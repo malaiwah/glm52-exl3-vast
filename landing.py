@@ -199,8 +199,6 @@ vertical-align:middle;margin:0 .3em 0 .8em}
 
 # Live dashboard: the browser scrapes $ep/metrics (Bearer $key unless placeholder).
 METRICS_SECTION = Template("""
-<h2>Model</h2>
-<div class=card><pre id=modeljson style="max-height:16rem;margin:0;border:none">loading /v1/models&hellip;</pre></div>
 <h2>Live performance</h2>
 <div class=grid>
  <div class=card><h3>Throughput <span class=chartv id=v0></span></h3>
@@ -429,6 +427,10 @@ def render(secure: bool, tok: str = "") -> bytes:
             "document.getElementById('qt').textContent.trim()).then(()=>{"
             "const b=document.getElementById('copybtn');b.textContent='copied!';"
             "setTimeout(()=>{b.textContent='copy'},1500)})}</script>")
+        if serving:
+            parts.append('<h2>Model</h2><div class=card>'
+                         '<pre id=modeljson style="max-height:16rem;margin:0;border:none">'
+                         'loading /v1/models&hellip;</pre></div>')
     if not serving:
         # keep boot status fresh; once serving, the dashboard polls instead
         parts.append("<script>setTimeout(function(){location.reload()},20000)</script>"
