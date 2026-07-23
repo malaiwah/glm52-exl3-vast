@@ -32,3 +32,31 @@ config matrix (6 runs, 5 hosts, 4 driver families):
 
 Base image: `verdictai/glm52-exl3-sparkinfer@sha256:bfd6d667...` (pinned).
 Checkpoint: `brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw`.
+
+## Security
+
+**Threat model honestly stated:** a rented host's operator has root — memory,
+VRAM, and traffic on the box are visible to a determined host. These controls
+are the padlock that keeps honest people honest; truly sensitive work belongs
+on hardware you own.
+
+- **API key** (always on): set `VLLM_API_KEY`, or one is auto-generated and
+  printed in the instance console logs at boot. All /v1 calls need
+  `Authorization: Bearer <key>`.
+- **SSH tunnel** (recommended for solo use): no public exposure needed —
+  `ssh -p <ssh-port> root@<ssh-host> -L 8000:localhost:8000`
+  then use `http://localhost:8000/v1`. You can omit `-p 8000:8000` from the
+  docker options entirely in this mode.
+- **TLS via Let's Encrypt DNS-01** (least-friction public HTTPS): set
+  `ACME_DOMAIN=glm.example.com`, `ACME_DNS_PROVIDER=cloudflare` (any lego
+  provider), and the provider credential env (e.g.
+  `CLOUDFLARE_DNS_API_TOKEN=...` with Zone:DNS:Edit scope; or DuckDNS:
+  `ACME_DNS_PROVIDER=duckdns` + `DUCKDNS_TOKEN=...` — free, no domain needed).
+  Point the name at the instance IP, and the endpoint becomes
+  `https://<domain>:<mapped-port>/v1`. Certs are issued fresh each boot.
+- **Egress hygiene**: telemetry disabled (`VLLM_NO_USAGE_STATS`,
+  `DO_NOT_TRACK`, `HF_HUB_DISABLE_TELEMETRY`), `HF_HUB_OFFLINE=1` once weights
+  are local, and the boot log prints the listening-socket audit. Full egress
+  firewalling is not possible without NET_ADMIN (not granted on vast).
+- **Disk note**: verify the instance actually allocated >=400 GB — some hosts
+  under-allocate silently; first boot needs ~332 GB for weights.
