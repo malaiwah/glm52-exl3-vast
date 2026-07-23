@@ -9,7 +9,7 @@ Weights auto-download on first boot (~332 GB — pick a fast-net host).
 
 ## One-click launch
 
-**[▶ Launch on vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=659cc795b0d88115a00de017c6377c66)** —
+**[▶ Launch on vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=1b4f8339bcb3bc9ee77e0d4dd9c2674d)** —
 public template with the image, ports, launch mode, disk, and host filters
 (4x RTX PRO 6000, >=400GB disk, >=1Gbps net) pre-configured. Rent, wait for
 "Application startup complete" in the instance logs, grab the API key from the
