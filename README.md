@@ -11,7 +11,7 @@ Weights auto-download on first boot (~332 GB — pick a fast-net host).
 - **Image**: `ghcr.io/malaiwah/glm52-exl3-vast:latest`
 - **Launch mode**: docker ENTRYPOINT (vLLM logs appear on the instance console;
   SSH works per vast standards)
-- **Docker options**: `-p 8000:8000 --ipc=host`
+- **Docker options**: `-p 8000:8000 --ipc=host --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576` (memlock is REQUIRED for DRAM offload)
 - **Disk**: >= 400 GB
 - **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB), CUDA >= 13.0
 - **Env (all optional)**: `HF_TOKEN` (faster download), `OFFLOAD_FRACTION`

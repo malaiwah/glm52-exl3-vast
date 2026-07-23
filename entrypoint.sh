@@ -24,6 +24,15 @@ fi
 OFFLOAD_FRACTION="${OFFLOAD_FRACTION:-0.70}"
 KVT_ARGS=()
 if [ "$OFFLOAD_FRACTION" != "0" ]; then
+  MEMLOCK_KB=$(ulimit -l)
+  if [ "$MEMLOCK_KB" != "unlimited" ] && [ "$MEMLOCK_KB" -lt 67108864 ] 2>/dev/null; then
+    echo "!!! WARNING: memlock ulimit is ${MEMLOCK_KB}KB — too low to pin a DRAM KV pool."
+    echo "!!! Add '--ulimit memlock=-1:-1' to the template Docker options to enable offload."
+    echo "!!! Continuing WITHOUT DRAM offload."
+    OFFLOAD_FRACTION=0
+  fi
+fi
+if [ "$OFFLOAD_FRACTION" != "0" ]; then
   MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
   OFF_BYTES=$(python3 -c "print(int($MEM_KB*1024*$OFFLOAD_FRACTION))")
   echo ">>> DRAM KV offload: $((OFF_BYTES/1073741824)) GiB (${OFFLOAD_FRACTION} of host RAM)"
