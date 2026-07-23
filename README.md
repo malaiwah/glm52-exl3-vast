@@ -55,7 +55,23 @@ on hardware you own.
   `ssh -p <ssh-port> root@<ssh-host> -L 8000:localhost:8000`
   then use `http://localhost:8000/v1`. You can omit `-p 8000:8000` from the
   docker options entirely in this mode.
-- **TLS via Let's Encrypt DNS-01** (least-friction public HTTPS): set
+- **TLS via Let's Encrypt DNS-01 — turnkey with deSEC** (recommended):
+  One-time setup (~2 minutes, free, reusable forever):
+  1. Create an account at [desec.io](https://desec.io/signup) (email only).
+  2. Register a dynDNS domain, e.g. `yourname.dedyn.io`
+     ([docs](https://desec.readthedocs.io/en/latest/dyndns/configure.html)).
+  3. Create an API token: [Token management](https://desec.io/tokens)
+     ([docs](https://desec.readthedocs.io/en/latest/auth/tokens.html)).
+
+  Then, when launching the template, add two environment variables on the
+  launch page: `DESEC_TOKEN=<your-token>` and `DESEC_DOMAIN=yourname.dedyn.io`.
+  At boot the instance registers a generated hostname
+  (`glm-<random>.yourname.dedyn.io`), points it at itself, obtains a
+  Let's Encrypt certificate via DNS-01 ([lego](https://go-acme.github.io/lego/dns/desec/)),
+  and prints the final `https://...:<port>/v1` URL in the console logs next to
+  the API key. Each instance gets its own name; certs are issued fresh per boot.
+
+- **Other DNS providers** (Cloudflare, DuckDNS, 150+ via lego): set
   `ACME_DOMAIN=glm.example.com`, `ACME_DNS_PROVIDER=cloudflare` (any lego
   provider), and the provider credential env (e.g.
   `CLOUDFLARE_DNS_API_TOKEN=...` with Zone:DNS:Edit scope; or DuckDNS:
