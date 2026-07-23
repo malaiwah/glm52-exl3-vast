@@ -231,7 +231,7 @@ def render(secure: bool, tok: str = "") -> bytes:
             'style="font-size:.55em;vertical-align:middle;cursor:pointer">copy</button></h2>'
             f"<pre id=qt>curl -H \"Authorization: Bearer {html.escape(key)}\" {ep}/v1/models</pre>"
             "<script>function copyQT(){navigator.clipboard.writeText("
-            "document.getElementById('qt').textContent).then(()=>{"
+            "document.getElementById('qt').textContent.trim()).then(()=>{"
             "const b=document.getElementById('copybtn');b.textContent='copied!';"
             "setTimeout(()=>{b.textContent='copy'},1500)})}</script>")
     parts.append("<p><small>Page auto-refreshes every 30 s.</small></p></body></html>")
