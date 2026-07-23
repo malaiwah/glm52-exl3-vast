@@ -101,10 +101,11 @@ if [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAI
   if [ -z "$MYIP" ]; then
     echo "!!! Could not determine public IP; skipping deSEC auto-DNS"
   else
+    # ttl 3600 = deSEC's account minimum; lower values are rejected with HTTP 400
     echo ">>> Registering ${SUB}.${DESEC_DOMAIN} -> ${MYIP} via deSEC"
     curl -sf -X PUT "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/" \
       -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json" \
-      -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":300,\"records\":[\"${MYIP}\"]}]" >/dev/null \
+      -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"${MYIP}\"]}]" >/dev/null \
       && export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN \
       && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-<mapped-port>}/v1" \
       || echo "!!! deSEC registration failed (HTTP error — check DESEC_TOKEN/DESEC_DOMAIN); continuing without auto-DNS"
