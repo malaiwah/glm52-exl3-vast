@@ -125,7 +125,7 @@ if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v le
       --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN" \
       --path /workspace/.lego run || echo "!!! ACME issuance failed; continuing WITHOUT TLS"
   fi
-  [ -f "$CRT" ] && TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY") && echo ">>> TLS enabled: https://$ACME_DOMAIN:<mapped-port>/v1"
+  [ -f "$CRT" ] && TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY") && echo ">>> TLS enabled: https://$ACME_DOMAIN:${VAST_TCP_PORT_8000:-<mapped-port>}/v1"
 fi
 
 # Egress hygiene: no telemetry; offline mode once weights are local
