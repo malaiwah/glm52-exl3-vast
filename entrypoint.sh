@@ -78,6 +78,15 @@ export VLLM_API_KEY
 # TLS via Let's Encrypt DNS-01 (optional): set ACME_DOMAIN + ACME_DNS_PROVIDER
 # (lego provider name, e.g. cloudflare, duckdns) + the provider's cred envs
 # (e.g. CLOUDFLARE_DNS_API_TOKEN, or DUCKDNS_TOKEN). Cert issued each boot.
+# Turnkey auto-DNS (deSEC): set DESEC_TOKEN + DESEC_DOMAIN (your *.dedyn.io zone).
+# A random name is registered at startup and pointed at this instance.
+if [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAIN:-}" ]; then
+  SUB="glm-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  MYIP="${PUBLIC_IPADDR:-$(curl -s -m 10 https://api.ipify.org)}"
+  echo ">>> Registering ${SUB}.${DESEC_DOMAIN} -> ${MYIP} via deSEC"
+  curl -s -X PUT "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/"     -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json"     -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":300,\"records\":[\"${MYIP}\"]}]" >/dev/null     && export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN     && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-<mapped-port>}/v1"     || echo "!!! deSEC registration failed; continuing without auto-DNS"
+fi
+
 TLS_ARGS=()
 if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null; then
   echo ">>> Issuing LetsEncrypt cert for $ACME_DOMAIN via DNS-01 ($ACME_DNS_PROVIDER)"
@@ -115,6 +124,7 @@ exec vllm serve "$MODEL_DIR" \
   --num-gpu-blocks-override 2048 \
   --enable-chunked-prefill --enable-prefix-caching \
   --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 \
+  --enable-prompt-tokens-details --enable-force-include-usage \
   --no-async-scheduling \
   --default-chat-template-kwargs '{"reasoning_effort":"high"}' \
   --hf-overrides '{"use_index_cache":true,"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
