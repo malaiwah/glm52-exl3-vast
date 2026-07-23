@@ -81,7 +81,7 @@ exec vllm serve "$MODEL_DIR" \
   --compilation-config '{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":true}}' \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.93}" \
   --max-model-len "${MAX_MODEL_LEN:-524288}" \
-  --max-num-seqs "${MAX_NUM_SEQS:-8}" \
+  --max-num-seqs "${MAX_NUM_SEQS:-32}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS:-3072}" \
   --max-cudagraph-capture-size 32 \
   --num-gpu-blocks-override 2048 \
