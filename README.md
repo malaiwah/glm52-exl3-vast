@@ -16,7 +16,7 @@ Weights auto-download on first boot (~332 GB — pick a fast-net host).
 - **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB), CUDA >= 13.0
 - **Env (all optional)**: `HF_TOKEN` (faster download), `OFFLOAD_FRACTION`
   (default 0.70; 0 disables), `MTP_TOKENS` (default 3; 0 disables),
-  `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (default 524288), `SERVED_MODEL_NAME`
+  `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (default 524288), `SERVED_MODEL_NAME`. Recommended extra env: `OPEN_BUTTON_PORT=8000` (dashboard Open button targets the API). On ready, the instance labels itself "GLM-5.2 READY <endpoint>" in your dashboard
 
 Endpoint: `http://<instance>:8000/v1` once the console shows
 `Application startup complete` (first boot: download + JIT, plan ~30-60 min;

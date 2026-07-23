@@ -108,6 +108,15 @@ if [ "$MTP_TOKENS" != "0" ]; then
   SPEC_ARGS=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS,\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
 fi
 
+# Best-effort: surface readiness + endpoint into the vast.ai dashboard label
+if [ -n "${CONTAINER_API_KEY:-}" ] && [ -n "${CONTAINER_ID:-}" ]; then
+  ( EP="${ACME_DOMAIN:+https://$ACME_DOMAIN}"; EP="${EP:-http://${PUBLIC_IPADDR:-?}}"
+    PORTPART="${VAST_TCP_PORT_8000:+:$VAST_TCP_PORT_8000}"
+    until curl -sf "http://localhost:${PORT:-8000}/health" >/dev/null 2>&1; do sleep 20; done
+    curl -s -X PUT "https://console.vast.ai/api/v0/instances/${CONTAINER_ID}/"       -H "Authorization: Bearer ${CONTAINER_API_KEY}" -H "Content-Type: application/json"       -d "{\"label\": \"GLM-5.2 READY ${EP}${PORTPART}/v1\"}" >/dev/null 2>&1 || true
+  ) &
+fi
+
 exec vllm serve "$MODEL_DIR" \
   --served-model-name "${SERVED_MODEL_NAME:-GLM-5.2}" \
   --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
