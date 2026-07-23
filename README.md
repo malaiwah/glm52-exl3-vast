@@ -10,7 +10,7 @@ Weights auto-download on first boot (~332 GB — pick a fast-net host).
 
 ## One-click launch
 
-**[▶ Launch on vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=697166835ebda4fe5de506047576f45d)** —
+**[▶ Launch on vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=a0e5331ea6c0cdb5822eef835d29905e)** —
 public template with the image, ports, launch mode, disk, and host filters
 (4x RTX PRO 6000, >=400GB disk, >=1Gbps net) pre-configured. Rent, wait for
 "Application startup complete" in the instance logs, grab the API key from the
@@ -21,12 +21,19 @@ same logs, done.
   must be set to **public** visibility, or vast hosts can't pull it)
 - **Launch mode**: docker ENTRYPOINT (vLLM logs appear on the instance console;
   SSH works per vast standards)
-- **Docker options**: `-p 8000:8000 --ipc=host --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576` (memlock is REQUIRED for DRAM offload)
+- **Docker options**: `-p 8000:8000 -p 1111:1111 --ipc=host --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576` (memlock is REQUIRED for DRAM offload; :1111 is the landing page)
 - **Disk**: >= 400 GB
 - **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB), CUDA >= 13.0
 - **Env (all optional)**: `HF_TOKEN` (faster download), `OFFLOAD_FRACTION`
   (default 0.70; 0 disables), `MTP_TOKENS` (default 3; 0 disables),
-  `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (default 524288), `SERVED_MODEL_NAME`. Recommended extra env: `OPEN_BUTTON_PORT=8000` (dashboard Open button targets the API). On ready, the instance labels itself "GLM-5.2 READY <endpoint>" in your dashboard
+  `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (default 524288), `SERVED_MODEL_NAME`,
+  `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
+  extra env: `OPEN_BUTTON_PORT=1111` — the dashboard **Open** button then hits
+  the landing page: live boot status (weight-download progress, TLS, engine),
+  ready-to-paste client configs (oh-my-pi, opencode, Claude Code, Codex), and
+  a minimal streaming chat UI at `/chat`. Token-gated; with TLS configured the
+  page upgrades plain-HTTP hits to HTTPS and only then embeds the API key.
+  On ready, the instance labels itself "GLM-5.2 READY <endpoint>" in your dashboard
 
 Endpoint: `http://<instance>:8000/v1` once the console shows
 `Application startup complete` (first boot: download + JIT, plan ~30-60 min;
