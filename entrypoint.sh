@@ -12,10 +12,31 @@ NGPU=$(nvidia-smi -L 2>/dev/null | wc -l)
 [ "$NGPU" -ge 4 ] || { echo "FATAL: need 4 GPUs, found $NGPU"; exit 1; }
 
 MODEL_DIR="${MODEL_DIR:-/workspace/GLM-5.2-EXL3-TR3-3.0bpw}"
+
+# Boot-status snapshot for the landing page; rewritten at each milestone.
+# Holds the API key once generated -> keep it root-only.
+STATUS_FILE="${STATUS_FILE:-/tmp/glm-boot-status.json}"
+EP_URL="" TLS_STATE="not configured" HTTPS_HOSTPORT="" CERT_PATH="" KEY_PATH="" OFFLOAD_STATE="off"
+status_update() {
+  printf '{"phase":"%s","endpoint":"%s","tls":"%s","https_hostport":"%s","cert":"%s","keyfile":"%s","offload":"%s","api_key":"%s"}\n' \
+    "$1" "$EP_URL" "$TLS_STATE" "$HTTPS_HOSTPORT" "$CERT_PATH" "$KEY_PATH" "$OFFLOAD_STATE" "${VLLM_API_KEY:-}" > "$STATUS_FILE"
+  chmod 600 "$STATUS_FILE" 2>/dev/null || true
+}
+
+# Landing page for the vast "Open" button (:1111, dual-protocol TLS+plain).
+# Started before the weight download so status is visible from minute one.
+# Needs OPEN_BUTTON_PORT=1111 env + '-p 1111:1111' in the template.
+if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ]; then
+  status_update booting
+  MODEL_DIR="$MODEL_DIR" STATUS_FILE="$STATUS_FILE" python3 /opt/landing.py &
+  echo ">>> Landing page (Open button) live on :1111"
+fi
+
 # Gate on a completion marker, not config.json: small files land early in the
 # parallel download, so config.json existing does not mean the shards made it.
 # snapshot_download resumes/verifies incrementally, so re-running is safe.
 if [ ! -f "$MODEL_DIR/.download-complete" ]; then
+  status_update downloading-weights
   echo ">>> Downloading EXL3 weights (~332 GB) to $MODEL_DIR (resumes if interrupted)"
   [ -n "${HF_TOKEN:-}" ] && echo ">>> (HF_TOKEN detected: authenticated download)" || echo ">>> (set HF_TOKEN env for higher rate limits)"
   HF_XET_HIGH_PERFORMANCE=1 python3 -c "
@@ -47,6 +68,7 @@ if [ "$OFFLOAD_FRACTION" != "0" ]; then
   fi
 fi
 if [ "$OFFLOAD_FRACTION" != "0" ]; then
+  OFFLOAD_STATE="$((OFF_BYTES/1073741824)) GiB pinned DRAM"
   echo ">>> DRAM KV offload: $((OFF_BYTES/1073741824)) GiB (${OFFLOAD_FRACTION} of instance RAM allocation)"
   KVT_ARGS=(--kv-transfer-config "{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":$OFF_BYTES}}")
   # OffloadingConnector rejects expandable_segments (VMM can remap pinned KV pages)
@@ -86,6 +108,7 @@ if [ -z "${VLLM_API_KEY:-}" ]; then
   echo "=================================================================="
 fi
 export VLLM_API_KEY
+status_update configuring
 
 # TLS via Let's Encrypt DNS-01 (optional): set ACME_DOMAIN + ACME_DNS_PROVIDER
 # (lego provider name, e.g. cloudflare, duckdns) + the provider's cred envs
@@ -129,6 +152,16 @@ if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v le
   [ -f "$CRT" ] && TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY") && echo ">>> TLS enabled: https://$ACME_DOMAIN:${VAST_TCP_PORT_8000:-<mapped-port>}/v1"
 fi
 
+# Feed the final endpoint/TLS picture to the landing page's status file
+if [ ${#TLS_ARGS[@]} -gt 0 ]; then
+  EP_URL="https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-8000}"
+  TLS_STATE="https://${ACME_DOMAIN}"
+  HTTPS_HOSTPORT="${ACME_DOMAIN}:${VAST_TCP_PORT_1111:-1111}"
+  CERT_PATH="$CRT" KEY_PATH="$KEY"
+else
+  EP_URL="http://${PUBLIC_IPADDR:-localhost}:${VAST_TCP_PORT_8000:-8000}"
+fi
+
 # Egress hygiene: no telemetry; offline mode once weights are local
 export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
 export HF_HUB_OFFLINE=1
@@ -140,6 +173,8 @@ SPEC_ARGS=()
 if [ "$MTP_TOKENS" != "0" ]; then
   SPEC_ARGS=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS,\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
 fi
+
+status_update starting-engine
 
 # Best-effort: surface readiness + endpoint into the vast.ai dashboard label
 if [ -n "${CONTAINER_API_KEY:-}" ] && [ -n "${CONTAINER_ID:-}" ]; then
