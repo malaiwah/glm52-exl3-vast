@@ -165,6 +165,32 @@ button:hover{border-color:var(--accent);color:var(--accent)}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.primary:hover{filter:brightness(1.08);color:#fff}
 canvas.chart{width:100%;height:96px;display:block}
+.layout{display:grid;gap:1rem;grid-template-columns:minmax(0,1fr)}
+aside.chatpane{display:none}
+.wrap.wide{max-width:64rem}
+@media(min-width:75rem){
+ .wrap.wide{max-width:96rem}
+ .wrap.wide .layout{grid-template-columns:minmax(0,1fr) 26rem}
+ .wrap.wide aside.chatpane{display:flex;flex-direction:column;position:sticky;top:1rem;
+  height:calc(100vh - 2rem);background:var(--card);border:1px solid var(--line);
+  border-radius:14px;padding:.9rem;overflow:hidden}
+}
+aside.chatpane h2{margin:0 0 .5rem;font-size:.95rem}
+.chatpane #log{flex:1;overflow-y:auto;min-height:0}
+.msg{max-width:85%;padding:.6rem .9rem;border-radius:14px;margin:.35rem 0;
+white-space:pre-wrap;font-size:.92rem;width:fit-content}
+.msg.you{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#fff;
+margin-left:auto;border-bottom-right-radius:4px}
+.msg.bot{background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:4px}
+details.think{color:var(--muted);font-size:.8em;margin:.2rem 0;max-width:85%;
+background:none;border:none;padding:0 .3rem}
+.composer{display:flex;gap:.5rem;align-items:flex-end;padding-top:.5rem;
+border-top:1px solid var(--line)}
+#in{flex:1;font:inherit;background:var(--bg);color:var(--fg);
+border:1px solid var(--line);border-radius:12px;padding:.5rem .7rem;
+min-height:2.6rem;max-height:9rem;resize:vertical}
+.side{display:flex;flex-direction:column;gap:.35rem}
+label.thinkbox{font-size:.78rem;color:var(--muted);white-space:nowrap}
 .chartv{font-family:var(--mono);font-size:1.02rem;font-weight:700;float:right}
 .legend{font-size:.72rem;color:var(--muted)}
 .legend i{display:inline-block;width:.9em;height:3px;border-radius:2px;
@@ -269,28 +295,8 @@ tick();
 })();
 </script>""")
 
-CHAT_PAGE = Template("""<!doctype html><html><head><title>GLM-5.2 chat</title>
-<meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE + """<style>
-.wrap{max-width:52rem;display:flex;flex-direction:column;height:100vh;padding-bottom:1rem}
-#log{flex:1;overflow-y:auto;padding:.5rem 0}
-.msg{max-width:85%;padding:.6rem .9rem;border-radius:14px;margin:.35rem 0;
-white-space:pre-wrap;font-size:.95rem;width:fit-content}
-.msg.you{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#fff;
-margin-left:auto;border-bottom-right-radius:4px}
-.msg.bot{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
-details.think{color:var(--muted);font-size:.8em;margin:.2rem 0;max-width:85%;
-background:none;border:none;padding:0 .3rem}
-.composer{display:flex;gap:.5rem;align-items:flex-end;padding-top:.5rem;
-border-top:1px solid var(--line)}
-#in{flex:1;font:inherit;background:var(--card);color:var(--fg);
-border:1px solid var(--line);border-radius:12px;padding:.6rem .8rem;
-min-height:2.8rem;max-height:9rem;resize:vertical}
-.side{display:flex;flex-direction:column;gap:.35rem}
-label.thinkbox{font-size:.78rem;color:var(--muted);white-space:nowrap}
-</style></head><body><div class=wrap>
-<header class=hero><h1><b>GLM-5.2</b> quick chat</h1>
-<span class=sub><a href="/?token=$token">&larr; status &amp; dashboard</a></span></header>
-<div id=log></div>
+
+CHAT_WIDGET = """<div id=log></div>
 <div class=composer>
 <textarea id=in placeholder="Message (Ctrl+Enter to send)"></textarea>
 <div class=side>
@@ -298,8 +304,9 @@ label.thinkbox{font-size:.78rem;color:var(--muted);white-space:nowrap}
 <button id=stop disabled>Stop</button>
 <button id=clear>Clear</button>
 <label class=thinkbox><input type=checkbox id=think checked> thinking</label>
-</div></div>
-<script>
+</div></div>"""
+
+CHAT_JS = """<script>
 const EP="$ep", KEY="$key", msgs=[];
 const log=document.getElementById("log"), inp=document.getElementById("in");
 let ctrl=null;
@@ -338,12 +345,21 @@ document.getElementById("send").onclick=send;
 document.getElementById("stop").onclick=()=>ctrl&&ctrl.abort();
 document.getElementById("clear").onclick=()=>{msgs.length=0;log.innerHTML=""};
 inp.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter")send()});
-inp.focus();
-</script></div></body></html>""")
+</script>"""
+
+CHAT_PAGE = Template("""<!doctype html><html><head><title>GLM-5.2 chat</title>
+<meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE + """<style>
+.wrap{max-width:52rem;display:flex;flex-direction:column;height:100vh;padding-bottom:1rem}
+#log{flex:1;overflow-y:auto;padding:.5rem 0}
+.msg.bot{background:var(--card)}
+</style></head><body><div class=wrap>
+<header class=hero><h1><b>GLM-5.2</b> quick chat</h1>
+<span class=sub><a href="/?token=$token">&larr; status &amp; dashboard</a></span></header>
+""" + CHAT_WIDGET + CHAT_JS + """<script>inp.focus();</script></div></body></html>""")
 
 PAGE_HEAD = ("""<!doctype html><html><head><title>GLM-5.2 EXL3 turnkey</title>
 <meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE +
-             """</head><body><div class=wrap>""")
+             """</head><body>""")
 
 
 def render(secure: bool, tok: str = "") -> bytes:
@@ -361,7 +377,11 @@ def render(secure: bool, tok: str = "") -> bytes:
                 f"<div class=v><span class='pill {cls}'></span>"
                 f"<span class={cls}>{html.escape(value)}</span></div></div>")
 
+    real0 = st.get("api_key", "")
+    chat_ok = bool(secure and TOKEN and real0 and endpoint and serving)
+    wrap_cls = "wrap wide" if chat_ok else "wrap"
     parts = [PAGE_HEAD,
+             f'<div class="{wrap_cls}"><div class=layout><main>',
              "<header class=hero><h1><b>GLM-5.2</b> EXL3 turnkey</h1>"
              "<span class=sub>512K context &middot; fp8 KV &middot; MTP-3 &middot; "
              "4&times; RTX PRO 6000</span></header>",
@@ -408,7 +428,11 @@ def render(secure: bool, tok: str = "") -> bytes:
         # keep boot status fresh; once serving, the dashboard polls instead
         parts.append("<script>setTimeout(function(){location.reload()},20000)</script>"
                      "<p class=sub>Auto-refreshing every 20 s while booting.</p>")
-    parts.append("</div></body></html>")
+    parts.append("</main>")
+    if chat_ok:
+        parts.append("<aside class=chatpane><h2>Quick chat</h2>" + CHAT_WIDGET +
+                     "</aside>" + Template(CHAT_JS).substitute(ep=endpoint, key=real0))
+    parts.append("</div></div></body></html>")
     return "".join(parts).encode()
 
 
