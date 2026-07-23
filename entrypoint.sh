@@ -1,7 +1,8 @@
 #!/bin/bash
 # GLM-5.2 EXL3 turnkey for vast.ai — 4x RTX PRO 6000 Blackwell (96GB), TP4/DCP4,
 # 512K context, fp8 KV (correct on stock drivers — see evidence gists in labels),
-# MTP speculative decode, DRAM KV offload auto-sized to a fraction of host RAM.
+# MTP speculative decode, DRAM KV offload auto-sized to a fraction of the
+# instance's RAM allocation (cgroup-aware).
 # All logs go to stdout (vast.ai console). SSH per vast standards works alongside.
 set -e
 
@@ -11,31 +12,42 @@ NGPU=$(nvidia-smi -L 2>/dev/null | wc -l)
 [ "$NGPU" -ge 4 ] || { echo "FATAL: need 4 GPUs, found $NGPU"; exit 1; }
 
 MODEL_DIR="${MODEL_DIR:-/workspace/GLM-5.2-EXL3-TR3-3.0bpw}"
-if [ ! -f "$MODEL_DIR/config.json" ]; then
-  echo ">>> First boot: downloading EXL3 weights (~332 GB) to $MODEL_DIR"
+# Gate on a completion marker, not config.json: small files land early in the
+# parallel download, so config.json existing does not mean the shards made it.
+# snapshot_download resumes/verifies incrementally, so re-running is safe.
+if [ ! -f "$MODEL_DIR/.download-complete" ]; then
+  echo ">>> Downloading EXL3 weights (~332 GB) to $MODEL_DIR (resumes if interrupted)"
   [ -n "${HF_TOKEN:-}" ] && echo ">>> (HF_TOKEN detected: authenticated download)" || echo ">>> (set HF_TOKEN env for higher rate limits)"
   HF_XET_HIGH_PERFORMANCE=1 python3 -c "
 from huggingface_hub import snapshot_download
 snapshot_download('brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw', local_dir='$MODEL_DIR', max_workers=16)"
+  touch "$MODEL_DIR/.download-complete"
   echo ">>> Weights ready."
 fi
 
-# DRAM KV offload: OFFLOAD_FRACTION of host RAM (default 0.70); OFFLOAD_FRACTION=0 disables.
+# DRAM KV offload: OFFLOAD_FRACTION of the instance's RAM allocation (default
+# 0.70); OFFLOAD_FRACTION=0 disables. Sized from min(cgroup limit, MemTotal) —
+# inside a container /proc/meminfo shows the whole host's RAM, but a partial
+# rental (e.g. 4 of 8 GPUs) only gets a slice of it.
 OFFLOAD_FRACTION="${OFFLOAD_FRACTION:-0.70}"
 KVT_ARGS=()
 if [ "$OFFLOAD_FRACTION" != "0" ]; then
+  MEM_BYTES=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') * 1024 ))
+  CG_LIMIT=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo max)
+  if [ "$CG_LIMIT" != "max" ] && [ "$CG_LIMIT" -lt "$MEM_BYTES" ] 2>/dev/null; then
+    MEM_BYTES=$CG_LIMIT
+  fi
+  OFF_BYTES=$(python3 -c "print(int($MEM_BYTES*$OFFLOAD_FRACTION))")
   MEMLOCK_KB=$(ulimit -l)
-  if [ "$MEMLOCK_KB" != "unlimited" ] && [ "$MEMLOCK_KB" -lt 67108864 ] 2>/dev/null; then
-    echo "!!! WARNING: memlock ulimit is ${MEMLOCK_KB}KB — too low to pin a DRAM KV pool."
+  if [ "$MEMLOCK_KB" != "unlimited" ] && [ "$MEMLOCK_KB" -lt "$((OFF_BYTES / 1024))" ] 2>/dev/null; then
+    echo "!!! WARNING: memlock ulimit (${MEMLOCK_KB} KB) is below the $((OFF_BYTES/1073741824)) GiB KV pool to pin."
     echo "!!! Add '--ulimit memlock=-1:-1' to the template Docker options to enable offload."
     echo "!!! Continuing WITHOUT DRAM offload."
     OFFLOAD_FRACTION=0
   fi
 fi
 if [ "$OFFLOAD_FRACTION" != "0" ]; then
-  MEM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-  OFF_BYTES=$(python3 -c "print(int($MEM_KB*1024*$OFFLOAD_FRACTION))")
-  echo ">>> DRAM KV offload: $((OFF_BYTES/1073741824)) GiB (${OFFLOAD_FRACTION} of host RAM)"
+  echo ">>> DRAM KV offload: $((OFF_BYTES/1073741824)) GiB (${OFFLOAD_FRACTION} of instance RAM allocation)"
   KVT_ARGS=(--kv-transfer-config "{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":$OFF_BYTES}}")
   # OffloadingConnector rejects expandable_segments (VMM can remap pinned KV pages)
   export PYTORCH_CUDA_ALLOC_CONF=""
@@ -77,22 +89,42 @@ export VLLM_API_KEY
 
 # TLS via Let's Encrypt DNS-01 (optional): set ACME_DOMAIN + ACME_DNS_PROVIDER
 # (lego provider name, e.g. cloudflare, duckdns) + the provider's cred envs
-# (e.g. CLOUDFLARE_DNS_API_TOKEN, or DUCKDNS_TOKEN). Cert issued each boot.
+# (e.g. CLOUDFLARE_DNS_API_TOKEN, or DUCKDNS_TOKEN). Certs persist on the
+# volume and are reused while valid >7 days, else re-issued at boot.
 # Turnkey auto-DNS (deSEC): set DESEC_TOKEN + DESEC_DOMAIN (your *.dedyn.io zone).
-# A random name is registered at startup and pointed at this instance.
+# A per-instance name — stable across reboots (keyed to CONTAINER_ID) so DNS
+# records don't pile up in the zone and the LE cert can be reused — is
+# registered at startup and pointed at this instance.
 if [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAIN:-}" ]; then
-  SUB="glm-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  SUB="glm-${CONTAINER_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
   MYIP="${PUBLIC_IPADDR:-$(curl -s -m 10 https://api.ipify.org)}"
-  echo ">>> Registering ${SUB}.${DESEC_DOMAIN} -> ${MYIP} via deSEC"
-  curl -s -X PUT "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/"     -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json"     -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":300,\"records\":[\"${MYIP}\"]}]" >/dev/null     && export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN     && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-<mapped-port>}/v1"     || echo "!!! deSEC registration failed; continuing without auto-DNS"
+  if [ -z "$MYIP" ]; then
+    echo "!!! Could not determine public IP; skipping deSEC auto-DNS"
+  else
+    echo ">>> Registering ${SUB}.${DESEC_DOMAIN} -> ${MYIP} via deSEC"
+    curl -sf -X PUT "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/" \
+      -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json" \
+      -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":300,\"records\":[\"${MYIP}\"]}]" >/dev/null \
+      && export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN \
+      && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-<mapped-port>}/v1" \
+      || echo "!!! deSEC registration failed (HTTP error — check DESEC_TOKEN/DESEC_DOMAIN); continuing without auto-DNS"
+  fi
 fi
 
 TLS_ARGS=()
 if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null; then
-  echo ">>> Issuing LetsEncrypt cert for $ACME_DOMAIN via DNS-01 ($ACME_DNS_PROVIDER)"
-  lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}"        --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN"        --path /workspace/.lego run || echo "!!! ACME issuance failed; continuing WITHOUT TLS"
   CRT="/workspace/.lego/certificates/${ACME_DOMAIN}.crt"
   KEY="/workspace/.lego/certificates/${ACME_DOMAIN}.key"
+  # /workspace persists across reboots: reuse a cert with >7 days left instead of
+  # re-issuing every boot (LE duplicate-cert limit is 5/week; a reboot loop burns it)
+  if [ -f "$CRT" ] && openssl x509 -checkend 604800 -noout -in "$CRT" >/dev/null 2>&1; then
+    echo ">>> Reusing persisted cert for $ACME_DOMAIN (>7 days validity left)"
+  else
+    echo ">>> Issuing LetsEncrypt cert for $ACME_DOMAIN via DNS-01 ($ACME_DNS_PROVIDER)"
+    lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}" \
+      --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN" \
+      --path /workspace/.lego run || echo "!!! ACME issuance failed; continuing WITHOUT TLS"
+  fi
   [ -f "$CRT" ] && TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY") && echo ">>> TLS enabled: https://$ACME_DOMAIN:<mapped-port>/v1"
 fi
 

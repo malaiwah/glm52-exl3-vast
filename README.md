@@ -4,7 +4,8 @@ One-click 512K-context GLM-5.2 OpenAI-compatible endpoint on rented GPUs:
 EXL3 trellis weights (~77 GiB/rank — fits commodity 95.01-GiB cards),
 **fp8 KV cache** (correct on stock drivers — the nvfp4 default silently
 corrupts >~150K context without a host driver P2P override; see Evidence),
-MTP speculative decoding, and DRAM KV offload auto-sized to 70% of host RAM.
+MTP speculative decoding, and DRAM KV offload auto-sized to 70% of the
+instance's RAM allocation (cgroup-aware — partial rentals don't oversize it).
 Weights auto-download on first boot (~332 GB — pick a fast-net host).
 
 ## One-click launch
@@ -16,7 +17,8 @@ public template with the image, ports, launch mode, disk, and host filters
 same logs, done.
 
 ## vast.ai template settings (manual setup)
-- **Image**: `ghcr.io/malaiwah/glm52-exl3-vast:latest`
+- **Image**: `ghcr.io/malaiwah/glm52-exl3-vast:latest` (the ghcr.io package
+  must be set to **public** visibility, or vast hosts can't pull it)
 - **Launch mode**: docker ENTRYPOINT (vLLM logs appear on the instance console;
   SSH works per vast standards)
 - **Docker options**: `-p 8000:8000 --ipc=host --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576` (memlock is REQUIRED for DRAM offload)
@@ -33,9 +35,12 @@ later boots only pay JIT).
 ## Evidence / why these defaults
 Root-cause investigation of the long-context corruption and the validated
 config matrix (6 runs, 5 hosts, 4 driver families):
-- Root cause (nvfp4 KV x host P2P state): gist cae272443a9817da72b6802a0b9a5d73
-- Override-host proof 7/7 @505K: gist 7d5d7e685f7498a356fa2dd12b876f14
-- fp8 clean to 440K on stock: same matrix gist; harness: gist 929d7d8e4ac94c43fe126c4b3f6a6ea6
+- Root cause (nvfp4 KV x host P2P state):
+  https://gist.github.com/cae272443a9817da72b6802a0b9a5d73
+- Override-host proof 7/7 @505K:
+  https://gist.github.com/7d5d7e685f7498a356fa2dd12b876f14
+- fp8 clean to 440K on stock: same matrix gist; harness:
+  https://gist.github.com/929d7d8e4ac94c43fe126c4b3f6a6ea6
 - 512K fp8 KV via `--num-gpu-blocks-override 2048` validated at util 0.93.
 
 Base image: `verdictai/glm52-exl3-sparkinfer@sha256:bfd6d667...` (pinned).
@@ -65,11 +70,13 @@ on hardware you own.
 
   Then, when launching the template, add two environment variables on the
   launch page: `DESEC_TOKEN=<your-token>` and `DESEC_DOMAIN=yourname.dedyn.io`.
-  At boot the instance registers a generated hostname
-  (`glm-<random>.yourname.dedyn.io`), points it at itself, obtains a
+  At boot the instance registers a stable per-instance hostname
+  (`glm-<container-id>.yourname.dedyn.io`), points it at itself, obtains a
   Let's Encrypt certificate via DNS-01 ([lego](https://go-acme.github.io/lego/dns/desec/)),
   and prints the final `https://...:<port>/v1` URL in the console logs next to
-  the API key. Each instance gets its own name; certs are issued fresh per boot.
+  the API key. Each instance gets its own name, stable across reboots — so
+  records don't pile up in the zone and certs persist on the volume, reused
+  while they have >7 days validity left.
 
 - **Other DNS providers** (Cloudflare, DuckDNS, 150+ via lego): set
   `ACME_DOMAIN=glm.example.com`, `ACME_DNS_PROVIDER=cloudflare` (any lego
@@ -77,7 +84,13 @@ on hardware you own.
   `CLOUDFLARE_DNS_API_TOKEN=...` with Zone:DNS:Edit scope; or DuckDNS:
   `ACME_DNS_PROVIDER=duckdns` + `DUCKDNS_TOKEN=...` — free, no domain needed).
   Point the name at the instance IP, and the endpoint becomes
-  `https://<domain>:<mapped-port>/v1`. Certs are issued fresh each boot.
+  `https://<domain>:<mapped-port>/v1`. Certs persist on the volume and are
+  reused while they have >7 days validity left, then re-issued at boot (avoids
+  Let's Encrypt's 5/week duplicate-cert limit on reboot loops).
+- **Token hygiene**: anything in template env is visible to the host operator
+  and to anyone you share the template with — scope DNS tokens narrowly
+  (single zone, DNS-only), rotate them when the rental ends, and never
+  publish a template with tokens baked in.
 - **Egress hygiene**: telemetry disabled (`VLLM_NO_USAGE_STATS`,
   `DO_NOT_TRACK`, `HF_HUB_DISABLE_TELEMETRY`), `HF_HUB_OFFLINE=1` once weights
   are local, and the boot log prints the listening-socket audit. Full egress

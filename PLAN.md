@@ -16,18 +16,25 @@ no tee/tail. Tune default MAX_NUM_SEQS by benchmarking where perf drops."
       (/mnt/fast/build/glm52-vast/, local tag glm52-exl3-vast:test).
       Base: verdictai/glm52-exl3-sparkinfer@sha256:bfd6d667 (pinned digest).
       Adds: hf_hub+hf_transfer, nvtop, htop, entrypoint.
-- [ ] Registry: docker.io login MISSING on AIBeast (Michel to run
-      `podman login docker.io` himself). Interim: can push test tag to ghcr.io
-      via gh auth token. Final name TBD: docker.io/malaiwah/glm52-exl3-vast.
+- [x] Registry: resolved — ghcr.io/malaiwah/glm52-exl3-vast, auto-built and
+      pushed by .github/workflows/build.yml (:latest + :<sha>) on main pushes.
+      (Optional later: docker.io/malaiwah mirror; needs `podman login` on
+      AIBeast.)
 - [ ] Rental validation (doctrine, direct-image mode: --image OURS --ssh,
       ENTRYPOINT launch): boots turnkey (auto-download weights), 512K KV
       confirmed (blocks-override 2048 => 524,288 tokens fp8 — proven in Arm B),
       offload engages at 70% host RAM, MTP3 gate (accept rate + stability;
       fallback MTP2 then 1), needle 150/190/250 + deep ~440-500K, PP sweep,
-      **concurrency sweep C=1..32 to pick default MAX_NUM_SEQS** (find knee
-      where aggregate throughput stops scaling / per-stream collapses).
-- [ ] Bake benchmark-chosen MAX_NUM_SEQS default, rebuild, final push, run-7
-      evidence gist (template + numbers + instructions), update doctrine ledger.
+      concurrency sweep DONE — C=1..32, aggregate scales to C=24+ with no
+      knee; default MAX_NUM_SEQS=32 baked (commit a84f5c8).
+- [x] Bake benchmark-chosen MAX_NUM_SEQS default (=32 per sweep), rebuild +
+      push handled by CI on main.
+- [ ] Run-7 evidence gist (template + numbers + instructions), update
+      doctrine ledger.
+- [x] 2026-07-23 hardening pass: download completion marker, cgroup-aware
+      offload sizing, memlock-vs-pool guard, deSEC HTTP-error handling +
+      stable per-instance names, cert reuse across boots, lego sha256 pin,
+      CI PR builds + shellcheck gate, MIT LICENSE, README/docs sync.
 - [ ] Template instructions for README/gist: vast template fields = image ref,
       launch mode ENTRYPOINT, docker options `-p 8000:8000 --ipc=host`,
       env (optional: HF_TOKEN, OFFLOAD_FRACTION, MTP_TOKENS, MAX_NUM_SEQS),
