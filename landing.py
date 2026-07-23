@@ -173,6 +173,7 @@ document.getElementById("send").onclick=send;
 document.getElementById("stop").onclick=()=>ctrl&&ctrl.abort();
 document.getElementById("clear").onclick=()=>{msgs.length=0;log.innerHTML=""};
 inp.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter")send()});
+inp.focus();
 </script></body></html>""")
 
 PAGE_HEAD = """<!doctype html><html><head><title>GLM-5.2 EXL3 turnkey</title>
