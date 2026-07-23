@@ -226,8 +226,14 @@ def render(secure: bool, tok: str = "") -> bytes:
             parts.append(f"<details><summary>{html.escape(name)}</summary>"
                          f"<p><code>{html.escape(where)}</code></p>"
                          f"<pre>{html.escape(filled)}</pre></details>")
-        parts.append(f"<h2>Quick test</h2><pre>curl -H \"Authorization: Bearer "
-                     f"{html.escape(key)}\" {ep}/v1/models</pre>")
+        parts.append(
+            '<h2>Quick test <button id=copybtn onclick="copyQT()" '
+            'style="font-size:.55em;vertical-align:middle;cursor:pointer">copy</button></h2>'
+            f"<pre id=qt>curl -H \"Authorization: Bearer {html.escape(key)}\" {ep}/v1/models</pre>"
+            "<script>function copyQT(){navigator.clipboard.writeText("
+            "document.getElementById('qt').textContent).then(()=>{"
+            "const b=document.getElementById('copybtn');b.textContent='copied!';"
+            "setTimeout(()=>{b.textContent='copy'},1500)})}</script>")
     parts.append("<p><small>Page auto-refreshes every 30 s.</small></p></body></html>")
     return "".join(parts).encode()
 
