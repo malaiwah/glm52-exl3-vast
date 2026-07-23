@@ -157,7 +157,9 @@ async function send(){
     for(;;){const {done,value}=await rd.read(); if(done)break;
       buf+=dec.decode(value,{stream:true}); const lines=buf.split("\\n"); buf=lines.pop();
       for(const ln of lines){ if(!ln.startsWith("data: ")||ln.includes("[DONE]"))continue;
-        const d=JSON.parse(ln.slice(6)).choices[0].delta||{};
+        const ch=JSON.parse(ln.slice(6)).choices;
+        if(!ch||!ch.length)continue; // final usage chunk has choices:[]
+        const d=ch[0].delta||{};
         if(d.reasoning_content){reasoning+=d.reasoning_content;tbody.textContent=reasoning;think.open=true}
         if(d.content){answer+=d.content;out.textContent=answer;
           if(think.open){think.open=false;think.querySelector("summary").textContent="thinking ("+reasoning.length+" chars)"}}
