@@ -6,8 +6,11 @@ boot minute. Each connection's first byte is peeked: 0x16 = TLS handshake,
 else plain HTTP. Once a cert exists (lazy-loaded mid-boot), plain hits are
 302-redirected to the HTTPS view. Boot state comes from the status file the
 entrypoint rewrites at each milestone, plus live probes (download size,
-/health). The API key and filled-in client configs (oh-my-pi, opencode,
-Claude Code, Codex) render only over TLS with a validated OPEN_BUTTON_TOKEN.
+/health). The API key, filled-in client configs (oh-my-pi, opencode, Claude
+Code, Codex), live metrics dashboard and /chat render only over TLS with a
+validated OPEN_BUTTON_TOKEN — or over plain HTTP if LANDING_ALLOW_INSECURE=1
+(trusted-LAN/demo hosts without a cert). The dashboard scrapes vLLM's
+/metrics from the browser (vLLM CORS is open) — no server-side proxying.
 Requires OPEN_BUTTON_PORT=1111 env + '-p 1111:1111' in the template.
 """
 import html
@@ -23,6 +26,8 @@ from urllib.parse import parse_qs, urlparse
 TOKEN = os.environ.get("OPEN_BUTTON_TOKEN", "")
 MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
 STATUS_FILE = os.environ.get("STATUS_FILE", "/tmp/glm-boot-status.json")
+ALLOW_INSECURE = os.environ.get("LANDING_ALLOW_INSECURE", "0") == "1"
+API_PORT = os.environ.get("LANDING_API_PORT", "8000")
 WEIGHTS_TOTAL_GIB = 309  # 332 GB
 
 _ssl_ctx = None
@@ -63,11 +68,11 @@ def weights_state() -> str:
 
 
 def engine_state() -> str:
-    # vLLM may serve TLS or plain on :8000 — probe both; any failure moves on
+    # vLLM may serve TLS or plain — probe both; any failure moves on
     for scheme, kw in (("https", {"context": ssl._create_unverified_context()}),
                        ("http", {})):
         try:
-            with urllib.request.urlopen(f"{scheme}://localhost:8000/health",
+            with urllib.request.urlopen(f"{scheme}://localhost:{API_PORT}/health",
                                         timeout=1.5, **kw):
                 return "serving"
         except Exception:
@@ -118,21 +123,182 @@ wire_api = "chat"
 # then:  export GLM_API_KEY="$key" """),
 ]
 
+# Shared look. Literal CSS only (no stray $): safe inside plain strings.
+STYLE = """<style>
+:root{--bg:#f5f6fa;--card:#ffffff;--fg:#1c1e26;--muted:#6b7280;--line:#e5e7eb;
+--accent:#4f7cff;--accent2:#9a6cff;--ok:#16a34a;--busy:#d97706;
+--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1013;--card:#171a20;--fg:#e7e9ee;
+--muted:#8b93a3;--line:#262b35;--accent:#6d95ff;--accent2:#ae8bff;--ok:#34d17b;--busy:#f0a24b}}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);
+margin:0;line-height:1.5}
+.wrap{max-width:62rem;margin:0 auto;padding:1.2rem 1rem 4rem}
+header.hero{display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap;
+padding:1.4rem 0 .6rem}
+header.hero h1{margin:0;font-size:1.55rem;letter-spacing:-.02em}
+header.hero h1 b{background:linear-gradient(90deg,var(--accent),var(--accent2));
+-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--muted);font-size:.92rem}
+.grid{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));margin:.8rem 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:.9rem 1rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.card h3{margin:0 0 .3rem;font-size:.78rem;text-transform:uppercase;
+letter-spacing:.06em;color:var(--muted);font-weight:600}
+.card .v{font-size:1.02rem;font-weight:600}
+.ok{color:var(--ok)}.busy{color:var(--busy)}
+.pill{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.45rem}
+.pill.ok{background:var(--ok)}.pill.busy{background:var(--busy);animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.35}}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:var(--mono);font-size:.88em;background:var(--bg);
+border:1px solid var(--line);padding:.08rem .35rem;border-radius:6px}
+pre{font-family:var(--mono);font-size:.82rem;background:var(--bg);
+border:1px solid var(--line);padding:.8rem;border-radius:10px;overflow-x:auto;margin:.5rem 0}
+h2{font-size:1.05rem;margin:1.6rem 0 .5rem}
+details{background:var(--card);border:1px solid var(--line);border-radius:12px;
+margin:.5rem 0;padding:.55rem .9rem}
+summary{cursor:pointer;font-weight:600;font-size:.95rem}
+button{font:inherit;font-size:.82rem;background:var(--card);color:var(--fg);
+border:1px solid var(--line);border-radius:8px;padding:.3rem .8rem;cursor:pointer}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{filter:brightness(1.08);color:#fff}
+canvas.chart{width:100%;height:96px;display:block}
+.chartv{font-family:var(--mono);font-size:1.02rem;font-weight:700;float:right}
+.legend{font-size:.72rem;color:var(--muted)}
+.legend i{display:inline-block;width:.9em;height:3px;border-radius:2px;
+vertical-align:middle;margin:0 .3em 0 .8em}
+</style>"""
+
+# Live dashboard: the browser scrapes $ep/metrics (Bearer $key unless placeholder).
+METRICS_SECTION = Template("""
+<h2>Live performance</h2>
+<div class=grid>
+ <div class=card><h3>Throughput <span class=chartv id=v0></span></h3>
+   <canvas class=chart id=c0></canvas>
+   <div class=legend><i style="background:var(--accent)"></i>generate tok/s
+   <i style="background:var(--accent2)"></i>prompt tok/s</div></div>
+ <div class=card><h3>Requests <span class=chartv id=v1></span></h3>
+   <canvas class=chart id=c1></canvas>
+   <div class=legend><i style="background:var(--accent)"></i>running
+   <i style="background:var(--busy)"></i>waiting</div></div>
+ <div class=card><h3>KV cache used <span class=chartv id=v2></span></h3>
+   <canvas class=chart id=c2></canvas></div>
+ <div class=card><h3>Prefix-cache hit rate <span class=chartv id=v3></span></h3>
+   <canvas class=chart id=c3></canvas></div>
+</div>
+<script>
+(function(){
+var EP="$ep", KEY="$key";
+var HDRS = KEY.charAt(0)==="<" ? {} : {"Authorization":"Bearer "+KEY};
+var N=100, S={gen:[],pro:[],run:[],wai:[],kv:[],hit:[]};
+var prev=null, prevT=0;
+function parse(text){
+  var v={}, lines=text.split("\\n");
+  for(var i=0;i<lines.length;i++){
+    var ln=lines[i];
+    if(!ln||ln.charCodeAt(0)===35)continue;
+    var sp=ln.lastIndexOf(" ");
+    var name=ln.slice(0,sp), val=parseFloat(ln.slice(sp+1));
+    var br=name.indexOf("{"); if(br>=0)name=name.slice(0,br);
+    if(!isNaN(val))v[name]=(v[name]||0)+val;
+  }
+  return v;
+}
+function push(a,x){a.push(x);if(a.length>N)a.shift()}
+function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
+function draw(id,series,colors){
+  var c=document.getElementById(id),dpr=window.devicePixelRatio||1;
+  var w=c.clientWidth,h=c.clientHeight;
+  c.width=w*dpr;c.height=h*dpr;
+  var g=c.getContext("2d");g.scale(dpr,dpr);g.clearRect(0,0,w,h);
+  var mx=1e-9,si,i;
+  for(si=0;si<series.length;si++)for(i=0;i<series[si].length;i++)
+    if(series[si][i]>mx)mx=series[si][i];
+  mx*=1.15;
+  g.strokeStyle="rgba(128,128,128,.25)";g.lineWidth=1;
+  g.beginPath();g.moveTo(0,h-.5);g.lineTo(w,h-.5);g.stroke();
+  for(si=series.length-1;si>=0;si--){
+    var s=series[si]; if(s.length<2)continue;
+    g.strokeStyle=colors[si];g.lineWidth=2;g.lineJoin="round";g.beginPath();
+    for(i=0;i<s.length;i++){
+      var px=i/(N-1)*w, py=h-4-(s[i]/mx)*(h-10);
+      i?g.lineTo(px,py):g.moveTo(px,py);
+    }
+    g.stroke();
+    if(si===0){
+      var grad=g.createLinearGradient(0,0,0,h);
+      grad.addColorStop(0,colors[0]+"55");grad.addColorStop(1,colors[0]+"00");
+      g.lineTo((s.length-1)/(N-1)*w,h);g.lineTo(0,h);g.closePath();
+      g.fillStyle=grad;g.fill();
+    }
+  }
+}
+function fmt(x){return x>=1000?(x/1000).toFixed(1)+"k":x.toFixed(0)}
+function last(a){return a.length?a[a.length-1]:0}
+function tick(){
+  fetch(EP+"/metrics",{headers:HDRS}).then(function(r){
+    if(!r.ok)throw 0; return r.text();
+  }).then(function(text){
+    var v=parse(text), t=Date.now()/1000;
+    if(prev){
+      var dt=Math.max(t-prevT,.1);
+      push(S.gen,Math.max(0,(v["vllm:generation_tokens_total"]-prev["vllm:generation_tokens_total"])/dt||0));
+      push(S.pro,Math.max(0,(v["vllm:prompt_tokens_total"]-prev["vllm:prompt_tokens_total"])/dt||0));
+      var dq=v["vllm:prefix_cache_queries_total"]-prev["vllm:prefix_cache_queries_total"];
+      var dh=v["vllm:prefix_cache_hits_total"]-prev["vllm:prefix_cache_hits_total"];
+      push(S.hit,dq>0?100*dh/dq:last(S.hit));
+    }
+    push(S.run,v["vllm:num_requests_running"]||0);
+    push(S.wai,v["vllm:num_requests_waiting"]||0);
+    push(S.kv,100*(v["vllm:kv_cache_usage_perc"]||0));
+    prev=v;prevT=t;
+    var A=css("--accent"),A2=css("--accent2"),B=css("--busy");
+    draw("c0",[S.gen,S.pro],[A,A2]);
+    draw("c1",[S.run,S.wai],[A,B]);
+    draw("c2",[S.kv],[A]);
+    draw("c3",[S.hit],[A2]);
+    document.getElementById("v0").textContent=S.gen.length?fmt(last(S.gen))+" tok/s":"";
+    document.getElementById("v1").textContent=last(S.run)+" / "+last(S.wai);
+    document.getElementById("v2").textContent=S.kv.length?last(S.kv).toFixed(1)+"%":"";
+    document.getElementById("v3").textContent=S.hit.length?last(S.hit).toFixed(0)+"%":"";
+  }).catch(function(){}).then(function(){setTimeout(tick,3000)});
+}
+tick();
+})();
+</script>""")
+
 CHAT_PAGE = Template("""<!doctype html><html><head><title>GLM-5.2 chat</title>
-<style>body{font-family:system-ui;max-width:52rem;margin:1.5rem auto;padding:0 1rem;line-height:1.45}
-#log{border:1px solid #ccc;border-radius:8px;padding:1rem;min-height:50vh;max-height:65vh;overflow-y:auto}
-.u{color:#046;font-weight:600;margin-top:.8rem}.a{white-space:pre-wrap}
-details.think{color:#888;font-size:.85em;margin:.3rem 0}
-#in{width:100%;box-sizing:border-box;min-height:4rem;margin-top:.6rem;font:inherit}
-button{font:inherit;padding:.35rem 1rem;margin-right:.5rem}
-@media(prefers-color-scheme:dark){body{background:#111;color:#ddd}#log{border-color:#444}.u{color:#8cf}}
-</style></head><body>
-<h2>GLM-5.2 &mdash; quick chat <small><a href="/?token=$token">&larr; status</a></small></h2>
+<meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE + """<style>
+.wrap{max-width:52rem;display:flex;flex-direction:column;height:100vh;padding-bottom:1rem}
+#log{flex:1;overflow-y:auto;padding:.5rem 0}
+.msg{max-width:85%;padding:.6rem .9rem;border-radius:14px;margin:.35rem 0;
+white-space:pre-wrap;font-size:.95rem;width:fit-content}
+.msg.you{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#fff;
+margin-left:auto;border-bottom-right-radius:4px}
+.msg.bot{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+details.think{color:var(--muted);font-size:.8em;margin:.2rem 0;max-width:85%;
+background:none;border:none;padding:0 .3rem}
+.composer{display:flex;gap:.5rem;align-items:flex-end;padding-top:.5rem;
+border-top:1px solid var(--line)}
+#in{flex:1;font:inherit;background:var(--card);color:var(--fg);
+border:1px solid var(--line);border-radius:12px;padding:.6rem .8rem;
+min-height:2.8rem;max-height:9rem;resize:vertical}
+.side{display:flex;flex-direction:column;gap:.35rem}
+label.thinkbox{font-size:.78rem;color:var(--muted);white-space:nowrap}
+</style></head><body><div class=wrap>
+<header class=hero><h1><b>GLM-5.2</b> quick chat</h1>
+<span class=sub><a href="/?token=$token">&larr; status &amp; dashboard</a></span></header>
 <div id=log></div>
+<div class=composer>
 <textarea id=in placeholder="Message (Ctrl+Enter to send)"></textarea>
-<p><button id=send>Send</button><button id=stop disabled>Stop</button>
+<div class=side>
+<button id=send class=primary>Send</button>
+<button id=stop disabled>Stop</button>
 <button id=clear>Clear</button>
-<label><input type=checkbox id=think checked> thinking</label></p>
+<label class=thinkbox><input type=checkbox id=think checked> thinking</label>
+</div></div>
 <script>
 const EP="$ep", KEY="$key", msgs=[];
 const log=document.getElementById("log"), inp=document.getElementById("in");
@@ -140,11 +306,10 @@ let ctrl=null;
 function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt)e.textContent=txt;log.appendChild(e);log.scrollTop=log.scrollHeight;return e}
 async function send(){
   const text=inp.value.trim(); if(!text||ctrl)return;
-  inp.value=""; msgs.push({role:"user",content:text}); el("div","u","you"); el("div","a",text);
-  el("div","u","GLM-5.2");
+  inp.value=""; msgs.push({role:"user",content:text}); el("div","msg you",text);
   const think=el("details","think"); think.appendChild(document.createElement("summary")).textContent="thinking…";
-  const tbody=think.appendChild(document.createElement("div")); tbody.className="a";
-  const out=el("div","a","");
+  const tbody=think.appendChild(document.createElement("div"));
+  const out=el("div","msg bot","");
   ctrl=new AbortController(); document.getElementById("stop").disabled=false;
   let answer="", reasoning="";
   try{
@@ -174,18 +339,11 @@ document.getElementById("stop").onclick=()=>ctrl&&ctrl.abort();
 document.getElementById("clear").onclick=()=>{msgs.length=0;log.innerHTML=""};
 inp.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter")send()});
 inp.focus();
-</script></body></html>""")
+</script></div></body></html>""")
 
-PAGE_HEAD = """<!doctype html><html><head><title>GLM-5.2 EXL3 turnkey</title>
-<meta http-equiv="refresh" content="30">
-<style>body{font-family:system-ui;max-width:46rem;margin:3rem auto;line-height:1.5;padding:0 1rem}
-code{background:#eee;padding:.1rem .3rem;border-radius:4px}
-pre{background:#f4f4f4;padding:.8rem;border-radius:6px;overflow-x:auto}
-table{border-collapse:collapse}td{padding:.2rem .8rem .2rem 0}
-.ok{color:#2a2}.busy{color:#b80}
-details{margin:.6rem 0}summary{cursor:pointer;font-weight:600}
-@media(prefers-color-scheme:dark){body{background:#111;color:#ddd}
-code,pre{background:#222}}</style></head><body>"""
+PAGE_HEAD = ("""<!doctype html><html><head><title>GLM-5.2 EXL3 turnkey</title>
+<meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE +
+             """</head><body><div class=wrap>""")
 
 
 def render(secure: bool, tok: str = "") -> bytes:
@@ -193,51 +351,64 @@ def render(secure: bool, tok: str = "") -> bytes:
     endpoint = st.get("endpoint", "")
     weights = weights_state()
     engine = engine_state()
-
-    def row(label, value, ok):
-        cls = "ok" if ok else "busy"
-        return (f"<tr><td>{html.escape(label)}</td>"
-                f"<td class={cls}>{html.escape(value)}</td></tr>")
-
     if engine == "serving":
         weights = "ready"  # a serving engine is proof enough (pre-marker volumes)
-    parts = [PAGE_HEAD, "<h1>GLM-5.2 EXL3 turnkey</h1><table>",
-             row("Weights", weights, weights == "ready"),
-             row("TLS / DNS", st.get("tls", "not configured"),
-                 st.get("tls", "").startswith("https")),
-             row("Engine", engine, engine == "serving"),
-             row("DRAM KV offload", st.get("offload", "off"),
-                 st.get("offload", "off") != "off"),
-             "</table>"]
+    serving = engine == "serving"
+
+    def card(label, value, ok):
+        cls = "ok" if ok else "busy"
+        return (f"<div class=card><h3>{html.escape(label)}</h3>"
+                f"<div class=v><span class='pill {cls}'></span>"
+                f"<span class={cls}>{html.escape(value)}</span></div></div>")
+
+    parts = [PAGE_HEAD,
+             "<header class=hero><h1><b>GLM-5.2</b> EXL3 turnkey</h1>"
+             "<span class=sub>512K context &middot; fp8 KV &middot; MTP-3 &middot; "
+             "4&times; RTX PRO 6000</span></header>",
+             "<div class=grid>",
+             card("Weights", weights, weights == "ready"),
+             card("TLS / DNS", st.get("tls", "not configured"),
+                  st.get("tls", "").startswith("https")),
+             card("Engine", engine, serving),
+             card("DRAM KV offload", st.get("offload", "off"),
+                  st.get("offload", "off") != "off"),
+             "</div>"]
     if endpoint:
         ep = html.escape(endpoint, quote=True)
-        # Real key only over TLS AND behind an active token gate.
         real = st.get("api_key", "")  # from the root-only status file
         key = real if (secure and TOKEN and real) else "<paste API key from instance logs>"
-        parts.append(f'<p>OpenAI-compatible API, 524,288-token context: '
-                     f'<a href="{ep}/v1/models"><code>{ep}/v1</code></a> &middot; '
-                     f'<a href="{ep}/metrics">Prometheus metrics</a></p>')
-        if key.startswith("<"):
-            parts.append("<p>The API key is printed in the instance logs "
-                         "(vast console &rarr; Logs, look for <code>API KEY</code>).</p>")
+        tok_esc = html.escape(tok, quote=True)
+        parts.append(f'<div class=card><h3>OpenAI-compatible endpoint</h3>'
+                     f'<div class=v><a href="{ep}/v1/models"><code>{ep}/v1</code></a></div>'
+                     f'<div class=sub style="margin-top:.4rem">'
+                     f'<a href="{ep}/metrics">Prometheus /metrics</a>')
         if not key.startswith("<"):
-            parts.append(f'<p><a href="/chat?token={html.escape(tok, quote=True)}"><b>Quick chat</b></a> — minimal '
-                         'multi-turn test UI (streams straight to the endpoint).</p>')
+            parts.append(f' &middot; <a href="/chat?token={tok_esc}"><b>Quick chat &rarr;</b></a>')
+        parts.append('</div></div>')
+        if key.startswith("<"):
+            parts.append("<p class=sub>The API key is printed in the instance logs "
+                         "(vast console &rarr; Logs, look for <code>API KEY</code>).</p>")
+        if serving:
+            parts.append(METRICS_SECTION.substitute(ep=endpoint, key=key))
         parts.append("<h2>Client configs</h2>")
         for name, where, body in SNIPPETS:
             filled = Template(body).substitute(ep=endpoint, key=key)
             parts.append(f"<details><summary>{html.escape(name)}</summary>"
-                         f"<p><code>{html.escape(where)}</code></p>"
+                         f"<p class=sub><code>{html.escape(where)}</code></p>"
                          f"<pre>{html.escape(filled)}</pre></details>")
         parts.append(
             '<h2>Quick test <button id=copybtn onclick="copyQT()" '
-            'style="font-size:.55em;vertical-align:middle;cursor:pointer">copy</button></h2>'
+            'style="vertical-align:middle">copy</button></h2>'
             f"<pre id=qt>curl -H \"Authorization: Bearer {html.escape(key)}\" {ep}/v1/models</pre>"
             "<script>function copyQT(){navigator.clipboard.writeText("
             "document.getElementById('qt').textContent.trim()).then(()=>{"
             "const b=document.getElementById('copybtn');b.textContent='copied!';"
             "setTimeout(()=>{b.textContent='copy'},1500)})}</script>")
-    parts.append("<p><small>Page auto-refreshes every 30 s.</small></p></body></html>")
+    if not serving:
+        # keep boot status fresh; once serving, the dashboard polls instead
+        parts.append("<script>setTimeout(function(){location.reload()},20000)</script>"
+                     "<p class=sub>Auto-refreshing every 20 s while booting.</p>")
+    parts.append("</div></body></html>")
     return "".join(parts).encode()
 
 
@@ -273,7 +444,7 @@ class Handler(BaseHTTPRequestHandler):
         if TOKEN and tok != TOKEN:
             self.send_error(403, "bad token (use the vast console Open button)")
             return
-        secure = isinstance(self.connection, ssl.SSLSocket)
+        secure = isinstance(self.connection, ssl.SSLSocket) or ALLOW_INSECURE
         hostport = status().get("https_hostport", "")
         if not secure and ssl_ctx() and hostport:
             # Upgrade the Open button's plain-HTTP hit to the TLS view of this page
@@ -285,7 +456,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/chat":
             st = status()
             key = st.get("api_key", "")
-            # the chat page embeds the key in JS: TLS + active token gate required
+            # the chat page embeds the key in JS: TLS (or trusted-LAN) + token gate
             if not (secure and TOKEN and key and st.get("endpoint")):
                 self.send_error(403, "chat needs TLS + token gate + a running endpoint")
                 return
