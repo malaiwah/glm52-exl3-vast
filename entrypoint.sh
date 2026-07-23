@@ -65,6 +65,34 @@ export TORCH_CUDA_ARCH_LIST=12.0a FLASHINFER_CUDA_ARCH_LIST=12.0f FLASHINFER_DIS
 export VLLM_ENGINE_READY_TIMEOUT_S=2400
 unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 
+# API key: use VLLM_API_KEY env, or auto-generate and print to console (vast UI logs)
+if [ -z "${VLLM_API_KEY:-}" ]; then
+  VLLM_API_KEY="sk-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  echo "=================================================================="
+  echo ">>> API KEY (auto-generated; set VLLM_API_KEY env to override):"
+  echo ">>> $VLLM_API_KEY"
+  echo "=================================================================="
+fi
+export VLLM_API_KEY
+
+# TLS via Let's Encrypt DNS-01 (optional): set ACME_DOMAIN + ACME_DNS_PROVIDER
+# (lego provider name, e.g. cloudflare, duckdns) + the provider's cred envs
+# (e.g. CLOUDFLARE_DNS_API_TOKEN, or DUCKDNS_TOKEN). Cert issued each boot.
+TLS_ARGS=()
+if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null; then
+  echo ">>> Issuing LetsEncrypt cert for $ACME_DOMAIN via DNS-01 ($ACME_DNS_PROVIDER)"
+  lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}"        --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN"        --path /workspace/.lego run || echo "!!! ACME issuance failed; continuing WITHOUT TLS"
+  CRT="/workspace/.lego/certificates/${ACME_DOMAIN}.crt"
+  KEY="/workspace/.lego/certificates/${ACME_DOMAIN}.key"
+  [ -f "$CRT" ] && TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY") && echo ">>> TLS enabled: https://$ACME_DOMAIN:<mapped-port>/v1"
+fi
+
+# Egress hygiene: no telemetry; offline mode once weights are local
+export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
+export HF_HUB_OFFLINE=1
+echo ">>> Listening sockets at boot (expect only vllm on ${PORT:-8000} + vast ssh):"
+(ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | head -8 || true
+
 MTP_TOKENS="${MTP_TOKENS:-3}"
 SPEC_ARGS=()
 if [ "$MTP_TOKENS" != "0" ]; then
@@ -90,4 +118,5 @@ exec vllm serve "$MODEL_DIR" \
   --no-async-scheduling \
   --default-chat-template-kwargs '{"reasoning_effort":"high"}' \
   --hf-overrides '{"use_index_cache":true,"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
-  "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}"
+  --api-key "$VLLM_API_KEY" \
+  "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}"
