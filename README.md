@@ -7,7 +7,15 @@ corrupts >~150K context without a host driver P2P override; see Evidence),
 MTP speculative decoding, and DRAM KV offload auto-sized to 70% of host RAM.
 Weights auto-download on first boot (~332 GB — pick a fast-net host).
 
-## vast.ai template settings
+## One-click launch
+
+**[▶ Launch on vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=659cc795b0d88115a00de017c6377c66)** —
+public template with the image, ports, launch mode, disk, and host filters
+(4x RTX PRO 6000, >=400GB disk, >=1Gbps net) pre-configured. Rent, wait for
+"Application startup complete" in the instance logs, grab the API key from the
+same logs, done.
+
+## vast.ai template settings (manual setup)
 - **Image**: `ghcr.io/malaiwah/glm52-exl3-vast:latest`
 - **Launch mode**: docker ENTRYPOINT (vLLM logs appear on the instance console;
   SSH works per vast standards)
