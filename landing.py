@@ -199,6 +199,8 @@ vertical-align:middle;margin:0 .3em 0 .8em}
 
 # Live dashboard: the browser scrapes $ep/metrics (Bearer $key unless placeholder).
 METRICS_SECTION = Template("""
+<h2>Model</h2>
+<div class=card><pre id=modeljson style="max-height:16rem;margin:0;border:none">loading /v1/models&hellip;</pre></div>
 <h2>Live performance</h2>
 <div class=grid>
  <div class=card><h3>Throughput <span class=chartv id=v0></span></h3>
@@ -220,6 +222,9 @@ var EP="$ep", KEY="$key";
 var HDRS = KEY.charAt(0)==="<" ? {} : {"Authorization":"Bearer "+KEY};
 var N=100, S={gen:[],pro:[],run:[],wai:[],kv:[],hit:[]};
 var prev=null, prevT=0;
+fetch(EP+"/v1/models",{headers:HDRS}).then(function(r){return r.json()}).then(function(j){
+  document.getElementById("modeljson").textContent=JSON.stringify(j,null,2);
+}).catch(function(){document.getElementById("modeljson").textContent="failed to fetch /v1/models"});
 function parse(text){
   var v={}, lines=text.split("\\n");
   for(var i=0;i<lines.length;i++){
