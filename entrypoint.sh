@@ -13,8 +13,8 @@ NGPU=$(nvidia-smi -L 2>/dev/null | wc -l)
 MODEL_DIR="${MODEL_DIR:-/workspace/GLM-5.2-EXL3-TR3-3.0bpw}"
 if [ ! -f "$MODEL_DIR/config.json" ]; then
   echo ">>> First boot: downloading EXL3 weights (~332 GB) to $MODEL_DIR"
-  echo ">>> (set HF_TOKEN env for higher rate limits)"
-  HF_HUB_ENABLE_HF_TRANSFER=1 python3 -c "
+  [ -n "${HF_TOKEN:-}" ] && echo ">>> (HF_TOKEN detected: authenticated download)" || echo ">>> (set HF_TOKEN env for higher rate limits)"
+  HF_XET_HIGH_PERFORMANCE=1 python3 -c "
 from huggingface_hub import snapshot_download
 snapshot_download('brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw', local_dir='$MODEL_DIR', max_workers=16)"
   echo ">>> Weights ready."
