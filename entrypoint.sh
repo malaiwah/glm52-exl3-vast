@@ -75,6 +75,41 @@ elif [ -f "$MODEL_DIR/.mtp78-grafted" ]; then
   python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert
 fi
 
+# Vision (default ON): MoonViT-3d tower (Kimi-K2.6, frozen) + Baseten's trained
+# 49.5M-param PatchMerger projector, bolted onto our EXL3 text backbone. Both
+# vision parts are BF16 and checkpoint-agnostic — only ~1 GB, no text weight is
+# touched. VISION=0 serves pure text.
+# The EXL3 loader is multimodal-aware (it collapses `language_model.` prefixes),
+# so the rank-sliced text weights still load under the Glm5v wrapper.
+VISION="${VISION:-1}"
+VISION_REPO="${VISION_REPO:-chronarion/GLM-5.2-Vision-MXFP8-NVFP4-NF3-Hybrid}"
+if [ "$VISION" = "1" ]; then
+  if [ ! -f "$MODEL_DIR/.vision-enabled" ]; then
+    status_update installing-vision
+    echo ">>> Vision: downloading tower + projector + processor (~1 GB) from $VISION_REPO"
+    python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
+  allow_patterns=['vision_tower.safetensors','mm_projector.safetensors','config.json',
+                  'configuration_glm5v.py','kimi_k25_processor.py','kimi_k25_vision_processing.py',
+                  'media_utils.py','preprocessor_config.json','chat_template.jinja',
+                  'plugins/**'], max_workers=8)" \
+      && cp "$MODEL_DIR/.vision"/{vision_tower,mm_projector}.safetensors "$MODEL_DIR/" 2>/dev/null \
+      && cp "$MODEL_DIR/.vision"/{configuration_glm5v.py,kimi_k25_processor.py,kimi_k25_vision_processing.py,media_utils.py,preprocessor_config.json} "$MODEL_DIR/" 2>/dev/null \
+      && pip install -q "$MODEL_DIR/.vision/plugins/glm5v_nf3" 2>&1 | tail -1 \
+      && python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" "$MODEL_DIR/.vision" \
+      && python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" \
+      && echo ">>> Vision: ENABLED (image input active; VISION=0 to disable)" \
+      || { echo "!!! Vision install failed — falling back to text-only"; \
+           python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert || true; }
+  else
+    echo ">>> Vision: already installed"
+  fi
+elif [ -f "$MODEL_DIR/.vision-enabled" ]; then
+  echo ">>> VISION=0: reverting to text-only config"
+  python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert
+fi
+
 # DRAM KV offload: OFFLOAD_FRACTION of the instance's RAM allocation (default
 # 0.70); OFFLOAD_FRACTION=0 disables. Sized from min(cgroup limit, MemTotal) —
 # inside a container /proc/meminfo shows the whole host's RAM, but a partial
@@ -104,6 +139,13 @@ if [ "$OFFLOAD_FRACTION" != "0" ]; then
   export PYTORCH_CUDA_ALLOC_CONF=""
 else
   export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+fi
+
+# Vision serve args: bound the encoder reserve (chronarion's guidance) and cap
+# media per request so a screenshot burst can't blow the profile.
+VISION_ARGS=()
+if [ "${VISION:-1}" = "1" ] && [ -f "$MODEL_DIR/.vision-enabled" ]; then
+  VISION_ARGS=(--limit-mm-per-prompt "{\"vision_chunk\":${VISION_CHUNKS:-8}}" --trust-remote-code)
 fi
 
 export CUDA_DEVICE_MAX_CONNECTIONS=32 CUTE_DSL_ARCH=sm_120a OMP_NUM_THREADS=16
@@ -256,6 +298,7 @@ vllm serve "$MODEL_DIR" \
   --enable-prompt-tokens-details --enable-force-include-usage \
   --no-async-scheduling \
   --default-chat-template-kwargs '{"reasoning_effort":"high"}' \
+  ${VISION_ARGS[@]+"${VISION_ARGS[@]}"} \
   --hf-overrides '{"use_index_cache":true,"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
   --api-key "$VLLM_API_KEY" \
   "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}"
