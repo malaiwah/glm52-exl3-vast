@@ -223,7 +223,12 @@ if [ -n "${CONTAINER_API_KEY:-}" ] && [ -n "${CONTAINER_ID:-}" ]; then
   ) &
 fi
 
-exec vllm serve "$MODEL_DIR" \
+# Supervisor: on a rental, an engine crash must not leave the box idle burning
+# money. Restart vLLM (up to SUPERVISOR_MAX_RESTARTS, default 5) with backoff;
+# a crash-loop that exceeds the budget exits so the instance is visibly failed
+# rather than thrashing. SUPERVISOR=0 disables (single exec, legacy behaviour).
+serve_once() {
+vllm serve "$MODEL_DIR" \
   --served-model-name "${SERVED_MODEL_NAME:-GLM-5.2}" \
   --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
   --tensor-parallel-size 4 --decode-context-parallel-size 4 \
@@ -245,3 +250,24 @@ exec vllm serve "$MODEL_DIR" \
   --hf-overrides '{"use_index_cache":true,"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
   --api-key "$VLLM_API_KEY" \
   "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}"
+}
+
+if [ "${SUPERVISOR:-1}" = "0" ]; then
+  serve_once
+  exit $?
+fi
+MAXR="${SUPERVISOR_MAX_RESTARTS:-5}"
+for attempt in $(seq 0 "$MAXR"); do
+  [ "$attempt" -gt 0 ] && {
+    status_update restarting
+    echo "!!! vLLM exited (attempt $attempt/$MAXR) — restarting in $((attempt*15))s"
+    sleep $((attempt*15))
+    # clear orphaned workers holding VRAM (they survive a parent crash)
+    pkill -9 -f "VLLM::" 2>/dev/null; pkill -9 -f EngineCore 2>/dev/null; sleep 5
+  }
+  serve_once
+  RC=$?
+  echo "!!! vLLM exited rc=$RC"
+done
+echo "!!! vLLM crash-looped past $MAXR restarts — giving up (destroy or debug the instance)"
+exit 1
