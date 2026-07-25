@@ -60,9 +60,12 @@ if [ "$MTP78_TRELLIS" = "1" ]; then
 from huggingface_hub import snapshot_download
 snapshot_download('malaiwah/GLM-5.2-EXL3-TR3-MTP78', allow_patterns=['3bpw-keep0/*'], local_dir='$MODEL_DIR/.mtp78-overlay', max_workers=8)"
     if python3 /opt/scripts/patch_deepseek_mtp.py; then
-      python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" "$MODEL_DIR/.mtp78-overlay/3bpw-keep0" \
-        && echo ">>> MTP78: trellis draft active (BF16-parity acceptance, +KV headroom)" \
-        || { echo "!!! MTP78 graft failed — reverting to BF16 draft"; python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert || true; }
+      if python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" "$MODEL_DIR/.mtp78-overlay/3bpw-keep0"; then
+        echo ">>> MTP78: trellis draft active (BF16-parity acceptance, +KV headroom)"
+      else
+        echo "!!! MTP78 graft failed — reverting to BF16 draft"
+        python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert || true
+      fi
     else
       echo "!!! MTP78: vLLM patch anchor missing in this image — keeping BF16 draft"
     fi
@@ -87,21 +90,28 @@ if [ "$VISION" = "1" ]; then
   if [ ! -f "$MODEL_DIR/.vision-enabled" ]; then
     status_update installing-vision
     echo ">>> Vision: downloading tower + projector + processor (~1 GB) from $VISION_REPO"
+    vision_ok=1
     python3 -c "
 from huggingface_hub import snapshot_download
 snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
   allow_patterns=['vision_tower.safetensors','mm_projector.safetensors','config.json',
                   'configuration_glm5v.py','kimi_k25_processor.py','kimi_k25_vision_processing.py',
                   'media_utils.py','preprocessor_config.json','chat_template.jinja',
-                  'plugins/**'], max_workers=8)" \
-      && cp "$MODEL_DIR/.vision"/{vision_tower,mm_projector}.safetensors "$MODEL_DIR/" 2>/dev/null \
-      && cp "$MODEL_DIR/.vision"/{configuration_glm5v.py,kimi_k25_processor.py,kimi_k25_vision_processing.py,media_utils.py,preprocessor_config.json} "$MODEL_DIR/" 2>/dev/null \
-      && pip install -q "$MODEL_DIR/.vision/plugins/glm5v_nf3" 2>&1 | tail -1 \
-      && python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" "$MODEL_DIR/.vision" \
-      && python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" \
-      && echo ">>> Vision: ENABLED (image input active; VISION=0 to disable)" \
-      || { echo "!!! Vision install failed — falling back to text-only"; \
-           python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert || true; }
+                  'plugins/**'], max_workers=8)" || vision_ok=0
+    if [ "$vision_ok" = "1" ]; then
+      cp "$MODEL_DIR/.vision"/vision_tower.safetensors "$MODEL_DIR/.vision"/mm_projector.safetensors "$MODEL_DIR/" || vision_ok=0
+      for f in configuration_glm5v.py kimi_k25_processor.py kimi_k25_vision_processing.py media_utils.py preprocessor_config.json; do
+        [ -f "$MODEL_DIR/.vision/$f" ] && cp "$MODEL_DIR/.vision/$f" "$MODEL_DIR/"
+      done
+      pip install -q "$MODEL_DIR/.vision/plugins/glm5v_nf3" || vision_ok=0
+    fi
+    if [ "$vision_ok" = "1" ] && python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" "$MODEL_DIR/.vision" && python3 /opt/scripts/index_add_vision.py "$MODEL_DIR"; then
+      echo ">>> Vision: ENABLED (image input active; VISION=0 to disable)"
+    else
+      echo "!!! Vision install failed — falling back to text-only"
+      python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert || true
+      python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" --revert || true
+    fi
   else
     echo ">>> Vision: already installed"
   fi
