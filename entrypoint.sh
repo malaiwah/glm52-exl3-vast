@@ -103,6 +103,17 @@ snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
       for f in configuration_glm5v.py kimi_k25_processor.py kimi_k25_vision_processing.py media_utils.py preprocessor_config.json; do
         [ -f "$MODEL_DIR/.vision/$f" ] && cp "$MODEL_DIR/.vision/$f" "$MODEL_DIR/"
       done
+      # The vision chat template is MANDATORY: the text-only template never emits
+      # <|begin_of_image|><|image|><|end_of_image|>, so the multimodal processor
+      # fails with "Failed to apply prompt replacement for mm_items['vision_chunk']".
+      # Keep the text-only one for VISION=0 restore.
+      if [ -f "$MODEL_DIR/.vision/chat_template.jinja" ]; then
+        [ -f "$MODEL_DIR/chat_template.jinja" ] && [ ! -f "$MODEL_DIR/chat_template.jinja.text-only" ] \
+          && cp "$MODEL_DIR/chat_template.jinja" "$MODEL_DIR/chat_template.jinja.text-only"
+        cp "$MODEL_DIR/.vision/chat_template.jinja" "$MODEL_DIR/chat_template.jinja"
+      else
+        vision_ok=0
+      fi
       pip install -q "$MODEL_DIR/.vision/plugins/glm5v_nf3" || vision_ok=0
     fi
     if [ "$vision_ok" = "1" ] && python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" "$MODEL_DIR/.vision" && python3 /opt/scripts/index_add_vision.py "$MODEL_DIR"; then
@@ -118,6 +129,8 @@ snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
 elif [ -f "$MODEL_DIR/.vision-enabled" ]; then
   echo ">>> VISION=0: reverting to text-only config"
   python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert
+  python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" --revert || true
+  [ -f "$MODEL_DIR/chat_template.jinja.text-only" ] && mv "$MODEL_DIR/chat_template.jinja.text-only" "$MODEL_DIR/chat_template.jinja"
 fi
 
 # DRAM KV offload: OFFLOAD_FRACTION of the instance's RAM allocation (default
