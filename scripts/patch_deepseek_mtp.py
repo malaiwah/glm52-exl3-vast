@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Idempotently apply the deepseek_mtp rank-sliced name-normalization fix to
+the image's vLLM (upstream PR: voipmonitor/vllm#11). Required to LOAD a
+rank-sliced EXL3 MTP overlay; without it boot fails with
+KeyError '...routed_experts.w2_rank0.mcg'.
+
+Exit 0 = patched or already patched; exit 1 = anchor missing (fall back to
+BF16 draft).
+"""
+import sys
+import vllm.model_executor.models.deepseek_mtp as m
+
+F = m.__file__
+s = open(F).read()
+if "normalize_rank_sliced_weight_name" in s:
+    print("deepseek_mtp: already patched")
+    sys.exit(0)
+OLD = """        _pending_wk_fp8: dict = {}  # FP8 indexer wk dequant buffer
+        _pending_fp8_linear: dict = {}
+        for name, loaded_weight in weights:
+            if "rotary_emb.inv_freq" in name:
+                continue"""
+NEW = """        _pending_wk_fp8: dict = {}  # FP8 indexer wk dequant buffer
+        _pending_fp8_linear: dict = {}
+        # mtp78: normalize EXL3 rank-sliced checkpoint names (voipmonitor/vllm#11)
+        rank_sliced_name = getattr(
+            self.quant_config,
+            "normalize_rank_sliced_weight_name",
+            None,
+        ) if getattr(self, "quant_config", None) is not None else None
+        for name, loaded_weight in weights:
+            if rank_sliced_name is not None:
+                name = rank_sliced_name(name)
+                if name is None:
+                    continue
+            if "rotary_emb.inv_freq" in name:
+                continue"""
+if OLD not in s:
+    print("deepseek_mtp: anchor not found in this image build — cannot patch")
+    sys.exit(1)
+open(F, "w").write(s.replace(OLD, NEW))
+import compileall
+compileall.compile_file(F, quiet=2)
+print("deepseek_mtp: patched OK")

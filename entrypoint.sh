@@ -46,6 +46,35 @@ snapshot_download('brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw', local_dir='$MODEL_DIR'
   echo ">>> Weights ready."
 fi
 
+# MTP78 trellis draft overlay (default ON): the MTP draft layer quantized to
+# 3.0bpw EXL3 (all-256-expert, full-corpus calibrated) — validated at BF16
+# acceptance PARITY (MAL 3.06 vs 3.05) while freeing ~3.8 GB/GPU for KV cache.
+# MTP78_TRELLIS=0 reverts to the stock BF16 draft. Needs the deepseek_mtp
+# loader patch (voipmonitor/vllm#11) applied to the image's vLLM at boot.
+MTP78_TRELLIS="${MTP78_TRELLIS:-1}"
+if [ "$MTP78_TRELLIS" = "1" ]; then
+  if [ ! -f "$MODEL_DIR/.mtp78-grafted" ]; then
+    status_update grafting-mtp78
+    echo ">>> MTP78: downloading 3bpw-keep0 trellis overlay (~3.7 GB)"
+    python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download('malaiwah/GLM-5.2-EXL3-TR3-MTP78', allow_patterns=['3bpw-keep0/*'], local_dir='$MODEL_DIR/.mtp78-overlay', max_workers=8)"
+    if python3 /opt/scripts/patch_deepseek_mtp.py; then
+      python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" "$MODEL_DIR/.mtp78-overlay/3bpw-keep0" \
+        && echo ">>> MTP78: trellis draft active (BF16-parity acceptance, +KV headroom)" \
+        || { echo "!!! MTP78 graft failed — reverting to BF16 draft"; python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert || true; }
+    else
+      echo "!!! MTP78: vLLM patch anchor missing in this image — keeping BF16 draft"
+    fi
+  else
+    python3 /opt/scripts/patch_deepseek_mtp.py || true  # image may have been re-pulled
+    echo ">>> MTP78: trellis draft already grafted"
+  fi
+elif [ -f "$MODEL_DIR/.mtp78-grafted" ]; then
+  echo ">>> MTP78_TRELLIS=0: reverting graft to stock BF16 draft"
+  python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert
+fi
+
 # DRAM KV offload: OFFLOAD_FRACTION of the instance's RAM allocation (default
 # 0.70); OFFLOAD_FRACTION=0 disables. Sized from min(cgroup limit, MemTotal) —
 # inside a container /proc/meminfo shows the whole host's RAM, but a partial

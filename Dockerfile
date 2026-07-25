@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir "huggingface_hub[hf_transfer]" && apt-get update 
  && echo "c8cc7fb636f8a5f1167e013dbd01485a72eb7393faf1776664c765a722cd6070  /tmp/lego.tgz" | sha256sum -c - \
  && tar xzf /tmp/lego.tgz -C /usr/local/bin lego && rm /tmp/lego.tgz && chmod +x /usr/local/bin/lego
 COPY landing.py /opt/landing.py
+COPY scripts/ /opt/scripts/
 COPY entrypoint.sh /usr/local/bin/glm52-entry.sh
 RUN chmod +x /usr/local/bin/glm52-entry.sh
 ENTRYPOINT ["/usr/local/bin/glm52-entry.sh"]

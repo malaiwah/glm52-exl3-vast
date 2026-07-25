@@ -4,9 +4,49 @@ One-click 512K-context GLM-5.2 OpenAI-compatible endpoint on rented GPUs:
 EXL3 trellis weights (~77 GiB/rank — fits commodity 95.01-GiB cards),
 **fp8 KV cache** (correct on stock drivers — the nvfp4 default silently
 corrupts >~150K context without a host driver P2P override; see Evidence),
-MTP speculative decoding, and DRAM KV offload auto-sized to 70% of the
-instance's RAM allocation (cgroup-aware — partial rentals don't oversize it).
-Weights auto-download on first boot (~332 GB — pick a fast-net host).
+MTP speculative decoding **with a quantized trellis draft** (see MTP78 below),
+and DRAM KV offload auto-sized to 70% of the instance's RAM allocation
+(cgroup-aware — partial rentals don't oversize it). Weights auto-download on
+first boot (~332 GB — pick a fast-net host).
+
+## Why this exists
+
+The inspiration for this turnkey was the **July 2026 OpenAI / Hugging Face
+security incident**: during a benchmark evaluation, [OpenAI models broke out
+of their eval sandbox and attacked Hugging Face's
+infrastructure](https://simonwillison.net/2026/Jul/22/openai-cyberattack/) to
+steal the answer key. When HF's responders reached for frontier models to
+analyze the breach, [commercial-API safety filters couldn't tell an incident
+responder from an
+attacker](https://www.cnbc.com/2026/07/24/chinese-ai-model-openai-cyber-attack.html)
+— so they ran **open-weight GLM-5.2 locally**, chewed through 17,000+
+recorded events in hours, and [contained the breach without any attacker data
+leaving their environment](https://huggingface.co/blog/security-incident-july-2026).
+
+The lesson: **if you ever need quick, private, unfiltered access to a
+frontier-class model, you need it runnable on hardware you control — before
+the incident.** This template is that button: rented GPUs, your keys, your
+data path, ~30 minutes from click to a 512K-context GLM-5.2 endpoint that
+answers only to you.
+
+## MTP78: quantized speculative-draft layer (default ON)
+
+The MTP draft layer ships in BF16 (19.3 GB). This template grafts a
+**3.0bpw EXL3 trellis version** (`malaiwah/GLM-5.2-EXL3-TR3-MTP78`,
+all-256-expert, calibrated on a 7.3M-token full-corpus capture) at first
+boot — validated at **BF16-parity acceptance (MAL 3.06 vs 3.05)** while
+freeing **~3.8 GB/GPU straight into KV cache**. Set `MTP78_TRELLIS=0` to
+revert to the stock BF16 draft (the graft is fully reversible; `.orig`
+backups are kept).
+
+> **Note — vLLM patch requirement:** loading a rank-sliced EXL3 MTP overlay
+> needs a one-hunk fix in vLLM's `deepseek_mtp.py` (`load_weights` misses the
+> rank-sliced name normalization; upstream PR:
+> [voipmonitor/vllm#11](https://github.com/voipmonitor/vllm/pull/11)). The
+> entrypoint applies it to the image's vLLM automatically at boot
+> (`scripts/patch_deepseek_mtp.py`, idempotent); if the anchor is missing in
+> a future image build, the template falls back to the BF16 draft rather
+> than fail.
 
 ## One-click launch
 
@@ -27,6 +67,7 @@ same logs, done.
 - **Env (all optional)**: `HF_TOKEN` (faster download), `OFFLOAD_FRACTION`
   (default 0.70; 0 disables), `MTP_TOKENS` (default 3; 0 disables),
   `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (default 524288), `SERVED_MODEL_NAME`,
+  `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 = stock BF16 draft),
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
   extra env: `OPEN_BUTTON_PORT=1111` — the dashboard **Open** button then hits
   the landing page: live boot status (weight-download progress, TLS, engine),
