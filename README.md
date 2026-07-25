@@ -9,6 +9,14 @@ and DRAM KV offload auto-sized to 70% of the instance's RAM allocation
 (cgroup-aware — partial rentals don't oversize it). Weights auto-download on
 first boot (~332 GB — pick a fast-net host).
 
+## One-click launch
+
+**[▶ Launch on vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=ccab1ea5b390cec1bb615a79840baa40)** —
+public template with the image, ports, launch mode, disk, and host filters
+(4x RTX PRO 6000, >=400GB disk, >=1Gbps net) pre-configured. Rent, wait for
+"Application startup complete" in the instance logs, grab the API key from the
+same logs, done.
+
 ## Why this exists
 
 The inspiration for this turnkey was the **July 2026 OpenAI / Hugging Face
@@ -47,14 +55,6 @@ backups are kept).
 > (`scripts/patch_deepseek_mtp.py`, idempotent); if the anchor is missing in
 > a future image build, the template falls back to the BF16 draft rather
 > than fail.
-
-## One-click launch
-
-**[▶ Launch on vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=ccab1ea5b390cec1bb615a79840baa40)** —
-public template with the image, ports, launch mode, disk, and host filters
-(4x RTX PRO 6000, >=400GB disk, >=1Gbps net) pre-configured. Rent, wait for
-"Application startup complete" in the instance logs, grab the API key from the
-same logs, done.
 
 ## vast.ai template settings (manual setup)
 - **Image**: `ghcr.io/malaiwah/glm52-exl3-vast:latest` (the ghcr.io package
