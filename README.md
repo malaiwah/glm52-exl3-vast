@@ -47,6 +47,53 @@ freeing **~3.8 GB/GPU straight into KV cache**. Set `MTP78_TRELLIS=0` to
 revert to the stock BF16 draft (the graft is fully reversible; `.orig`
 backups are kept).
 
+### Measured (4-arm QC run, same box / config / prompts, 2026-07-25)
+
+| draft (layer 78) | MAL | accept | decode tok/s | KV mem/GPU |
+|---|---|---|---|---|
+| BF16 (stock, 19.3 GB) | 3.528 | 84.3% | 49.6 | 5.27 GiB |
+| **EXL3 3bpw grafted** (3.7 GB) | 3.517 | 83.9% | 49.5 | **8.92 GiB** |
+| **EXL3 3bpw override** (3.7 GB, no surgery) | **3.548** | **84.9%** | **49.9** | **8.92 GiB** |
+| NVFP4 (`lukealonso/GLM-5.2-NVFP4` MTP shards) | 3.531 | 84.4% | 49.5 | 8.5 GiB |
+
+All four drafts accept identically; the EXL3 3bpw draft is the smallest and
+edges NVFP4 on batched decode. Prefill/decode deltas are inside run-to-run
+noise. Full writeup, methodology and the two NVFP4 config gotchas:
+**https://gist.github.com/malaiwah/4bbb16bef2e336e94af165076cdba955**
+
+**KV headroom:** available KV memory goes 5.27 -> 8.92 GiB/GPU (**+69%**). This
+template pins the pool at 512K (`--num-gpu-blocks-override 2048`), so the
+headroom is unspent by default — at ~10.3 KiB/token it is worth roughly
+**+355K tokens of pool (~880K context)** if you lift the override, or the same
+512K with much more concurrency margin.
+
+### Deploying it elsewhere (no checkpoint surgery)
+
+The overlay works as a *separate draft directory* — leave the base checkpoint
+untouched and add one field:
+
+```
+--speculative-config '{"method":"mtp","num_speculative_tokens":3,
+                       "moe_backend":"triton","draft_sample_method":"probabilistic",
+                       "model":"/path/to/GLM-5.2-EXL3-TR3-MTP78/3bpw-keep0"}'
+```
+
+(Validated: KV showed 8.92 GiB with the base checkpoint reverted to stock BF16 —
+proof the trellis draft really loads from the override dir.)
+
+### Model quality (the target model, unrelated to the draft)
+
+648 samples per quant, Z.ai eval settings (temp 1.0, top_p 0.95), pass@1:
+
+| benchmark | Original BF16 | Hybrid MXFP8-NVFP4-NF3 | EXL3 3.0bpw |
+|---|---|---|---|
+| AIME 2026 (30x4) | 99.2 | 97.5 | **99.2** |
+| HMMT Feb 2026 (33x4) | 92.5 | 97.0 | **95.5** |
+| GPQA Diamond (198x2) | 91.2 | 89.4 | **91.4** |
+
+Both quants are statistically indistinguishable from BF16 — every delta is
+within sampling noise (~±3).
+
 > **Note — vLLM patch requirement:** loading a rank-sliced EXL3 MTP overlay
 > needs a one-hunk fix in vLLM's `deepseek_mtp.py` (`load_weights` misses the
 > rank-sliced name normalization; upstream PR:
