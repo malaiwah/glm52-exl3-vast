@@ -128,11 +128,20 @@ export TORCH_CUDA_ARCH_LIST=12.0a FLASHINFER_CUDA_ARCH_LIST=12.0f FLASHINFER_DIS
 export VLLM_ENGINE_READY_TIMEOUT_S=2400
 unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 
-# API key: use VLLM_API_KEY env, or auto-generate and print to console (vast UI logs)
+# API key: VLLM_API_KEY env > persisted key on the volume > freshly generated.
+# Persisting matters: a restart (supervisor, reboot, manual) that minted a NEW
+# key would silently invalidate every client config the user already pasted.
+KEYFILE="${MODEL_DIR%/*}/.vllm-api-key"
+if [ -z "${VLLM_API_KEY:-}" ] && [ -s "$KEYFILE" ]; then
+  VLLM_API_KEY="$(cat "$KEYFILE")"
+  echo ">>> API key: reusing the persisted key from $KEYFILE"
+fi
 if [ -z "${VLLM_API_KEY:-}" ]; then
   VLLM_API_KEY="sk-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  ( umask 077; printf '%s' "$VLLM_API_KEY" > "$KEYFILE" ) 2>/dev/null || true
   echo "=================================================================="
-  echo ">>> API KEY (auto-generated; set VLLM_API_KEY env to override):"
+  echo ">>> API KEY (auto-generated, persisted for restarts;"
+  echo ">>>          set VLLM_API_KEY env to override):"
   echo ">>> $VLLM_API_KEY"
   echo "=================================================================="
 fi
