@@ -327,22 +327,45 @@ vllm serve "$MODEL_DIR" \
   "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}"
 }
 
+export -f serve_once
 if [ "${SUPERVISOR:-1}" = "0" ]; then
   serve_once
   exit $?
 fi
+
+# Supervisor v2 (QC-hardened). v1 relied on the foreground child exiting and on
+# pattern-based cleanup; a real crash leaves VLLM:: workers alive holding all
+# VRAM, so the parent's exit is not a reliable death signal and name-pattern
+# kills miss the survivors. v2: run the server in its OWN SESSION (setsid), so
+# the whole tree can be killed by process group, and detect death by polling
+# both the process and /health.
+kill_server_tree() {
+  [ -n "${SRV_PID:-}" ] && kill -9 -- "-$SRV_PID" 2>/dev/null   # negative PID = whole group
+  pkill -9 -f 'VLLM:[:]' 2>/dev/null
+  pkill -9 -f 'EngineCor[e]' 2>/dev/null
+  pkill -9 -f 'vllm serv[e]' 2>/dev/null
+  for _ in $(seq 1 30); do
+    u=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1)
+    [ "${u:-0}" -lt 3000 ] 2>/dev/null && break
+    sleep 5
+  done
+}
+
 MAXR="${SUPERVISOR_MAX_RESTARTS:-5}"
 for attempt in $(seq 0 "$MAXR"); do
-  [ "$attempt" -gt 0 ] && {
+  if [ "$attempt" -gt 0 ]; then
     status_update restarting
-    echo "!!! vLLM exited (attempt $attempt/$MAXR) — restarting in $((attempt*15))s"
+    echo "!!! vLLM died — restart $attempt/$MAXR in $((attempt*15))s" >&2
     sleep $((attempt*15))
-    # clear orphaned workers holding VRAM (they survive a parent crash)
-    pkill -9 -f "VLLM::" 2>/dev/null; pkill -9 -f EngineCore 2>/dev/null; sleep 5
-  }
-  serve_once
-  RC=$?
-  echo "!!! vLLM exited rc=$RC"
+    kill_server_tree
+  fi
+  setsid bash -c 'serve_once' &
+  SRV_PID=$!
+  # Death = the session leader is gone. (Health is not a liveness proxy: the
+  # engine legitimately takes ~15 min of JIT/cudagraph work before it answers.)
+  while kill -0 "$SRV_PID" 2>/dev/null; do sleep 10; done
+  echo "!!! vLLM exited (attempt $attempt)" >&2
+  kill_server_tree
 done
-echo "!!! vLLM crash-looped past $MAXR restarts — giving up (destroy or debug the instance)"
+echo "!!! vLLM crash-looped past $MAXR restarts — giving up (destroy or debug the instance)" >&2
 exit 1
