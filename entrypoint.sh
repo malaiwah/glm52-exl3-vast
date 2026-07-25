@@ -174,9 +174,18 @@ if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v le
     echo ">>> Reusing persisted cert for $ACME_DOMAIN (>7 days validity left)"
   else
     echo ">>> Issuing LetsEncrypt cert for $ACME_DOMAIN via DNS-01 ($ACME_DNS_PROVIDER)"
-    lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}" \
-      --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN" \
-      --path /workspace/.lego run || echo "!!! ACME issuance failed; continuing WITHOUT TLS"
+    # DESEC_PROPAGATION_TIMEOUT: LE multi-perspective validation checks from
+    # several vantage points; deSEC anycast can lag >60s — without the wait,
+    # issuance fails with 'NXDOMAIN during secondary validation' (QC-run find).
+    # 2 attempts: transient DNS propagation failures are common on first boot.
+    for _try in 1 2; do
+      DESEC_PROPAGATION_TIMEOUT="${DESEC_PROPAGATION_TIMEOUT:-300}" \
+      lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}" \
+        --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN" \
+        --path /workspace/.lego run && break
+      echo "!!! ACME attempt $_try failed$( [ $_try = 2 ] && echo '; continuing WITHOUT TLS' || echo '; retrying in 30s')"
+      sleep 30
+    done
   fi
   [ -f "$CRT" ] && TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY") && echo ">>> TLS enabled: https://$ACME_DOMAIN:${VAST_TCP_PORT_8000:-<mapped-port>}/v1"
 fi
