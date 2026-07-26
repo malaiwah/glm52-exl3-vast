@@ -93,16 +93,54 @@ noise. Full writeup, methodology and the two NVFP4 config gotchas:
 **https://gist.github.com/malaiwah/4bbb16bef2e336e94af165076cdba955**
 
 **KV headroom:** available KV memory goes 5.27 -> 8.92 GiB/GPU (**+69%**). This
+template pins the pool at 512K (`--num-gpu-blocks-override 2048`), so the
+headroom is unspent by default — at ~10.3 KiB/token it is worth roughly
+**+355K tokens of pool (~880K context)** if you lift the override, or the same
+512K with much more concurrency margin.
+
 **Speculation depth:** the cheaper draft also moves the optimum. Measured
 (GSM8K n=30, +-0.5% noise floor): MTP-2 42.9 tok/s, **MTP-3 51.5** (default),
 **MTP-5 53.4** (+3.7%). MTP-5 used to lose ~22% with the 19.3 GB BF16 draft;
 at 3.7 GB the extra draft tokens are cheap enough to win. Try `MTP_TOKENS=5`
 if you want that last few percent (not yet the default — wants a larger run).
 
-template pins the pool at 512K (`--num-gpu-blocks-override 2048`), so the
-headroom is unspent by default — at ~10.3 KiB/token it is worth roughly
-**+355K tokens of pool (~880K context)** if you lift the override, or the same
-512K with much more concurrency margin.
+### The converged stack: EXL3 + MTP78 + vision, one image
+
+Measured 2026-07-26 on owned hardware (4x RTX PRO 6000 Blackwell, **280 W cap**,
+TP4/DCP4-a2a, MTP-3, 512K context, DRAM KV offload on, clean single-stream):
+
+| stack | decode C1 | MAL / accept | KV/GPU | KV pool |
+|---|---|---|---|---|
+| GLM-5.2 NVFP4-NF3 hybrid (previous prod) | 119.2 tok/s | ~3.5 / 0.83 | 4.64 GiB | 537,600 tok |
+| **EXL3-TR3 3bpw + MTP78 trellis** | **127.4 tok/s** | **3.533 / 0.844** | **7.42 GiB** | **860,928 tok** |
+| **the same + vision (MoonViT + projector)** | 110.3 tok/s | 3.528 / 0.843 | 6.11 GiB | 588,544 tok |
+
+Read that middle row twice: the trellis stack is **+6.9% faster** than the hybrid
+it replaces *and* carries **+60% more KV pool** — the usual quantization trade
+(give up speed to buy context) simply does not appear here. Even with the vision
+tower resident, the pool is still larger than the hybrid's.
+
+**Vision costs 1.31 GiB/GPU and ~13% of text decode.** The memory cost matches
+what we measured on rented hardware; the throughput cost applies to *pure-text*
+requests too, so if you do not need images, run the text-only checkpoint. That
+13% is a real number others have not published — most write-ups treat a vision
+graft as free because they never benchmarked text decode after grafting.
+
+**MTP survives the graft** (MAL 3.528 with vision vs 3.533 without). Reports of
+*zero* draft acceptance on comparable hybrid grafts come from the speculator not
+seeing the nested `lm_head`; the plugin used here exposes it.
+
+Two knobs are load-bearing — without them the engine does not start:
+
+- `ONLINE_QUANT=none` — serving presets that default to an mxfp8 online overlay
+  make EXL3 refuse with `quantization_config is only supported when ...`.
+- `VLLM_EXL3_TRELLIS_MIN_M=1` — vLLM captures CUDA graphs at batch m=1,2 but the
+  trellis window defaults to `[4,32]`, so capture falls into the eager parity
+  path and the worker dies with `EXL3 eager parity path entered during CUDA
+  graph capture (m=2)`.
+
+A trellis (or BF16) MTP draft also needs `moe_backend=triton` **separately from**
+the target's backend — a rank-3 trellis tensor is not a fused expert weight.
 
 ### Deploying it elsewhere (no checkpoint surgery)
 
