@@ -14,10 +14,15 @@
 # known-good one automatically, with its config and log preserved for analysis.
 set -e
 
-echo "=== GLM-5.2 EXL3 turnkey ==="
+echo "=== vLLM turnkey (GLM-5.2 default; see MODEL_FAMILY) ==="
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | head -4 || true
 NGPU=$(nvidia-smi -L 2>/dev/null | wc -l)
-[ "$NGPU" -ge 4 ] || { echo "FATAL: need 4 GPUs, found $NGPU"; exit 1; }
+export GLM_GPU_COUNT="$NGPU"
+# The GPU-count gate used to be `-ge 4` right here, before any configuration was
+# read, because the serve line hard-coded --tensor-parallel-size 4. That made the
+# image refuse to start on a 1-GPU host even for a model that fits on one card.
+# The check now belongs to the resolved TENSOR_PARALLEL_SIZE and runs after
+# apply_config.
 
 # Repair SSH key permissions before anything else. vast injects the account's
 # public key into /root/.ssh/authorized_keys at container start; when it lands
@@ -114,6 +119,79 @@ apply_config() {
 }
 
 apply_config
+
+if [ "$NGPU" -lt "${TENSOR_PARALLEL_SIZE:-4}" ]; then
+  echo "FATAL: tensor-parallel size ${TENSOR_PARALLEL_SIZE:-4} needs ${TENSOR_PARALLEL_SIZE:-4} GPUs, found $NGPU."
+  echo "       Set TENSOR_PARALLEL_SIZE=$NGPU (and pick a model family that fits, e.g."
+  echo "       MODEL_FAMILY=qwen36 for a single 96 GB card), or rent a host with more GPUs."
+  exit 1
+fi
+
+# ---- optional sshd ----------------------------------------------------------
+# MEASURED on a live RunPod pod: this image does NOT start sshd, and RunPod does
+# not start one for you — their SSH works only because their own base images run
+# one. With this image as PID 1 the pod reports RUNNING, `runpodctl ssh info`
+# happily resolves, and every connection is refused. Combined with RunPod's other
+# trap (ports must be requested at pod creation), a misconfigured pod becomes a
+# black box: no shell, no landing page, only the console log.
+#
+# So: start sshd when the provider handed us keys and something is there to run.
+# It is `auto` rather than always-on because on vast.ai sshd is already running
+# and re-starting it would be at best redundant; and it is skippable entirely
+# (SSHD=0) for anyone who wants the smaller surface. Key-only auth, using the
+# key material the provider itself injected — this grants no access that the
+# provider was not already handing out.
+setup_sshd() {
+  local mode="${SSHD:-auto}"
+  if [ "$mode" = "0" ]; then
+    echo ">>> sshd: disabled (SSHD=0)"
+    return 0
+  fi
+  # RunPod injects PUBLIC_KEY; vast injects SSH_PUBLIC_KEY and already runs sshd.
+  local keys="${PUBLIC_KEY:-}"
+  if [ "$mode" = "auto" ] && [ -z "$keys" ]; then
+    return 0
+  fi
+  if (ss -tln 2>/dev/null || netstat -tln 2>/dev/null) | grep -q ':22 '; then
+    echo ">>> sshd: something is already listening on :22, leaving it alone"
+    return 0
+  fi
+  if [ -n "$keys" ]; then
+    mkdir -p /root/.ssh
+    touch /root/.ssh/authorized_keys
+    # append only what is missing, so a re-run does not grow the file
+    printf '%s\n' "$keys" | while IFS= read -r k; do
+      [ -n "$k" ] || continue
+      grep -qxF "$k" /root/.ssh/authorized_keys || printf '%s\n' "$k" >> /root/.ssh/authorized_keys
+    done
+    chmod 700 /root/.ssh
+    chmod 600 /root/.ssh/authorized_keys
+    echo ">>> sshd: installed $(grep -c . /root/.ssh/authorized_keys) authorized key(s) from PUBLIC_KEY"
+  fi
+  if ! command -v sshd >/dev/null 2>&1 && [ ! -x /usr/sbin/sshd ]; then
+    echo "!!! sshd: no sshd binary in this image, so there is NO SHELL ACCESS on"
+    echo "!!! providers that expect the container to run one (RunPod). The landing"
+    echo "!!! page on :1111 is then the only way in — make sure that port is exposed."
+    echo "!!! Rebuild with openssh-server, or set SSHD_INSTALL=1 to apt-get it at boot."
+    if [ "${SSHD_INSTALL:-0}" = "1" ]; then
+      echo ">>> sshd: installing openssh-server (SSHD_INSTALL=1)"
+      if apt-get update -qq; then
+        apt-get install -y -qq openssh-server || true
+      fi
+    else
+      return 0
+    fi
+  fi
+  ssh-keygen -A >/dev/null 2>&1 || true
+  mkdir -p /run/sshd
+  if ${SSHD_BIN:-/usr/sbin/sshd}; then
+    echo ">>> sshd: started on :22 (key-only; expose 22/tcp at pod creation to reach it)"
+  else
+    echo "!!! sshd: failed to start; the landing page is the only way in"
+  fi
+  return 0
+}
+setup_sshd
 
 # Boot-status snapshot for the landing page; rewritten at each milestone.
 # Holds the API key once generated -> keep it root-only.
@@ -368,10 +446,19 @@ snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
 # there. It is idempotent and cheap (safetensors headers only).
 prepare_checkpoint() {
   fetch_weights
-  prepare_mtp78
-  prepare_vision
-  python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-1}" || \
-    echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
+  # The MTP78 graft/overlay and the Glm5v vision wrapper are surgery on a GLM-5.2
+  # checkpoint's layer 78 and config.json. They are meaningless — and would be
+  # destructive — anywhere else, so they are gated on the family rather than on
+  # their own knobs, which the config layer has already marked inapplicable.
+  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ]; then
+    prepare_mtp78
+    prepare_vision
+    python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-1}" || \
+      echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
+  else
+    echo ">>> ${MODEL_FAMILY:-glm52}: no checkpoint surgery (MTP78 graft and the vision"
+    echo ">>> wrapper are GLM-5.2-specific); serving the downloaded weights as they are."
+  fi
   return 0
 }
 
@@ -435,15 +522,32 @@ compute_offload() {
 VISION_ARGS=()
 compute_vision_args() {
   VISION_ARGS=()
-  if [ "${VISION:-1}" = "1" ] && [ -f "$MODEL_DIR/.vision-enabled" ]; then
+  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] && [ "${VISION:-1}" = "1" ] \
+     && [ -f "$MODEL_DIR/.vision-enabled" ]; then
     VISION_ARGS=(--limit-mm-per-prompt "{\"vision_chunk\":${VISION_CHUNKS:-8}}" --trust-remote-code)
   fi
   return 0
 }
 
+# ---- engine environment -----------------------------------------------------
+# Split in two. The COMMON block is true of any model on this hardware. The
+# GLM-5.2 block below it is the "each one is a measured decision" list — b12x
+# kernels, the MLA/DCP path, the EXL3 trellis — and it is guarded by family
+# because forcing those onto a dense non-MLA model is exactly how you get a
+# configuration that cannot work and does not say why.
+#
+# The block stays HERE rather than in glm_config.py on purpose: it has to run
+# after the image's own ENV in order to override it (see the TUNE_ note below),
+# and that ordering is not expressible from the config layer.
 export CUDA_DEVICE_MAX_CONNECTIONS=32 CUTE_DSL_ARCH=sm_120a OMP_NUM_THREADS=16
 export SAFETENSORS_FAST_GPU=1 NCCL_IB_DISABLE=1 NCCL_P2P_LEVEL=SYS NCCL_PROTO=LL,LL128,Simple
-export VLLM_USE_FLASHINFER_SAMPLER=1 VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_SPARSE_INDEXER=1
+export TORCH_CUDA_ARCH_LIST=12.0a FLASHINFER_CUDA_ARCH_LIST=12.0f FLASHINFER_DISABLE_VERSION_CHECK=1
+export VLLM_ENGINE_READY_TIMEOUT_S=2400
+export VLLM_USE_FLASHINFER_SAMPLER=1
+unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE
+
+if [ "${FAMILY_ENV_BLOCK:-glm52}" = "glm52" ]; then
+export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_SPARSE_INDEXER=1
 export VLLM_USE_B12X_MOE=1 VLLM_USE_V2_MODEL_RUNNER=1
 export VLLM_ENABLE_PCIE_ALLREDUCE=1 VLLM_PCIE_ALLREDUCE_BACKEND=b12x
 export VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE=64KB VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
@@ -459,9 +563,11 @@ export VLLM_DCP_GLOBAL_TOPK=1 VLLM_DCP_SHARD_DRAFT=1 VLLM_DCP_QUERY_SPLIT=0
 export VLLM_B12X_MLA_CKV_GATHER=1 VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS=512 VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS=16384
 export VLLM_EXL3_TRELLIS_MIN_M=4 VLLM_EXL3_TRELLIS_MAX_M=32 VLLM_EXL3_TRELLIS_BLOCK_M=8 VLLM_EXL3_PREFILL_CHUNK=128
 export VLLM_MEMORY_PROFILE_INCLUDE_ATTN=1 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
-export TORCH_CUDA_ARCH_LIST=12.0a FLASHINFER_CUDA_ARCH_LIST=12.0f FLASHINFER_DISABLE_VERSION_CHECK=1
-export VLLM_ENGINE_READY_TIMEOUT_S=2400
-unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
+unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
+else
+  echo ">>> ${MODEL_FAMILY:-?}: skipping the GLM-5.2 engine environment (b12x kernels,"
+  echo ">>> MLA/DCP path, EXL3 trellis). Only the common block above is exported."
+fi
 
 # ---- tuning overrides -------------------------------------------------------
 # TUNE_<NAME>=<value> exports <NAME>=<value> here, i.e. AFTER the authoritative
@@ -641,6 +747,11 @@ echo ">>> Listening sockets at boot (expect only vllm on ${PORT:-8000} + vast ss
 # (more captured sizes cost capture time and some VRAM, so measure rather than
 # assume it wins).
 warn_capture_window() {
+  # EXL3 trellis window: GLM family only. A dense model has no trellis and this
+  # arithmetic would be meaningless noise on its boot log.
+  if [ "${MODEL_FAMILY:-glm52}" != "glm52" ]; then
+    return 0
+  fi
   _DECODE_M=$(( ${MAX_NUM_SEQS:-8} * (1 + ${MTP_TOKENS:-3}) ))
   _CAP_MAX=${MAX_CUDAGRAPH_CAPTURE_SIZE:-32}
   _TRELLIS_MAX=${VLLM_EXL3_TRELLIS_MAX_M:-32}
@@ -665,17 +776,26 @@ SPEC_ARGS=()
 # vLLM's method name for it is "modelopt_fp4".
 build_spec_args() {
   SPEC_ARGS=()
+  if [ "${MTP_TOKENS:-3}" = "0" ]; then
+    return 0
+  fi
+  # Speculation is not GLM-only, but its shape is family-specific: GLM-5.2 uses
+  # method "mtp" with a triton MoE backend for the draft and (optionally) a
+  # separate draft checkpoint, while Qwen3.6's model card calls for
+  # method "qwen3_next_mtp" and nothing else. SPEC_METHOD comes from the family.
+  if [ "${MODEL_FAMILY:-glm52}" != "glm52" ]; then
+    SPEC_ARGS=(--speculative-config "{\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-2}}")
+    return 0
+  fi
   _SPEC_QUANT=""
   if [ -n "${DRAFT_QUANTIZATION:-}" ]; then
     _SPEC_QUANT=",\"quantization\":\"${DRAFT_QUANTIZATION}\""
     echo ">>> Draft quantization: ${DRAFT_QUANTIZATION} (overrides the target's --quantization)"
   fi
-  if [ "${MTP_TOKENS:-3}" != "0" ]; then
-    if [ -n "${DRAFT_MODEL:-}" ]; then
-      SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"mtp\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"${_SPEC_QUANT}}")
-    else
-      SPEC_ARGS=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
-    fi
+  if [ -n "${DRAFT_MODEL:-}" ]; then
+    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"${_SPEC_QUANT}}")
+  else
+    SPEC_ARGS=(--speculative-config "{\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
   fi
   return 0
 }
@@ -717,26 +837,27 @@ fi
 # preserves as the failed boot's error log. Process substitution (not a pipe) so
 # that $! stays the vllm process — a pipeline's exit would otherwise wait on tee,
 # which surviving VLLM:: workers can hold open long after the engine is dead.
+# GENERIC flags only. Everything architecture-specific — the quantization, the
+# MLA/DCP flags, the attention and MoE backends, the tool/reasoning parsers, the
+# sparse-indexer hf_overrides, the compilation config — comes from
+# FAMILY_SERVE_ARGS, which the config layer built for the selected MODEL_FAMILY.
+# That is what makes a second model family possible without a second serve line,
+# and what removed `--tensor-parallel-size 4` as a literal.
 vllm serve "$MODEL_DIR" \
   --served-model-name "${SERVED_NAMES[@]}" \
   --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
-  --tensor-parallel-size 4 --decode-context-parallel-size "${DCP:-4}" \
-  --dcp-comm-backend a2a --dcp-kv-cache-interleave-size 64 \
-  --quantization "${QUANTIZATION:-exl3}" --kv-cache-dtype "${KV_CACHE_DTYPE:-fp8}" \
-  --attention-backend B12X_MLA_SPARSE --moe-backend b12x --load-format safetensors \
-  --compilation-config "{\"cudagraph_mode\":\"FULL_AND_PIECEWISE\",\"cudagraph_capture_sizes\":[${CUDAGRAPH_CAPTURE_SIZES:-4,8,12,16,20,24,28,32}],\"custom_ops\":[\"all\"],\"pass_config\":{\"fuse_allreduce_rms\":true}}" \
+  --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-4}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE:-fp8}" \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.93}" \
   --max-model-len "${MAX_MODEL_LEN:-524288}" \
   --max-num-seqs "${MAX_NUM_SEQS:-8}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS:-3072}" \
   --max-cudagraph-capture-size "${MAX_CUDAGRAPH_CAPTURE_SIZE:-32}" \
   --enable-chunked-prefill --enable-prefix-caching \
-  --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 \
   --enable-prompt-tokens-details --enable-force-include-usage \
   --no-async-scheduling \
-  --default-chat-template-kwargs '{"reasoning_effort":"high"}' \
+  ${FAMILY_SERVE_ARGS[@]+"${FAMILY_SERVE_ARGS[@]}"} \
   ${VISION_ARGS[@]+"${VISION_ARGS[@]}"} \
-  --hf-overrides '{"use_index_cache":true,"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
   ${BLOCKS_ARGS[@]+"${BLOCKS_ARGS[@]}"} ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
   "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}" \
   > >(tee -a "$SERVE_LOG") 2>&1

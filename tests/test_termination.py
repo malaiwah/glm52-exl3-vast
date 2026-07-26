@@ -436,7 +436,7 @@ def test_state_file_cannot_set_switches(tmp):
 
         effective, sources, notes = gc.resolve()
         check("the whole file is ignored, not just the key",
-              effective["MTP_TOKENS"] == 3 and sources["MTP_TOKENS"] == "default",
+              effective["MTP_TOKENS"] == 3 and sources["MTP_TOKENS"] != "file",
               f"{effective['MTP_TOKENS']} / {sources['MTP_TOKENS']}")
         check("and the rejection is surfaced as a note",
               any("state file rejected" in n for n in notes), str(notes))
@@ -633,6 +633,9 @@ def erase_env(root):
             # RunPod's PID-1 default: the whole HF cache on the network volume
             "HF_HOME": os.path.join(root, "runpod-volume", ".cache", "huggingface"),
             "ERASE_EXTRA_ROOTS": os.path.join(root, "runpod-volume"),
+            "ERASE_ETC_SSH": os.path.join(root, "etc-ssh"),
+            # hard fence: nothing outside the sandbox may even be planned
+            "ERASE_CONFINE_TO": root,
             "ERASE_WORKSPACE": os.path.join(root, "workspace"),
             "ERASE_HOME": os.path.join(root, "root"),
             "ERASE_TMP": os.path.join(root, "tmp"),
@@ -646,11 +649,21 @@ def test_erase_plan(tmp):
     section("erase plan: keeps the public weights, takes the session")
     root = os.path.join(tmp, "inst1")
     md, home, public, secrets, user, derived = build_fake_instance(root)
+    os.makedirs(os.path.join(root, "etc-ssh"), exist_ok=True)
+    open(os.path.join(root, "etc-ssh", "ssh_host_ed25519_key"), "w").write("HOSTKEY")
     env = erase_env(root)
     os.environ.update(env)
     p = secure_erase.Paths(env)
     doc = secure_erase.plan(p)
     chosen = {t["path"] for t in doc["targets"]}
+
+    # THE test: nothing outside the sandbox may ever be planned. This module
+    # walks absolute system paths that are only correct inside the container.
+    stray = [c for c in chosen if not os.path.realpath(c).startswith(
+        os.path.realpath(root) + "/")]
+    check("no planned path escapes the sandbox root", not stray, str(stray[:5]))
+    check("sshd host keys are taken",
+          os.path.join(root, "etc-ssh", "ssh_host_ed25519_key") in chosen)
 
     check("manifest was found and used", doc["manifest_used"] is True)
     for f in public:

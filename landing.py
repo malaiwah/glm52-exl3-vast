@@ -427,6 +427,22 @@ background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:
 </style>"""
 
 
+def _val_ctx():
+    """What validate() needs from the host: GPU count and what the state file
+    actually persists."""
+    ctx = {"vision_available": os.path.exists(
+        os.path.join(model_dir(), "vision_tower.safetensors"))}
+    try:
+        ctx["gpu_count"] = int(os.environ["GLM_GPU_COUNT"])
+    except (KeyError, ValueError):
+        pass
+    try:
+        ctx["state_keys"] = list(gc.load_state_file())
+    except Exception:
+        ctx["state_keys"] = []
+    return ctx
+
+
 def config_enabled() -> bool:
     return gc is not None and bool(TOKEN)
 
@@ -459,10 +475,13 @@ def correctness() -> tuple:
             % (lc.get("found", 0), lc.get("total", 0)), False, v.get("reason", ""))
 
 
-def _field(knob, value):
+def _field(knob, value, source=""):
     key = html.escape(knob["key"])
-    editable = knob.get("editable", True)
+    editable = knob.get("editable", True) and source != "n/a"
     dis = "" if editable else " disabled"
+    if source == "n/a":
+        return ("<span class=sub>not applicable to this model family</span>"
+                f"<input type=hidden name='__na_{key}' value=1>")
     if knob["type"] == "bool":
         opts = "".join(
             "<option value='%s'%s>%s</option>" % (
@@ -471,8 +490,11 @@ def _field(knob, value):
         return f"<select name='{key}'{dis}>{opts}</select>"
     if knob["type"] == "choice":
         labels = {}
-        if knob["key"] == "MODEL_VARIANT":
-            labels = {k: v["label"] for k, v in gc.VARIANTS.items()}
+        if knob["key"] == "MODEL_FAMILY":
+            labels = {k: v["label"] for k, v in gc.FAMILIES.items()}
+        elif knob["key"] == "MODEL_VARIANT":
+            labels = {k: "%s [%s]" % (v["label"], v.get("family", "?"))
+                      for k, v in gc.VARIANTS.items()}
         elif knob["key"] == "MTP_DRAFT":
             labels = {k: v["label"] for k, v in gc.DRAFTS.items()}
         opts = "".join(
@@ -542,9 +564,8 @@ def _failures_html():
 def render_config(tok: str, secure: bool, banner=None, banner_cls="",
                   extra_findings=None) -> bytes:
     effective, sources, notes = gc.resolve()
-    findings = list(extra_findings or []) + gc.validate(
-        effective, {"vision_available": os.path.exists(
-            os.path.join(model_dir(), "vision_tower.safetensors"))})
+    findings = list(extra_findings or []) + gc.validate(effective, _val_ctx())
+    fam = gc.family(effective.get("MODEL_FAMILY"))
     st = gc.apply_state()
     head, ok, detail = correctness()
     tok_q = html.escape(tok, quote=True)
@@ -583,6 +604,13 @@ def render_config(tok: str, secure: bool, banner=None, banner_cls="",
             "back.</b> The previous known-good configuration is what is running now. "
             "The failed configuration, its boot log and a diff are kept below.</div>")
 
+    parts.append(
+        "<div class=card><h3>Model family</h3><div class=v>%s</div>"
+        "<div class=why>%s</div>%s</div>" % (
+            html.escape(fam["label"]), html.escape(fam["notes"]),
+            "" if fam.get("tested") else
+            "<div class=finding error><b>UNTESTED</b> — nobody has booted this image "
+            "with this family. Treat every default as a starting point.</div>"))
     if notes:
         parts.append("".join(f"<div class=finding>{html.escape(n)}</div>" for n in notes))
     if findings:
@@ -599,10 +627,11 @@ def render_config(tok: str, secure: bool, banner=None, banner_cls="",
         key = knob["key"]
         src = sources[key]
         locked = "" if knob.get("editable", True) else " <span class=src>locked</span>"
+        na = " <span class=src>n/a</span>" if src == "n/a" else ""
         parts.append(
-            "<tr><td class=k>%s%s</td><td class=v>%s</td><td>"
+            "<tr><td class=k>%s%s%s</td><td class=v>%s</td><td>"
             "<b>%s</b> <span class='src %s'>%s</span><div class=why>%s</div></td></tr>" % (
-                html.escape(key), locked, _field(knob, effective[key]),
+                html.escape(key), locked, na, _field(knob, effective[key], src),
                 html.escape(knob.get("label", key)), src, src,
                 html.escape(knob["rationale"])))
     parts.append("</table>")
@@ -668,16 +697,26 @@ def apply_values(values: dict):
         return False, [{"id": "forbidden-key", "level": "error",
                         "keys": list(gc.FORBIDDEN_STATE_KEYS), "message": str(e)}], \
             "Nothing was applied."
-    minimal = gc.minimize(values)
+    dropped = []
+    minimal = gc.minimize(values, dropped)
     effective, _sources, notes = gc.resolve(state_values=minimal)
-    findings = gc.validate(effective, {"vision_available": os.path.exists(
-        os.path.join(model_dir(), "vision_tower.safetensors"))})
+    ctx = _val_ctx()
+    ctx["state_keys"] = list(minimal)
+    findings = gc.validate(effective, ctx)
     if gc.errors(findings):
         return False, findings, "Nothing was applied — fix the errors below."
+    # Report dropped knobs on EVERY path, including "no change" — otherwise a
+    # user who submits a GLM knob while on Qwen is told nothing happened, which
+    # is true but hides the more useful fact of WHY.
+    drop_msg = ""
+    if dropped:
+        drop_msg = ("<p><b>Not applicable to this model family, so not saved:</b> "
+                    + html.escape(", ".join(sorted(set(dropped)))) + "</p>")
     good = gc.read_json(gc.p_known_good())
     current, _s, _n = gc.resolve()
     if not gc.diff(current, effective):
-        return True, findings, "No change: the submitted configuration is the one running."
+        return True, findings, ("No change: the submitted configuration is the one "
+                                "running." + drop_msg)
     gc.write_json_atomic(gc.p_state(), {
         "values": minimal,
         "written_at": gc.utcnow_iso()}, mode=0o600)
@@ -687,8 +726,11 @@ def apply_values(values: dict):
     os.makedirs(gc.runtime_dir(), exist_ok=True)
     with open(gc.p_restart_flag(), "w") as f:
         f.write("landing-page\n")
-    return True, findings, ("Applied. vLLM is restarting with:<br><pre>"
-                            + html.escape(gc.diff_text(current, effective)) + "</pre>")
+    msg = ("Applied. vLLM is restarting with:<br><pre>"
+           + html.escape(gc.diff_text(current, effective)) + "</pre>")
+    # Not silently ignored: the user is told which knobs the selected family
+    # does not have and that they were not written.
+    return True, findings, msg + drop_msg
 
 
 # ==========================================================================

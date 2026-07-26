@@ -37,6 +37,37 @@ the incident.** This template is that button: rented GPUs, your keys, your
 data path, ~30 minutes from click to a 512K-context GLM-5.2 endpoint that
 answers only to you.
 
+## Model families: GLM-5.2 (default) and Qwen3.6 (untested preset)
+
+The serve line is no longer GLM-only. A **family** supplies the architecture's
+engine flags, its knob subset and its validation rules; the config layer then
+resolves `defaults < family < startup env < state file` inside it. Design note:
+[docs/model-families.md](docs/model-families.md).
+
+```
+-e MODEL_FAMILY=qwen36     # Qwen3.6-27B, dense, TP=1 — runs on a SINGLE GPU
+```
+
+- `--tensor-parallel-size` was a **literal 4**, so the image aborted at the GPU
+  gate on any smaller host. It is now the `TENSOR_PARALLEL_SIZE` knob, and the
+  gate compares against it and names the fix.
+- Everything MLA/EXL3/GLM-specific — DCP, `B12X_MLA_SPARSE`, the sparse-indexer
+  `hf_overrides`, the glm47/glm45 parsers, the MTP78 draft apparatus, the vision
+  wrapper, the `VLLM_EXL3_*`/`B12X_*` environment — is supplied by the GLM family
+  and simply absent otherwise.
+- Knobs that cannot apply to the selected family are shown **disabled and
+  labelled**, dropped rather than saved (with the drop reported), and rejected
+  with the key named if a hand-edited state file carries one. The measured
+  trellis/DCP/vision rules are GLM-scoped for the same reason.
+- The **long-context needle probe is family-independent**: short prompts are
+  insufficient for any model, and a family cannot opt out of being verified.
+
+> **The Qwen3.6 preset is UNVALIDATED.** Nobody has booted this image with it.
+> The repo, context length, speculation method and reasoning parser are taken
+> from the [model card](https://huggingface.co/Qwen/Qwen3.6-27B); whether this
+> vLLM build implements Gated DeltaNet or `qwen3_next_mtp` at all is unknown.
+> It exists so the template can run on one GPU and be iterated on.
+
 ## Self-service configuration (no rebuild, no re-rent)
 
 The image is locked in when you rent, but the *deployment* is not. The landing
@@ -347,6 +378,10 @@ existing endpoint:
 | `VERIFY_LONG_CONTEXT` | `1` | `0` keeps the short-prompt checks only — read the warning above before using it |
 | `VERIFY_NEEDLE_TOKENS` | `32768` | size of the long-context retrieval probe |
 | `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures and logs live |
+| `MODEL_FAMILY` | `glm52` | `qwen36` selects the untested Qwen3.6-27B preset (dense, TP=1, 256K context) |
+| `TENSOR_PARALLEL_SIZE` | family (`4` GLM / `1` Qwen) | number of GPUs to shard weights across; must be <= the GPUs present |
+| `SSHD` | `auto` | `auto` starts sshd when the provider injected `PUBLIC_KEY` (RunPod); `0` never, `1` always |
+| `SSHD_INSTALL` | `0` | `1` apt-gets openssh-server at boot if the image has no sshd |
 | `TERMINATE_ENABLED` | `0` | `1` exposes the terminate control on the landing page (startup env only) |
 | `TERMINATE_LOCKED` | `0` | `1` hard-locks termination for the life of the container (startup env only) |
 | `TERMINATE_PROVIDER` | (auto) | force `vastai` or `runpod` when detection fails |

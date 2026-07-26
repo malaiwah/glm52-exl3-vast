@@ -62,6 +62,121 @@ def p_config_env() -> str:   return os.path.join(runtime_dir(), "config.env")
 
 
 # --------------------------------------------------------------------------
+# model families
+# --------------------------------------------------------------------------
+# A FAMILY owns everything that is true about a model architecture rather than
+# about this deployment: which checkpoints exist, which vLLM flags the engine
+# needs, which knobs even mean anything, and which of the measured failure rules
+# apply. The serve line used to hard-code GLM-5.2's answers to all of that —
+# including `--tensor-parallel-size 4` as a literal, which made the image
+# unstartable on a 1-GPU host.
+#
+# Split of responsibility, deliberately not clean-looking:
+#   * CLI ARGS live here, because the landing page has to be able to show what a
+#     family implies and to reject knobs that cannot apply to it.
+#   * The ENV BLOCK stays in entrypoint.sh, guarded by family. That block is the
+#     "each one is a measured decision" list, it has to run AFTER the image's own
+#     ENV to override it, and the TUNE_ mechanism is defined in terms of it.
+#     Moving it here would have made a second source of truth for the one thing
+#     in this repo with the most expensive history behind it.
+#
+# `tested` means: someone booted it and measured the result. Only glm52 is.
+
+FAMILIES = {
+    "glm52": {
+        "label": "GLM-5.2 753B (MLA + EXL3/NVFP4) — the measured default",
+        "tested": True,
+        "env_block": "glm52",
+        "default_variant": "exl3-tr3",
+        "kv_dtypes": ["fp8", "nvfp4_ds_mla"],
+        "spec_method": "mtp",
+        # knobs that only make sense here; everything else is generic
+        "own_knobs": ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
+                      "VLLM_EXL3_TRELLIS_MAX_M", "VLLM_EXL3_TRELLIS_MIN_M",
+                      "VISION", "VISION_CHUNKS", "BASE_GENERATION"),
+        "defaults": {
+            "TENSOR_PARALLEL_SIZE": 4, "MAX_MODEL_LEN": 524288, "MTP_TOKENS": 3,
+            "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
+            "GPU_MEMORY_UTILIZATION": 0.93, "GPU_BLOCKS_OVERRIDE": 2048,
+            "KV_CACHE_DTYPE": "fp8", "SERVED_MODEL_NAME": "GLM-5.2",
+        },
+        # %(...)s are substituted from the resolved knobs
+        "serve_args": [
+            "--decode-context-parallel-size", "%(DCP)s",
+            "--dcp-comm-backend", "a2a",
+            "--dcp-kv-cache-interleave-size", "64",
+            "--attention-backend", "B12X_MLA_SPARSE",
+            "--moe-backend", "b12x",
+            "--load-format", "safetensors",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser", "glm47",
+            "--reasoning-parser", "glm45",
+            "--default-chat-template-kwargs", '{"reasoning_effort":"high"}',
+            "--hf-overrides",
+            '{"use_index_cache":true,"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSS'
+            'FSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}',
+        ],
+        "compilation_config": (
+            '{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":'
+            '[%(CUDAGRAPH_CAPTURE_SIZES)s],"custom_ops":["all"],'
+            '"pass_config":{"fuse_allreduce_rms":true}}'),
+        "notes": ("MLA attention with a sparse indexer, an EXL3 or NVFP4 checkpoint, "
+                  "DCP-sharded KV, and the MTP78 speculative-draft apparatus. Every "
+                  "default here has a measurement behind it; see README.md."),
+    },
+    "qwen36": {
+        "label": "Qwen3.6 27B (dense, hybrid Gated DeltaNet) — UNTESTED here",
+        "tested": False,
+        "env_block": "generic",
+        "default_variant": "qwen36-bf16",
+        # nvfp4_ds_mla is an MLA KV layout; it does not exist for this family.
+        "kv_dtypes": ["auto", "fp8"],
+        # The model card's own vLLM line uses
+        #   --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+        # so speculation applies here too — with a different method and without
+        # any of the MTP78 draft machinery.
+        "spec_method": "qwen3_next_mtp",
+        "own_knobs": (),
+        "defaults": {
+            # 1, not 4: 27B at BF16 is ~55.6 GB and fits one 96 GB card, and the
+            # whole point of this preset is that the image can start on a 1-GPU
+            # host at all.
+            "TENSOR_PARALLEL_SIZE": 1,
+            "MAX_MODEL_LEN": 262144,        # native; 1M needs YaRN rope scaling
+            "MTP_TOKENS": 2,                # the model card's number
+            "MAX_NUM_SEQS": 8,
+            "MAX_NUM_BATCHED_TOKENS": 3072,
+            "GPU_MEMORY_UTILIZATION": 0.90,
+            "GPU_BLOCKS_OVERRIDE": 0,       # let vLLM size the pool
+            "KV_CACHE_DTYPE": "auto",
+            "SERVED_MODEL_NAME": "Qwen3.6-27B",
+        },
+        "serve_args": [
+            "--reasoning-parser", "qwen3",
+        ],
+        "compilation_config": (
+            '{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":'
+            '[%(CUDAGRAPH_CAPTURE_SIZES)s]}'),
+        "notes": (
+            "UNVALIDATED PRESET. Qwen3.6-27B is a DENSE 27B model with hybrid "
+            "attention (16 x (3 x Gated DeltaNet -> FFN) + 1 x Gated Attention -> FFN), "
+            "262,144 native context extensible to ~1M with YaRN. It is not MLA, so "
+            "DCP, the sparse-indexer hf_overrides and the EXL3 trellis have no meaning "
+            "here and are refused rather than silently ignored. Facts from the model "
+            "card (huggingface.co/Qwen/Qwen3.6-27B); the serve line is derived from "
+            "the card's own vLLM example. NOBODY HAS BOOTED THIS IMAGE WITH IT: "
+            "whether this vLLM fork implements Gated DeltaNet and qwen3_next_mtp is "
+            "unknown. No tool-call parser is set — the card does not name one, and "
+            "guessing wrong makes --enable-auto-tool-choice fail at startup."),
+    },
+}
+
+
+def family(name=None) -> dict:
+    return FAMILIES.get(name or "glm52", FAMILIES["glm52"])
+
+
+# --------------------------------------------------------------------------
 # model variants
 # --------------------------------------------------------------------------
 # `kv_scales_calibrated` is the ONLY thing that makes nvfp4 KV admissible: the
@@ -70,6 +185,7 @@ def p_config_env() -> str:   return os.path.join(runtime_dir(), "config.env")
 
 VARIANTS = {
     "exl3-tr3": {
+        "family": "glm52",
         "label": "EXL3-TR3 3.0bpw (default, measured)",
         "repo": "brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw",
         "dirname": "GLM-5.2-EXL3-TR3-3.0bpw",
@@ -79,12 +195,25 @@ VARIANTS = {
         "tested": True,
     },
     "nvfp4": {
+        "family": "glm52",
         "label": "NVFP4 hybrid (EXPERIMENTAL in this template)",
         "repo": "lukealonso/GLM-5.2-NVFP4",
         "dirname": "GLM-5.2-NVFP4",
         "quantization": "modelopt_fp4",
         "kv_scales_calibrated": True,
         "download_gib": 400,
+        "tested": False,
+    },
+    "qwen36-bf16": {
+        "family": "qwen36",
+        "label": "Qwen3.6-27B BF16 (UNVALIDATED preset)",
+        "repo": "Qwen/Qwen3.6-27B",
+        "dirname": "Qwen3.6-27B",
+        # No --quantization at all: the upstream checkpoint is BF16, and naming a
+        # quantization method the checkpoint does not carry is a boot failure.
+        "quantization": "",
+        "kv_scales_calibrated": False,
+        "download_gib": 56,
         "tested": False,
     },
 }
@@ -120,6 +249,28 @@ BASE_GENERATIONS = ("v20", "pre-v20")
 #            "download"   needs a (large) weight download
 
 KNOBS = [
+    dict(key="MODEL_FAMILY", type="choice", default="glm52", choices=list(FAMILIES),
+         group="Model", scope="download", label="Model family",
+         rationale=(
+             "Which model architecture this instance serves. The family decides the "
+             "engine flags, which knobs exist, and which of the measured failure rules "
+             "apply — MLA-only features like DCP and the EXL3 trellis are refused "
+             "outside GLM rather than silently ignored. 'glm52' is the family every "
+             "number in this README was measured on. 'qwen36' is a dense 27B preset "
+             "that nobody has booted with this image: it exists so the template can "
+             "run on one GPU and be iterated on, not because it is known to work. "
+             "Changing family triggers a fresh download.")),
+
+    dict(key="TENSOR_PARALLEL_SIZE", type="int", default=4, min=1, max=8,
+         group="Parallelism", scope="engine", label="Tensor parallel size",
+         rationale=(
+             "How many GPUs the model's weights are sharded across. This was a "
+             "hard-coded 4 in the serve line, which meant the image could not start on "
+             "a 1-GPU host at all — it aborted at the GPU count check before reaching "
+             "vLLM. GLM-5.2 needs 4; Qwen3.6-27B at BF16 is ~56 GB and fits one 96 GB "
+             "card, so the Qwen preset defaults to 1. It must be <= the number of "
+             "visible GPUs, and the instance is refused at boot if it is not.")),
+
     dict(key="MODEL_VARIANT", type="choice", default="exl3-tr3",
          choices=list(VARIANTS), group="Model", scope="download",
          label="Model variant",
@@ -154,7 +305,7 @@ KNOBS = [
              "anything else about memory changes.")),
 
     dict(key="KV_CACHE_DTYPE", type="choice", default="fp8",
-         choices=["fp8", "nvfp4_ds_mla"], group="Model", scope="engine",
+         choices=["auto", "fp8", "nvfp4_ds_mla"], group="Model", scope="engine",
          label="KV cache dtype",
          rationale=(
              "fp8 is the safe default and costs ~1.7x the bytes per token that nvfp4 "
@@ -164,7 +315,7 @@ KNOBS = [
              "GSM8K, vision and structured output all still passed. Nothing short of "
              "a long-context retrieval test catches it.")),
 
-    dict(key="MTP_DRAFT", type="choice", default="tr3-graft", choices=list(DRAFTS),
+    dict(key="MTP_DRAFT", families=("glm52",), type="choice", default="tr3-graft", choices=list(DRAFTS),
          group="Speculative decoding", scope="checkpoint", label="MTP draft type",
          aliases=[],
          rationale=(
@@ -190,7 +341,7 @@ KNOBS = [
              "decode query width m = MAX_NUM_SEQS x (1 + MTP_TOKENS), which has to "
              "stay inside the capture/trellis window. 0 disables speculation.")),
 
-    dict(key="DRAFT_MODEL", type="str", default="", group="Speculative decoding",
+    dict(key="DRAFT_MODEL", families=("glm52",), type="str", default="", group="Speculative decoding",
          scope="checkpoint", label="External draft dir (advanced)",
          rationale=(
              "Path to an external draft checkpoint for --speculative-config. Leave "
@@ -199,7 +350,7 @@ KNOBS = [
              "external draft is how you get a non-EXL3 draft without the rank-sliced "
              "capture bug.")),
 
-    dict(key="DRAFT_QUANTIZATION", type="str", default="", group="Speculative decoding",
+    dict(key="DRAFT_QUANTIZATION", families=("glm52",), type="str", default="", group="Speculative decoding",
          scope="engine", label="Draft quantization method",
          rationale=(
              "A draft INHERITS the target's --quantization unless its speculative "
@@ -210,7 +361,7 @@ KNOBS = [
              "cause. This is a config trap, not a bug. vLLM's name for the NVFP4 "
              "modelopt draft is 'modelopt_fp4'. Left empty, the draft type sets it.")),
 
-    dict(key="DCP", type="choice", default="4", choices=["1", "2", "4"],
+    dict(key="DCP", families=("glm52",), type="choice", default="4", choices=["1", "2", "4"],
          group="Parallelism", scope="engine", label="Decode context parallel",
          rationale=(
              "Shards the KV cache across GPUs at decode (--decode-context-parallel-size). "
@@ -257,7 +408,7 @@ KNOBS = [
              "EXL3 trellis window [4, 32]: a capture below 4 falls into the eager "
              "parity path and the engine dies during capture.")),
 
-    dict(key="VLLM_EXL3_TRELLIS_MAX_M", type="int", default=32, min=4, max=512,
+    dict(key="VLLM_EXL3_TRELLIS_MAX_M", families=("glm52",), type="int", default=32, min=4, max=512,
          aliases=["TUNE_VLLM_EXL3_TRELLIS_MAX_M"],
          group="Concurrency", scope="engine", label="EXL3 trellis window max (m)",
          rationale=(
@@ -266,7 +417,7 @@ KNOBS = [
              "together with MAX_CUDAGRAPH_CAPTURE_SIZE and CUDAGRAPH_CAPTURE_SIZES — "
              "raising one alone just moves which of the two ceilings you hit.")),
 
-    dict(key="VLLM_EXL3_TRELLIS_MIN_M", type="int", default=4, min=4, max=4,
+    dict(key="VLLM_EXL3_TRELLIS_MIN_M", families=("glm52",), type="int", default=4, min=4, max=4,
          editable=False, group="Concurrency", scope="engine",
          label="EXL3 trellis window min (m) — LOCKED",
          rationale=(
@@ -295,7 +446,7 @@ KNOBS = [
              "than failing the request. Costs host RAM and nothing else; the win is on "
              "prefix-cache hits across requests.")),
 
-    dict(key="VISION", type="bool", default=True, group="Multimodal", scope="checkpoint",
+    dict(key="VISION", families=("glm52",), type="bool", default=True, group="Multimodal", scope="checkpoint",
          label="Vision (image input) — EXPERIMENTAL on EXL3",
          rationale=(
              "Bolts the MoonViT-3d tower + PatchMerger projector (~890 MB, BF16, no "
@@ -307,7 +458,7 @@ KNOBS = [
              "(needed 5.7 GiB, had 3.97). Use it for short-prompt image work only, and "
              "turn it off for anything that depends on long-context retrieval.")),
 
-    dict(key="VISION_CHUNKS", type="int", default=8, min=1, max=64,
+    dict(key="VISION_CHUNKS", families=("glm52",), type="int", default=8, min=1, max=64,
          group="Multimodal", scope="engine", label="Max vision chunks per request",
          rationale=(
              "Caps media items per request (--limit-mm-per-prompt) so a screenshot "
@@ -321,7 +472,7 @@ KNOBS = [
              "existing clients already use (e.g. 'GLM-5.2 local-primary') and they need "
              "no reconfiguration to point at this instance.")),
 
-    dict(key="BASE_GENERATION", type="choice", default="v20", choices=list(BASE_GENERATIONS),
+    dict(key="BASE_GENERATION", families=("glm52",), type="choice", default="v20", choices=list(BASE_GENERATIONS),
          editable=False, group="Serving", scope="engine",
          label="Base image generation (read-only)",
          rationale=(
@@ -668,8 +819,41 @@ def termination_allowed(env=None):
     return True, "termination is available on this instance"
 
 
+def applies_to(knob, family_name) -> bool:
+    """Is this knob meaningful for the selected family?
+
+    A knob scoped to a family it is not in is INAPPLICABLE — not "ignored". DCP,
+    the EXL3 trellis window and the vision wrapper describe MLA/GLM machinery
+    that does not exist in a dense Qwen; offering them would invite exactly the
+    class of unbootable configuration (the m=3 capture crash) that this whole
+    validation layer exists to prevent."""
+    fams = knob.get("families")
+    return not fams or (family_name or "glm52") in fams
+
+
+def resolve_family(state_values, env_values) -> str:
+    """The family has to be settled before anything else can be resolved,
+    because it supplies a defaults layer of its own."""
+    knob = KNOB_BY_KEY["MODEL_FAMILY"]
+    name = knob["default"]
+    for layer in (env_values, state_values):
+        if layer and "MODEL_FAMILY" in layer:
+            try:
+                name = coerce(knob, layer["MODEL_FAMILY"])
+            except ConfigError:
+                pass
+    return name
+
+
 def resolve(state_values=None, env_values=None):
-    """-> (effective {key: value}, sources {key: 'default'|'env'|'file'}, notes[])
+    """-> (effective {key: value}, sources {key: ...}, notes[])
+
+    Sources, lowest to highest: 'default' < 'family' < 'env' < 'file'.
+    The family layer sits between the built-in defaults and the environment: it
+    is what "GLM-5.2 wants TP=4 and Qwen3.6 wants TP=1" means, and the operator
+    must still be able to override it from the template or the page.
+    Inapplicable knobs are reported with source 'n/a' and keep a value only so
+    that nothing downstream has to special-case a missing key.
 
     Never raises: an unusable state file degrades to env+defaults and says so in
     `notes`, because bricking the instance over a bad file is worse than
@@ -684,10 +868,22 @@ def resolve(state_values=None, env_values=None):
             notes.append(f"state file ignored ({e}); falling back to env + defaults")
             state_values = {}
 
+    fam_name = resolve_family(state_values, env_values)
+    fam = family(fam_name)
+    fam_defaults = fam.get("defaults", {})
+
     effective, sources = {}, {}
     for knob in KNOBS:
         key = knob["key"]
         value, src = knob["default"], "default"
+        if key == "MODEL_VARIANT":
+            value = fam.get("default_variant", value)
+            src = "family"
+        if key in fam_defaults:
+            try:
+                value, src = coerce(knob, fam_defaults[key]), "family"
+            except ConfigError as e:
+                notes.append(f"family default {e}")
         if key in env_values:
             try:
                 value, src = coerce(knob, env_values[key]), "env"
@@ -701,6 +897,8 @@ def resolve(state_values=None, env_values=None):
                     value, src = coerce(knob, state_values[key]), "file"
                 except ConfigError as e:
                     notes.append(f"state file {e}")
+        if not applies_to(knob, fam_name):
+            src = "n/a"
         effective[key], sources[key] = value, src
     unknown = [k for k in state_values if k not in KNOB_BY_KEY]
     if unknown:
@@ -708,7 +906,7 @@ def resolve(state_values=None, env_values=None):
     return effective, sources, notes
 
 
-def minimize(values: dict) -> dict:
+def minimize(values: dict, dropped=None) -> dict:
     """Keep only the values that actually OVERRIDE the layers below.
 
     The state file is a diff, not a snapshot. Writing every knob would freeze
@@ -716,15 +914,38 @@ def minimize(values: dict) -> dict:
     start winning over the env the operator set at launch, and a later change to
     the defaults could never reach the box. It also keeps an exported config
     portable between instances with different templates."""
-    base, _sources, _notes = resolve(state_values={})
+    env_layer = load_startup_env()
+    fam_name = resolve_family(values, env_layer)
+    # Two baselines, and the difference between them matters.
+    #  * `base` is what the SELECTED family would give with no state file, so a
+    #    knob the user left at that family's own default is not pinned into the
+    #    file — the family stays free to change it later.
+    #  * `unfiled` is what we would get with no state file AT ALL, which is the
+    #    only thing MODEL_FAMILY can be compared against. Comparing the family
+    #    to `base` is circular (base was built FROM it), and the earlier version
+    #    did exactly that: the selected family always equalled its own baseline,
+    #    was therefore never written, and every apply silently reverted to the
+    #    previous family — taking its validation rules with it.
+    base, _s1, _n1 = resolve(state_values={"MODEL_FAMILY": fam_name})
+    unfiled, _s2, _n2 = resolve(state_values={})
     out = {}
+    if fam_name != unfiled["MODEL_FAMILY"]:
+        out["MODEL_FAMILY"] = fam_name
     for knob in KNOBS:
         key = knob["key"]
-        if key not in values or not knob.get("editable", True):
+        if key == "MODEL_FAMILY" or key not in values or not knob.get("editable", True):
             continue
         try:
             value = coerce(knob, values[key])
         except ConfigError:
+            continue
+        # A knob the selected family does not have is dropped rather than
+        # written: switching family would otherwise leave a stale MTP_DRAFT or
+        # DCP in the file, which the next validation would reject and the user
+        # would have no obvious way to clear.
+        if not applies_to(knob, fam_name):
+            if dropped is not None and value != knob["default"]:
+                dropped.append(key)
             continue
         if value != base[key]:
             out[key] = value
@@ -735,14 +956,44 @@ def minimize(values: dict) -> dict:
 # derived values (what the serve path actually consumes)
 # --------------------------------------------------------------------------
 
+def family_serve_args(cfg: dict):
+    """The family's own vLLM flags, with %(KNOB)s placeholders filled in.
+
+    Returned as a list so the caller can quote each element exactly once; these
+    values contain JSON with spaces and braces."""
+    fam = family(cfg.get("MODEL_FAMILY"))
+    subs = {k: to_text(KNOB_BY_KEY[k], v) for k, v in cfg.items() if k in KNOB_BY_KEY}
+    args = [a % subs if "%(" in a else a for a in fam.get("serve_args", [])]
+    variant = VARIANTS.get(cfg.get("MODEL_VARIANT"), {})
+    if variant.get("quantization"):
+        args = ["--quantization", variant["quantization"]] + args
+    comp = fam.get("compilation_config")
+    if comp:
+        args += ["--compilation-config", comp % subs]
+    return args
+
+
 def derive(cfg: dict) -> dict:
     """Expand the knobs into the env the entrypoint's serve path reads."""
+    fam_name = cfg.get("MODEL_FAMILY", "glm52")
+    fam = family(fam_name)
     variant = VARIANTS.get(cfg["MODEL_VARIANT"], VARIANTS["exl3-tr3"])
     draft = DRAFTS.get(cfg["MTP_DRAFT"], DRAFTS["tr3-graft"])
     out = dict(cfg)
     out["MODEL_REPO"] = variant["repo"]
     out["MODEL_DIRNAME"] = variant["dirname"]
     out["QUANTIZATION"] = variant["quantization"]
+    out["FAMILY_ENV_BLOCK"] = fam.get("env_block", "generic")
+    out["SPEC_METHOD"] = fam.get("spec_method", "mtp")
+    out["FAMILY_SERVE_ARGS"] = family_serve_args(cfg)
+    # The MTP78 draft apparatus is GLM-only; outside it there is no graft, no
+    # overlay and no external draft dir, just a speculation depth.
+    if fam_name != "glm52":
+        out["MTP78_MODE"] = "off"
+        out["DRAFT_MODEL"] = ""
+        out["DRAFT_QUANTIZATION"] = ""
+        out["VISION"] = False
+        return out
     out["MTP78_MODE"] = draft["mtp78_mode"]
     # rule draft-inherits-quant: a non-EXL3 draft against an EXL3 target must
     # declare its own quantization or it is loaded through the EXL3 path.
@@ -777,13 +1028,49 @@ def validate(cfg: dict, context=None):
     variant = VARIANTS.get(cfg["MODEL_VARIANT"], VARIANTS["exl3-tr3"])
     draft = cfg["MTP_DRAFT"]
     seqs, toks = cfg["MAX_NUM_SEQS"], cfg["MTP_TOKENS"]
+    fam_name = cfg.get("MODEL_FAMILY", "glm52")
+    fam = family(fam_name)
+    is_glm = fam_name == "glm52"
+
+    # 0. family coherence ---------------------------------------------------
+    if not fam.get("tested"):
+        warn("family-untested", ["MODEL_FAMILY"],
+             f"{fam['label']}: NOBODY HAS BOOTED THIS IMAGE WITH THIS FAMILY. The serve "
+             "arguments are derived from the model card, not measured, and it is unknown "
+             "whether this vLLM build implements the architecture at all. Expect to "
+             "iterate, and treat a clean boot as the beginning of validation rather than "
+             "the end of it.")
+    if variant.get("family") and variant["family"] != fam_name:
+        err("variant-family-mismatch", ["MODEL_VARIANT", "MODEL_FAMILY"],
+            f"model variant '{cfg['MODEL_VARIANT']}' belongs to the "
+            f"{variant['family']} family, not {fam_name}. Pick one of: "
+            + ", ".join(k for k, v in VARIANTS.items() if v.get("family") == fam_name))
+    if cfg["KV_CACHE_DTYPE"] not in fam.get("kv_dtypes", []):
+        err("kv-dtype-family", ["KV_CACHE_DTYPE", "MODEL_FAMILY"],
+            f"KV dtype '{cfg['KV_CACHE_DTYPE']}' is not available for {fam['label']}. "
+            f"This family supports: {', '.join(fam.get('kv_dtypes', []))}. "
+            "(nvfp4_ds_mla in particular is an MLA KV layout — it has no meaning "
+            "outside an MLA model.)")
+    ngpu = ctx.get("gpu_count")
+    tp = cfg["TENSOR_PARALLEL_SIZE"]
+    if ngpu is not None and tp > ngpu:
+        err("tp-exceeds-gpus", ["TENSOR_PARALLEL_SIZE"],
+            f"tensor-parallel size {tp} needs {tp} GPUs and this host has {ngpu}. The "
+            "engine cannot start. Lower it, or rent a host with more GPUs.")
+    if is_glm and tp != 4:
+        warn("tp-off-measured", ["TENSOR_PARALLEL_SIZE"],
+             f"every GLM-5.2 number in this repo was measured at TP=4; {tp} is "
+             "unexplored territory for this family (and the 753B weights do not fit in "
+             "fewer than 4 x 96 GB anyway).")
 
     # 1. concurrency vs the capture + trellis windows -----------------------
+    # GLM/EXL3-SCOPED. The trellis window belongs to the EXL3 kernel; applying
+    # these rules to a dense Qwen would reject configurations that are fine.
     m = seqs * (1 + toks)
     cap_max = cfg["MAX_CUDAGRAPH_CAPTURE_SIZE"]
     trellis_max = cfg["VLLM_EXL3_TRELLIS_MAX_M"]
     window = min(cap_max, trellis_max)
-    if toks > 0 and m > window:
+    if is_glm and toks > 0 and m > window:
         err("concurrency-window", ["MAX_NUM_SEQS", "MTP_TOKENS",
                                    "MAX_CUDAGRAPH_CAPTURE_SIZE", "VLLM_EXL3_TRELLIS_MAX_M"],
             f"MAX_NUM_SEQS x (1 + MTP_TOKENS) = {seqs} x {1 + toks} = {m} query tokens per "
@@ -801,7 +1088,7 @@ def validate(cfg: dict, context=None):
                  f"the largest captured size ({max(sizes)}) does not equal "
                  f"MAX_CUDAGRAPH_CAPTURE_SIZE ({cap_max}); decode above {max(sizes)} runs "
                  "eager whatever the max says.")
-        if min(sizes) < cfg["VLLM_EXL3_TRELLIS_MIN_M"]:
+        if is_glm and min(sizes) < cfg["VLLM_EXL3_TRELLIS_MIN_M"]:
             err("capture-below-trellis-min", ["CUDAGRAPH_CAPTURE_SIZES"],
                 f"a capture size of {min(sizes)} is below the EXL3 trellis window minimum "
                 f"({cfg['VLLM_EXL3_TRELLIS_MIN_M']}). Capture then falls into the eager "
@@ -810,14 +1097,14 @@ def validate(cfg: dict, context=None):
                 "capture size, never to lower the trellis minimum.")
 
     # 2. the locked trellis minimum -----------------------------------------
-    if cfg["VLLM_EXL3_TRELLIS_MIN_M"] != 4:
+    if is_glm and cfg["VLLM_EXL3_TRELLIS_MIN_M"] != 4:
         err("trellis-min-m", ["VLLM_EXL3_TRELLIS_MIN_M"],
             "VLLM_EXL3_TRELLIS_MIN_M must stay 4. Lowering it to 1 makes an EXL3 capture "
             "crash disappear but SILENTLY CORRUPTS OUTPUT: measured 32K needle 0/2 and "
             "370K needle 0/5, pure garbage, while short-prompt checks still passed 6/6.")
 
     # 3. rank-sliced EXL3 draft vs the base generation -----------------------
-    if draft == "tr3-override" and cfg["BASE_GENERATION"] == "v20":
+    if is_glm and draft == "tr3-override" and cfg["BASE_GENERATION"] == "v20":
         err("tr3-draft-on-v20", ["MTP_DRAFT"],
             "an EXL3 rank-sliced MTP draft (TR3-trellis, separate draft dir) cannot be "
             "CUDA-graph captured on the GG v20 base: SpeculatorCudaGraphManager captures "
@@ -827,27 +1114,28 @@ def validate(cfg: dict, context=None):
             "(same weights, grafted into the target, and the only draft with long-context "
             "evidence) or a bf16/nvfp4 draft.")
 
-    if draft.startswith("tr3-") and cfg["MODEL_VARIANT"] != "exl3-tr3":
+    if is_glm and draft.startswith("tr3-") and cfg["MODEL_VARIANT"] != "exl3-tr3":
         err("tr3-draft-needs-exl3", ["MTP_DRAFT", "MODEL_VARIANT"],
             "the TR3 trellis drafts are layer-78 overlays built for the EXL3-TR3 "
             f"checkpoint; they have no meaning on the {variant['label']} target. Use the "
             "bf16 in-checkpoint draft or an external nvfp4 draft dir.")
 
     # 4. a draft inherits the target's quantization --------------------------
-    if draft == "nvfp4" and cfg.get("DRAFT_QUANTIZATION") != "modelopt_fp4":
+    if is_glm and draft == "nvfp4" and cfg.get("DRAFT_QUANTIZATION") != "modelopt_fp4":
         err("draft-quant-inherit", ["DRAFT_QUANTIZATION", "MTP_DRAFT"],
             "a draft inherits the target's --quantization unless its speculative config "
             "carries its own, so an NVFP4 draft against an EXL3 target is loaded through "
             "the EXL3 path and throws the identical 'capture (m=3)' error as the v20 "
             "rank-sliced bug. Set DRAFT_QUANTIZATION=modelopt_fp4. This is a config trap, "
             "not a bug.")
-    if cfg.get("DRAFT_MODEL") and draft in ("tr3-graft", "bf16", "off"):
+    if is_glm and cfg.get("DRAFT_MODEL") and draft in ("tr3-graft", "bf16", "off"):
         warn("draft-model-overrides", ["DRAFT_MODEL", "MTP_DRAFT"],
              "an explicit DRAFT_MODEL takes over draft selection; the MTP draft type is "
              "then only used to decide what happens to the target checkpoint.")
 
     # 5. nvfp4 KV needs calibrated MLA outer scales --------------------------
-    if cfg["KV_CACHE_DTYPE"] != "fp8" and not variant["kv_scales_calibrated"]:
+    if is_glm and cfg["KV_CACHE_DTYPE"] not in ("fp8", "auto") \
+            and not variant["kv_scales_calibrated"]:
         err("kv-nvfp4-uncalibrated", ["KV_CACHE_DTYPE", "MODEL_VARIANT"],
             f"KV dtype {cfg['KV_CACHE_DTYPE']} requires per-checkpoint calibrated MLA "
             f"outer scales and the {variant['label']} checkpoint has none. With nvfp4 KV "
@@ -856,21 +1144,21 @@ def validate(cfg: dict, context=None):
             "is the safe default; it costs ~1.7x the KV bytes per token.")
 
     # 6. vision on an EXL3 target -------------------------------------------
-    if cfg["VISION"] and cfg["MODEL_VARIANT"] == "exl3-tr3":
+    if is_glm and cfg["VISION"] and cfg["MODEL_VARIANT"] == "exl3-tr3":
         warn("vision-long-context", ["VISION"],
              "EXPERIMENTAL / KNOWN BROKEN AT LONG CONTEXT: VISION=1 on the EXL3-TR3 "
              "checkpoint corrupts long-context output — measured 32K needle 0/2 with "
              "degenerate text on BOTH the v20 and pre-v20 bases, while short-prompt and "
              "vision smoke tests passed 6/6. Safe only for short-prompt image work. The "
              "long-context probe will fail this configuration by design.")
-    if cfg["VISION"] and cfg["MAX_MODEL_LEN"] > 393216:
+    if is_glm and cfg["VISION"] and cfg["MAX_MODEL_LEN"] > 393216:
         warn("vision-kv-pressure", ["VISION", "MAX_MODEL_LEN"],
              f"vision costs ~1.31 GiB/GPU and raises memory pressure enough that even "
              f"MAX_MODEL_LEN 384K has failed KV validation (needed 5.7 GiB, had 3.97). At "
              f"{cfg['MAX_MODEL_LEN']} expect 'To serve at least one request with the "
              "model's max seq len ... larger than the available KV cache memory' at boot. "
              "Reducing MAX_MODEL_LEN is the standard remedy.")
-    if cfg["VISION"] and ctx.get("vision_available") is False:
+    if is_glm and cfg["VISION"] and ctx.get("vision_available") is False:
         warn("vision-unavailable", ["VISION"],
              "vision assets are not on the volume yet; enabling it triggers a ~1 GB "
              "download during the restart.")
@@ -896,12 +1184,12 @@ def validate(cfg: dict, context=None):
              "the prefill chunk is larger than the whole context window; it will simply "
              "be clamped.")
 
-    # 8. parallelism ---------------------------------------------------------
-    if 4 % int(cfg["DCP"]) != 0:
-        err("dcp-divides-tp", ["DCP"],
+    # 8. parallelism (DCP is an MLA-path feature: GLM only) -------------------
+    if is_glm and int(cfg["TENSOR_PARALLEL_SIZE"]) % int(cfg["DCP"]) != 0:
+        err("dcp-divides-tp", ["DCP", "TENSOR_PARALLEL_SIZE"],
             f"decode context parallel size {cfg['DCP']} must divide the tensor-parallel "
-            "size (4).")
-    if int(cfg["DCP"]) < 4 and cfg["MAX_MODEL_LEN"] > 262144:
+            f"size ({cfg['TENSOR_PARALLEL_SIZE']}).")
+    if is_glm and int(cfg["DCP"]) < 4 and cfg["MAX_MODEL_LEN"] > 262144:
         warn("dcp-reduces-pool", ["DCP", "MAX_MODEL_LEN"],
              f"DCP={cfg['DCP']} replicates KV instead of sharding it across the 4 ranks, "
              f"cutting the usable pool by about {4 // int(cfg['DCP'])}x. "
@@ -916,6 +1204,19 @@ def validate(cfg: dict, context=None):
     if toks == 0:
         warn("spec-off", ["MTP_TOKENS"],
              "speculative decoding disabled; expect roughly 30% lower decode throughput.")
+
+    # 10. a persisted knob that this family does not have ---------------------
+    # Same principle as the termination switches: a state file that carries
+    # something meaningless for the running configuration is not quietly
+    # ignored, it is reported with the key named. The landing page drops these
+    # on apply, so reaching this rule means the file was edited by hand.
+    for key in ctx.get("state_keys") or ():
+        knob = KNOB_BY_KEY.get(key)
+        if knob and not applies_to(knob, fam_name):
+            err("knob-inapplicable", [key, "MODEL_FAMILY"],
+                f"'{key}' has no meaning for {fam['label']} and is set in the state "
+                f"file. {knob['label']} belongs to the "
+                f"{', '.join(knob['families'])} family. Remove it, or switch family.")
     return out
 
 

@@ -442,6 +442,7 @@ Beyond termination, these differ in ways that affect this image.
 | | vast.ai | RunPod |
 |---|---|---|
 | **persistent path** | the instance's own disk; this template uses `/workspace` and nothing survives a destroy | **volume disk** mounted at `/workspace` by default; survives stop, destroyed on terminate. A **network volume** also mounts at `/workspace`, replaces the volume disk, and survives the pod entirely |
+| **SSH** | vast runs sshd; the entrypoint only repairs key permissions | nothing runs sshd unless the image does — this image now starts one when `PUBLIC_KEY` is present (`SSHD=0` to opt out) |
 | **port exposure** | `-p 8000:8000 -p 1111:1111` in Docker options; external ports arrive as `VAST_TCP_PORT_8000` etc. and are usually *not* the same numbers | **ports must be requested AT POD CREATION** (`--ports "22/tcp,1111/http,8000/http"`); HTTP ports are proxied at `https://[POD_ID]-[PORT].proxy.runpod.net` (max 10, **100-second Cloudflare timeout**); raw TCP needs a public IP and symmetrical ports above 70000, surfaced as `RUNPOD_TCP_PORT_*` |
 | **HF cache location** | `~/.cache/huggingface` on the instance disk; dies with the instance | PID 1 sets `HF_HOME=/runpod-volume/.cache/huggingface/` — **the network volume by default**, which survives termination and keeps billing |
 | **landing page on :1111** | works; `OPEN_BUTTON_PORT=1111` makes the dashboard's Open button hit it | reachable via the HTTP proxy at `https://<pod>-1111.proxy.runpod.net`; there is no Open button, so the URL must be constructed by hand, and `OPEN_BUTTON_TOKEN` is not injected — **it must be set manually or the config/terminate UI stays disabled** |
@@ -475,6 +476,48 @@ is the OpenAI-compatible endpoint, `22/tcp` is SSH. Remember the proxy's
 100-second timeout applies to the `/http` ports: keep long generations
 streaming, or reach the API over a TCP-mapped port instead.
 
+### RunPod: this image now starts sshd, because nothing else will
+
+**MEASURED.** This image does not run `sshd`, and RunPod does not run one for
+you — their SSH works because *their* base images start one. With this image as
+PID 1 the pod reports RUNNING, `runpodctl ssh info` resolves happily, and every
+connection is refused. RunPod injects `PUBLIC_KEY`, but something in the
+container has to consume it.
+
+Combined with the ports trap above, that produced the worst possible failure
+mode: a pod that is billing, looks healthy, and is a **black box** — no shell,
+no landing page, only the console log.
+
+**Decision: start sshd when the provider handed us keys** (`SSHD=auto`, the
+default), rather than documenting "RunPod users get no SSH". The argument:
+
+* *Against* starting it: more surface, more moving parts, and one more thing
+  that can fail at boot.
+* *For*: the access it grants is the access the provider was **already handing
+  out** — key-only auth using key material RunPod itself injected, reachable
+  only on a port the user had to expose deliberately at pod creation. It grants
+  nothing new to anyone; it just stops silently withholding it from the owner.
+* And the decisive asymmetry: without SSH, the *only* remaining way into a
+  misconfigured pod is the landing page — which may be exactly what is
+  misconfigured. Two independent ways in is the difference between "fix it" and
+  "destroy it and re-download 332 GB".
+
+Behaviour: `auto` starts sshd only when `PUBLIC_KEY` is set (so vast.ai, where
+sshd already runs, is untouched) and only when nothing is already listening on
+:22. It installs the injected keys into `/root/.ssh/authorized_keys`
+(append-only, deduplicated, 0600), generates host keys, and starts the daemon.
+`SSHD=1` forces it, `SSHD=0` disables it entirely for anyone who wants the
+smaller surface.
+
+If the image has no `sshd` binary, it says so loudly and names the consequence —
+"there is NO SHELL ACCESS on providers that expect the container to run one;
+the landing page on :1111 is the only way in" — rather than failing silently.
+`SSHD_INSTALL=1` will `apt-get` it at boot for anyone who wants that instead of
+a rebuild.
+
+The generated host keys are added to the session erase: they are what
+fingerprints this box to a client.
+
 ### What in the current entrypoint assumes vast.ai
 
 Flagged rather than changed — none of it breaks a RunPod boot, but a RunPod
@@ -502,8 +545,9 @@ template needs to know:
    under whatever memlock the pod has — the warn-and-proceed default already
    covers this, but it is untested there.
 6. **SSH key repair** targets `/root/.ssh/authorized_keys`, which vast injects.
-   RunPod injects `PUBLIC_KEY` and expects the image to install it; this image
-   does not, so **SSH into a RunPod pod running this image is not set up**.
+   RunPod injects `PUBLIC_KEY` and expects the image to install it and to run
+   sshd — **now handled** (see above); on vast nothing changes, because
+   `PUBLIC_KEY` is unset there and sshd is already listening.
 
 Making the image fully RunPod-native is a separate piece of work; this document
 is the list it would start from.

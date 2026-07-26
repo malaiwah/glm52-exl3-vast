@@ -55,6 +55,21 @@ def _resolved():
     return effective, sources, notes
 
 
+def _context():
+    """Validation context the shell can supply: how many GPUs this host has,
+    and which keys the state file actually persisted."""
+    ctx = {}
+    try:
+        ctx["gpu_count"] = int(os.environ["GLM_GPU_COUNT"])
+    except (KeyError, ValueError):
+        pass
+    try:
+        ctx["state_keys"] = list(gc.load_state_file())
+    except Exception:
+        ctx["state_keys"] = []
+    return ctx
+
+
 # --------------------------------------------------------------------------
 
 def cmd_snapshot_env(_args):
@@ -86,8 +101,13 @@ def cmd_env(_args):
         key = knob["key"]
         lines.append("export %s=%s" % (key, shlex.quote(gc.to_text(knob, effective[key]))))
     for key in ("MODEL_REPO", "MODEL_DIRNAME", "QUANTIZATION", "MTP78_MODE",
-                "DRAFT_MODEL", "DRAFT_QUANTIZATION"):
+                "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK", "SPEC_METHOD"):
         lines.append("export %s=%s" % (key, shlex.quote(str(derived.get(key, "")))))
+    # A bash ARRAY, not a string: these values are JSON with spaces and braces,
+    # and word-splitting them would corrupt the serve line. Arrays cannot be
+    # exported, which is fine — config.env is sourced into the same shell.
+    lines.append("FAMILY_SERVE_ARGS=(%s)" % " ".join(
+        shlex.quote(a) for a in derived.get("FAMILY_SERVE_ARGS", [])))
     # a compact source map so the boot log can explain where a value came from
     lines.append("export GLM_CONFIG_SOURCES=%s" % shlex.quote(json.dumps(sources)))
     print("\n".join(lines))
@@ -96,11 +116,18 @@ def cmd_env(_args):
 
 def cmd_show(_args):
     effective, sources, notes = _resolved()
-    findings = gc.validate(effective)
+    findings = gc.validate(effective, _context())
     width = max(len(k["key"]) for k in gc.KNOBS)
-    print(">>> effective configuration (default < env < state file):")
+    fam = gc.family(effective.get("MODEL_FAMILY"))
+    print(">>> model family: %s%s" % (fam["label"],
+                                      "" if fam.get("tested") else "  [UNTESTED PRESET]"))
+    print(">>> effective configuration (default < family < env < state file):")
     for knob in gc.KNOBS:
         key = knob["key"]
+        if sources[key] == "n/a":
+            print("      %-*s = %-28s [not applicable to this family]" % (
+                width, key, "-"))
+            continue
         print("      %-*s = %-28s [%s]" % (width, key,
                                            gc.to_text(knob, effective[key]), sources[key]))
     for note in notes:
@@ -112,7 +139,7 @@ def cmd_show(_args):
 
 def cmd_validate(args):
     effective, _sources, _notes = _resolved()
-    findings = gc.validate(effective)
+    findings = gc.validate(effective, _context())
     errs = gc.errors(findings)
     if not args.quiet:
         for f in findings:

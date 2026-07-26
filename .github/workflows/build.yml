@@ -21,6 +21,11 @@ jobs:
       # provider API and never destroys anything.
       - name: termination + switch tests
         run: python3 tests/test_termination.py
+      # Guards the family preset layer: that the GLM serve line is unchanged,
+      # that no GLM-ism leaks into another family, and that the measured rules
+      # stay scoped to the family they were measured on.
+      - name: model family tests
+        run: python3 tests/test_families.py
   build:
     # PRs build without pushing, so a broken Dockerfile is caught before main
     runs-on: ubuntu-latest

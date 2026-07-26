@@ -87,6 +87,14 @@ class Paths:
         # that SURVIVES termination and keeps billing.
         extra = env.get("ERASE_EXTRA_ROOTS", "/runpod-volume")
         self.extra_roots = [r for r in extra.split(":") if r and os.path.isdir(r)]
+        self.etc_ssh = env.get("ERASE_ETC_SSH", "/etc/ssh")
+        # ERASE_CONFINE_TO is a hard fence: when set, any planned path outside it
+        # is dropped. It exists because this module walks absolute system paths
+        # (/root, /tmp, /var/log, /etc/ssh) that are only correct INSIDE the
+        # rental container. A test that forgets one override would otherwise
+        # overwrite the developer's own files — which is exactly what happened
+        # once, and was survived only because the process was not root.
+        self.confine_to = env.get("ERASE_CONFINE_TO", "")
 
     def hf_cache_roots(self):
         """Everywhere a Hugging Face token can land, from the environment that
@@ -257,6 +265,15 @@ def plan(paths=None, keep=()):
     _add_tree(targets, os.path.join(p.home, ".ssh"), "credentials",
               "SSH keys / authorized_keys / known_hosts — identifies you and your hosts",
               seen)
+    # Host keys this container generated for its own sshd (see setup_sshd).
+    # They live on the container filesystem and die with it, but they are cheap
+    # to take and they are the thing that fingerprints this box to a client.
+    sshdir = p.etc_ssh
+    if os.path.isdir(sshdir):
+        for f in os.listdir(sshdir):
+            if f.startswith("ssh_host_"):
+                _add(targets, os.path.join(sshdir, f), "credentials",
+                     "sshd host key generated for this container", seen)
 
     # 2. TLS material ------------------------------------------------------
     _add_tree(targets, os.path.join(p.workspace, ".lego"), "tls",
@@ -317,7 +334,16 @@ def plan(paths=None, keep=()):
         targets.append(t)
 
     targets = [t for t in targets if not os.path.realpath(t["path"]).startswith(keep)]
+    outside = []
+    if p.confine_to:
+        fence = os.path.realpath(p.confine_to).rstrip("/") + "/"
+        inside = [t for t in targets
+                  if os.path.realpath(t["path"]).startswith(fence)]
+        outside = [t["path"] for t in targets if t not in inside]
+        targets = inside
     return {"targets": targets,
+            "confined_to": p.confine_to,
+            "refused_outside_fence": outside,
             "unknown_large": unknown_large,
             "manifest_used": manifest_used,
             "total_bytes": sum(t["size"] for t in targets),
