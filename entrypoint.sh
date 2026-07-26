@@ -769,6 +769,10 @@ fi
 # gilded-gnosis fork's cache bug); verify decode tok/s after enabling this.
 export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-$MODEL_DIR/.vllm-cache}"
 mkdir -p "$VLLM_CACHE_ROOT" 2>/dev/null || true
+# Some upstream images still export the removed VLLM_CACHE_DIR alias. Recent
+# vLLM warns for every unknown VLLM_* variable, so keep only the supported
+# persistent-cache setting above.
+unset VLLM_CACHE_DIR
 
 export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
 export HF_HUB_OFFLINE=1
