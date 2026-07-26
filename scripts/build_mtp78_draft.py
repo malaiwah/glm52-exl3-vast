@@ -64,6 +64,19 @@ for f in ("tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
 
 # Config: the target's, plus the two edits that make layer 78 a trellis MoE.
 cfg = json.load(open(os.path.join(model_dir, "config.json")))
+# UNWRAP a multimodal wrapper. With vision installed, the target's config.json is
+# the Glm5v wrapper, whose auto_map points at configuration_glm5v.Glm5vConfig —
+# a file that does not exist in the draft dir, so the draft dies with
+#   OSError: ... does not appear to have a file named configuration_glm5v.py
+# The MTP draft operates on the TEXT model, so the text_config is what it wants
+# (the same substitution chronarion's plugin makes for the speculative config).
+# The wrapper holds quantization_config, so carry it down if the text side lacks it.
+if "text_config" in cfg and isinstance(cfg["text_config"], dict):
+    outer_quant = cfg.get("quantization_config")
+    cfg = dict(cfg["text_config"])
+    if outer_quant and not cfg.get("quantization_config"):
+        cfg["quantization_config"] = outer_quant
+    cfg.pop("auto_map", None)
 cfg.setdefault("hybrid_tr3_tail", {})["moe_layers"] = [3, 78]
 q = cfg.get("quantization_config") or {}
 if q:
