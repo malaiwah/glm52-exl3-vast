@@ -141,7 +141,21 @@ snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
       python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" --revert || true
     fi
   else
-    echo ">>> Vision: already installed"
+    # The marker lives on the VOLUME but the plugin is installed into the
+    # CONTAINER's site-packages, so a replaced container (restart, image bump)
+    # skips the block above and starts with a config.json that asks for
+    # Glm5vForConditionalGeneration while the plugin that registers it is gone:
+    #   Model architectures ['Glm5vForConditionalGeneration'] are not supported
+    # vLLM then crash-loops until the supervisor gives up. Re-install every boot;
+    # it is a ~50 KB local wheel and pip is a no-op when already satisfied.
+    if [ -d "$MODEL_DIR/.vision/plugins/glm5v_nf3" ]; then
+      pip install -q "$MODEL_DIR/.vision/plugins/glm5v_nf3" 2>/dev/null || true
+      echo ">>> Vision: already installed (plugin re-registered in this container)"
+    else
+      echo "!!! Vision: marker present but $MODEL_DIR/.vision/plugins/glm5v_nf3 is missing."
+      echo "!!! The Glm5v arch will not register. Remove $MODEL_DIR/.vision-enabled to reinstall,"
+      echo "!!! or set VISION=0 to serve text-only."
+    fi
   fi
 elif [ -f "$MODEL_DIR/.vision-enabled" ]; then
   echo ">>> VISION=0: reverting to text-only config"
