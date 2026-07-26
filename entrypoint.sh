@@ -93,7 +93,17 @@ fi
 MTP78_MODE="${MTP78_MODE:-graft}"
 [ "${MTP78_TRELLIS:-1}" = "0" ] && MTP78_MODE=off
 MTP78_DRAFT_DIR="$MODEL_DIR/.mtp78-draft"
-DRAFT_MODEL=""
+# DRAFT_MODEL may be supplied from the environment to point --speculative-config at
+# an EXTERNAL draft checkpoint, independently of MTP78_MODE. This is how a non-EXL3
+# draft (e.g. the NVFP4 MTP draft from lukealonso/GLM-5.2-NVFP4, model-mtp.safetensors,
+# 5.6 GiB) is used: it recovers most of the KV that the BF16 fallback draft gives up,
+# while still avoiding _apply_rank_sliced -- so it does not hit the v20 speculator
+# capture bug that makes an EXL3 rank-sliced draft unbootable (see the warning above).
+DRAFT_MODEL="${DRAFT_MODEL:-}"
+if [ -n "$DRAFT_MODEL" ]; then
+  echo ">>> Draft: external checkpoint $DRAFT_MODEL (MTP78_MODE=$MTP78_MODE ignored for draft selection)"
+  MTP78_MODE=off
+fi
 
 fetch_mtp78_overlay() {
   [ -d "$MODEL_DIR/.mtp78-overlay/3bpw-keep0" ] && return 0
@@ -153,6 +163,19 @@ fi
 VISION="${VISION:-1}"
 VISION_REPO="${VISION_REPO:-chronarion/GLM-5.2-Vision-MXFP8-NVFP4-NF3-Hybrid}"
 if [ "$VISION" = "1" ]; then
+  # Gate on what config.json ACTUALLY says, not just the marker file. An MTP78 graft
+  # REVERT rewrites config.json back to its pre-vision form, which silently strips the
+  # Glm5v wrapper while leaving .vision-enabled in place -- the installer then reported
+  # "already installed", skipped re-wrapping, and the server answered image requests
+  # with "GLM-5.2 is not a multimodal model" (400). Measured on AIBeast 2026-07-26.
+  if [ -f "$MODEL_DIR/.vision-enabled" ] && \
+     ! python3 -c "
+import json,sys
+c=json.load(open('$MODEL_DIR/config.json'))
+sys.exit(0 if 'text_config' in c or any('Glm5v' in a for a in c.get('architectures') or []) else 1)" 2>/dev/null; then
+    echo ">>> Vision: marker present but config.json is text-only (graft revert clobbers it) -- reinstalling"
+    rm -f "$MODEL_DIR/.vision-enabled"
+  fi
   if [ ! -f "$MODEL_DIR/.vision-enabled" ]; then
     status_update installing-vision
     echo ">>> Vision: downloading tower + projector + processor (~1 GB) from $VISION_REPO"
