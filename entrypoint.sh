@@ -11,6 +11,21 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | 
 NGPU=$(nvidia-smi -L 2>/dev/null | wc -l)
 [ "$NGPU" -ge 4 ] || { echo "FATAL: need 4 GPUs, found $NGPU"; exit 1; }
 
+# Repair SSH key permissions before anything else. vast injects the account's
+# public key into /root/.ssh/authorized_keys at container start; when it lands
+# group- or world-writable, sshd refuses it with
+#   "Authentication refused: bad ownership or modes for file /root/.ssh/authorized_keys"
+# and every `ssh root@...` fails with a bare "Permission denied (publickey)".
+# That silently breaks the SSH tunnel this README recommends as the safest way
+# to reach the endpoint, and it looks exactly like a bad-host/bad-key problem,
+# so it gets misdiagnosed as rental bad luck. Cheap to make unconditional.
+if [ -d /root/.ssh ]; then
+  chown -R root:root /root/.ssh 2>/dev/null || true
+  chmod 700 /root /root/.ssh 2>/dev/null || true
+  [ -f /root/.ssh/authorized_keys ] && chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
+  echo ">>> SSH: repaired /root/.ssh ownership+modes (sshd rejects loose perms)"
+fi
+
 MODEL_DIR="${MODEL_DIR:-/workspace/GLM-5.2-EXL3-TR3-3.0bpw}"
 
 # Boot-status snapshot for the landing page; rewritten at each milestone.
