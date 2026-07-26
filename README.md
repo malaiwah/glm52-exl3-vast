@@ -92,6 +92,16 @@ edges NVFP4 on batched decode. Prefill/decode deltas are inside run-to-run
 noise. Full writeup, methodology and the two NVFP4 config gotchas:
 **https://gist.github.com/malaiwah/4bbb16bef2e336e94af165076cdba955**
 
+**DRAM offload and memlock.** Docker's default memlock ulimit (8 MiB) is far
+below any useful KV tier, and under rootless podman `--ulimit memlock=-1:-1`
+cannot raise it past the user's hard limit — so gating offload on memlock turns
+an advertised feature off with no way forward. It is measurably a false gate: a
+125 GiB tier offloads normally under a 31 GiB memlock, because the connector
+does not mlock the tier up front. So the default is warn-and-proceed, and it
+degrades rather than fails — `kv_load_failure_policy=recompute` means any KV
+block that cannot be fetched back is recomputed instead of erroring the request.
+Set `OFFLOAD_IGNORE_MEMLOCK=0` to get the old disable-instead behaviour.
+
 **KV headroom:** available KV memory goes 5.27 -> 8.92 GiB/GPU (**+69%**). This
 template pins the pool at 512K (`--num-gpu-blocks-override 2048`), so the
 headroom is unspent by default — at ~10.3 KiB/token it is worth roughly
@@ -238,6 +248,8 @@ existing endpoint:
 | `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
 | `GPU_BLOCKS_OVERRIDE` | `2048` | `0` drops the pin and lets vLLM use all available KV |
 | `OFFLOAD_FRACTION` | `0.70` | fraction of RAM for the DRAM KV tier; `0` disables |
+| `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
+| `MTP78_MODE` | `override` | `override` points `--speculative-config` at a separate draft dir (target checkpoint untouched); `graft` is the legacy in-place surgery; `off` uses the stock BF16 draft |
 
 ## Security
 

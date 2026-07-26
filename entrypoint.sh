@@ -214,14 +214,18 @@ if [ "$OFFLOAD_FRACTION" != "0" ]; then
   MEMLOCK_KB=$(ulimit -l)
   if [ "$MEMLOCK_KB" != "unlimited" ] && [ "$MEMLOCK_KB" -lt "$((OFF_BYTES / 1024))" ] 2>/dev/null; then
     echo "!!! WARNING: memlock ulimit (${MEMLOCK_KB} KB) is below the $((OFF_BYTES/1073741824)) GiB KV pool to pin."
-    if [ "${OFFLOAD_IGNORE_MEMLOCK:-0}" = "1" ]; then
+    if [ "${OFFLOAD_IGNORE_MEMLOCK:-1}" = "1" ]; then
       # Measured 2026-07-26 on an owned box: a 128 GiB offload tier runs fine with
       # memlock capped at ~31 GiB (kv_offload_total_bytes climbs normally), because
       # the connector does not mlock the whole tier up front. Rootless podman also
       # cannot raise memlock past the user's hard limit, so '--ulimit memlock=-1:-1'
       # is a no-op there and the check would disable a working feature outright.
       # Opt-in, because on an unknown rental host the conservative default is right.
-      echo "!!! OFFLOAD_IGNORE_MEMLOCK=1 — proceeding anyway (verify kv_offload_* metrics climb)."
+      echo "!!! Proceeding anyway (warn-and-proceed is the default; OFFLOAD_IGNORE_MEMLOCK=0 to"
+      echo "!!! disable offload instead). This degrades rather than fails: the connector does not"
+      echo "!!! mlock the tier up front (measured: a 125 GiB tier offloading normally under a"
+      echo "!!! 31 GiB memlock), and kv_load_failure_policy=recompute means any KV that cannot be"
+      echo "!!! brought back is simply recomputed. Verify kv_offload_* metrics climb."
     else
       echo "!!! Add '--ulimit memlock=-1:-1' to the template Docker options to enable offload,"
       echo "!!! or set OFFLOAD_IGNORE_MEMLOCK=1 if you have verified offload works at this limit."
@@ -233,7 +237,11 @@ fi
 if [ "$OFFLOAD_FRACTION" != "0" ]; then
   OFFLOAD_STATE="$((OFF_BYTES/1073741824)) GiB pinned DRAM"
   echo ">>> DRAM KV offload: $((OFF_BYTES/1073741824)) GiB (${OFFLOAD_FRACTION} of instance RAM allocation)"
-  KVT_ARGS=(--kv-transfer-config "{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":$OFF_BYTES}}")
+  # kv_load_failure_policy=recompute: a KV block that cannot be fetched back from
+  # the DRAM tier is recomputed instead of failing the request. The vLLM default
+  # is "fail", which would turn any offload hiccup into a terminal error — not an
+  # acceptable trade for a cache tier that is a pure optimisation.
+  KVT_ARGS=(--kv-transfer-config "{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_load_failure_policy\":\"recompute\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":$OFF_BYTES}}")
   # OffloadingConnector rejects expandable_segments (VMM can remap pinned KV pages)
   export PYTORCH_CUDA_ALLOC_CONF=""
 else
