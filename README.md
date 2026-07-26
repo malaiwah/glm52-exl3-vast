@@ -115,10 +115,25 @@ TP4/DCP4-a2a, MTP-3, 512K context, DRAM KV offload on, clean single-stream):
 | **EXL3-TR3 3bpw + MTP78 trellis** | **127.4 tok/s** | **3.533 / 0.844** | **7.42 GiB** | **860,928 tok** |
 | **the same + vision (MoonViT + projector)** | 110.3 tok/s | 3.528 / 0.843 | 6.11 GiB | 588,544 tok |
 
-Read that middle row twice: the trellis stack is **+6.9% faster** than the hybrid
-it replaces *and* carries **+60% more KV pool** — the usual quantization trade
-(give up speed to buy context) simply does not appear here. Even with the vision
-tower resident, the pool is still larger than the hybrid's.
+> **CORRECTION (2026-07-26, same day): the two EXL3 rows above were measured with
+> `--kv-cache-dtype nvfp4_ds_mla`, which is NOT the configuration this template
+> ships and is NOT safe at long context.** A 505K needle retrieval on that config
+> returned **0/6 with degenerate output** (`".,, while.,, and and while,,,,"`),
+> while short-context work looked perfect — GSM8K, vision and structured output
+> all passed. The throughput and pool numbers are real but they were bought with
+> a KV cache that silently corrupts past ~150K.
+>
+> Root cause: nvfp4 KV needs *per-checkpoint calibrated MLA outer scales*. The
+> hybrid checkpoint has them; the EXL3 checkpoint does not, and reusing the
+> hybrid's would be meaningless. **This template already ships `fp8` KV for
+> exactly this reason** (see the header and Evidence). fp8 costs ~1.7x the KV
+> bytes per token (7.6 GiB vs 4.52 GiB for 512K), which is why the pool is pinned
+> with `--num-gpu-blocks-override 2048` (2048 blocks x 64 tokens x DCP 4 =
+> 524,288). Corrected fp8 numbers will replace this table once re-measured.
+>
+> Keeping the note rather than deleting the table: "faster and bigger" was
+> exactly the too-good-to-be-true result that turned out to be measuring a broken
+> configuration, and the failure was invisible to every short-context test.
 
 **Vision costs 1.31 GiB/GPU and ~13% of text decode.** The memory cost matches
 what we measured on rented hardware; the throughput cost applies to *pure-text*
