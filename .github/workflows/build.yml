@@ -26,6 +26,12 @@ jobs:
       # stay scoped to the family they were measured on.
       - name: model family tests
         run: python3 tests/test_families.py
+      # Catches "the knob exists but nothing reads it" — the class of defect that
+      # was found twice by renting a GPU instead of by running a test.
+      - name: knob wiring audit
+        run: python3 tests/test_knob_wiring.py
+      - name: gpu detection
+        run: python3 tests/test_gpu_detect.py
   build:
     # PRs build without pushing, so a broken Dockerfile is caught before main
     runs-on: ubuntu-latest

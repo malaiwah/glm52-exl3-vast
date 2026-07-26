@@ -49,7 +49,7 @@ MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
 STATUS_FILE = os.environ.get("STATUS_FILE", "/tmp/glm-boot-status.json")
 ALLOW_INSECURE = os.environ.get("LANDING_ALLOW_INSECURE", "0") == "1"
 API_PORT = os.environ.get("LANDING_API_PORT", "8000")
-WEIGHTS_TOTAL_GIB = 309  # 332 GB
+
 
 _ssl_ctx = None
 
@@ -82,6 +82,9 @@ def model_dir() -> str:
 
 
 def weights_state() -> str:
+    """Progress against the SELECTED model's size. This used to compare against a
+    hardcoded 309 GiB — the GLM checkpoint — which made a 56 GiB Qwen download
+    look like a GLM one and cost a live debugging session."""
     MODEL_DIR = model_dir()
     if os.path.isfile(os.path.join(MODEL_DIR, ".download-complete")):
         return "ready"
@@ -92,7 +95,16 @@ def weights_state() -> str:
                 done += os.path.getsize(os.path.join(root, f))
             except OSError:
                 pass
-    return f"downloading — {done / 2**30:.0f} of ~{WEIGHTS_TOTAL_GIB} GiB"
+    total = ""
+    if gc is not None:
+        try:
+            eff, _s, _n = gc.resolve()
+            variant = gc.VARIANTS.get(eff.get("MODEL_VARIANT"), {})
+            if variant.get("download_gib"):
+                total = f" of ~{variant['download_gib']} GiB"
+        except Exception:
+            pass
+    return f"downloading — {done / 2**30:.0f}{total} GiB".replace(" GiB GiB", " GiB")
 
 
 def engine_state() -> str:
@@ -117,7 +129,7 @@ SNIPPETS = [
       "api": "openai-completions",
       "apiKey": "$key",
       "models": [
-        {"id": "GLM-5.2", "name": "GLM-5.2 (vast)", "contextWindow": 524288}
+        {"id": "$model", "name": "$model", "contextWindow": $ctx}
       ]
     }
   }
@@ -127,23 +139,23 @@ SNIPPETS = [
   "provider": {
     "glm-vast": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "GLM-5.2 (vast)",
+      "name": "$model",
       "options": {"baseURL": "$ep/v1", "apiKey": "$key"},
       "models": {
-        "GLM-5.2": {"name": "GLM-5.2", "limit": {"context": 524288, "output": 131072}}
+        "$model": {"name": "$model", "limit": {"context": $ctx, "output": 131072}}
       }
     }
   }
 }"""),
     ("Claude Code", "shell (native /v1/messages — Anthropic wire format)", """export ANTHROPIC_BASE_URL="$ep"
 export ANTHROPIC_AUTH_TOKEN="$key"
-export ANTHROPIC_MODEL="GLM-5.2"
+export ANTHROPIC_MODEL="$model"
 claude"""),
-    ("Codex", "~/.codex/config.toml", """model = "GLM-5.2"
+    ("Codex", "~/.codex/config.toml", """model = "$model"
 model_provider = "glm-vast"
 
 [model_providers.glm-vast]
-name = "GLM-5.2 (vast)"
+name = "$model"
 base_url = "$ep/v1"
 env_key = "GLM_API_KEY"
 wire_api = "chat"
@@ -338,7 +350,7 @@ CHAT_WIDGET = """<div id=log></div>
 </div></div>"""
 
 CHAT_JS = """<script>
-const EP="$ep", KEY="$key", msgs=[];
+const EP="$ep", KEY="$key", MODEL="$model", msgs=[];
 const log=document.getElementById("log"), inp=document.getElementById("in");
 let ctrl=null;
 function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt)e.textContent=txt;log.appendChild(e);log.scrollTop=log.scrollHeight;return e}
@@ -353,7 +365,7 @@ async function send(){
   try{
     const r=await fetch(EP+"/v1/chat/completions",{method:"POST",signal:ctrl.signal,
       headers:{"Authorization":"Bearer "+KEY,"Content-Type":"application/json"},
-      body:JSON.stringify({model:"GLM-5.2",messages:msgs,stream:true,max_tokens:8192,
+      body:JSON.stringify({model:MODEL,messages:msgs,stream:true,max_tokens:8192,
         chat_template_kwargs:{enable_thinking:document.getElementById("think").checked}})});
     if(!r.ok){out.textContent="HTTP "+r.status+": "+await r.text();return}
     const rd=r.body.getReader(), dec=new TextDecoder(); let buf="";
@@ -378,19 +390,20 @@ document.getElementById("clear").onclick=()=>{msgs.length=0;log.innerHTML=""};
 inp.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter")send()});
 </script>"""
 
-CHAT_PAGE = Template("""<!doctype html><html><head><title>GLM-5.2 chat</title>
+CHAT_PAGE = Template("""<!doctype html><html><head><title>$model chat</title>
 <meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE + """<style>
 .wrap{max-width:52rem;display:flex;flex-direction:column;height:100vh;padding-bottom:1rem}
 #log{flex:1;overflow-y:auto;padding:.5rem 0}
 .msg.bot{background:var(--card)}
 </style></head><body><div class=wrap>
-<header class=hero><h1><b>GLM-5.2</b> quick chat</h1>
+<header class=hero><h1><b>$model</b> quick chat</h1>
 <span class=sub><a href="/?token=$token">&larr; status &amp; dashboard</a></span></header>
 """ + CHAT_WIDGET + CHAT_JS + """<script>inp.focus();</script></div></body></html>""")
 
-PAGE_HEAD = ("""<!doctype html><html><head><title>GLM-5.2 EXL3 turnkey</title>
-<meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE +
-             """</head><body>""")
+def page_head(title="vLLM turnkey"):
+    return ("<!doctype html><html><head><title>" + html.escape(title) + "</title>"
+            '<meta name=viewport content="width=device-width,initial-scale=1">'
+            + STYLE + "</head><body>")
 
 # ==========================================================================
 # self-service configuration
@@ -441,6 +454,63 @@ def _val_ctx():
     except Exception:
         ctx["state_keys"] = []
     return ctx
+
+
+def boot_notes(limit=40):
+    """The entrypoint's own warnings. RunPod has no console view and no CLI log
+    command, so a boot warning that only reaches stdout is invisible exactly
+    when it matters most."""
+    if gc is None:
+        return []
+    try:
+        with open(os.path.join(gc.runtime_dir(), "boot-notes.log")) as f:
+            return [ln.rstrip() for ln in f][-limit:]
+    except OSError:
+        return []
+
+
+def deployment() -> dict:
+    """What is ACTUALLY configured, for every user-visible string.
+
+    The header used to advertise a fixed model name, context length, KV dtype,
+    speculation depth and GPU model regardless of what was actually running.
+    Under another family or another GPU count every clause of that is false, and
+    on a live pod it caused two correctly-honoured knobs to be reported as
+    ignored."""
+    st = status()
+    out = {"title": "vLLM turnkey", "model": "", "family": "", "chips": [],
+           "gpus": st.get("gpus", ""), "gpu_name": st.get("gpu_name", ""),
+           "provider": st.get("provider", "unknown"), "sshd": st.get("sshd", "")}
+    if gc is None:
+        return out
+    try:
+        eff, _src, _notes = gc.resolve()
+    except Exception:
+        return out
+    fam = gc.family(eff.get("MODEL_FAMILY"))
+    variant = gc.VARIANTS.get(eff.get("MODEL_VARIANT"), {})
+    served = str(eff.get("SERVED_MODEL_NAME", "")).split()[0] or "model"
+    out["model"] = served
+    out["family"] = fam["label"]
+    out["title"] = f"{served} turnkey"
+    out["context"] = int(eff.get("MAX_MODEL_LEN") or 0)
+    out["served_names"] = str(eff.get("SERVED_MODEL_NAME", served)).split()
+    ctx = out["context"]
+    ctx_s = f"{ctx // 1024}K" if ctx >= 1024 else str(ctx)
+    chips = [f"{ctx_s} context", f"{eff.get('KV_CACHE_DTYPE')} KV"]
+    if eff.get("MTP_TOKENS"):
+        chips.append(f"MTP-{eff['MTP_TOKENS']}")
+    else:
+        chips.append("no speculation")
+    tp = eff.get("TENSOR_PARALLEL_SIZE")
+    gpus = out["gpus"] or tp
+    chips.append(f"TP={tp}" + (f" of {gpus} GPU" + ("s" if str(gpus) != "1" else "")
+                               if str(gpus) != str(tp) else
+                               f" x {out['gpu_name'] or 'GPU'}"))
+    out["chips"] = chips
+    out["repo"] = variant.get("repo", "")
+    out["tested"] = fam.get("tested", True)
+    return out
 
 
 def config_enabled() -> bool:
@@ -570,10 +640,13 @@ def render_config(tok: str, secure: bool, banner=None, banner_cls="",
     head, ok, detail = correctness()
     tok_q = html.escape(tok, quote=True)
 
-    parts = ["<!doctype html><html><head><title>GLM-5.2 configuration</title>"
+    dep = deployment()
+    parts = ["<!doctype html><html><head><title>"
+             + html.escape(dep["model"] or "vLLM") + " configuration</title>"
              "<meta name=viewport content='width=device-width,initial-scale=1'>",
              STYLE, CONFIG_STYLE, "</head><body><div class=wrap>",
-             "<header class=hero><h1><b>GLM-5.2</b> configuration</h1>"
+             "<header class=hero><h1><b>"
+             + html.escape(dep["model"] or "vLLM") + "</b> configuration</h1>"
              f"<span class=sub><a href='/?token={tok_q}'>&larr; status &amp; dashboard</a>"
              + (f" &middot; <a href='/terminate?token={tok_q}'>terminate</a>"
                 if terminate_available() else "")
@@ -1019,13 +1092,21 @@ def render(secure: bool, tok: str = "") -> bytes:
                 f"<span class={cls}>{html.escape(value)}</span></div></div>")
 
     real0 = st.get("api_key", "")
+    dep = deployment()
     chat_ok = bool(secure and TOKEN and real0 and endpoint and serving)
     wrap_cls = "wrap wide" if chat_ok else "wrap"
-    parts = [PAGE_HEAD,
+    subtitle = " &middot; ".join(html.escape(c) for c in dep["chips"])
+    parts = [page_head(dep["title"]),
              f'<div class="{wrap_cls}"><div class=layout><main>',
-             "<header class=hero><h1><b>GLM-5.2</b> EXL3 turnkey</h1>"
-             "<span class=sub>512K context &middot; fp8 KV &middot; MTP-3 &middot; "
-             "4&times; RTX PRO 6000</span></header>",
+             f"<header class=hero><h1><b>{html.escape(dep['model'] or 'vLLM')}</b> "
+             f"turnkey</h1><span class=sub>{subtitle}</span></header>",]
+    if not dep.get("tested", True):
+        parts.append("<div class=card style='border-color:#e5484d'><h3>Untested "
+                     "preset</h3><div class=v>" + html.escape(dep["family"]) +
+                     "</div><div class=sub>Nobody has booted this image with this "
+                     "model family. Treat every default as a starting point.</div>"
+                     "</div>")
+    parts += [
              "<div class=grid>",
              card("Weights", weights, weights == "ready"),
              card("TLS / DNS", st.get("tls", "not configured"),
@@ -1034,6 +1115,19 @@ def render(secure: bool, tok: str = "") -> bytes:
              card("DRAM KV offload", st.get("offload", "off"),
                   st.get("offload", "off") != "off"),
              "</div>"]
+    parts.append(
+        "<div class=card><h3>Deployment</h3>"
+        "<div class=v>%s</div>"
+        "<div class=sub style='margin-top:.3rem'>%s%s%s</div></div>" % (
+            html.escape(dep["family"] or "unknown family"),
+            ("repo <code>%s</code>" % html.escape(dep.get("repo", "")))
+            if dep.get("repo") else "",
+            (" &middot; %s GPU(s)%s" % (html.escape(str(dep["gpus"])),
+                                        (" " + html.escape(dep["gpu_name"]))
+                                        if dep["gpu_name"] else ""))
+            if dep.get("gpus") else "",
+            (" &middot; provider %s" % html.escape(dep["provider"]))
+            if dep.get("provider") and dep["provider"] != "unknown" else ""))
     if gc is not None:
         # "Engine: serving" above is a LIVENESS statement. Correctness is a
         # separate card on purpose — every silent-corruption configuration this
@@ -1074,13 +1168,24 @@ def render(secure: bool, tok: str = "") -> bytes:
                          'Terminate instance</a>')
         parts.append('</div></div>')
         if key.startswith("<"):
-            parts.append("<p class=sub>The API key is printed in the instance logs "
-                         "(vast console &rarr; Logs, look for <code>API KEY</code>).</p>")
+            where = {
+                "vastai": "the instance logs (vast console &rarr; Logs, look for "
+                          "<code>API KEY</code>)",
+                "runpod": "the pod's container logs. <b>RunPod exposes no console log "
+                          "view and no CLI log command</b>, so if you cannot see them, "
+                          "open this page with the token from the pod environment "
+                          "(<code>OPEN_BUTTON_TOKEN</code>) &mdash; it is shown here "
+                          "once the token check passes",
+            }.get(dep.get("provider"), "the container logs, or set "
+                                       "<code>VLLM_API_KEY</code> yourself")
+            parts.append(f"<p class=sub>The API key is printed in {where}.</p>")
         if serving:
             parts.append(METRICS_SECTION.substitute(ep=endpoint, key=key))
         parts.append("<h2>Client configs</h2>")
         for name, where, body in SNIPPETS:
-            filled = Template(body).substitute(ep=endpoint, key=key)
+            filled = Template(body).substitute(
+                ep=endpoint, key=key, model=dep["model"] or "model",
+                ctx=dep.get("context") or 32768)
             parts.append(f"<details><summary>{html.escape(name)}</summary>"
                          f"<p class=sub><code>{html.escape(where)}</code></p>"
                          f"<pre>{html.escape(filled)}</pre></details>")
@@ -1096,6 +1201,14 @@ def render(secure: bool, tok: str = "") -> bytes:
             parts.append('<h2>Model</h2><div class=card>'
                          '<pre id=modeljson style="max-height:16rem;margin:0;border:none">'
                          'loading /v1/models&hellip;</pre></div>')
+    notes = boot_notes()
+    if notes:
+        parts.append(
+            "<h2>Boot log highlights</h2><div class=card><pre style='margin:0;"
+            "border:none;max-height:14rem'>" + html.escape("\n".join(notes)) +
+            "</pre></div><p class=sub>Warnings the entrypoint emitted before the "
+            "engine came up. This page carries them because some providers expose "
+            "no container console at all.</p>")
     if not serving:
         # keep boot status fresh; once serving, the dashboard polls instead
         parts.append("<script>setTimeout(function(){location.reload()},20000)</script>"
@@ -1103,7 +1216,8 @@ def render(secure: bool, tok: str = "") -> bytes:
     parts.append("</main>")
     if chat_ok:
         parts.append("<aside class=chatpane><h2>Quick chat</h2>" + CHAT_WIDGET +
-                     "</aside>" + Template(CHAT_JS).substitute(ep=endpoint, key=real0))
+                     "</aside>" + Template(CHAT_JS).substitute(
+                         ep=endpoint, key=real0, model=dep["model"] or "model"))
     parts.append("</div></div></body></html>")
     return "".join(parts).encode()
 
@@ -1287,6 +1401,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(403, "chat needs TLS + token gate + a running endpoint")
                 return
             body = CHAT_PAGE.substitute(ep=st["endpoint"], key=key,
+                                        model=deployment()["model"] or "model",
                                         token=html.escape(tok, quote=True)).encode()
         elif url.path == "/config":
             if not self._config_guard(tok):

@@ -95,7 +95,7 @@ FAMILIES = {
                       "VLLM_EXL3_TRELLIS_MAX_M", "VLLM_EXL3_TRELLIS_MIN_M",
                       "VISION", "VISION_CHUNKS", "BASE_GENERATION"),
         "defaults": {
-            "TENSOR_PARALLEL_SIZE": 4, "MAX_MODEL_LEN": 524288, "MTP_TOKENS": 3,
+            "MAX_MODEL_LEN": 524288, "MTP_TOKENS": 3,
             "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
             "GPU_MEMORY_UTILIZATION": 0.93, "GPU_BLOCKS_OVERRIDE": 2048,
             "KV_CACHE_DTYPE": "fp8", "SERVED_MODEL_NAME": "GLM-5.2",
@@ -138,10 +138,10 @@ FAMILIES = {
         "spec_method": "qwen3_next_mtp",
         "own_knobs": (),
         "defaults": {
-            # 1, not 4: 27B at BF16 is ~55.6 GB and fits one 96 GB card, and the
-            # whole point of this preset is that the image can start on a 1-GPU
-            # host at all.
-            "TENSOR_PARALLEL_SIZE": 1,
+            # No TP here either: it comes from the GPUs actually visible. 27B at
+            # BF16 is ~55.6 GB, so it fits one 96 GB card, which is what makes
+            # this preset useful on a single-GPU rental — but on a 4-GPU box
+            # there is no reason to leave three idle.
             "MAX_MODEL_LEN": 262144,        # native; 1M needs YaRN rope scaling
             "MTP_TOKENS": 2,                # the model card's number
             "MAX_NUM_SEQS": 8,
@@ -261,15 +261,17 @@ KNOBS = [
              "run on one GPU and be iterated on, not because it is known to work. "
              "Changing family triggers a fresh download.")),
 
-    dict(key="TENSOR_PARALLEL_SIZE", type="int", default=4, min=1, max=8,
+    dict(key="TENSOR_PARALLEL_SIZE", type="int", default=4, min=1, max=16,
          group="Parallelism", scope="engine", label="Tensor parallel size",
          rationale=(
-             "How many GPUs the model's weights are sharded across. This was a "
-             "hard-coded 4 in the serve line, which meant the image could not start on "
-             "a 1-GPU host at all — it aborted at the GPU count check before reaching "
-             "vLLM. GLM-5.2 needs 4; Qwen3.6-27B at BF16 is ~56 GB and fits one 96 GB "
-             "card, so the Qwen preset defaults to 1. It must be <= the number of "
-             "visible GPUs, and the instance is refused at boot if it is not.")),
+             "How many GPUs the model's weights are sharded across. DEFAULTS TO THE "
+             "NUMBER OF GPUs THIS CONTAINER CAN ACTUALLY SEE — not to 4, which is what "
+             "the serve line hard-coded and what made the image unstartable on any "
+             "other shape of host. Detection intersects nvidia-smi with "
+             "NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES (including CUDA's rule "
+             "that enumeration stops at the first invalid entry), and a provider's "
+             "advertised count is treated as corroboration, not truth. Setting it "
+             "explicitly overrides detection; it can never exceed the visible count.")),
 
     dict(key="MODEL_VARIANT", type="choice", default="exl3-tr3",
          choices=list(VARIANTS), group="Model", scope="download",
@@ -361,14 +363,16 @@ KNOBS = [
              "cause. This is a config trap, not a bug. vLLM's name for the NVFP4 "
              "modelopt draft is 'modelopt_fp4'. Left empty, the draft type sets it.")),
 
-    dict(key="DCP", families=("glm52",), type="choice", default="4", choices=["1", "2", "4"],
+    dict(key="DCP", families=("glm52",), type="choice", default="4",
+         choices=["1", "2", "4", "8"],
          group="Parallelism", scope="engine", label="Decode context parallel",
          rationale=(
              "Shards the KV cache across GPUs at decode (--decode-context-parallel-size). "
-             "DCP=4 is what makes a 512K pool fit at all: each rank holds a quarter of "
-             "the KV. Lowering it replicates KV instead, roughly dividing the usable "
-             "context by the same factor, and is only interesting when debugging a "
-             "suspected DCP/a2a issue. Must divide the tensor-parallel size (4).")),
+             "It defaults to the tensor-parallel size, i.e. every rank holds a slice "
+             "of the KV, which is what makes a 512K pool fit at all. Lowering it "
+             "replicates KV instead, roughly dividing the usable context by the same "
+             "factor, and is only interesting when debugging a suspected DCP/a2a "
+             "issue. Must divide the tensor-parallel size.")),
 
     dict(key="MAX_NUM_SEQS", type="int", default=8, min=1, max=256,
          group="Concurrency", scope="engine", label="Max concurrent sequences",
@@ -831,6 +835,20 @@ def applies_to(knob, family_name) -> bool:
     return not fams or (family_name or "glm52") in fams
 
 
+def detected_gpu_count(env=None):
+    """What the entrypoint measured, passed down as GLM_GPU_COUNT.
+
+    The entrypoint runs gpu_detect.py once at boot (it is the only thing allowed
+    to shell out to nvidia-smi) and exports the result. Resolution reads that,
+    so nothing in the config layer depends on being able to see a GPU."""
+    env = effective_env(env)
+    try:
+        n = int(env.get("GLM_GPU_COUNT", ""))
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
 def resolve_family(state_values, env_values) -> str:
     """The family has to be settled before anything else can be resolved,
     because it supplies a defaults layer of its own."""
@@ -872,6 +890,7 @@ def resolve(state_values=None, env_values=None):
     fam = family(fam_name)
     fam_defaults = fam.get("defaults", {})
 
+    ngpu = detected_gpu_count(env_values if env_values else None)
     effective, sources = {}, {}
     for knob in KNOBS:
         key = knob["key"]
@@ -884,6 +903,15 @@ def resolve(state_values=None, env_values=None):
                 value, src = coerce(knob, fam_defaults[key]), "family"
             except ConfigError as e:
                 notes.append(f"family default {e}")
+        # DETECTED layer: above the family, below the environment. The hardware
+        # in front of us outranks a preset's guess about hardware, and both are
+        # outranked by someone saying what they want.
+        if ngpu and key == "TENSOR_PARALLEL_SIZE":
+            value, src = min(ngpu, knob["max"]), "detected"
+        if ngpu and key == "DCP":
+            # DCP defaults to the TP size: one KV shard per rank. It has to
+            # divide TP, and TP is the detected count at this point.
+            value, src = str(min(ngpu, 8)), "detected"
         if key in env_values:
             try:
                 value, src = coerce(knob, env_values[key]), "env"
@@ -1057,11 +1085,27 @@ def validate(cfg: dict, context=None):
         err("tp-exceeds-gpus", ["TENSOR_PARALLEL_SIZE"],
             f"tensor-parallel size {tp} needs {tp} GPUs and this host has {ngpu}. The "
             "engine cannot start. Lower it, or rent a host with more GPUs.")
+    if is_glm and tp < 4:
+        err("glm-needs-four-ranks", ["TENSOR_PARALLEL_SIZE", "MODEL_FAMILY"],
+            f"the GLM-5.2 753B checkpoint is ~308 GiB of weights (~77 GiB/rank at "
+            f"TP=4). At TP={tp} it cannot fit: even on 96 GB cards that is "
+            f"{308 // max(tp, 1)} GiB per rank before any KV cache. Use 4 or more "
+            "GPUs, or switch to a family sized for this host (MODEL_FAMILY=qwen36).")
     if is_glm and tp != 4:
         warn("tp-off-measured", ["TENSOR_PARALLEL_SIZE"],
-             f"every GLM-5.2 number in this repo was measured at TP=4; {tp} is "
-             "unexplored territory for this family (and the 753B weights do not fit in "
-             "fewer than 4 x 96 GB anyway).")
+             f"every measured GLM-5.2 number in this repo — the 835,584-token pool, "
+             f"121.3 tok/s decode, needle 5/5 at 490K — comes from TP=4 on 4x RTX PRO "
+             f"6000. At TP={tp} none of them should be assumed to hold: the KV pool "
+             "pin (GPU_BLOCKS_OVERRIDE), the DCP shard count and the memory profile "
+             "all move with the rank count. The CUDA-graph/trellis window arithmetic "
+             "(MAX_NUM_SEQS x (1+MTP_TOKENS)) is a per-kernel batch width and does NOT "
+             "move with TP — that one rule still applies unchanged.")
+    if is_glm and tp != 4 and cfg["GPU_BLOCKS_OVERRIDE"]:
+        warn("pool-pin-off-measured", ["GPU_BLOCKS_OVERRIDE", "TENSOR_PARALLEL_SIZE"],
+             f"the KV pool is pinned at {cfg['GPU_BLOCKS_OVERRIDE']} blocks, a value "
+             "chosen to give exactly 512K tokens at TP=4/DCP=4. At a different rank "
+             "count that pin no longer means 512K; set GPU_BLOCKS_OVERRIDE=0 to let "
+             "vLLM size the pool for the hardware it actually has.")
 
     # 1. concurrency vs the capture + trellis windows -----------------------
     # GLM/EXL3-SCOPED. The trellis window belongs to the EXL3 kernel; applying

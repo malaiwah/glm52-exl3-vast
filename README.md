@@ -45,12 +45,15 @@ resolves `defaults < family < startup env < state file` inside it. Design note:
 [docs/model-families.md](docs/model-families.md).
 
 ```
--e MODEL_FAMILY=qwen36     # Qwen3.6-27B, dense, TP=1 — runs on a SINGLE GPU
+-e MODEL_FAMILY=qwen36     # Qwen3.6-27B, dense — runs on a SINGLE GPU
 ```
 
-- `--tensor-parallel-size` was a **literal 4**, so the image aborted at the GPU
-  gate on any smaller host. It is now the `TENSOR_PARALLEL_SIZE` knob, and the
-  gate compares against it and names the fix.
+- **Tensor parallelism defaults to the GPUs you actually have.** It was a
+  literal 4, then a knob defaulting to 4; both made the image abort on any other
+  shape of host. Detection intersects `nvidia-smi` with `NVIDIA_VISIBLE_DEVICES`
+  and `CUDA_VISIBLE_DEVICES` (including CUDA's rule that enumeration stops at the
+  first invalid entry), treats the provider's advertised count as corroboration
+  only, and **refuses to start rather than guess** if it finds nothing.
 - Everything MLA/EXL3/GLM-specific — DCP, `B12X_MLA_SPARSE`, the sparse-indexer
   `hf_overrides`, the glm47/glm45 parsers, the MTP78 draft apparatus, the vision
   wrapper, the `VLLM_EXL3_*`/`B12X_*` environment — is supplied by the GLM family
@@ -61,6 +64,16 @@ resolves `defaults < family < startup env < state file` inside it. Design note:
   trellis/DCP/vision rules are GLM-scoped for the same reason.
 - The **long-context needle probe is family-independent**: short prompts are
   insufficient for any model, and a family cannot opt out of being verified.
+
+**Check a configuration without renting anything:**
+
+```
+docker run --rm -e CONFIG_SMOKE=1 -e MODEL_FAMILY=qwen36 ghcr.io/malaiwah/glm52-exl3-vast:latest
+```
+
+resolves every knob (with its source), prints the repo and directory it *would*
+download, and prints the **exact vLLM argv** — then exits. No download, no GPU,
+no landing page, no API key, no DNS. Run this before paying for anything.
 
 > **The Qwen3.6 preset is UNVALIDATED.** Nobody has booted this image with it.
 > The repo, context length, speculation method and reasoning parser are taken
@@ -380,7 +393,8 @@ existing endpoint:
 | `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures and logs live |
 | `MODEL_FAMILY` | `glm52` | `qwen36` selects the untested Qwen3.6-27B preset (dense, TP=1, 256K context) |
 | `TENSOR_PARALLEL_SIZE` | family (`4` GLM / `1` Qwen) | number of GPUs to shard weights across; must be <= the GPUs present |
-| `SSHD` | `auto` | `auto` starts sshd when the provider injected `PUBLIC_KEY` (RunPod); `0` never, `1` always |
+| `SSHD` | `auto` | `auto` starts sshd when the provider injected `PUBLIC_KEY` (RunPod); `0` never, `1` always. **If the image has no sshd binary it says so and there is no shell access** — the landing page is then the only way in |
+| `CONFIG_SMOKE` | `0` | `1` resolves the config, prints the argv and exits without downloading or touching a GPU |
 | `SSHD_INSTALL` | `0` | `1` apt-gets openssh-server at boot if the image has no sshd |
 | `TERMINATE_ENABLED` | `0` | `1` exposes the terminate control on the landing page (startup env only) |
 | `TERMINATE_LOCKED` | `0` | `1` hard-locks termination for the life of the container (startup env only) |

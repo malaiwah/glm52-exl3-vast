@@ -451,6 +451,13 @@ Beyond termination, these differ in ways that affect this image.
 | **GPU selection** | host filters in the template (4× RTX PRO 6000, disk, bandwidth) | GPU type and count chosen at deploy time; no equivalent of vast's host-level filters for disk speed or network |
 | **billing while idle** | stopped instances keep paying for storage | stopped pods keep paying for volume storage; **network volumes bill whether or not a pod exists** |
 
+### RunPod: renting for tests
+
+Use **community cloud** and filter on `communityCloud: true`. The `lowestPrice`
+GraphQL field reports the community price even for GPUs where community
+capacity does not exist, which is an easy way to plan for $0.50/hr and land on
+a $3.79/hr secure H200.
+
 ### RunPod: expose the ports at creation, or the UI does not exist
 
 **VERIFIED the hard way.** A pod created without `--ports` came up with
@@ -488,6 +495,15 @@ Combined with the ports trap above, that produced the worst possible failure
 mode: a pod that is billing, looks healthy, and is a **black box** — no shell,
 no landing page, only the console log.
 
+**Measured again on 2026-07-26, and it is worse than it looked:** with the image
+running as PID 1 on a live pod, `ssh` was refused while `runpodctl ssh info`
+happily returned an ip and port. The most likely cause is that **the base image
+has no `sshd` binary at all** — in which case the code below cannot start one
+and says so, loudly, in the boot log. That boot log is itself unreachable on
+RunPod, which is why those warnings are now mirrored onto the landing page (§
+"Boot log highlights"). Until someone confirms the binary is present, **assume
+RunPod users get no shell** and treat the landing page as the only channel.
+
 **Decision: start sshd when the provider handed us keys** (`SSHD=auto`, the
 default), rather than documenting "RunPod users get no SSH". The argument:
 
@@ -517,6 +533,14 @@ a rebuild.
 
 The generated host keys are added to the session erase: they are what
 fingerprints this box to a client.
+
+Two fixes after the live run: the injected keys are now installed into
+`authorized_keys` **before** the "is something already on :22?" check — skipping
+the install because a daemon exists was backwards, and would have left a running
+sshd that rejects the only key the provider handed out — and the sshd state
+(`listening on :22` / `no sshd binary in this image` / `failed to start` /
+`disabled`) is reported in the status file and on the landing page instead of
+only in a log nobody can read.
 
 ### What in the current entrypoint assumes vast.ai
 

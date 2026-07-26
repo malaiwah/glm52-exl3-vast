@@ -34,11 +34,12 @@ def section(t):
     print(f"\n=== {t} ===")
 
 
-def resolved(family=None, **state):
+def resolved(family=None, gpus=None, **state):
     values = dict(state)
     if family:
         values["MODEL_FAMILY"] = family
-    return gc.resolve(state_values=values)
+    env = {"GLM_GPU_COUNT": str(gpus)} if gpus else {}
+    return gc.resolve(state_values=values, env_values=env)
 
 
 def ids(findings):
@@ -53,9 +54,12 @@ def errs(findings):
 
 def test_glm_unchanged():
     section("the GLM path is exactly what it was")
-    eff, src, _ = resolved()
+    eff, src, _ = resolved(gpus=4)
     check("family defaults to glm52", eff["MODEL_FAMILY"] == "glm52")
-    check("TP is 4", eff["TENSOR_PARALLEL_SIZE"] == 4)
+    check("TP is 4 on a 4-GPU box, and it is DETECTED not assumed",
+          eff["TENSOR_PARALLEL_SIZE"] == 4 and src["TENSOR_PARALLEL_SIZE"] == "detected",
+          f"{eff['TENSOR_PARALLEL_SIZE']} / {src['TENSOR_PARALLEL_SIZE']}")
+    check("DCP follows TP", eff["DCP"] == "4" and src["DCP"] == "detected")
     check("context is 512K", eff["MAX_MODEL_LEN"] == 524288)
     check("MTP-3", eff["MTP_TOKENS"] == 3)
     check("fp8 KV", eff["KV_CACHE_DTYPE"] == "fp8")
@@ -93,11 +97,13 @@ def test_glm_unchanged():
 
 def test_qwen_preset():
     section("the Qwen preset")
-    eff, src, _ = resolved("qwen36")
-    check("TP defaults to 1 so a 1-GPU host can start",
-          eff["TENSOR_PARALLEL_SIZE"] == 1)
-    check("and that value is attributed to the family layer",
-          src["TENSOR_PARALLEL_SIZE"] == "family")
+    eff, src, _ = resolved("qwen36", gpus=1)
+    check("TP is the detected GPU count, so a 1-GPU host just works",
+          eff["TENSOR_PARALLEL_SIZE"] == 1 and src["TENSOR_PARALLEL_SIZE"] == "detected",
+          f"{eff['TENSOR_PARALLEL_SIZE']} / {src['TENSOR_PARALLEL_SIZE']}")
+    eff8, src8, _ = resolved("qwen36", gpus=8)
+    check("and on an 8-GPU host it uses all 8 rather than leaving 7 idle",
+          eff8["TENSOR_PARALLEL_SIZE"] == 8)
     check("context is the card's native 262144", eff["MAX_MODEL_LEN"] == 262144)
     check("MTP depth is the card's 2", eff["MTP_TOKENS"] == 2)
     check("KV dtype is auto, not the MLA fp8 default", eff["KV_CACHE_DTYPE"] == "auto")
@@ -233,11 +239,18 @@ def test_gpu_count_gate():
     msg = [x["message"] for x in f if x["id"] == "tp-exceeds-gpus"][0]
     check("and the message says how many are needed vs found",
           "needs 4 GPUs and this host has 1" in msg, msg)
-    eff, _, _ = resolved("qwen36")
+    eff, _, _ = resolved("qwen36", gpus=1)
     check("Qwen at TP=1 on a 1-GPU host is fine",
           "tp-exceeds-gpus" not in errs(gc.validate(eff, {"gpu_count": 1})))
-    check("TP=1 is even expressible for GLM (with a warning)",
-          "tp-off-measured" in ids(gc.validate(resolved(TENSOR_PARALLEL_SIZE=1)[0])))
+    check("and GLM on a 1-GPU host is refused for a better reason than the gate",
+          "glm-needs-four-ranks" in errs(gc.validate(resolved(gpus=1)[0],
+                                                     {"gpu_count": 1})))
+    check("GLM at TP=8 is expressible, with the measured numbers disclaimed",
+          "tp-off-measured" in ids(gc.validate(resolved(TENSOR_PARALLEL_SIZE=8)[0])))
+    msg = [x["message"] for x in gc.validate(resolved(TENSOR_PARALLEL_SIZE=8)[0])
+           if x["id"] == "tp-off-measured"][0]
+    check("and that warning says which numbers do NOT move with TP",
+          "does NOT move with TP" in msg, msg)
     eff, _, _ = resolved("qwen36", TENSOR_PARALLEL_SIZE=4)
     check("Qwen can still be told to use 4 GPUs",
           not errs(gc.validate(eff, {"gpu_count": 4})), str(errs(gc.validate(eff))))
@@ -267,9 +280,9 @@ def test_long_context_gate_is_family_independent():
 
 def test_env_layer_still_wins_over_family():
     section("layering: default < family < env < file")
-    env = {"TENSOR_PARALLEL_SIZE": 2}
+    env = {"TENSOR_PARALLEL_SIZE": 2, "GLM_GPU_COUNT": "8"}
     eff, src, _ = gc.resolve(state_values={"MODEL_FAMILY": "qwen36"}, env_values=env)
-    check("the template env overrides the family default",
+    check("the template env overrides detection",
           eff["TENSOR_PARALLEL_SIZE"] == 2 and src["TENSOR_PARALLEL_SIZE"] == "env",
           f"{eff['TENSOR_PARALLEL_SIZE']} / {src['TENSOR_PARALLEL_SIZE']}")
     eff, src, _ = gc.resolve(state_values={"MODEL_FAMILY": "qwen36",
@@ -277,9 +290,15 @@ def test_env_layer_still_wins_over_family():
                              env_values=env)
     check("and the state file overrides the env",
           eff["TENSOR_PARALLEL_SIZE"] == 3 and src["TENSOR_PARALLEL_SIZE"] == "file")
-    eff, src, _ = gc.resolve(state_values={"MODEL_FAMILY": "qwen36"}, env_values={})
-    check("with neither, the family default stands",
-          eff["TENSOR_PARALLEL_SIZE"] == 1 and src["TENSOR_PARALLEL_SIZE"] == "family")
+    eff, src, _ = gc.resolve(state_values={"MODEL_FAMILY": "qwen36"},
+                             env_values={"GLM_GPU_COUNT": "2"})
+    check("with neither, the DETECTED count stands",
+          eff["TENSOR_PARALLEL_SIZE"] == 2 and src["TENSOR_PARALLEL_SIZE"] == "detected",
+          f"{eff['TENSOR_PARALLEL_SIZE']} / {src['TENSOR_PARALLEL_SIZE']}")
+    eff, src, _ = gc.resolve(state_values={}, env_values={})
+    check("with no detection at all it falls back to the built-in default, and the "
+          "entrypoint refuses to boot on 0 GPUs rather than guessing",
+          src["TENSOR_PARALLEL_SIZE"] == "default")
 
 
 def main():

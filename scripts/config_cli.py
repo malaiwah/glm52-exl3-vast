@@ -100,7 +100,11 @@ def cmd_env(_args):
     for knob in gc.KNOBS:
         key = knob["key"]
         lines.append("export %s=%s" % (key, shlex.quote(gc.to_text(knob, effective[key]))))
-    for key in ("MODEL_REPO", "MODEL_DIRNAME", "QUANTIZATION", "MTP78_MODE",
+    # NB: QUANTIZATION is deliberately NOT exported. --quantization is part of
+    # FAMILY_SERVE_ARGS now (it comes from the variant), and exporting it as well
+    # would be a second source of truth for one flag — the kind of thing the knob
+    # wiring audit exists to catch.
+    for key in ("MODEL_REPO", "MODEL_DIRNAME", "MTP78_MODE",
                 "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK", "SPEC_METHOD"):
         lines.append("export %s=%s" % (key, shlex.quote(str(derived.get(key, "")))))
     # A bash ARRAY, not a string: these values are JSON with spaces and braces,

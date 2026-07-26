@@ -14,10 +14,42 @@
 # known-good one automatically, with its config and log preserved for analysis.
 set -e
 
+SCRIPTS_DIR="${SCRIPTS_DIR:-/opt/scripts}"
 echo "=== vLLM turnkey (GLM-5.2 default; see MODEL_FAMILY) ==="
 nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | head -4 || true
-NGPU=$(nvidia-smi -L 2>/dev/null | wc -l)
+# What can this container ACTUALLY use? nvidia-smi intersected with
+# NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES — see scripts/gpu_detect.py.
+# This is the only place that shells out to nvidia-smi; the config layer reads
+# the result from GLM_GPU_COUNT, so nothing else needs to see a GPU.
+GPU_JSON=$(python3 "${SCRIPTS_DIR:-/opt/scripts}/gpu_detect.py" --json 2>/dev/null || echo '{}')
+NGPU=$(printf '%s' "$GPU_JSON" | python3 -c "import json,sys
+try: print(json.load(sys.stdin).get('count', 0))
+except Exception: print(0)")
 export GLM_GPU_COUNT="$NGPU"
+printf '%s' "$GPU_JSON" | python3 -c "import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit()
+for n in d.get('notes', []): print('>>> gpu: ' + n)" || true
+GPU_NAME=$(printf '%s' "$GPU_JSON" | python3 -c "import json,sys
+try: print(json.load(sys.stdin).get('name', ''))
+except Exception: print('')" 2>/dev/null || echo "")
+export GLM_PROVIDER
+GLM_PROVIDER=$(python3 -c "
+import sys; sys.path.insert(0, '${SCRIPTS_DIR:-/opt/scripts}')
+try:
+    import provider; print(provider.detect())
+except Exception: print('unknown')" 2>/dev/null || echo unknown)
+echo ">>> GPUs visible to this container: $NGPU${GPU_NAME:+ ($GPU_NAME)}  provider: $GLM_PROVIDER"
+if [ "$NGPU" = "0" ]; then
+  # Never silently fall back to 4. A wrong TP is a boot failure either way; the
+  # only thing that changes is whether the user can tell why.
+  echo "FATAL: no usable GPU detected."
+  echo "       nvidia-smi reported nothing, or NVIDIA_VISIBLE_DEVICES/CUDA_VISIBLE_DEVICES"
+  echo "       narrowed the set to zero. This image cannot serve a model without a GPU."
+  echo "       If you believe this is wrong, run:  python3 ${SCRIPTS_DIR:-/opt/scripts}/gpu_detect.py --json"
+  echo "       and set TENSOR_PARALLEL_SIZE explicitly to override the detected count."
+  exit 1
+fi
 # The GPU-count gate used to be `-ge 4` right here, before any configuration was
 # read, because the serve line hard-coded --tensor-parallel-size 4. That made the
 # image refuse to start on a 1-GPU host even for a model that fits on one card.
@@ -46,7 +78,6 @@ fi
 # it survives a container replacement. The runtime dir must NOT be on the volume:
 # a stale restart flag or verify verdict surviving a container swap would fire
 # once more against a config that was never applied.
-SCRIPTS_DIR="${SCRIPTS_DIR:-/opt/scripts}"
 MODEL_ROOT="${MODEL_ROOT:-/workspace}"
 export GLM_STATE_DIR="${GLM_STATE_DIR:-$MODEL_ROOT/.glm-config}"
 export GLM_RUNTIME_DIR="${GLM_RUNTIME_DIR:-/tmp/glm-runtime}"
@@ -62,7 +93,18 @@ CONFIG_ENV="$GLM_RUNTIME_DIR/config.env"
 # with a clean slate and can never inherit a stale "please terminate".
 TERMINATE_FLAG="$GLM_RUNTIME_DIR/terminate-in-progress"
 ENGINE_STOPPED="$GLM_RUNTIME_DIR/engine-stopped"
+BOOT_NOTES="$GLM_RUNTIME_DIR/boot-notes.log"
 mkdir -p "$GLM_STATE_DIR" "$GLM_RUNTIME_DIR" "$GLM_LOG_DIR" "$GLM_STATE_DIR/failures"
+: > "$BOOT_NOTES"
+# Everything important that happens before the engine is up goes BOTH to stdout
+# and to a file the landing page renders. On RunPod stdout is unreachable —
+# there is no console view and no CLI log command — so a boot warning that only
+# reaches stdout may as well not exist. That is how three "silent" defects were
+# diagnosed from a rented pod instead of from a log line.
+boot_note() {
+  echo "$1"
+  printf '%s\n' "$1" >> "$BOOT_NOTES" 2>/dev/null || true
+}
 rm -f "$RESTART_FLAG" "$VERIFY_FILE" "$TERMINATE_FLAG" "$ENGINE_STOPPED"
 
 # MODEL_DIR set in the template env pins the weights regardless of the model
@@ -111,6 +153,11 @@ apply_config() {
   # MODEL_DIR follows the variant unless the template pinned it.
   if [ -n "$MODEL_DIR_PINNED" ]; then
     MODEL_DIR="$MODEL_DIR_PINNED"
+    if [ -n "${MODEL_DIRNAME:-}" ] && [ "$(basename "$MODEL_DIR")" != "$MODEL_DIRNAME" ]; then
+      echo "!!! MODEL_DIR is pinned to $MODEL_DIR but the resolved model is"
+      echo "!!! ${MODEL_REPO:-?} (expected directory '$MODEL_DIRNAME'). Serving from the"
+      echo "!!! pinned path anyway — unset MODEL_DIR to let the family choose it."
+    fi
   else
     MODEL_DIR="$MODEL_ROOT/${MODEL_DIRNAME:-GLM-5.2-EXL3-TR3-3.0bpw}"
   fi
@@ -120,11 +167,53 @@ apply_config() {
 
 apply_config
 
-if [ "$NGPU" -lt "${TENSOR_PARALLEL_SIZE:-4}" ]; then
-  echo "FATAL: tensor-parallel size ${TENSOR_PARALLEL_SIZE:-4} needs ${TENSOR_PARALLEL_SIZE:-4} GPUs, found $NGPU."
-  echo "       Set TENSOR_PARALLEL_SIZE=$NGPU (and pick a model family that fits, e.g."
-  echo "       MODEL_FAMILY=qwen36 for a single 96 GB card), or rent a host with more GPUs."
+# A resolved MODEL_FAMILY the rest of this script does not implement must be a
+# LOUD failure, not a silent fallback. Silently serving GLM-5.2 to someone who
+# asked for another family is the worst outcome available: it downloads hundreds
+# of GB they did not ask for, onto a disk that may not hold it, at rental rates,
+# with the UI reporting progress as though everything were fine.
+case "${FAMILY_ENV_BLOCK:-}" in
+  glm52|generic) ;;
+  *)
+    echo "FATAL: MODEL_FAMILY='${MODEL_FAMILY:-?}' resolved to an engine environment"
+    echo "       block ('${FAMILY_ENV_BLOCK:-}') that this entrypoint does not implement."
+    echo "       Refusing to fall back to GLM-5.2 silently. Known families:"
+    python3 -c "
+import sys; sys.path.insert(0, '$SCRIPTS_DIR')
+import glm_config as gc
+for k, v in gc.FAMILIES.items():
+    print('         %-8s %s' % (k, v['label']))" || true
+    exit 1
+    ;;
+esac
+if [ -z "${MODEL_REPO:-}" ]; then
+  echo "FATAL: no model repository resolved for MODEL_FAMILY='${MODEL_FAMILY:-?}'."
+  echo "       Refusing to guess. Set MODEL_VARIANT or MODEL_DIR explicitly."
   exit 1
+fi
+
+if [ "$NGPU" -lt "${TENSOR_PARALLEL_SIZE:-4}" ]; then
+  echo "FATAL: tensor-parallel size ${TENSOR_PARALLEL_SIZE:-4} needs that many GPUs, found $NGPU."
+  echo "       TENSOR_PARALLEL_SIZE defaults to the detected count, so this means it was"
+  echo "       set explicitly (env or config state) to more than this host has."
+  echo "       Unset it to use $NGPU, or rent a host with more GPUs."
+  exit 1
+fi
+
+# CONFIG_SMOKE=1: resolve everything, print what WOULD be served, and exit
+# before the first byte is downloaded or a GPU is touched. This exists because
+# knobs shipped that the entrypoint did not honour end-to-end, and each was
+# found by renting a GPU instead of by running this.
+#     docker run --rm -e CONFIG_SMOKE=1 -e MODEL_FAMILY=qwen36 <image>
+# The argv half runs further down, once serve_once and the arg builders exist.
+if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  echo "=== CONFIG SMOKE (nothing will be downloaded, no GPU will be touched) ==="
+  python3 "$SCRIPTS_DIR/config_cli.py" show || true
+  echo ">>> model repo    : ${MODEL_REPO:-<unset>}"
+  echo ">>> model dir     : ${MODEL_DIR:-<unset>}"
+  echo ">>> family env    : ${FAMILY_ENV_BLOCK:-<unset>}"
+  echo ">>> spec method   : ${SPEC_METHOD:-<unset>}"
+  echo ">>> GPUs visible  : $NGPU (tensor-parallel ${TENSOR_PARALLEL_SIZE:-4})"
 fi
 
 # ---- optional sshd ----------------------------------------------------------
@@ -141,40 +230,57 @@ fi
 # (SSHD=0) for anyone who wants the smaller surface. Key-only auth, using the
 # key material the provider itself injected — this grants no access that the
 # provider was not already handing out.
+SSHD_STATE="not started"
 setup_sshd() {
   local mode="${SSHD:-auto}"
+  if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+    return 0
+  fi
   if [ "$mode" = "0" ]; then
+    SSHD_STATE="disabled (SSHD=0)"
     echo ">>> sshd: disabled (SSHD=0)"
     return 0
   fi
   # RunPod injects PUBLIC_KEY; vast injects SSH_PUBLIC_KEY and already runs sshd.
   local keys="${PUBLIC_KEY:-}"
   if [ "$mode" = "auto" ] && [ -z "$keys" ]; then
+    SSHD_STATE="not needed (no PUBLIC_KEY; the provider runs its own)"
     return 0
   fi
-  if (ss -tln 2>/dev/null || netstat -tln 2>/dev/null) | grep -q ':22 '; then
-    echo ">>> sshd: something is already listening on :22, leaving it alone"
-    return 0
-  fi
+  # Install the keys FIRST, unconditionally. If some other sshd is already
+  # listening it is still the injected key that has to be in authorized_keys for
+  # the user to get in — skipping the install because a daemon exists was
+  # backwards, and would have left a running sshd that rejects the only key the
+  # provider handed out.
   if [ -n "$keys" ]; then
     mkdir -p /root/.ssh
     touch /root/.ssh/authorized_keys
     # append only what is missing, so a re-run does not grow the file
     printf '%s\n' "$keys" | while IFS= read -r k; do
       [ -n "$k" ] || continue
-      grep -qxF "$k" /root/.ssh/authorized_keys || printf '%s\n' "$k" >> /root/.ssh/authorized_keys
+      if ! grep -qxF "$k" /root/.ssh/authorized_keys 2>/dev/null; then
+        printf '%s\n' "$k" >> /root/.ssh/authorized_keys
+      fi
     done
-    chmod 700 /root/.ssh
-    chmod 600 /root/.ssh/authorized_keys
-    echo ">>> sshd: installed $(grep -c . /root/.ssh/authorized_keys) authorized key(s) from PUBLIC_KEY"
+    chmod 700 /root/.ssh 2>/dev/null || true
+    chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
+    _nkeys=$(grep -c . /root/.ssh/authorized_keys 2>/dev/null || echo 0)
+    boot_note ">>> sshd: ${_nkeys} authorized key(s) installed from PUBLIC_KEY"
+  fi
+  if (ss -tln 2>/dev/null || netstat -tln 2>/dev/null) | grep -q ':22 '; then
+    boot_note ">>> sshd: something is already listening on :22, leaving it alone"
+    SSHD_STATE="already running"
+    return 0
   fi
   if ! command -v sshd >/dev/null 2>&1 && [ ! -x /usr/sbin/sshd ]; then
-    echo "!!! sshd: no sshd binary in this image, so there is NO SHELL ACCESS on"
-    echo "!!! providers that expect the container to run one (RunPod). The landing"
-    echo "!!! page on :1111 is then the only way in — make sure that port is exposed."
-    echo "!!! Rebuild with openssh-server, or set SSHD_INSTALL=1 to apt-get it at boot."
+    SSHD_STATE="no sshd binary in this image"
+    boot_note "!!! sshd: NO sshd BINARY IN THIS IMAGE. There is no shell access on"
+    boot_note "!!! providers that expect the container to run one (RunPod), and the"
+    boot_note "!!! landing page on :1111 is then the ONLY way in — make sure that port"
+    boot_note "!!! was exposed AT POD CREATION, because it cannot be added later."
+    boot_note "!!! Rebuild with openssh-server, or set SSHD_INSTALL=1 to apt-get it."
     if [ "${SSHD_INSTALL:-0}" = "1" ]; then
-      echo ">>> sshd: installing openssh-server (SSHD_INSTALL=1)"
+      boot_note ">>> sshd: installing openssh-server (SSHD_INSTALL=1)"
       if apt-get update -qq; then
         apt-get install -y -qq openssh-server || true
       fi
@@ -185,9 +291,12 @@ setup_sshd() {
   ssh-keygen -A >/dev/null 2>&1 || true
   mkdir -p /run/sshd
   if ${SSHD_BIN:-/usr/sbin/sshd}; then
-    echo ">>> sshd: started on :22 (key-only; expose 22/tcp at pod creation to reach it)"
+    SSHD_STATE="listening on :22"
+    boot_note ">>> sshd: started on :22 (key-only; the port must have been exposed at"
+    boot_note ">>> pod/instance creation to reach it)"
   else
-    echo "!!! sshd: failed to start; the landing page is the only way in"
+    SSHD_STATE="failed to start"
+    boot_note "!!! sshd: FAILED to start; the landing page is the only way in"
   fi
   return 0
 }
@@ -198,8 +307,9 @@ setup_sshd
 STATUS_FILE="${STATUS_FILE:-/tmp/glm-boot-status.json}"
 EP_URL="" TLS_STATE="not configured" HTTPS_HOSTPORT="" CERT_PATH="" KEY_PATH="" OFFLOAD_STATE="off"
 status_update() {
-  printf '{"phase":"%s","endpoint":"%s","tls":"%s","https_hostport":"%s","cert":"%s","keyfile":"%s","offload":"%s","api_key":"%s","model_dir":"%s"}\n' \
-    "$1" "$EP_URL" "$TLS_STATE" "$HTTPS_HOSTPORT" "$CERT_PATH" "$KEY_PATH" "$OFFLOAD_STATE" "${VLLM_API_KEY:-}" "$MODEL_DIR" > "$STATUS_FILE"
+  printf '{"phase":"%s","endpoint":"%s","tls":"%s","https_hostport":"%s","cert":"%s","keyfile":"%s","offload":"%s","api_key":"%s","model_dir":"%s","gpus":"%s","gpu_name":"%s","sshd":"%s","provider":"%s"}\n' \
+    "$1" "$EP_URL" "$TLS_STATE" "$HTTPS_HOSTPORT" "$CERT_PATH" "$KEY_PATH" "$OFFLOAD_STATE" "${VLLM_API_KEY:-}" "$MODEL_DIR" \
+    "${GLM_GPU_COUNT:-?}" "${GPU_NAME:-}" "${SSHD_STATE:-not started}" "${GLM_PROVIDER:-unknown}" > "$STATUS_FILE"
   chmod 600 "$STATUS_FILE" 2>/dev/null || true
 }
 
@@ -208,7 +318,8 @@ status_update() {
 # Needs OPEN_BUTTON_PORT=1111 env + '-p 1111:1111' in the template.
 # It also hosts the config editor, so it gets the state/runtime dirs and the
 # scripts dir (for the shared knob registry in glm_config.py).
-if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ]; then
+if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
+   && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
   status_update booting
   MODEL_DIR="$MODEL_DIR" STATUS_FILE="$STATUS_FILE" GLM_SCRIPTS_DIR="$SCRIPTS_DIR" \
     GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
@@ -217,6 +328,20 @@ if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ]; then
 fi
 
 fetch_weights() {
+  # Which repo do the bytes in this directory actually belong to? A model dir is
+  # keyed by name, but MODEL_DIR can be pinned by the template while MODEL_REPO
+  # moves with the family — and downloading one model on top of another produces
+  # a directory that is neither, with a boot failure a long way from the cause.
+  _repo_marker="$MODEL_DIR/.download-repo"
+  if [ -f "$_repo_marker" ]; then
+    _have=$(cat "$_repo_marker" 2>/dev/null || echo "")
+    if [ -n "$_have" ] && [ "$_have" != "${MODEL_REPO:-}" ]; then
+      echo "FATAL: $MODEL_DIR already holds '$_have' but this configuration wants"
+      echo "       '${MODEL_REPO:-?}'. Refusing to download one model on top of another."
+      echo "       Point MODEL_DIR somewhere else, or delete that directory first."
+      exit 1
+    fi
+  fi
   # Gate on a completion marker, not config.json: small files land early in the
   # parallel download, so config.json existing does not mean the shards made it.
   # snapshot_download resumes/verifies incrementally, so re-running is safe.
@@ -224,7 +349,7 @@ fetch_weights() {
     return 0
   fi
   status_update downloading-weights
-  echo ">>> Downloading ${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw} weights to $MODEL_DIR (resumes if interrupted)"
+  boot_note ">>> Downloading ${MODEL_REPO:-?} (${MODEL_FAMILY:-glm52} family) to $MODEL_DIR"
   if [ -n "${HF_TOKEN:-}" ]; then
     echo ">>> (HF_TOKEN detected: authenticated download)"
   else
@@ -236,7 +361,8 @@ fetch_weights() {
 from huggingface_hub import snapshot_download
 snapshot_download('${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}', local_dir='$MODEL_DIR', max_workers=16)"
   touch "$MODEL_DIR/.download-complete"
-  echo ">>> Weights ready."
+  printf '%s' "${MODEL_REPO:-}" > "$MODEL_DIR/.download-repo" 2>/dev/null || true
+  boot_note ">>> Weights ready (${MODEL_REPO:-?})."
   return 0
 }
 
@@ -610,6 +736,9 @@ unset _k _v _n
 # so it is opt-in and loudly announced. Default stays "always authenticated".
 AUTH="${AUTH:-key}"
 KEYFILE="${MODEL_DIR%/*}/.vllm-api-key"
+if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  AUTH=none            # a smoke run must not mint or persist a key
+fi
 if [ "$AUTH" = "none" ]; then
   VLLM_API_KEY=""
   echo "=================================================================="
@@ -642,7 +771,8 @@ status_update configuring
 # A per-instance name — stable across reboots (keyed to CONTAINER_ID) so DNS
 # records don't pile up in the zone and the LE cert can be reused — is
 # registered at startup and pointed at this instance.
-if [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAIN:-}" ]; then
+if [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAIN:-}" ] \
+   && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
   SUB="glm-${CONTAINER_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
   MYIP="${PUBLIC_IPADDR:-$(curl -s -m 10 https://api.ipify.org)}"
   if [ -z "$MYIP" ]; then
@@ -660,7 +790,8 @@ if [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAI
 fi
 
 TLS_ARGS=()
-if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null; then
+if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null \
+   && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
   CRT="/workspace/.lego/certificates/${ACME_DOMAIN}.crt"
   KEY="/workspace/.lego/certificates/${ACME_DOMAIN}.key"
   # /workspace persists across reboots: reuse a cert with >7 days left instead of
@@ -843,7 +974,7 @@ fi
 # FAMILY_SERVE_ARGS, which the config layer built for the selected MODEL_FAMILY.
 # That is what makes a second model family possible without a second serve line,
 # and what removed `--tensor-parallel-size 4` as a literal.
-vllm serve "$MODEL_DIR" \
+_SERVE_CMD=(vllm serve "$MODEL_DIR" \
   --served-model-name "${SERVED_NAMES[@]}" \
   --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
   --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-4}" \
@@ -859,9 +990,27 @@ vllm serve "$MODEL_DIR" \
   ${FAMILY_SERVE_ARGS[@]+"${FAMILY_SERVE_ARGS[@]}"} \
   ${VISION_ARGS[@]+"${VISION_ARGS[@]}"} \
   ${BLOCKS_ARGS[@]+"${BLOCKS_ARGS[@]}"} ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
-  "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}" \
-  > >(tee -a "$SERVE_LOG") 2>&1
+  "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}")
+# SERVE_PRINT_ONLY: show the exact argv and return, for CONFIG_SMOKE. Printing
+# the ARRAY rather than a reconstructed string is the point — it is the same
+# array the engine gets, quoting and all.
+if [ "${SERVE_PRINT_ONLY:-0}" = "1" ]; then
+  printf '    %q\n' "${_SERVE_CMD[@]}"
+  return 0
+fi
+"${_SERVE_CMD[@]}" > >(tee -a "$SERVE_LOG") 2>&1
 }
+
+if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  compute_offload
+  compute_vision_args
+  warn_capture_window
+  build_spec_args
+  echo ">>> vllm argv that would be executed:"
+  SERVE_PRINT_ONLY=1 serve_once
+  echo "=== CONFIG SMOKE OK — nothing was downloaded, no GPU was touched ==="
+  exit 0
+fi
 
 if [ "${SUPERVISOR:-1}" = "0" ]; then
   prepare_checkpoint

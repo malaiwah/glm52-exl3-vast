@@ -14,7 +14,10 @@ mean anything, and which of the measured failure rules apply.
 |---|---|
 | `scripts/glm_config.py` | `FAMILIES` registry, family-aware resolver, family-scoped validation |
 | `entrypoint.sh` | family-guarded env block, generic serve line + `FAMILY_SERVE_ARGS` |
-| `tests/test_families.py` | 114 assertions: GLM unchanged, Qwen coherent, rules scoped |
+| `scripts/gpu_detect.py` | what the container can actually use, from nvidia-smi ∩ the visibility variables |
+| `tests/test_families.py` | 118 assertions: GLM unchanged, Qwen coherent, rules scoped |
+| `tests/test_gpu_detect.py` | 20 assertions against injected device lists |
+| `tests/test_knob_wiring.py` | every knob has a consumer; the UI hardcodes nothing |
 
 ---
 
@@ -177,24 +180,93 @@ that is the next thing to strip.
 
 ---
 
-## 5. Running on one GPU
+## 5. Tensor parallelism follows the hardware
+
+`--tensor-parallel-size 4` was a literal; then it was a knob defaulting to 4.
+Both are wrong for an image people rent on arbitrary hardware — a 1-, 2- or
+8-GPU host all got 4 and failed opaquely. **It now defaults to the number of
+GPUs the container can actually use**, and the resolution shows up as source
+`detected` in the boot log and on `/config` beside `default`/`family`/`env`/
+`file`.
+
+Counting is `scripts/gpu_detect.py`, and it is not `nvidia-smi -L | wc -l`:
+
+* `NVIDIA_VISIBLE_DEVICES` is what the container runtime was told to expose
+  (`all`, `none`, or a list of indices/UUIDs).
+* `CUDA_VISIBLE_DEVICES` narrows it further inside the container, and CUDA's
+  enumeration rule is unusual: **the list is honoured up to the first invalid or
+  repeated entry and everything after it is dropped**. `0,5,1` on a 4-GPU box
+  yields one device, not two. Getting this wrong sets TP higher than the number
+  of devices torch will enumerate, and the engine dies during init.
+* The two compose; the intersection is what torch sees.
+* A provider's advertised count (`RUNPOD_GPU_COUNT`, `GPU_COUNT`) is
+  **corroboration, never the source**. When it disagrees with what is visible,
+  the boot log says so — a mismatch means the pod is not what it claims.
+* If detection yields zero, the entrypoint **refuses to start** and names the
+  knob, rather than silently falling back to 4. A wrong TP is a boot failure
+  either way; the only thing that changes is whether the user can tell why.
+
+`DCP` follows the detected count too, for the GLM family: one KV shard per rank
+is what the 4-GPU configuration always did, and DCP must divide TP.
+
+### What moves with the rank count, and what does not
+
+Worked through rather than assumed, because the measured GLM numbers all come
+from one 4× RTX PRO 6000 box:
+
+| setting | moves with TP? |
+|---|---|
+| `DCP` | **yes** — it is a KV shard count, one per rank; defaults to TP |
+| `GPU_BLOCKS_OVERRIDE` (the 512K pool pin) | **yes, and it is not automatic**. 2048 blocks was chosen to mean exactly 512K tokens at TP=4/DCP=4. At another rank count that arithmetic no longer holds, so a warning fires and points at `GPU_BLOCKS_OVERRIDE=0` |
+| the memory profile / KV headroom | **yes** — per-rank weights change, so the pool that fits changes |
+| `MAX_NUM_SEQS × (1 + MTP_TOKENS) ≤ 32` | **NO.** This is a per-kernel batch width — the CUDA-graph capture window and the EXL3 trellis window — and has nothing to do with how many ranks exist. The rule applies unchanged at any TP, and the warning says so explicitly so nobody "fixes" it by scaling with GPUs |
+| `dcp-kv-cache-interleave-size 64` | independent of rank count (it is an interleave granularity); left alone |
+
+GLM-5.2 below TP=4 is now a hard **error**, not a warning: 753B is ~308 GiB of
+weights, which is 154 GiB per rank at TP=2 — it cannot fit on any card that
+exists. The message says so and points at `MODEL_FAMILY=qwen36`. TP above 4 is
+allowed with a warning that the published numbers (835,584-token pool,
+121.3 tok/s, needle 5/5 at 490K) were all measured at TP=4 and should not be
+assumed to transfer.
+
+### Running on one GPU
 
 ```
 -e MODEL_FAMILY=qwen36
 ```
 
-is enough: the family sets TP=1 and a 256K context. The GPU-count gate now
-compares against the resolved `TENSOR_PARALLEL_SIZE` rather than a literal 4,
-and refuses with a message naming both numbers and the fix. GLM-5.2 still
-requires 4 GPUs — 753B of weights does not fit in fewer — and asking for TP≠4
-there warns that every measured number in this repo assumed 4.
+is enough. TP comes from detection, so nothing else needs setting.
 
 ---
 
-## 6. Untested
+## 6. Checking a configuration without renting anything
+
+```
+docker run --rm -e CONFIG_SMOKE=1 -e MODEL_FAMILY=qwen36 <image>
+```
+
+`CONFIG_SMOKE=1` resolves the full configuration, prints every knob with its
+source, prints the repo and directory that WOULD be downloaded, and prints the
+**exact argv** the engine would be given — then exits. It downloads nothing,
+touches no GPU, starts no landing page, mints no API key, and issues no ACME or
+DNS calls.
+
+This exists because three separate "the knob was ignored" reports were
+investigated on rented hardware, at real cost, when a local run of this would
+have answered all three in seconds. It is the first thing to run after changing
+anything in the config layer, and the first thing to ask for when someone
+reports that a setting had no effect.
+
+## 7. Untested
 
 - **The Qwen preset has never been booted**, by anyone, with this image. Every
-  value above is either quoted from the model card or reasoned from it.
+  value above is either quoted from the model card or reasoned from it. A live
+  RunPod pod did get as far as resolving it correctly and starting the download
+  (verified: repo, directory, TP and argv are all Qwen), but no engine has run.
+- **GPU detection has never seen a real multi-GPU narrowing.** The logic is
+  tested against injected device lists — the development host's 4 GPUs are busy
+  serving production traffic and were not touched. `CUDA_VISIBLE_DEVICES`
+  semantics in particular are implemented from documentation, not observed.
 - The family-guarded env block: the GLM branch is byte-identical to what shipped
   and is exercised daily, but the `generic` branch (what a non-GLM family gets)
   has never run an engine.
