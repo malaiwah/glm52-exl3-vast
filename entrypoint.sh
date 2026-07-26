@@ -63,22 +63,51 @@ snapshot_download('brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw', local_dir='$MODEL_DIR'
   echo ">>> Weights ready."
 fi
 
-# MTP78 trellis draft overlay (default ON): the MTP draft layer quantized to
-# 3.0bpw EXL3 (all-256-expert, full-corpus calibrated) — validated at BF16
-# acceptance PARITY (MAL 3.06 vs 3.05) while freeing ~3.8 GB/GPU for KV cache.
-# MTP78_TRELLIS=0 reverts to the stock BF16 draft. Needs the deepseek_mtp
-# loader patch (voipmonitor/vllm#11) applied to the image's vLLM at boot.
-MTP78_TRELLIS="${MTP78_TRELLIS:-1}"
-if [ "$MTP78_TRELLIS" = "1" ]; then
-  if [ ! -f "$MODEL_DIR/.mtp78-grafted" ]; then
-    status_update grafting-mtp78
-    echo ">>> MTP78: downloading 3bpw-keep0 trellis overlay (~3.7 GB)"
-    python3 -c "
+# MTP78 trellis draft (default ON) — the MTP draft layer quantized to 3.0bpw EXL3
+# (all-256-expert, full-corpus calibrated), validated at BF16 acceptance PARITY
+# while freeing ~3.8 GB/GPU for KV cache.
+#
+# MTP78_MODE=override (default) builds a SEPARATE draft directory and points
+# --speculative-config at it. The target checkpoint is never modified, so there
+# are no .orig backups, no revert path that can fail halfway, and no on-volume
+# "grafted" marker that can disagree with the container. Our 4-arm QC measured
+# this path as the better one too: MAL 3.548 / 84.9% vs 3.517 / 83.9% grafted.
+#   MTP78_MODE=graft  legacy in-place surgery (kept for rollback)
+#   MTP78_MODE=off    stock BF16 draft
+# MTP78_TRELLIS=0 is still honoured as a synonym for off.
+MTP78_MODE="${MTP78_MODE:-override}"
+[ "${MTP78_TRELLIS:-1}" = "0" ] && MTP78_MODE=off
+MTP78_DRAFT_DIR="$MODEL_DIR/.mtp78-draft"
+DRAFT_MODEL=""
+
+fetch_mtp78_overlay() {
+  [ -d "$MODEL_DIR/.mtp78-overlay/3bpw-keep0" ] && return 0
+  echo ">>> MTP78: downloading 3bpw-keep0 trellis overlay (~3.7 GB)"
+  python3 -c "
 from huggingface_hub import snapshot_download
 snapshot_download('malaiwah/GLM-5.2-EXL3-TR3-MTP78', allow_patterns=['3bpw-keep0/*'], local_dir='$MODEL_DIR/.mtp78-overlay', max_workers=8)"
+}
+
+if [ "$MTP78_MODE" = "override" ]; then
+  status_update preparing-mtp78
+  if python3 /opt/scripts/patch_deepseek_mtp.py; then
+    if fetch_mtp78_overlay && python3 /opt/scripts/build_mtp78_draft.py \
+         "$MODEL_DIR" "$MODEL_DIR/.mtp78-overlay/3bpw-keep0" "$MTP78_DRAFT_DIR"; then
+      DRAFT_MODEL="$MTP78_DRAFT_DIR"
+      echo ">>> MTP78: trellis draft via --speculative-config override (target untouched)"
+    else
+      echo "!!! MTP78: draft build failed — falling back to the in-checkpoint BF16 draft"
+    fi
+  else
+    echo "!!! MTP78: vLLM patch anchor missing in this image — keeping BF16 draft"
+  fi
+elif [ "$MTP78_MODE" = "graft" ]; then
+  if [ ! -f "$MODEL_DIR/.mtp78-grafted" ]; then
+    status_update grafting-mtp78
+    fetch_mtp78_overlay
     if python3 /opt/scripts/patch_deepseek_mtp.py; then
       if python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" "$MODEL_DIR/.mtp78-overlay/3bpw-keep0"; then
-        echo ">>> MTP78: trellis draft active (BF16-parity acceptance, +KV headroom)"
+        echo ">>> MTP78: trellis draft active (grafted in place)"
       else
         echo "!!! MTP78 graft failed — reverting to BF16 draft"
         python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert || true
@@ -90,9 +119,14 @@ snapshot_download('malaiwah/GLM-5.2-EXL3-TR3-MTP78', allow_patterns=['3bpw-keep0
     python3 /opt/scripts/patch_deepseek_mtp.py || true  # image may have been re-pulled
     echo ">>> MTP78: trellis draft already grafted"
   fi
-elif [ -f "$MODEL_DIR/.mtp78-grafted" ]; then
-  echo ">>> MTP78_TRELLIS=0: reverting graft to stock BF16 draft"
-  python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert
+else
+  echo ">>> MTP78 disabled — stock BF16 draft"
+fi
+# A checkpoint grafted by an earlier boot must be reverted before override mode
+# can work, otherwise the target still carries the trellis layer 78.
+if [ "$MTP78_MODE" != "graft" ] && [ -f "$MODEL_DIR/.mtp78-grafted" ]; then
+  echo ">>> Reverting a previous in-place graft (MTP78_MODE=$MTP78_MODE)"
+  python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert || true
 fi
 
 # Vision (default ON): MoonViT-3d tower (Kimi-K2.6, frozen) + Baseten's trained
@@ -339,7 +373,11 @@ echo ">>> Listening sockets at boot (expect only vllm on ${PORT:-8000} + vast ss
 MTP_TOKENS="${MTP_TOKENS:-3}"
 SPEC_ARGS=()
 if [ "$MTP_TOKENS" != "0" ]; then
-  SPEC_ARGS=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS,\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
+  if [ -n "$DRAFT_MODEL" ]; then
+    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS,\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
+  else
+    SPEC_ARGS=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS,\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
+  fi
 fi
 
 status_update starting-engine
