@@ -2,9 +2,9 @@ name: build-and-push
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, entrypoint.sh, landing.py, .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "scripts/**", .github/workflows/build.yml]
   pull_request:
-    paths: [Dockerfile, entrypoint.sh, landing.py, .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "scripts/**", .github/workflows/build.yml]
   workflow_dispatch:
 jobs:
   lint:
