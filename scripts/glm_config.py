@@ -546,6 +546,54 @@ def check_forbidden(values: dict):
                 "Remove the key and try again.")
 
 
+_PID1_ENV = None
+
+
+def pid1_env() -> dict:
+    """The environment of PID 1, read from /proc/1/environ.
+
+    MEASURED ON A LIVE RUNPOD POD: RunPod injects RUNPOD_POD_ID, RUNPOD_API_KEY
+    and friends into the container's MAIN process only. An SSH login shell — or
+    anything else started from a new session — gets a FRESH environment and sees
+    none of them. A helper that reads os.environ and concludes "no provider
+    detected" would be wrong in exactly the situation where a user has SSH'd in
+    to sort out a stuck instance.
+
+    The entrypoint itself is PID 1, so it never needed this; every helper that
+    might be invoked from another session does. Cached: PID 1's environment
+    cannot change under us."""
+    global _PID1_ENV
+    if _PID1_ENV is None:
+        out = {}
+        try:
+            with open("/proc/1/environ", "rb") as f:
+                for item in f.read().split(b"\0"):
+                    if b"=" in item:
+                        k, v = item.split(b"=", 1)
+                        out[k.decode("utf-8", "replace")] = v.decode("utf-8", "replace")
+        except OSError:
+            out = {}
+        _PID1_ENV = out
+    return _PID1_ENV
+
+
+def effective_env(env=None) -> dict:
+    """PID 1's environment, with this process's own environment layered on top.
+
+    An explicit dict is returned untouched — tests and callers that mean a
+    specific environment get exactly that. Otherwise the process's own non-empty
+    variables win (so an operator can still override something in their shell),
+    and anything the shell is missing falls back to what the container was
+    actually started with."""
+    if env is not None:
+        return env
+    merged = dict(pid1_env())
+    for k, v in os.environ.items():
+        if v != "":
+            merged[k] = v
+    return merged
+
+
 def env_flag(env, name, default=False):
     v = (env.get(name) or "").strip().lower()
     if v == "":
@@ -563,7 +611,7 @@ def switches_from_env(env=None) -> dict:
     dashboard can already terminate an instance, so the in-container control is
     a convenience that must be opted into, while the lock is opt-in because a
     locked instance that nobody can unlock is its own failure mode."""
-    env = os.environ if env is None else env
+    env = effective_env(env)
     return {"enabled": env_flag(env, "TERMINATE_ENABLED", False),
             "locked": env_flag(env, "TERMINATE_LOCKED", False),
             "source": "startup environment"}

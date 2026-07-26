@@ -97,9 +97,10 @@ first. Full design note, provider matrix and cited sources:
   any token, only by restarting the container with different env.
 - **vast.ai and RunPod**, auto-detected (`TERMINATE_PROVIDER` overrides). An
   unrecognised provider says so and points at the dashboard instead of failing
-  obscurely. On RunPod, supply `RUNPOD_TERMINATE_API_KEY` (an account key) —
-  it is not confirmed that the pod-scoped key RunPod injects may delete its own
-  pod, and the page checks the credential before you commit.
+  obscurely. On RunPod the pod-scoped key RunPod injects is **verified to
+  terminate its own pod** — no extra credential needed; the page still checks it
+  before you commit, and `RUNPOD_TERMINATE_API_KEY` covers the cases the pod key
+  cannot.
 - **Typed confirmation**: you type the instance id, plus an explicit
   acknowledgement checkbox. No single click can destroy anything.
 - **`TERMINATE_DRY_RUN=1`** runs the whole flow and shows the request it would
@@ -114,10 +115,18 @@ first. Full design note, provider matrix and cited sources:
   volumes an overwrite does not guarantee the old bytes are unreachable, and the
   instance console log in your dashboard is outside our reach entirely.
 
-> **RunPod network volumes:** a network volume survives termination and keeps
-> billing. Everything this template writes lives under `/workspace`, which is
-> where it mounts — so on such a pod the erase is the *only* thing that removes
-> your session data. The page says so in red when it detects one.
+> **RunPod, two things that bite by default:**
+> 1. **Expose the ports when you create the pod** — `--ports "22/tcp,1111/http,8000/http"`.
+>    A pod created without them comes up with `ports: null`: the container runs,
+>    but the landing page, the API and even SSH are unreachable, and a running
+>    pod's ports cannot be changed. You would have to destroy it and re-download
+>    332 GB. (Measured.)
+> 2. **A network volume survives termination and keeps billing** — and RunPod's
+>    stock environment already points `HF_HOME` at it
+>    (`/runpod-volume/.cache/huggingface/`), so your HF token lands there by
+>    default. On such a pod the erase is the *only* thing that removes your
+>    session data; the page says so in red, and the volume itself must be deleted
+>    from the dashboard.
 
 ## Vision (default ON)
 
@@ -341,7 +350,7 @@ existing endpoint:
 | `TERMINATE_ENABLED` | `0` | `1` exposes the terminate control on the landing page (startup env only) |
 | `TERMINATE_LOCKED` | `0` | `1` hard-locks termination for the life of the container (startup env only) |
 | `TERMINATE_PROVIDER` | (auto) | force `vastai` or `runpod` when detection fails |
-| `RUNPOD_TERMINATE_API_KEY` | (unset) | RunPod account API key; the injected pod-scoped key may not be permitted to delete its own pod |
+| `RUNPOD_TERMINATE_API_KEY` | (unset) | RunPod account API key. Not normally needed — the injected pod-scoped key is verified to terminate its own pod — but covers a missing/altered key or targeting another pod |
 | `TERMINATE_DRY_RUN` | `0` | `1` prepares the destroy request and does not send it |
 | `TERMINATE_PROBE` | `1` | `0` skips the read-only credential pre-check |
 

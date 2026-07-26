@@ -47,17 +47,30 @@ RunPod
     one HTTP POST, so shipping a 13.8 MB static Go binary to make it would be
     silly when the container already POSTs to vast's API the same way. It is
     used opportunistically if the image happens to have it.
-  - UNVERIFIED: whether the auto-injected pod-scoped key is actually permitted
-    to delete its own pod. Users report 403s from the pod-scoped key against
-    the REST API, so RUNPOD_TERMINATE_API_KEY (an account key the user supplies)
-    is tried first and a 401/403 is reported as exactly that problem.
+  - VERIFIED on a live pod (2026-07-26): the auto-injected pod-scoped
+    RUNPOD_API_KEY DOES terminate its own pod via GraphQL podTerminate, and the
+    pod disappears within ~20 s. The key is scoped, not powerless: it cannot
+    read account-level data (`myself` returns Unauthorized) but it can read and
+    terminate its own pod. RUNPOD_TERMINATE_API_KEY remains supported for the
+    cases the pod key cannot cover (a missing/altered key, or targeting another
+    pod).
+  - VERIFIED: RunPod injects its variables into PID 1 ONLY. A helper started
+    from a new session — an SSH login shell, say — sees none of them, so the
+    environment is read through glm_config.effective_env(), which layers this
+    process's environment over /proc/1/environ.
+  - VERIFIED: runpodctl is NOT present in the base image, which settles the
+    decision not to depend on it.
 """
 import json
 import os
 import shutil
 import ssl
 import subprocess
+import sys
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import glm_config as gc  # noqa: E402
 
 VAST = "vastai"
 RUNPOD = "runpod"
@@ -158,7 +171,10 @@ class Provider:
     docs = ""
 
     def __init__(self, env=None):
-        self.env = os.environ if env is None else env
+        # effective_env: this process's environment over PID 1's. RunPod injects
+        # only into PID 1, so os.environ alone is wrong for anything invoked
+        # from a separate session.
+        self.env = gc.effective_env(env)
 
     # -- identity ---------------------------------------------------------
     def instance_id(self):
@@ -296,19 +312,27 @@ class RunPod(Provider):
         if self.env.get("RUNPOD_TERMINATE_API_KEY"):
             return "RUNPOD_TERMINATE_API_KEY (account key supplied by the user)"
         if self.env.get("RUNPOD_API_KEY"):
-            return ("RUNPOD_API_KEY (pod-scoped key injected by RunPod — it is NOT "
-                    "confirmed that this key may delete its own pod; see the docs note)")
+            return ("RUNPOD_API_KEY (pod-scoped key injected by RunPod — verified to "
+                    "terminate its own pod)")
         return ""
 
     GRAPHQL_URL = "https://api.runpod.io/graphql"
-    # Verified against RunPod's own SDK (runpod/api/mutations/pods.py,
-    # generate_pod_terminate_mutation) and the published schema
-    # (podTerminate(input: PodTerminateInput!) -> Void).
+    # VERIFIED ON A LIVE POD (2026-07-26): the injected pod-scoped RUNPOD_API_KEY
+    # terminates its OWN pod. `mutation { podTerminate(input:{podId:"<own id>"}) }`
+    # returned {"data":{"podTerminate":null}} — null IS the success shape, the
+    # mutation returns Void — and the pod left `runpodctl pod list` within 20s.
     TERMINATE_MUTATION = 'mutation { podTerminate(input: { podId: "%s" }) }'
-    # A read-only identity query — the same thing `runpodctl user` asks for.
-    # Only `id`: proving the key works does not require pulling the account
-    # holder's email or balance into a rented container.
-    PROBE_QUERY = "query { myself { id } }"
+    # The pre-check must ask a question the POD-SCOPED key is allowed to answer.
+    # MEASURED: `query { myself { id } }` returns
+    #   {"errors":[{"message":"Unauthorized","path":["myself"]}],"data":{"myself":null}}
+    # for a key that can nonetheless terminate its own pod. Probing with `myself`
+    # therefore condemns a perfectly good credential and sends the user off to
+    # fetch an account key they do not need. Reading the pod itself is both
+    # permitted and strictly more useful: it also proves the podId we resolved is
+    # the right one.
+    POD_PROBE_QUERY = 'query { pod(input: {podId: "%s"}) { id desiredStatus } }'
+    # Only used when no pod id is known — an account key with no pod to point at.
+    ACCOUNT_PROBE_QUERY = "query { myself { id } }"
 
     def network_volume_id(self):
         return (self.env.get("RUNPOD_VOLUME_ID") or "").strip()
@@ -325,33 +349,46 @@ class RunPod(Provider):
                 "you tick the erase box. Delete the volume itself from the dashboard "
                 "when you no longer want to pay for it."
                 % self.network_volume_id())
-        if not self.env.get("RUNPOD_TERMINATE_API_KEY") and self.env.get("RUNPOD_API_KEY"):
-            out.append(
-                "Using the pod-scoped key RunPod injects. It is NOT confirmed that this "
-                "key may delete its own pod (users report 403 from it), so if the call "
-                "is refused, relaunch with RUNPOD_TERMINATE_API_KEY set to an account "
-                "API key — or just terminate from the dashboard.")
         return out
 
     def probe(self, transport):
-        """`{ myself { id } }` — a read, not a mutation. Declared
-        destructive=False so it works through an UNARMED transport: the landing
-        page checks the credential without ever holding a loaded gun."""
+        """A read, not a mutation. Declared destructive=False so it works
+        through an UNARMED transport: the landing page checks the credential
+        without ever holding a loaded gun.
+
+        Asks about THIS POD, not about the account, because the pod-scoped key
+        is scoped — see POD_PROBE_QUERY. A pass here means the key can see the
+        pod it is about to terminate, which is the authorisation that matters."""
         if not self.api_key():
             return "rejected", "no API key is available in this pod"
-        body = json.dumps({"query": self.PROBE_QUERY}).encode()
-        assert "mutation" not in self.PROBE_QUERY, "the probe must never mutate"
+        iid = self.instance_id()
+        query = self.POD_PROBE_QUERY % iid if iid else self.ACCOUNT_PROBE_QUERY
+        assert "mutation" not in query, "the probe must never mutate"
         status, text = transport("POST", self.GRAPHQL_URL,
                                  {"Authorization": "Bearer " + self.api_key(),
                                   "Content-Type": "application/json"},
-                                 body, destructive=False)
-        if status == 200 and '"errors"' not in (text or ""):
+                                 json.dumps({"query": query}).encode(),
+                                 destructive=False)
+        text = text or ""
+        if status == 200 and '"errors"' not in text:
+            if iid:
+                # 200 + data.pod == null means the key is fine but the id is not
+                # a pod it can see: worth catching before the user types it out.
+                try:
+                    if (json.loads(text).get("data") or {}).get("pod") is None:
+                        return "rejected", (
+                            f"RunPod accepted the key but returned nothing for pod "
+                            f"{iid}. The pod id may be wrong, or this key belongs to "
+                            "another account. Terminating would fail.")
+                except ValueError:
+                    pass
+                return "ok", f"the API key can read this pod ({iid}) — it can terminate it"
             return "ok", "the API key was accepted by RunPod"
-        if status in (401, 403):
+        if status in (401, 403) or '"Unauthorized"' in text:
             return "rejected", (
-                "RunPod REFUSED this API key (HTTP %s). Terminating will fail. Supply "
-                "an account key as RUNPOD_TERMINATE_API_KEY, or use the dashboard."
-                % status)
+                "RunPod REFUSED this API key for this pod (HTTP %s). Terminating will "
+                "fail. Supply an account key as RUNPOD_TERMINATE_API_KEY, or use the "
+                "dashboard." % status)
         return "unknown", f"the credential check was inconclusive (HTTP {status})"
 
     def terminate(self, transport, runner=None):
@@ -432,10 +469,11 @@ def _explain(status, text, provider):
     if status in (401, 403):
         extra = ""
         if provider.name == RUNPOD:
-            extra = (" RunPod's auto-injected pod-scoped key is reported to be "
-                     "rejected for this call. Supply an account API key as "
-                     "RUNPOD_TERMINATE_API_KEY (Settings -> API Keys) and try again, "
-                     "or terminate from the dashboard.")
+            extra = (" The pod-scoped key RunPod injects is verified to terminate its "
+                     "own pod, so a refusal here means the key is missing or altered, "
+                     "or this pod id belongs to another account. Supply an account API "
+                     "key as RUNPOD_TERMINATE_API_KEY (Settings -> API Keys), or "
+                     "terminate from the dashboard.")
         return ("The provider REFUSED the credential (HTTP %s). THE INSTANCE IS STILL "
                 "RUNNING AND STILL BILLING — terminate it from the dashboard.%s"
                 % (status, extra))
@@ -454,8 +492,12 @@ def _explain(status, text, provider):
 
 def detect(env=None):
     """Which provider are we on? Manual override wins, then unambiguous
-    provider-injected identifiers, then unknown."""
-    env = os.environ if env is None else env
+    provider-injected identifiers, then unknown.
+
+    There is no cloud metadata service to fall back on — VERIFIED unreachable
+    (169.254.169.254) from a RunPod pod — so identity comes entirely from the
+    variables the provider injected into PID 1."""
+    env = gc.effective_env(env)
     override = (env.get("TERMINATE_PROVIDER") or "").strip().lower()
     if override:
         return override if override in PROVIDERS else UNKNOWN
@@ -471,17 +513,18 @@ def detect(env=None):
 
 
 def get(env=None):
-    env = os.environ if env is None else env
+    env = gc.effective_env(env)
     return PROVIDERS.get(detect(env), UnknownProvider)(env)
 
 
 def detection_evidence(env=None):
     """What the detector saw — shown on the confirmation screen so a user can
     tell a misdetection from a missing credential."""
-    env = os.environ if env is None else env
+    env = gc.effective_env(env)
     keys = ("TERMINATE_PROVIDER", "RUNPOD_POD_ID", "RUNPOD_API_KEY",
             "RUNPOD_TERMINATE_API_KEY", "CONTAINER_ID", "CONTAINER_API_KEY",
-            "VAST_API_KEY", "PUBLIC_IPADDR", "RUNPOD_DC_ID")
+            "VAST_API_KEY", "PUBLIC_IPADDR", "RUNPOD_DC_ID", "RUNPOD_GPU_NAME",
+            "RUNPOD_POD_HOSTNAME", "RUNPOD_VOLUME_ID")
     out = {}
     for k in keys:
         v = env.get(k)

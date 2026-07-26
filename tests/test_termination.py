@@ -266,18 +266,48 @@ def test_runpod_terminate():
 def test_runpod_probe_and_volume():
     section("RunPod credential probe and network-volume warning")
     p = provider.get(RUNPOD_ENV)
-    t = StubTransport([(200, '{"data":{"myself":{"id":"user_1"}}}')])
+
+    # MEASURED on a live pod: this is what the pod-scoped key gets back when it
+    # reads its own pod.
+    t = StubTransport([(200, '{"data":{"pod":{"id":"pod-abc123","name":"glm-recon2",'
+                             '"desiredStatus":"RUNNING"}}}')])
     state, detail = p.probe(t)
-    check("a valid key probes ok", state == "ok", detail)
+    check("a pod-scoped key that can read its own pod probes OK", state == "ok", detail)
+    check("the probe asks about THIS POD, not the account",
+          "pod(input:" in t.calls[0]["body"] and "myself" not in t.calls[0]["body"],
+          t.calls[0]["body"])
     check("the probe is a READ, declared non-destructive",
           t.calls[0]["destructive"] is False, str(t.calls))
     check("the probe body carries no mutation", "mutation" not in t.calls[0]["body"],
           t.calls[0]["body"])
-    check("the probe asks only for the account id, not email or balance",
-          "myself" in t.calls[0]["body"] and "email" not in t.calls[0]["body"]
-          and "clientBalance" not in t.calls[0]["body"], t.calls[0]["body"])
-    check("an UNARMED transport can run the probe",
-          provider.HttpTransport.__name__ is not None)   # see the arming test
+
+    # REGRESSION: the old pre-check asked `myself`, which a pod-scoped key is
+    # NOT allowed to answer — measured Unauthorized for a key that could
+    # nonetheless terminate the pod. Probing with `myself` condemned a working
+    # credential and sent the user off for an account key they did not need.
+    check("a pod-scoped Unauthorized on `myself` can no longer be reached "
+          "when a pod id is known",
+          "myself" not in t.calls[0]["body"], t.calls[0]["body"])
+    t = StubTransport([(200, '{"errors":[{"message":"Unauthorized","path":["myself"],'
+                             '"extensions":{"code":"RUNPOD"}}],"data":{"myself":null}}')])
+    state, detail = p.probe(t)
+    check("and if that shape ever comes back, it is reported as rejected",
+          state == "rejected" and "REFUSED" in detail, detail)
+
+    # a valid key pointed at a pod it cannot see
+    state, detail = p.probe(StubTransport([(200, '{"data":{"pod":null}}')]))
+    check("200 with data.pod null is caught as a bad pod id, not a pass",
+          state == "rejected" and "pod id may be wrong" in detail, detail)
+
+    # no pod id at all -> the account query is the only thing left to ask
+    p_noid = provider.get({"TERMINATE_PROVIDER": "runpod", "RUNPOD_API_KEY": "k"})
+    t = StubTransport([(200, '{"data":{"myself":{"id":"user_1"}}}')])
+    state, _ = p_noid.probe(t)
+    check("with no pod id it falls back to the account query",
+          state == "ok" and "myself" in t.calls[0]["body"], t.calls[0]["body"])
+    check("the account fallback asks only for the id, not email or balance",
+          "email" not in t.calls[0]["body"] and "clientBalance" not in t.calls[0]["body"],
+          t.calls[0]["body"])
 
     state, detail = p.probe(StubTransport([(401, "unauthorized")]))
     check("a rejected key is reported before the user types anything",
@@ -286,6 +316,26 @@ def test_runpod_probe_and_volume():
 
     check("vast.ai deliberately has no probe",
           provider.get(VAST_ENV).probe(StubTransport([]))[0] == "unknown")
+
+    # the injected pod key is verified, so nothing should call it suspect
+    src = provider.get(RUNPOD_ENV).key_source()
+    check("the injected pod key is described as verified, not suspect",
+          "verified" in src and "NOT confirmed" not in src, src)
+    check("and no warning tells the user to go get an account key",
+          not any("RUNPOD_TERMINATE_API_KEY" in w
+                  for w in provider.get(RUNPOD_ENV).warnings()),
+          str(provider.get(RUNPOD_ENV).warnings()))
+
+    # MEASURED success shape of the mutation: data.podTerminate is null
+    t = StubTransport([(403, "no"), (200, '{"data":{"podTerminate":null}}')])
+    real_which = provider.shutil.which
+    provider.shutil.which = lambda name: None
+    try:
+        res = p.terminate(t)
+    finally:
+        provider.shutil.which = real_which
+    check("{'data':{'podTerminate':null}} is the measured SUCCESS shape",
+          res["ok"] is True, json.dumps(res)[:200])
 
     p = provider.get(dict(RUNPOD_ENV, RUNPOD_VOLUME_ID="vol-xyz"))
     warns = " ".join(p.warnings())
@@ -299,6 +349,32 @@ def test_runpod_probe_and_volume():
     check("stop-vs-terminate is explicit in the billing copy",
           "not a stop" in provider.RunPod.billing
           and "KEEPS CHARGING" in provider.RunPod.billing, provider.RunPod.billing)
+
+
+def test_pid1_env(tmp):
+    section("environment is read from PID 1, not the calling shell")
+    # RunPod injects into PID 1 only; an SSH login shell sees nothing.
+    saved = gc._PID1_ENV
+    try:
+        gc._PID1_ENV = {"RUNPOD_POD_ID": "pod-from-pid1", "RUNPOD_API_KEY": "k1"}
+        for var in ("RUNPOD_POD_ID", "RUNPOD_API_KEY", "CONTAINER_ID",
+                    "CONTAINER_API_KEY"):
+            os.environ.pop(var, None)
+        check("a shell with an empty environment still detects RunPod",
+              provider.detect() == provider.RUNPOD, provider.detect())
+        check("and resolves the pod id from PID 1",
+              provider.get().instance_id() == "pod-from-pid1")
+        os.environ["RUNPOD_POD_ID"] = "pod-from-shell"
+        check("an explicit value in this process still wins",
+              provider.get().instance_id() == "pod-from-shell")
+        os.environ.pop("RUNPOD_POD_ID")
+        check("an explicitly passed env dict is never merged with PID 1",
+              provider.detect({}) == provider.UNKNOWN)
+        gc._PID1_ENV = {"TERMINATE_ENABLED": "1"}
+        check("the switches are derived from PID 1's environment too",
+              gc.switches_from_env()["enabled"] is True)
+    finally:
+        gc._PID1_ENV = saved
 
 
 def test_failure_reporting():
@@ -532,6 +608,10 @@ def build_fake_instance(root, with_manifest=True):
         w(os.path.join(home, ".bash_history"), "curl -H 'Authorization: Bearer sk-'"),
         w(os.path.join(home, ".cache", "huggingface", "token"), "hf_xxx"),
         w(os.path.join(home, ".runpod", "config.toml"), 'apiKey = "rp-secret"'),
+        # the HF token where RunPod's defaults actually put it: on the network
+        # volume, which termination does NOT clear
+        w(os.path.join(root, "runpod-volume", ".cache", "huggingface", "token"), "hf_v"),
+        w(os.path.join(root, "runpod-volume", "vllm.log"), "prompt text on the volume"),
         w(os.path.join(root, "state", "config.json"), "{}"),
         w(os.path.join(root, "state", "logs", "serve-current.log"), "prompt text"),
         w(os.path.join(root, "state", "failures", "20260726T000000Z", "error.log"), "boom"),
@@ -550,6 +630,9 @@ def build_fake_instance(root, with_manifest=True):
 def erase_env(root):
     md = os.path.join(root, "workspace", "GLM-5.2-EXL3-TR3-3.0bpw")
     return {"MODEL_DIR": md,
+            # RunPod's PID-1 default: the whole HF cache on the network volume
+            "HF_HOME": os.path.join(root, "runpod-volume", ".cache", "huggingface"),
+            "ERASE_EXTRA_ROOTS": os.path.join(root, "runpod-volume"),
             "ERASE_WORKSPACE": os.path.join(root, "workspace"),
             "ERASE_HOME": os.path.join(root, "root"),
             "ERASE_TMP": os.path.join(root, "tmp"),
@@ -806,6 +889,7 @@ def main():
         test_vast_terminate()
         test_runpod_terminate()
         test_runpod_probe_and_volume()
+        test_pid1_env(tmp)
         test_failure_reporting()
         test_switch_defaults(tmp)
         test_state_file_cannot_set_switches(tmp)

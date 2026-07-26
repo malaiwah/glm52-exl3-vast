@@ -64,7 +64,11 @@ class Paths:
     """Every root this module may touch. Overridable so tests stay in a sandbox."""
 
     def __init__(self, env=None):
-        env = os.environ if env is None else env
+        # effective_env, not os.environ: on RunPod the HF cache variables (and
+        # everything else) are injected into PID 1 only, so an erase started
+        # from an SSH session would otherwise miss the network-volume paths
+        # entirely. MEASURED on a live pod.
+        env = gc.effective_env(env)
         self.env = env
         self.model_dir = env.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
         self.workspace = env.get("ERASE_WORKSPACE", env.get("MODEL_ROOT", "/workspace"))
@@ -76,6 +80,35 @@ class Paths:
         self.status_file = env.get("STATUS_FILE", "/tmp/glm-boot-status.json")
         self.keyfile = os.path.join(os.path.dirname(self.model_dir.rstrip("/")) or "/workspace",
                                     ".vllm-api-key")
+        # Extra roots that are not under any of the above. On RunPod a network
+        # volume mounts at /runpod-volume and PID 1's environment points the
+        # whole Hugging Face cache at it by default (VERIFIED: HF_HOME=
+        # /runpod-volume/.cache/huggingface/), so the HF token lands on storage
+        # that SURVIVES termination and keeps billing.
+        extra = env.get("ERASE_EXTRA_ROOTS", "/runpod-volume")
+        self.extra_roots = [r for r in extra.split(":") if r and os.path.isdir(r)]
+
+    def hf_cache_roots(self):
+        """Everywhere a Hugging Face token can land, from the environment that
+        the container actually started with."""
+        roots = []
+        for var in ("HF_HOME", "HUGGINGFACE_HUB_CACHE", "HF_DATASETS_CACHE",
+                    "TRANSFORMERS_CACHE", "HF_HUB_CACHE"):
+            v = self.env.get(var)
+            if v:
+                roots.append(v)
+        xdg = self.env.get("XDG_CACHE_HOME")
+        roots.append(os.path.join(xdg, "huggingface") if xdg
+                     else os.path.join(self.home, ".cache", "huggingface"))
+        for r in self.extra_roots:
+            roots.append(os.path.join(r, ".cache", "huggingface"))
+        seen, out = set(), []
+        for r in roots:
+            r = r.rstrip("/")
+            if r and r not in seen:
+                seen.add(r)
+                out.append(r)
+        return out
 
 
 # --------------------------------------------------------------------------
@@ -214,9 +247,13 @@ def plan(paths=None, keep=()):
              "provider or Hugging Face credential", seen)
     _add_tree(targets, os.path.join(p.home, ".runpod"), "credentials",
               "runpodctl configuration (holds the account API key, written 0644)", seen)
-    if p.env.get("HF_HOME"):
-        _add(targets, os.path.join(p.env["HF_HOME"], "token"), "credentials",
-             "Hugging Face token", seen)
+    # The Hugging Face TOKEN, wherever the cache lives — including a network
+    # volume that termination does not clear. The cached model BLOBS are left
+    # alone for the same reason the weights are: they are public bytes.
+    for root in p.hf_cache_roots():
+        for name in ("token", "stored_tokens"):
+            _add(targets, os.path.join(root, name), "credentials",
+                 f"Hugging Face token in {root}", seen)
     _add_tree(targets, os.path.join(p.home, ".ssh"), "credentials",
               "SSH keys / authorized_keys / known_hosts — identifies you and your hosts",
               seen)
@@ -248,6 +285,12 @@ def plan(paths=None, keep=()):
                 _add(targets, os.path.join(root, f), "logs",
                      "log file at the volume root", seen)
     _add_tree(targets, p.var_log, "logs", "system logs", seen)
+    for root in p.extra_roots:
+        for dirpath, _dirs, files in os.walk(root):
+            for f in files:
+                if f.endswith((".log", ".jsonl", ".ndjson")):
+                    _add(targets, os.path.join(dirpath, f), "logs",
+                         "log file on a mounted volume that outlives this instance", seen)
 
     # 5. runtime scratch ---------------------------------------------------
     _add_tree(targets, p.runtime_dir, "runtime",
@@ -458,6 +501,10 @@ GUARANTEES = {
         "snapshots, or backups taken before now",
         "does NOT reach the instance console log in the provider dashboard, which has "
         "every line this container printed to stdout",
+        "does NOT erase PID 1's environment, which on RunPod holds PUBLIC_KEY (your "
+        "account's SSH public keys) and the pod-scoped API key. The copy written into "
+        "~/.ssh/authorized_keys IS erased; the copy in /proc/1/environ dies with the "
+        "container, not with this erase",
         "is NOT media sanitisation: it defeats recovery tools, not an adversary with "
         "the flash in hand",
     ],

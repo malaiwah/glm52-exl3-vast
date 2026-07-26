@@ -16,7 +16,7 @@ anything.
 | `scripts/terminate_worker.py` | the sequence: stop engine → erase → destroy. Re-checks every gate. |
 | `landing.py` | `/terminate` confirmation UI, `/terminate/lock` ratchet, `/terminate/status`. |
 | `entrypoint.sh` | derives the switches at boot; stands the supervisor down when a termination starts. |
-| `tests/test_termination.py` | 158 assertions, all provider calls stubbed. |
+| `tests/test_termination.py` | 172 assertions, all provider calls stubbed. |
 
 ---
 
@@ -46,24 +46,25 @@ Confidence is high for a second reason: `entrypoint.sh` has been using these
 same two variables against `console.vast.ai/api/v0/instances/{id}/` (a `PUT` to
 set the dashboard label) since long before this feature, and that works.
 
-### RunPod — endpoints verified, in-pod credential **UNVERIFIED**
+### RunPod — verified on live pods
 
-Some of this is now verified by execution: `runpodctl v2.7.2-309512b` was
-installed and authenticated against a real account on the development host
-(read-only commands only — no pod was created, started or destroyed; the
-account has zero balance and `runpodctl pod list` returns `[]`).
+Two pods were created, exercised and destroyed on 2026-07-26
+(`runpod/base:0.6.2-cuda12.4.1`, SECURE cloud). Everything in this table is
+measured from inside a running pod unless marked otherwise.
 
 | | | how known |
 |---|---|---|
-| identifies the pod | `RUNPOD_POD_ID` | documented ("Unique Pod identifier", set automatically). **Not verified by execution** — that needs a running pod |
-| credential | `RUNPOD_API_KEY`, documented as an automatically-set "Pod-scoped API key"; `RUNPOD_TERMINATE_API_KEY` if the user supplies an account key | documented; **not verified by execution** |
-| auth mechanism | a single API key; GraphQL over `https://api.runpod.io/graphql`, `Authorization: Bearer <key>` | **verified**: that is what `runpodctl config --apiKey` stores and uses, and what RunPod's own SDK sends |
-| where the CLI stores it | `~/.runpod/config.toml` — **written world-readable (0644)** | **verified by execution** |
-| REST terminate | `DELETE https://rest.runpod.io/v1/pods/{podId}`, Bearer, `204` on success | documented API reference |
-| GraphQL terminate | `POST https://api.runpod.io/graphql`, Bearer, body `{"query": "mutation { podTerminate(input: { podId: \"<id>\" }) }"}` | **verified from RunPod's own SDK** (`runpod/api/mutations/pods.py`, `generate_pod_terminate_mutation`) and the published schema: `podTerminate(input: PodTerminateInput!) -> Void` |
-| CLI terminate | `runpodctl pod delete <pod-id>` — help text "delete/terminate a pod by id", aliases delete/rm/remove | **verified by execution** |
-| stop is a different verb | `runpodctl pod stop <pod-id>` — "stop a running pod by id" | **verified by execution** |
-| credential probe | `query { myself { id } }` — the read behind `runpodctl user` | **verified**: `runpodctl user` returns id, email, clientBalance, currentSpendPerHr, spendLimit |
+| identifies the pod | `RUNPOD_POD_ID` | **verified present in PID 1** |
+| credential | `RUNPOD_API_KEY`, injected automatically, pod-scoped | **verified present in PID 1** |
+| **self-termination with the injected key** | `mutation { podTerminate(input:{podId:"<own id>"}) }` → `{"data":{"podTerminate":null}}`; pod gone from `runpodctl pod list` within 20 s | **VERIFIED — it works** |
+| success shape | `null`. The mutation returns `Void`, so `data.podTerminate: null` *is* success | **verified** |
+| what the pod key may NOT do | account-level reads: `query { myself { id } }` → `{"errors":[{"message":"Unauthorized","path":["myself"]}],"data":{"myself":null}}` | **verified** |
+| what the pod key MAY read | its own pod: `query { pod(input:{podId:"<own id>"}) { id name desiredStatus } }` → the pod | **verified** |
+| auth mechanism | one API key, `Authorization: Bearer <key>` to `https://api.runpod.io/graphql` | verified (runpodctl config + RunPod's SDK) |
+| where the CLI stores it | `~/.runpod/config.toml`, **world-readable (0644)** | verified on a real install |
+| REST terminate | `DELETE https://rest.runpod.io/v1/pods/{podId}`, Bearer, `204` | documented API reference |
+| CLI terminate / stop | `runpodctl pod delete <id>` vs `runpodctl pod stop <id>` — different verbs, different billing | verified from the CLI; **runpodctl is NOT in the base image** |
+| metadata service | 169.254.169.254 **unreachable** — there is none to fall back on | **verified** |
 
 Sources: [environment variables](https://docs.runpod.io/pods/templates/environment-variables),
 [DELETE /v1/pods/{podId}](https://docs.runpod.io/api-reference/pods/DELETE/pods/podId),
@@ -71,71 +72,74 @@ Sources: [environment variables](https://docs.runpod.io/pods/templates/environme
 [GraphQL manage-pods](https://docs.runpod.io/sdks/graphql/manage-pods),
 [GraphQL schema](https://graphql-spec.runpod.io/),
 [runpod-python mutations](https://github.com/runpod/runpod-python/blob/main/runpod/api/mutations/pods.py),
-[runpod-python graphql client](https://github.com/runpod/runpod-python/blob/main/runpod/api/graphql.py),
-[runpodctl README](https://github.com/runpod/runpodctl/blob/main/README.md).
+[runpod-python graphql client](https://github.com/runpod/runpod-python/blob/main/runpod/api/graphql.py).
+
+**The pod-scoped key is scoped, not weak — and the pre-check has to respect
+that.** An earlier revision of this feature probed the credential with
+`query { myself { id } }`. That is exactly the query a pod-scoped key is *not*
+allowed to answer, so the pre-check condemned a credential that could in fact
+terminate the pod, and told the user to go and fetch an account key they did not
+need. The probe now reads **the pod itself**
+(`pod(input:{podId:"<id>"})`), which the key is permitted to do and which
+additionally proves the pod id we resolved is the right one. `myself` is only
+used as a fallback when no pod id is known. A `200` carrying
+`{"data":{"pod":null}}` is treated as a *failure* — valid key, wrong pod.
+
+**Environment variables come from PID 1, not from your shell.** RunPod injects
+into the container's main process only. A helper started from a new session —
+an SSH login shell being the obvious one — sees *none* of them, which reads
+exactly like "no provider detected" while the box is plainly a RunPod pod. All
+provider identity, the switches and the erase paths therefore go through
+`glm_config.effective_env()`: this process's environment layered over
+`/proc/1/environ`, with an explicitly-passed dict never merged. The entrypoint
+itself is PID 1 and never needed this; everything invocable from another session
+did.
+
+Confirmed present in PID 1: `RUNPOD_API_KEY`, `RUNPOD_POD_ID`,
+`RUNPOD_POD_HOSTNAME`, `RUNPOD_PUBLIC_IP`, `RUNPOD_TCP_PORT_22`, `RUNPOD_DC_ID`,
+`RUNPOD_GPU_COUNT`, `RUNPOD_GPU_NAME`, `RUNPOD_CPU_COUNT`, `RUNPOD_MEM_GB`, and
+`PUBLIC_KEY` (the account's SSH public keys — session evidence, see §4).
 
 **Why no `runpodctl` binary is bundled.** Auth is a plain API key and the
-operation is one HTTP POST; shipping a 13.8 MB static Go binary to make that
-call would be dead weight in an image that already POSTs to vast's API with
-`urllib`. The CLI *is* self-contained and would work, so the trade is real but
-one-sided. The code still uses `runpodctl` opportunistically if the image
-happens to have it — as the last of three attempts, since a binary that is
-already present costs nothing.
+operation is one HTTP POST; a 13.8 MB static Go binary to make that call would
+be dead weight in an image that already POSTs to vast's API with `urllib`. It is
+also **not present in RunPod's own base image**, so depending on it would have
+been wrong twice. The code still uses it opportunistically as the last of three
+attempts if the image happens to carry it.
 
 **Terminate, never stop.** `pod stop` and `pod delete` are different verbs with
 different billing: a stopped pod keeps paying for volume storage. Someone who
-clicks "terminate" means "stop paying". The code only ever deletes, the UI copy
-says "This does a TERMINATE (delete), not a stop… RunPod's 'stop' keeps the
-volume disk and KEEPS CHARGING for its storage", and a test asserts the CLI
-fallback never passes `stop`.
+clicks "terminate" means "stop paying". The code only ever deletes, and a test
+asserts the CLI fallback never passes `stop`.
 
 **The ladder.** REST `DELETE` → GraphQL `podTerminate` → `runpodctl pod delete`
 if present. REST and GraphQL are different services, so a key refused by one is
 not necessarily refused by the other, and trying both costs one extra
-round-trip on a path that only runs once. A GraphQL `200` carrying an `errors`
-block is **not** treated as success.
+round-trip on a path that runs once. A GraphQL `200` carrying an `errors` block
+is **not** treated as success.
 
-**Credential pre-check.** Before the user types anything, `/terminate` runs
-`query { myself { id } }` through an **unarmed** transport and reports "the API
-key was accepted" or "RunPod REFUSED this API key (HTTP 401) — terminating will
-fail". Only `id` is requested: proving a key works does not require pulling the
-account holder's email or balance into a rented container. `TERMINATE_PROBE=0`
-disables it; vast.ai deliberately has no probe, because `CONTAINER_API_KEY` is
-scoped to start/stop/destroy only and a read call could be refused for a key
-that can destroy — a false alarm is worse than no check.
+**`RUNPOD_TERMINATE_API_KEY` is still supported**, for the cases the pod key
+cannot cover: a key that is missing or has been altered, or a deployment that
+wants to terminate a *different* pod. It is no longer presented as the expected
+path, and nothing warns the user to go and get one unless a call actually fails.
 
-**STILL UNVERIFIED, and it is the crux:** whether a running pod actually gets
-`RUNPOD_API_KEY` injected, and if so whether that pod-scoped key may delete its
-own pod. The environment-variables page documents both the variable and the
-"Pod-scoped" wording, but users report `403 Forbidden` from it against the REST
-API ([community thread](https://www.answeroverflow.com/m/1353526942577725501)),
-and RunPod's [scoped API keys](https://www.runpod.io/blog/scoped-api-keys-runpod)
-model does not enumerate which scope permits deletion. Confirming it requires a
-running pod; none could be launched (zero balance), and creating one was out of
-scope. So the design assumes it may fail:
-
-1. `RUNPOD_TERMINATE_API_KEY` (account key, documented in the README) wins if set;
-2. otherwise the pod-scoped `RUNPOD_API_KEY` is tried, and the UI labels it
-   "NOT confirmed that this key may delete its own pod";
-3. the pre-check surfaces a rejected key *before* the user commits;
-4. a 401/403 says exactly what to do: supply `RUNPOD_TERMINATE_API_KEY`, or use
-   the dashboard.
-
-If neither key is present the terminate control degrades to "no API credential
-is available" and points at the dashboard — it never renders a button that
-cannot work.
-
-**Network volumes change the erase calculus.** A RunPod network volume mounts at
-`/workspace` (replacing the volume disk), "must be attached during Pod creation
-and cannot be detached later", is "Retained independently", and RunPod's own
-wording is that terminating "permanently deletes all data not stored in a
-network volume" — while the volume keeps billing. Everything this template
-writes lives under `/workspace`. So **on a pod with a network volume, your API
-key, TLS private key, logs and prompts SURVIVE the termination**, and the erase
-stops being optional hygiene and becomes the only thing that removes them. When
-`RUNPOD_VOLUME_ID` is set, the confirmation page says exactly that, in a red
-banner, and reminds the user that the volume itself must be deleted from the
-dashboard to stop its charges.
+**Network volumes: the flagged case is the DEFAULT case.** A RunPod network
+volume mounts at `/workspace` (replacing the volume disk), "must be attached
+during Pod creation and cannot be detached later", is retained independently,
+and RunPod's own wording is that terminating "permanently deletes all data not
+stored in a network volume" — while the volume keeps billing. On top of that,
+PID 1's environment points the **entire Hugging Face cache** at the volume by
+default: `HF_HOME=/runpod-volume/.cache/huggingface/`, plus
+`HUGGINGFACE_HUB_CACHE`, `HF_DATASETS_CACHE` and friends. So on a stock RunPod
+pod, **your HF token and anything cached through it land on storage that
+termination does not clear and that goes on charging you.** This is not an edge
+case to warn about; it is what happens if you change nothing. The erase resolves
+every HF cache root from PID 1's environment and takes the `token` /
+`stored_tokens` files from each (the cached model *blobs* are left alone for the
+same reason the weights are — public bytes), and it sweeps `/runpod-volume` for
+logs. When `RUNPOD_VOLUME_ID` is set the confirmation page says all of this in a
+red banner, including that the volume itself must be deleted from the dashboard
+to stop its charges.
 
 ### Unknown provider
 
@@ -316,7 +320,7 @@ couple of minutes and covers every file that says a particular person was here.
 
 | group | contents |
 |---|---|
-| credentials | the persisted vLLM API key (`.vllm-api-key`), the boot status file (which carries the key in plaintext for the landing page), `~/.cache/huggingface/token` and `$HF_HOME/token`, provider CLI credentials — including `~/.runpod/config.toml`, which `runpodctl` writes **world-readable (0644)** with the account API key in it (verified on a real install) — plus `~/.vast_api_key` and `~/.config/*`, everything under `~/.ssh` (authorized_keys, known_hosts, any private keys) |
+| credentials | the persisted vLLM API key (`.vllm-api-key`), the boot status file (which carries the key in plaintext for the landing page), the Hugging Face token in **every** cache root resolved from PID 1's environment — on RunPod that defaults to `/runpod-volume/.cache/huggingface`, i.e. storage that termination does NOT clear, provider CLI credentials — including `~/.runpod/config.toml`, which `runpodctl` writes **world-readable (0644)** with the account API key in it (verified on a real install) — plus `~/.vast_api_key` and `~/.config/*`, everything under `~/.ssh` (authorized_keys, known_hosts, any private keys) |
 | tls | all of `/workspace/.lego` — the Let's Encrypt **account key**, the certificate, and the **private key** for your domain |
 | config-state | `config.json`, `known-good.json`, `apply-state.json`, `verify-last.json`, `checkpoint-baseline.json`, the switch state, and every preserved failure directory |
 | logs | `logs/serve-current.log`, `logs/last-good.log`, every `failures/*/error.log`, every `failures/*/analysis.md` (the model's written description of your configuration), `*.log`/`*.jsonl` at the volume root, `/var/log` |
@@ -438,12 +442,38 @@ Beyond termination, these differ in ways that affect this image.
 | | vast.ai | RunPod |
 |---|---|---|
 | **persistent path** | the instance's own disk; this template uses `/workspace` and nothing survives a destroy | **volume disk** mounted at `/workspace` by default; survives stop, destroyed on terminate. A **network volume** also mounts at `/workspace`, replaces the volume disk, and survives the pod entirely |
-| **port exposure** | `-p 8000:8000 -p 1111:1111` in Docker options; external ports arrive as `VAST_TCP_PORT_8000` etc. and are usually *not* the same numbers | HTTP ports are proxied at `https://[POD_ID]-[PORT].proxy.runpod.net` (max 10, **100-second Cloudflare timeout**); raw TCP needs a public IP and symmetrical ports requested above 70000, surfaced as `RUNPOD_TCP_PORT_*` |
+| **port exposure** | `-p 8000:8000 -p 1111:1111` in Docker options; external ports arrive as `VAST_TCP_PORT_8000` etc. and are usually *not* the same numbers | **ports must be requested AT POD CREATION** (`--ports "22/tcp,1111/http,8000/http"`); HTTP ports are proxied at `https://[POD_ID]-[PORT].proxy.runpod.net` (max 10, **100-second Cloudflare timeout**); raw TCP needs a public IP and symmetrical ports above 70000, surfaced as `RUNPOD_TCP_PORT_*` |
+| **HF cache location** | `~/.cache/huggingface` on the instance disk; dies with the instance | PID 1 sets `HF_HOME=/runpod-volume/.cache/huggingface/` — **the network volume by default**, which survives termination and keeps billing |
 | **landing page on :1111** | works; `OPEN_BUTTON_PORT=1111` makes the dashboard's Open button hit it | reachable via the HTTP proxy at `https://<pod>-1111.proxy.runpod.net`; there is no Open button, so the URL must be constructed by hand, and `OPEN_BUTTON_TOKEN` is not injected — **it must be set manually or the config/terminate UI stays disabled** |
 | **streaming / long requests** | direct TCP; a 20-minute generation is fine | the HTTP proxy's **100 s timeout kills long non-streaming requests** (524). Use the TCP-mapped port for the API, not the proxy, or keep responses streaming |
 | **env vars** | template env + injected `CONTAINER_ID`, `CONTAINER_API_KEY`, `PUBLIC_IPADDR`, `VAST_TCP_PORT_*`, `DATA_DIRECTORY`, `SSH_PUBLIC_KEY` | template/pod env + injected `RUNPOD_POD_ID`, `RUNPOD_API_KEY`, `RUNPOD_DC_ID`, `RUNPOD_PUBLIC_IP`, `RUNPOD_TCP_PORT_22`, `RUNPOD_VOLUME_ID`, `PUBLIC_KEY` |
 | **GPU selection** | host filters in the template (4× RTX PRO 6000, disk, bandwidth) | GPU type and count chosen at deploy time; no equivalent of vast's host-level filters for disk speed or network |
 | **billing while idle** | stopped instances keep paying for storage | stopped pods keep paying for volume storage; **network volumes bill whether or not a pod exists** |
+
+### RunPod: expose the ports at creation, or the UI does not exist
+
+**VERIFIED the hard way.** A pod created without `--ports` came up with
+`ports: null`: the container ran, but nothing was reachable — not the landing
+page, not the API, not even SSH. There is no way to add a port to a running
+pod; the pod has to be destroyed and recreated.
+
+That is materially worse than on vast.ai, where the Docker options are part of
+the template and a missed port is visible immediately in the instance's port
+list. On RunPod the pod looks healthy, the logs look healthy, and the entire
+self-service surface — config editor, terminate control, status — is simply
+unreachable, with the only fix being to recreate the pod and lose the 332 GB
+download.
+
+So a RunPod deployment of this image **must** request, at creation time:
+
+```
+--ports "22/tcp,1111/http,8000/http"
+```
+
+`1111/http` is the landing page (config editor + terminate control), `8000/http`
+is the OpenAI-compatible endpoint, `22/tcp` is SSH. Remember the proxy's
+100-second timeout applies to the `/http` ports: keep long generations
+streaming, or reach the API over a TCP-mapped port instead.
 
 ### What in the current entrypoint assumes vast.ai
 
@@ -482,42 +512,46 @@ is the list it would start from.
 
 ## 7. Untested and unverified
 
-**Untested (cannot be tested without destroying a real paid instance):**
+**Verified on live pods (2026-07-26).** Two RunPod pods were created, exercised
+and destroyed: the injected pod-scoped key terminates its own pod through
+GraphQL `podTerminate` (`{"data":{"podTerminate":null}}`, pod gone within 20 s);
+`RUNPOD_POD_ID` / `RUNPOD_API_KEY` and the rest are present in PID 1 and absent
+from a fresh SSH session; `myself` is Unauthorized for the pod key while
+`pod(input:{podId})` is allowed; ports must be requested at creation or nothing
+is reachable; `HF_HOME` defaults onto the network volume; `runpodctl` is not in
+the base image; there is no metadata service.
 
-- No terminate call has ever been sent to either provider. Both are exercised
-  only through stubbed transports. `runpodctl` was installed and authenticated
-  on the development host, and only read-only verbs were run; no pod was
-  created, started, stopped or deleted (the account has zero balance and
-  `runpodctl pod list` returns `[]`).
-- The `runpodctl pod delete` fallback: the command and its "delete/terminate a
-  pod by id" semantics are verified from the CLI itself, but its behaviour
-  *when the REST and GraphQL calls have just been refused* is a hypothesis.
-- The GraphQL `podTerminate` mutation: name, input shape, endpoint and Bearer
-  auth are verified from RunPod's own SDK and schema, but the request has never
-  been sent.
-- Anything requiring a live pod: whether `RUNPOD_POD_ID` and `RUNPOD_API_KEY`
-  are really present in a running container, and whether the pod-scoped key can
-  delete its own pod.
-- The full worker sequence against a live supervisor — the handshake
-  (`terminate-in-progress` → `engine-stopped`) is implemented on both sides and
-  the shell branch passes `bash -n` and shellcheck, but no container has run it.
-- VRAM zeroing: needs torch and GPUs, neither available here.
-- RAM overwrite on a cgroup-limited container: `drop_caches` is expected to be
-  unavailable in most containers and is reported rather than assumed.
-- The erase against a real 332 GB checkpoint directory; only a synthetic layout
-  was used.
+**Still untested (cannot be tested without destroying a paid instance from this
+codebase):**
 
-**Unverified from documentation:**
+- **This code has never issued a terminate call.** The vast.ai and RunPod paths
+  are exercised only through stubbed transports. The RunPod GraphQL request this
+  code builds is byte-identical in shape to the one that was verified by hand,
+  but it has not itself been sent.
+- The vast.ai destroy call. High confidence — the entrypoint already uses the
+  same two credentials against the same host for the dashboard label — but
+  unexercised.
+- The `runpodctl` fallback's behaviour *after* REST and GraphQL have both been
+  refused; it is also moot on the stock image, which has no runpodctl.
+- The full worker sequence against a live supervisor: the
+  `terminate-in-progress` → `engine-stopped` handshake is implemented on both
+  sides, passes `bash -n` and shellcheck, and is driven in tests with a stubbed
+  stopper — but no container has run it end to end.
+- VRAM zeroing (needs torch and GPUs) and the RAM overwrite under a cgroup
+  limit. `drop_caches` is expected to be unavailable in most containers and is
+  reported rather than assumed.
+- The erase against a real 332 GB checkpoint directory; only synthetic layouts
+  were used.
 
-- Whether RunPod injects `RUNPOD_API_KEY` into a running pod at all, and if so
-  whether that pod-scoped key may delete its own pod (§1). Documented as
-  injected; permissions treated as *probably insufficient* — user reports say
-  403 — with an account key preferred, a pre-check that surfaces a rejected key
-  before the user commits, and an explicit failure message.
-- Whether `RUNPOD_POD_ID` is reliably present in a running pod. Documented, not
-  observed.
+**Still unverified from documentation:**
+
 - The exact `.metadata` sidecar naming under `local_dir/.cache/huggingface/`
   (§4). The folder's existence is documented; the per-file naming is handled
-  defensively and degrades to the size rule.
-- RunPod's per-key permission model for scoped keys beyond the blog-level
-  description; the docs do not enumerate which scopes permit pod deletion.
+  defensively and degrades to the size rule, which is also what a user gets on a
+  hub version whose layout we guessed wrong.
+- RunPod's REST `DELETE /v1/pods/{podId}` — documented, never called. GraphQL is
+  the path that was actually proven, and it is tried second; if the REST call
+  turns out to be wrong for pod-scoped keys, the ladder still lands on the
+  verified one.
+- Whether a vast.ai instance ever lacks `CONTAINER_API_KEY` (the docs say it is
+  always injected).
