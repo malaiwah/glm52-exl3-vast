@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai and R
       org.opencontainers.image.description="Profile-driven OpenAI endpoint: validated GLM-5.2 EXL3 production defaults plus a low-cost Qwen3.6-27B NVFP4 development profile. Weights auto-download on first boot." \
       ai.malaiwah.evidence="gists: cae272443a 7d5d7e68 f3096ae9 e8a587ad 65bb725e 929d7d8e" \
       ai.malaiwah.base="verdictai/glm52-exl3-sparkinfer@sha256:2bb9e804a283d1da3b7e3425ff87375121285141d0d0a40d3dc09d41bf881a10"
-RUN pip install --no-cache-dir huggingface_hub && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server && rm -rf /var/lib/apt/lists/* \
+RUN pip install --no-cache-dir huggingface_hub && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && curl -sSL -o /tmp/lego.tgz https://github.com/go-acme/lego/releases/download/v4.21.0/lego_v4.21.0_linux_amd64.tar.gz \
  && echo "c8cc7fb636f8a5f1167e013dbd01485a72eb7393faf1776664c765a722cd6070  /tmp/lego.tgz" | sha256sum -c - \
@@ -16,5 +16,5 @@ COPY landing.py /opt/landing.py
 COPY scripts/ /opt/scripts/
 COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 RUN chmod +x /usr/local/bin/model-turnkey-entry.sh
-EXPOSE 22 8000 1111
+EXPOSE 22 8000 8443 1111
 ENTRYPOINT ["/usr/local/bin/model-turnkey-entry.sh"]

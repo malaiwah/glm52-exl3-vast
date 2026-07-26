@@ -73,6 +73,32 @@ Vast credit moved from approximately `$21.8431` to `$21.6435`, for about
 `$0.20` total including the deliberately aborted slow-host attempts. The final
 Vast API check returned zero instances.
 
+### deSEC dynamic DNS and direct TLS follow-up
+
+The supplied DNS token exposed one zone. A unique documentation-address RRset
+was created using the appliance's atomic bulk `PUT`, resolved from deSEC's
+authoritative nameserver, updated, deleted, and confirmed absent through both
+the API and authoritative DNS.
+
+A second short Vast RTX 5090 run exercised the appliance path itself:
+
+- `model-<instance-id>` registered to the observed public IPv4 address.
+- lego created the DNS-01 TXT challenge, Let's Encrypt validated it, and lego
+  removed the TXT RRset afterward.
+- The issued certificate had the generated hostname as both CN and SAN, a
+  trusted Let's Encrypt chain, and a 90-day validity window.
+- The direct mapped HTTPS endpoint passed `/health`, authenticated
+  `/v1/models`, and a Qwen chat completion.
+- The token-gated dashboard accepted TLS on its mapped port; an unauthenticated
+  request correctly returned 403.
+- The Vast label became
+  `Qwen3.5-0.8B-Dynamic-DNS-Smoke READY https://.../v1`, making readiness and
+  the final endpoint visible in the console.
+
+The follow-up used about `$0.06` of Vast credit. The rental was destroyed, its
+A record was deleted, the record returned API 404, and the final Vast inventory
+again returned zero instances.
+
 ## Runpod live execution
 
 Static REST/template validation passed, and authenticated Runpod inventory and
@@ -105,6 +131,7 @@ checks.
 |---|---|
 | Build, profiles, manifests, local UI | Passed |
 | Vast provider integration and baseline appliance features | Passed |
+| deSEC API lifecycle, DNS-01 cleanup, and trusted direct TLS | Passed on Vast |
 | Qwen reasoning/tool parser with small live model | Passed on Vast |
 | UI reasoning compatibility and multi-turn behavior | Fixed and browser-tested |
 | Runpod template/API schema and placement handling | Passed |

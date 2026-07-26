@@ -4,8 +4,11 @@
   "dockerEntrypoint": [],
   "dockerStartCmd": [],
   "env": {
+    "DESEC_DOMAIN": "malaiwah.dedyn.io",
+    "DESEC_TOKEN": "{{ RUNPOD_SECRET_desec_token }}",
     "LANDING_PAGE": "1",
-    "MODEL_PROFILE": "qwen36-27b-nvfp4"
+    "MODEL_PROFILE": "qwen36-27b-nvfp4",
+    "RUNPOD_DIRECT_TLS": "auto"
   },
   "imageName": "ghcr.io/malaiwah/glm52-exl3-vast:latest",
   "isPublic": false,
@@ -13,10 +16,11 @@
   "name": "Model Turnkey: Qwen3.6-27B NVFP4 (1x Blackwell)",
   "ports": [
     "8000/http",
+    "8443/tcp",
     "1111/http",
     "22/tcp"
   ],
-  "readme": "Lower-cost development profile for nvidia/Qwen3.6-27B-NVFP4. Deploy on 1x NVIDIA RTX PRO 6000 Blackwell or GeForce RTX 5090. The profile downloads about 21 GiB, defaults to a 32K text-only context, disables DRAM KV offload and MTP until explicitly tested, and mounts persistent storage at /workspace. Port 8000 is the API, 1111 is the token-gated dashboard, and 22 is key-only SSH. Use an SSH tunnel for requests longer than Runpod proxy's 100-second limit.",
+  "readme": "Lower-cost development profile for nvidia/Qwen3.6-27B-NVFP4. Deploy on 1x NVIDIA RTX PRO 6000 Blackwell or GeForce RTX 5090. The profile downloads about 21 GiB, defaults to a 32K text-only context, disables DRAM KV offload and MTP until explicitly tested, and mounts persistent storage at /workspace. Ports 1111 and 8000 use Runpod managed HTTPS for the dashboard and secure API fallback. When the desec_token Secret is available, port 8443 also provides direct appliance TLS, avoiding Runpod proxy's 100-second limit.",
   "volumeInGb": 80,
   "volumeMountPath": "/workspace"
 }

@@ -114,24 +114,34 @@ the same values:
   80 GB for Qwen at `/workspace`. A volume disk survives stops/restarts but is
   deleted with the Pod; use a network volume if weights must survive deletion. See
   [Runpod storage options](https://docs.runpod.io/pods/storage/types).
-- **Ports:** `8000/http`, `1111/http`, `22/tcp`.
+- **Ports:** `8000/http`, `8443/tcp`, `1111/http`, `22/tcp`. The dashboard and
+  fallback API stay behind Runpod's managed HTTPS proxy. When DNS credentials
+  are available, inference also gets a direct-TCP appliance-TLS route so large
+  prefills and long generations are not subject to the proxy timeout.
 - **Secrets:** add `HF_TOKEN` or DNS credentials through
   [Runpod Secrets](https://docs.runpod.io/pods/templates/secrets), referenced
-  as `{{ RUNPOD_SECRET_secret_name }}`. Do not put credentials in the JSON or a
-  shared template.
+  as `{{ RUNPOD_SECRET_secret_name }}`. The checked-in manifests expect a
+  secret named `desec_token`. Do not put credentials in the JSON or a shared
+  template.
 
 Runpod injects the Pod ID, public IP, mapped SSH port, and account public key.
 The image uses those values automatically: `PUBLIC_KEY` configures the
 key-only SSH daemon, and the logs print both URLs after boot:
 
 ```text
-API:       https://<pod-id>-8000.proxy.runpod.net/v1
+API direct:   https://model-<pod-id>.<desec-domain>:<mapped-8443-port>/v1
+API fallback: https://<pod-id>-8000.proxy.runpod.net/v1
 Dashboard: https://<pod-id>-1111.proxy.runpod.net/?token=<persistent-token>
 ```
 
 Runpod's proxy supplies HTTPS to the client while forwarding HTTP inside the
-Pod. The generated dashboard token persists on `/workspace` so its URL remains
-valid across restarts. The API still requires the separately generated
+Pod, and the generated dashboard token persists on `/workspace` so its URL
+remains valid across restarts. For inference, Secure Cloud supplies a public
+IP and maps a public TCP port to container port 8443. The appliance registers
+that IP under the per-Pod deSEC name, obtains a Let's Encrypt certificate,
+starts a TLS pass-through listener to local vLLM, and prints the final mapped
+URL. If DNS configuration is absent or fails, it keeps the secure proxy URL
+instead of exposing plaintext direct TCP. The API still requires the generated
 `VLLM_API_KEY`, printed in the Pod logs and persisted on the volume.
 
 **Cold-start cost guard:** the published image has 46 layers totaling about
@@ -144,8 +154,12 @@ the Pod if it has no runtime or port mappings at that deadline. A stopped Pod
 still incurs volume-storage charges.
 
 **Long requests:** Runpod documents a 100-second limit on HTTP-proxy
-connections. Long generations and large-context prompts should bypass the
-proxy with the existing SSH port:
+connections. The supplied templates therefore expose the inference API as
+both `8000/http` and `8443/tcp` and set `RUNPOD_DIRECT_TLS=auto`.
+`PUBLIC_ENDPOINT` is derived automatically after deSEC registers the Pod's
+public IP. If deSEC is unavailable, the appliance keeps the managed HTTPS
+proxy as its secure fallback. For a credential-free long-request route, bypass
+the proxy with the existing SSH port:
 
 ```bash
 ssh -p <mapped-ssh-port> root@<RUNPOD_PUBLIC_IP> -L 8000:localhost:8000
@@ -153,12 +167,8 @@ ssh -p <mapped-ssh-port> root@<RUNPOD_PUBLIC_IP> -L 8000:localhost:8000
 
 Then use `http://localhost:8000/v1`; the connection is encrypted by SSH and is
 not subject to the proxy timeout. Find the host and mapped port in the Pod's
-Connect panel. For an advanced direct-TCP deployment, replace `8000/http` with
-`8000/tcp`, set `RUNPOD_DIRECT_TLS=1`, configure the ACME variables described
-under Security, and set
-`PUBLIC_ENDPOINT=https://<domain>:<mapped-port>`. Do not enable app-level TLS
-behind `8000/http`: the Runpod proxy expects plain HTTP on the container side.
-Port behavior and the 100-second limit are documented in
+Connect panel. To force proxy-only API access, remove `8443/tcp` and set
+`RUNPOD_DIRECT_TLS=0`. Port behavior and the 100-second limit are documented in
 [Runpod's expose-ports guide](https://docs.runpod.io/pods/configuration/expose-ports).
 
 ## Why this exists
@@ -449,7 +459,8 @@ on hardware you own.
   image installs Vast's `SSH_PUBLIC_KEY` or Runpod's `PUBLIC_KEY` and starts
   key-only `sshd` itself.
 - **Direct-TCP TLS via Let's Encrypt DNS-01 — turnkey with deSEC**
-  (recommended on Vast; Runpod proxy mode already supplies HTTPS):
+  (recommended for Vast and for Runpod's inference API; the Runpod dashboard
+  stays on managed proxy HTTPS):
   One-time setup (~2 minutes, free, reusable forever):
   1. Create an account at [desec.io](https://desec.io/signup) (email only).
   2. Register a dynDNS domain, e.g. `yourname.dedyn.io`
@@ -459,8 +470,12 @@ on hardware you own.
 
   Store `DESEC_TOKEN=<your-token>` in Vast
   [Account Settings](https://cloud.vast.ai/account/) **Environment Variables**
-  section, where it is encrypted and injected at launch. Add
-  `DESEC_DOMAIN=yourname.dedyn.io` to the instance or private template.
+  section, where it is encrypted and injected at launch. On Runpod, create a
+  Secret such as `desec_token` and reference it from the private template as
+  `{{ RUNPOD_SECRET_desec_token }}`. Add
+  `DESEC_DOMAIN=yourname.dedyn.io` to the instance or private template; on
+  Runpod also expose `8000/http` plus `8443/tcp` and set
+  `RUNPOD_DIRECT_TLS=auto` (secure proxy fallback) or `1` (fail-fast).
   At boot the instance registers a stable per-instance hostname
   (`model-<provider-instance-id>.yourname.dedyn.io`), points it at itself, obtains a
   Let's Encrypt certificate via DNS-01 ([lego](https://go-acme.github.io/lego/dns/desec/)),

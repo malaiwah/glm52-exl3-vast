@@ -46,7 +46,9 @@ soon as their evidence is collected.
 | Supervisor recovery after terminating the engine child | — | yes | yes |
 | Vast readiness label | — | yes | — |
 | Runpod HTTPS proxy and dashboard URL | — | — | yes |
-| Direct TLS/ACME configuration validation | yes | no DNS credential | proxy TLS |
+| deSEC RRset create/update/delete and authoritative propagation | — | yes | yes |
+| DNS-01 issuance, challenge cleanup, and trusted certificate | yes | yes | yes |
+| Hybrid Runpod networking (`1111/http`, `8000/http` fallback, `8443/tcp` TLS) | config | — | yes |
 | Runpod long-request SSH-tunnel route | — | — | yes |
 | Teardown and no remaining billable resource | — | yes | yes |
 

@@ -110,9 +110,23 @@ LANDING_FEATURES="${LANDING_FEATURES:-$PROFILE_FEATURES}"
 echo "=== Model turnkey: $MODEL_DISPLAY_NAME ==="
 echo ">>> Profile: $MODEL_PROFILE; checkpoint: $MODEL_ID"
 echo ">>> Platform: $PLATFORM${INSTANCE_ID:+ ($INSTANCE_ID)}"
+case "${DESEC_TOKEN:-}" in
+  *RUNPOD_SECRET_*) DESEC_TOKEN="" ;;
+esac
+if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" = "auto" ]; then
+  if [ -n "${RUNPOD_TCP_PORT_8443:-}" ] &&
+     { { [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ]; } ||
+       { [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ]; }; }; then
+    RUNPOD_DIRECT_TLS=1
+  else
+    RUNPOD_DIRECT_TLS=0
+    echo ">>> Runpod direct TLS not configured; using the managed HTTPS proxy fallback."
+  fi
+fi
 if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" = "1" ]; then
-  [ -n "${PUBLIC_ENDPOINT:-}" ] || {
-    echo "FATAL: RUNPOD_DIRECT_TLS=1 requires PUBLIC_ENDPOINT=https://domain:mapped-port"
+  [ -n "${RUNPOD_TCP_PORT_8443:-}" ] || {
+    echo "FATAL: RUNPOD_DIRECT_TLS=1 requires exposing container port 8443 as TCP."
+    echo "FATAL: Runpod did not inject RUNPOD_TCP_PORT_8443; add 8443/tcp to the template."
     exit 1
   }
   if ! { [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ]; } &&
@@ -192,7 +206,7 @@ fi
 STATUS_FILE="${STATUS_FILE:-/tmp/model-turnkey-boot-status.json}"
 EP_URL="${PUBLIC_ENDPOINT%/}" TLS_STATE="not configured" HTTPS_HOSTPORT="" CERT_PATH="" KEY_PATH="" OFFLOAD_STATE="off"
 if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" != "1" ]; then
-  [ -n "$EP_URL" ] || EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
+  EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
   TLS_STATE="https:// managed by Runpod proxy"
 fi
 status_update() {
@@ -686,7 +700,7 @@ if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" != "1" ]; then
   ACME_DIRECT=0
   if [ -n "${ACME_DOMAIN:-}${DESEC_TOKEN:-}${DESEC_DOMAIN:-}" ]; then
     echo "!!! Runpod proxy mode ignores ACME/deSEC settings because the proxy already terminates TLS."
-    echo "!!! Set RUNPOD_DIRECT_TLS=1 and PUBLIC_ENDPOINT=https://host:mapped-port for direct TCP TLS."
+    echo "!!! Expose 8443/tcp and set RUNPOD_DIRECT_TLS=auto or 1 for direct TCP TLS."
   fi
 fi
 
@@ -702,12 +716,13 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN
       -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json" \
       -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"${MYIP}\"]}]" >/dev/null \
       && export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN \
-      && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8000:-<mapped-port>}}/v1" \
+      && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-<mapped-port>}}/v1" \
       || echo "!!! deSEC registration failed (HTTP error — check DESEC_TOKEN/DESEC_DOMAIN); continuing without auto-DNS"
   fi
 fi
 
 TLS_ARGS=()
+TLS_ENABLED=0
 if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null; then
   CRT="/workspace/.lego/certificates/${ACME_DOMAIN}.crt"
   KEY="/workspace/.lego/certificates/${ACME_DOMAIN}.key"
@@ -731,33 +746,51 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PRO
     done
   fi
   if [ -f "$CRT" ] && [ -f "$KEY" ]; then
-    TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY")
-    echo ">>> TLS enabled: https://$ACME_DOMAIN:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8000:-<mapped-port>}}/v1"
+    TLS_ENABLED=1
+    if [ "$PLATFORM" = "runpod" ]; then
+      # Keep vLLM plain on :8000 for Runpod's managed HTTPS proxy. A separate
+      # TLS listener on :8443 preserves a secure direct-TCP route without
+      # breaking the proxy fallback.
+      socat "OPENSSL-LISTEN:8443,cert=${CRT},key=${KEY},verify=0,reuseaddr,fork" \
+        "TCP4:127.0.0.1:${PORT:-8000}" &
+      TLS_PROXY_PID=$!
+      sleep 1
+      kill -0 "$TLS_PROXY_PID" 2>/dev/null || {
+        echo "!!! Runpod direct-TLS proxy failed to start; using managed HTTPS proxy"
+        TLS_ENABLED=0
+      }
+    else
+      TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY")
+    fi
+    if [ "$TLS_ENABLED" = "1" ]; then
+      echo ">>> TLS enabled: https://$ACME_DOMAIN:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-<mapped-port>}}/v1"
+    fi
   fi
 fi
 
 # Feed the final endpoint/TLS picture to the landing page's status file
 LOCAL_HEALTH_URL="http://localhost:${PORT:-8000}/health"
-if [ ${#TLS_ARGS[@]} -gt 0 ]; then
-  [ -n "$EP_URL" ] || EP_URL="https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8000:-8000}}"
+if [ "$TLS_ENABLED" = "1" ]; then
+  [ -n "$EP_URL" ] || EP_URL="https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-8443}}"
   TLS_STATE="https://${ACME_DOMAIN}"
   if [ "$PLATFORM" != "runpod" ]; then
     HTTPS_HOSTPORT="${ACME_DOMAIN}:${VAST_TCP_PORT_1111:-1111}"
+    LOCAL_HEALTH_URL="https://localhost:${PORT:-8000}/health"
   fi
   CERT_PATH="$CRT" KEY_PATH="$KEY"
-  LOCAL_HEALTH_URL="https://localhost:${PORT:-8000}/health"
 elif [ "$PLATFORM" = "runpod" ]; then
-  [ -n "$EP_URL" ] || EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
+  EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
   TLS_STATE="https:// managed by Runpod proxy"
 else
   [ -n "$EP_URL" ] || EP_URL="http://${PUBLIC_IP_CURRENT:-localhost}:${VAST_TCP_PORT_8000:-8000}"
 fi
 
-if [ "$PLATFORM" = "runpod" ] && [ ${#TLS_ARGS[@]} -eq 0 ]; then
+if [ "$PLATFORM" = "runpod" ] && [ "$TLS_ENABLED" != "1" ]; then
   echo ">>> Runpod proxy endpoint: ${EP_URL}/v1"
   echo "!!! Runpod's HTTP proxy has a 100-second connection limit; use the SSH tunnel"
   echo "!!! documented in README.md for long generations and large-context requests."
 elif [ "$PLATFORM" = "runpod" ]; then
+  echo ">>> Runpod dashboard (managed proxy TLS): https://${RUNPOD_POD_ID}-1111.proxy.runpod.net/?token=${OPEN_BUTTON_TOKEN}"
   echo ">>> Runpod direct-TCP TLS endpoint: ${EP_URL}/v1"
 fi
 
