@@ -277,6 +277,33 @@ export TORCH_CUDA_ARCH_LIST=12.0a FLASHINFER_CUDA_ARCH_LIST=12.0f FLASHINFER_DIS
 export VLLM_ENGINE_READY_TIMEOUT_S=2400
 unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 
+# ---- tuning overrides -------------------------------------------------------
+# TUNE_<NAME>=<value> exports <NAME>=<value> here, i.e. AFTER the authoritative
+# block above. This is what makes a knob A/B-able without rebuilding the image.
+#
+# Why a TUNE_ prefix instead of rewriting the block as ${NAME:-default}: the
+# block deliberately OVERRIDES image-level ENV, and for two knobs the image ships
+# a different value than we want --
+#     VLLM_PCIE_ALLREDUCE_BACKEND        image=cpp  -> we force b12x
+#     VLLM_DISABLE_SHARED_EXPERTS_STREAM image=0    -> we force 1
+# so ${NAME:-default} would let the image's value win and silently change the
+# allreduce backend. The prefix cannot collide with an inherited name.
+#
+# Values are echoed so a bench result can always be traced back to the exact
+# configuration that produced it, e.g.
+#     podman run -e TUNE_VLLM_EXL3_PREFILL_CHUNK=256 ...
+while IFS='=' read -r _k _v; do
+  case "$_k" in
+    TUNE_*)
+      _n="${_k#TUNE_}"
+      [ -n "$_n" ] || continue
+      export "$_n=$_v"
+      echo ">>> tuning override: $_n=$_v"
+      ;;
+  esac
+done < <(env)
+unset _k _v _n
+
 # API key: VLLM_API_KEY env > persisted key on the volume > freshly generated.
 # Persisting matters: a restart (supervisor, reboot, manual) that minted a NEW
 # key would silently invalidate every client config the user already pasted.
@@ -387,6 +414,20 @@ echo ">>> Listening sockets at boot (expect only vllm on ${PORT:-8000} + vast ss
 (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | head -8 || true
 
 MTP_TOKENS="${MTP_TOKENS:-3}"
+# EXL3 trellis window vs speculative capture. The MTP draft is CUDA-graph captured
+# at m=MTP_TOKENS. If that falls below VLLM_EXL3_TRELLIS_MIN_M the EXL3 kernel
+# hands off to its eager parity path, which cannot be captured, and the engine dies:
+#   RuntimeError: EXL3 eager parity path entered during CUDA graph capture (m=3);
+#                 capture sizes must lie inside the Trellis window [4, 32]
+# The default MIN_M=4 is therefore only safe by coincidence -- it happens to equal
+# the 1+3 the TARGET captures at. With a separate draft (MTP78_MODE=override) the
+# draft captures at m=3 and the boot fails. Widen the window instead of clamping
+# MTP: MIN_M=1 is the configuration validated on this checkpoint (needle 6/6, fp8).
+if [ "$MTP_TOKENS" != "0" ] && [ "$MTP_TOKENS" -lt "${VLLM_EXL3_TRELLIS_MIN_M:-4}" ] 2>/dev/null; then
+  echo ">>> EXL3: lowering VLLM_EXL3_TRELLIS_MIN_M ${VLLM_EXL3_TRELLIS_MIN_M:-4} -> 1"
+  echo ">>>       (MTP draft captures at m=$MTP_TOKENS, which must lie inside the trellis window)"
+  export VLLM_EXL3_TRELLIS_MIN_M=1
+fi
 SPEC_ARGS=()
 if [ "$MTP_TOKENS" != "0" ]; then
   if [ -n "$DRAFT_MODEL" ]; then
