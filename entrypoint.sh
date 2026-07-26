@@ -166,9 +166,20 @@ if [ "$OFFLOAD_FRACTION" != "0" ]; then
   MEMLOCK_KB=$(ulimit -l)
   if [ "$MEMLOCK_KB" != "unlimited" ] && [ "$MEMLOCK_KB" -lt "$((OFF_BYTES / 1024))" ] 2>/dev/null; then
     echo "!!! WARNING: memlock ulimit (${MEMLOCK_KB} KB) is below the $((OFF_BYTES/1073741824)) GiB KV pool to pin."
-    echo "!!! Add '--ulimit memlock=-1:-1' to the template Docker options to enable offload."
-    echo "!!! Continuing WITHOUT DRAM offload."
-    OFFLOAD_FRACTION=0
+    if [ "${OFFLOAD_IGNORE_MEMLOCK:-0}" = "1" ]; then
+      # Measured 2026-07-26 on an owned box: a 128 GiB offload tier runs fine with
+      # memlock capped at ~31 GiB (kv_offload_total_bytes climbs normally), because
+      # the connector does not mlock the whole tier up front. Rootless podman also
+      # cannot raise memlock past the user's hard limit, so '--ulimit memlock=-1:-1'
+      # is a no-op there and the check would disable a working feature outright.
+      # Opt-in, because on an unknown rental host the conservative default is right.
+      echo "!!! OFFLOAD_IGNORE_MEMLOCK=1 — proceeding anyway (verify kv_offload_* metrics climb)."
+    else
+      echo "!!! Add '--ulimit memlock=-1:-1' to the template Docker options to enable offload,"
+      echo "!!! or set OFFLOAD_IGNORE_MEMLOCK=1 if you have verified offload works at this limit."
+      echo "!!! Continuing WITHOUT DRAM offload."
+      OFFLOAD_FRACTION=0
+    fi
   fi
 fi
 if [ "$OFFLOAD_FRACTION" != "0" ]; then
