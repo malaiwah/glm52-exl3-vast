@@ -373,6 +373,14 @@ else
 fi
 
 # Egress hygiene: no telemetry; offline mode once weights are local
+# Keep the torch.compile / AOT cache on the persistent volume. It defaults to
+# /root/.cache/vllm inside the container, so a replaced container recompiles the
+# backbone and the eagle head from scratch — ~100 s of every boot, for ~1.6 GB of
+# artifacts. VLLM_DISABLE_COMPILE_CACHE is NOT set here (that guard belongs to the
+# gilded-gnosis fork's cache bug); verify decode tok/s after enabling this.
+export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-$MODEL_DIR/.vllm-cache}"
+mkdir -p "$VLLM_CACHE_ROOT" 2>/dev/null || true
+
 export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
 export HF_HUB_OFFLINE=1
 echo ">>> Listening sockets at boot (expect only vllm on ${PORT:-8000} + vast ssh):"
