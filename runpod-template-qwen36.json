@@ -1,0 +1,22 @@
+{
+  "category": "NVIDIA",
+  "containerDiskInGb": 50,
+  "dockerEntrypoint": [],
+  "dockerStartCmd": [],
+  "env": {
+    "LANDING_PAGE": "1",
+    "MODEL_PROFILE": "qwen36-27b-nvfp4"
+  },
+  "imageName": "ghcr.io/malaiwah/glm52-exl3-vast:latest",
+  "isPublic": false,
+  "isServerless": false,
+  "name": "Model Turnkey: Qwen3.6-27B NVFP4 (1x Blackwell)",
+  "ports": [
+    "8000/http",
+    "1111/http",
+    "22/tcp"
+  ],
+  "readme": "Lower-cost development profile for nvidia/Qwen3.6-27B-NVFP4. Deploy on 1x NVIDIA RTX PRO 6000 Blackwell or GeForce RTX 5090. The profile downloads about 21 GiB, defaults to a 32K text-only context, disables DRAM KV offload and MTP until explicitly tested, and mounts persistent storage at /workspace. Port 8000 is the API, 1111 is the token-gated dashboard, and 22 is key-only SSH. Use an SSH tunnel for requests longer than Runpod proxy's 100-second limit.",
+  "volumeInGb": 80,
+  "volumeMountPath": "/workspace"
+}

@@ -1,0 +1,25 @@
+{
+  "category": "NVIDIA",
+  "containerDiskInGb": 50,
+  "dockerEntrypoint": [],
+  "dockerStartCmd": [],
+  "env": {
+    "LANDING_PAGE": "1",
+    "MODEL_PROFILE": "glm52-exl3",
+    "MTP78_MODE": "graft",
+    "OFFLOAD_FRACTION": "0.70",
+    "VISION": "1"
+  },
+  "imageName": "ghcr.io/malaiwah/glm52-exl3-vast:latest",
+  "isPublic": false,
+  "isServerless": false,
+  "name": "Model Turnkey: GLM-5.2 EXL3 (4x RTX PRO 6000)",
+  "ports": [
+    "8000/http",
+    "1111/http",
+    "22/tcp"
+  ],
+  "readme": "Multi-model OpenAI-compatible Pod using MODEL_PROFILE=glm52-exl3. Deploy this profile on exactly 4x NVIDIA RTX PRO 6000 Blackwell 96 GB GPUs. Keep /workspace on a volume of at least 450 GB. For the lower-cost one-GPU Qwen3.6 profile, use runpod-template-qwen36.json. Port 8000 is the API, 1111 is the token-gated dashboard, and 22 is key-only SSH. The Runpod HTTP proxy has a 100-second request limit; use an SSH tunnel for long generations. Add HF_TOKEN and other credentials with Runpod Secrets.",
+  "volumeInGb": 450,
+  "volumeMountPath": "/workspace"
+}

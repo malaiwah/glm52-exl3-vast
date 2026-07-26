@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vast.ai "Open" button landing page — dual-protocol (TLS + plain) on :1111.
+"""Vast.ai/Runpod landing page — dual-protocol (TLS + plain) on :1111.
 
 Started first thing in entrypoint.sh so status is visible from the very first
 boot minute. Each connection's first byte is peeked: 0x16 = TLS handshake,
@@ -8,10 +8,11 @@ else plain HTTP. Once a cert exists (lazy-loaded mid-boot), plain hits are
 entrypoint rewrites at each milestone, plus live probes (download size,
 /health). The API key, filled-in client configs (oh-my-pi, opencode, Claude
 Code, Codex), live metrics dashboard and /chat render only over TLS with a
-validated OPEN_BUTTON_TOKEN — or over plain HTTP if LANDING_ALLOW_INSECURE=1
-(trusted-LAN/demo hosts without a cert). The dashboard scrapes vLLM's
+validated OPEN_BUTTON_TOKEN — over a trusted HTTPS reverse proxy, or over
+plain HTTP if LANDING_ALLOW_INSECURE=1 (trusted-LAN/demo hosts without a
+cert). The dashboard scrapes vLLM's
 /metrics from the browser (vLLM CORS is open) — no server-side proxying.
-Requires OPEN_BUTTON_PORT=1111 env + '-p 1111:1111' in the template.
+Vast uses OPEN_BUTTON_PORT=1111 + '-p 1111:1111'; Runpod uses 1111/http.
 """
 import html
 import json
@@ -24,13 +25,34 @@ from string import Template
 from urllib.parse import parse_qs, urlparse
 
 TOKEN = os.environ.get("OPEN_BUTTON_TOKEN", "")
-MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
-STATUS_FILE = os.environ.get("STATUS_FILE", "/tmp/glm-boot-status.json")
+MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/models/current")
+STATUS_FILE = os.environ.get("STATUS_FILE", "/tmp/model-turnkey-boot-status.json")
+MODEL_DISPLAY_NAME = os.environ.get("MODEL_DISPLAY_NAME", "Local model")
+MODEL_ID = os.environ.get("LANDING_MODEL_ID", MODEL_DISPLAY_NAME)
+MODEL_PROFILE = os.environ.get("MODEL_PROFILE", "custom")
+MODEL_CONTEXT_WINDOW = int(os.environ.get("MODEL_CONTEXT_WINDOW", "32768"))
+MODEL_OUTPUT_LIMIT = int(os.environ.get("MODEL_OUTPUT_LIMIT", "8192"))
+LANDING_FEATURES = os.environ.get(
+    "LANDING_FEATURES", "OpenAI-compatible · self-hosted"
+)
 ALLOW_INSECURE = os.environ.get("LANDING_ALLOW_INSECURE", "0") == "1"
+TRUST_PROXY_HTTPS = os.environ.get("LANDING_TRUST_PROXY_HTTPS", "0") == "1"
 API_PORT = os.environ.get("LANDING_API_PORT", "8000")
-WEIGHTS_TOTAL_GIB = 309  # 332 GB
+WEIGHTS_TOTAL_GIB = float(os.environ.get("MODEL_DOWNLOAD_GIB", "0"))
 
 _ssl_ctx = None
+
+
+def is_secure_connection(connection) -> bool:
+    """Whether secrets may be rendered on this request's transport."""
+    return (
+        isinstance(connection, ssl.SSLSocket)
+        # Runpod's documented HTTP endpoint is HTTPS-only, but its proxy
+        # header contract is not documented. Trust it only when the
+        # entrypoint explicitly selected the Runpod dashboard proxy.
+        or TRUST_PROXY_HTTPS
+        or ALLOW_INSECURE
+    )
 
 
 def ssl_ctx():
@@ -64,7 +86,10 @@ def weights_state() -> str:
                 done += os.path.getsize(os.path.join(root, f))
             except OSError:
                 pass
-    return f"downloading — {done / 2**30:.0f} of ~{WEIGHTS_TOTAL_GIB} GiB"
+    downloaded = done / 2**30
+    if WEIGHTS_TOTAL_GIB > 0:
+        return f"downloading — {downloaded:.0f} of ~{WEIGHTS_TOTAL_GIB:g} GiB"
+    return f"downloading — {downloaded:.0f} GiB"
 
 
 def engine_state() -> str:
@@ -84,12 +109,12 @@ def engine_state() -> str:
 SNIPPETS = [
     ("oh-my-pi / pi", "~/.pi/agent/models.json", """{
   "providers": {
-    "glm-vast": {
+    "turnkey": {
       "baseUrl": "$ep/v1",
       "api": "openai-completions",
       "apiKey": "$key",
       "models": [
-        {"id": "GLM-5.2", "name": "GLM-5.2 (vast)", "contextWindow": 524288}
+        {"id": "$model", "name": "$display", "contextWindow": $context}
       ]
     }
   }
@@ -97,30 +122,30 @@ SNIPPETS = [
     ("opencode", "opencode.json (project or ~/.config/opencode/)", """{
   "$$schema": "https://opencode.ai/config.json",
   "provider": {
-    "glm-vast": {
+    "turnkey": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "GLM-5.2 (vast)",
+      "name": "$display",
       "options": {"baseURL": "$ep/v1", "apiKey": "$key"},
       "models": {
-        "GLM-5.2": {"name": "GLM-5.2", "limit": {"context": 524288, "output": 131072}}
+        "$model": {"name": "$display", "limit": {"context": $context, "output": $output}}
       }
     }
   }
 }"""),
     ("Claude Code", "shell (native /v1/messages — Anthropic wire format)", """export ANTHROPIC_BASE_URL="$ep"
 export ANTHROPIC_AUTH_TOKEN="$key"
-export ANTHROPIC_MODEL="GLM-5.2"
+export ANTHROPIC_MODEL="$model"
 claude"""),
-    ("Codex", "~/.codex/config.toml", """model = "GLM-5.2"
-model_provider = "glm-vast"
+    ("Codex", "~/.codex/config.toml", """model = "$model"
+model_provider = "turnkey"
 
-[model_providers.glm-vast]
-name = "GLM-5.2 (vast)"
+[model_providers.turnkey]
+name = "$display"
 base_url = "$ep/v1"
-env_key = "GLM_API_KEY"
+env_key = "TURNKEY_API_KEY"
 wire_api = "chat"
 
-# then:  export GLM_API_KEY="$key" """),
+# then:  export TURNKEY_API_KEY="$key" """),
 ]
 
 # Shared look. Literal CSS only (no stray $): safe inside plain strings.
@@ -325,7 +350,7 @@ async function send(){
   try{
     const r=await fetch(EP+"/v1/chat/completions",{method:"POST",signal:ctrl.signal,
       headers:{"Authorization":"Bearer "+KEY,"Content-Type":"application/json"},
-      body:JSON.stringify({model:"GLM-5.2",messages:msgs,stream:true,max_tokens:8192,
+      body:JSON.stringify({model:"$model",messages:msgs,stream:true,max_tokens:$output,
         chat_template_kwargs:{enable_thinking:document.getElementById("think").checked}})});
     if(!r.ok){out.textContent="HTTP "+r.status+": "+await r.text();return}
     const rd=r.body.getReader(), dec=new TextDecoder(); let buf="";
@@ -350,19 +375,19 @@ document.getElementById("clear").onclick=()=>{msgs.length=0;log.innerHTML=""};
 inp.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter")send()});
 </script>"""
 
-CHAT_PAGE = Template("""<!doctype html><html><head><title>GLM-5.2 chat</title>
+CHAT_PAGE = Template("""<!doctype html><html><head><title>$display chat</title>
 <meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE + """<style>
 .wrap{max-width:52rem;display:flex;flex-direction:column;height:100vh;padding-bottom:1rem}
 #log{flex:1;overflow-y:auto;padding:.5rem 0}
 .msg.bot{background:var(--card)}
 </style></head><body><div class=wrap>
-<header class=hero><h1><b>GLM-5.2</b> quick chat</h1>
+<header class=hero><h1><b>$display</b> quick chat</h1>
 <span class=sub><a href="/?token=$token">&larr; status &amp; dashboard</a></span></header>
 """ + CHAT_WIDGET + CHAT_JS + """<script>inp.focus();</script></div></body></html>""")
 
-PAGE_HEAD = ("""<!doctype html><html><head><title>GLM-5.2 EXL3 turnkey</title>
+PAGE_HEAD = Template("""<!doctype html><html><head><title>$display model turnkey</title>
 <meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE +
-             """</head><body>""")
+                     """</head><body>""")
 
 
 def render(secure: bool, tok: str = "") -> bytes:
@@ -383,12 +408,14 @@ def render(secure: bool, tok: str = "") -> bytes:
     real0 = st.get("api_key", "")
     chat_ok = bool(secure and TOKEN and real0 and endpoint and serving)
     wrap_cls = "wrap wide" if chat_ok else "wrap"
-    parts = [PAGE_HEAD,
+    display = html.escape(MODEL_DISPLAY_NAME)
+    features = html.escape(LANDING_FEATURES)
+    parts = [PAGE_HEAD.substitute(display=display),
              f'<div class="{wrap_cls}"><div class=layout><main>',
-             "<header class=hero><h1><b>GLM-5.2</b> EXL3 turnkey</h1>"
-             "<span class=sub>512K context &middot; fp8 KV &middot; MTP-3 &middot; "
-             "4&times; RTX PRO 6000</span></header>",
+             f"<header class=hero><h1><b>{display}</b> model turnkey</h1>"
+             f"<span class=sub>{features}</span></header>",
              "<div class=grid>",
+             card("Profile", MODEL_PROFILE, True),
              card("Weights", weights, weights == "ready"),
              card("TLS / DNS", st.get("tls", "not configured"),
                   st.get("tls", "").startswith("https")),
@@ -410,12 +437,19 @@ def render(secure: bool, tok: str = "") -> bytes:
         parts.append('</div></div>')
         if key.startswith("<"):
             parts.append("<p class=sub>The API key is printed in the instance logs "
-                         "(vast console &rarr; Logs, look for <code>API KEY</code>).</p>")
+                         "(open Pod/instance logs and look for <code>API KEY</code>).</p>")
         if serving:
             parts.append(METRICS_SECTION.substitute(ep=endpoint, key=key))
         parts.append("<h2>Client configs</h2>")
         for name, where, body in SNIPPETS:
-            filled = Template(body).substitute(ep=endpoint, key=key)
+            filled = Template(body).substitute(
+                ep=endpoint,
+                key=key,
+                model=MODEL_ID,
+                display=MODEL_DISPLAY_NAME,
+                context=MODEL_CONTEXT_WINDOW,
+                output=MODEL_OUTPUT_LIMIT,
+            )
             parts.append(f"<details><summary>{html.escape(name)}</summary>"
                          f"<p class=sub><code>{html.escape(where)}</code></p>"
                          f"<pre>{html.escape(filled)}</pre></details>")
@@ -438,7 +472,12 @@ def render(secure: bool, tok: str = "") -> bytes:
     parts.append("</main>")
     if chat_ok:
         parts.append("<aside class=chatpane><h2>Quick chat</h2>" + CHAT_WIDGET +
-                     "</aside>" + Template(CHAT_JS).substitute(ep=endpoint, key=real0))
+                     "</aside>" + Template(CHAT_JS).substitute(
+                         ep=endpoint,
+                         key=real0,
+                         model=MODEL_ID,
+                         output=MODEL_OUTPUT_LIMIT,
+                     ))
     parts.append("</div></div></body></html>")
     return "".join(parts).encode()
 
@@ -463,7 +502,7 @@ class DualProtocolServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args):  # keep the vast console log quiet
+    def log_message(self, *args):  # keep provider logs quiet
         pass
 
     def do_GET(self):
@@ -473,9 +512,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         tok = parse_qs(url.query).get("token", [""])[0]
         if TOKEN and tok != TOKEN:
-            self.send_error(403, "bad token (use the vast console Open button)")
+            self.send_error(403, "bad token (use the dashboard URL printed in the Pod/instance logs)")
             return
-        secure = isinstance(self.connection, ssl.SSLSocket) or ALLOW_INSECURE
+        secure = is_secure_connection(self.connection)
         hostport = status().get("https_hostport", "")
         if not secure and ssl_ctx() and hostport:
             # Upgrade the Open button's plain-HTTP hit to the TLS view of this page
@@ -491,8 +530,14 @@ class Handler(BaseHTTPRequestHandler):
             if not (secure and TOKEN and key and st.get("endpoint")):
                 self.send_error(403, "chat needs TLS + token gate + a running endpoint")
                 return
-            body = CHAT_PAGE.substitute(ep=st["endpoint"], key=key,
-                                        token=html.escape(tok, quote=True)).encode()
+            body = CHAT_PAGE.substitute(
+                ep=st["endpoint"],
+                key=key,
+                token=html.escape(tok, quote=True),
+                display=html.escape(MODEL_DISPLAY_NAME),
+                model=MODEL_ID,
+                output=MODEL_OUTPUT_LIMIT,
+            ).encode()
         else:
             body = render(secure, tok)
         self.send_response(200)

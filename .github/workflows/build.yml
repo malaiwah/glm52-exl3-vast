@@ -2,9 +2,9 @@ name: build-and-push
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, entrypoint.sh, landing.py, "scripts/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "runpod-template*.json", sshd_config, "scripts/**", .github/workflows/build.yml]
   pull_request:
-    paths: [Dockerfile, entrypoint.sh, landing.py, "scripts/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "runpod-template*.json", sshd_config, "scripts/**", .github/workflows/build.yml]
   workflow_dispatch:
 jobs:
   lint:
@@ -13,6 +13,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: shellcheck entrypoint
         run: shellcheck entrypoint.sh
+      - name: validate Python and Runpod template
+        run: |
+          python3 -m py_compile landing.py scripts/*.py
+          PROFILE_VALIDATE_ONLY=1 MODEL_PROFILE=glm52-exl3 bash entrypoint.sh | grep -q '^REQUIRED_GPUS=4$'
+          PROFILE_VALIDATE_ONLY=1 MODEL_PROFILE=qwen36-27b-nvfp4 bash entrypoint.sh | grep -q '^REQUIRED_GPUS=1$'
+          PROFILE_VALIDATE_ONLY=1 MODEL_PROFILE=qwen36-27b-nvfp4 bash entrypoint.sh | grep -q '^MODEL_ID=nvidia/Qwen3.6-27B-NVFP4$'
+          PROFILE_VALIDATE_ONLY=1 MODEL_PROFILE=custom MODEL_ID=org/model bash entrypoint.sh | grep -q '^MODEL_DIR=/workspace/models/org-model$'
+          python3 -m json.tool runpod-template.json >/dev/null
+          python3 -m json.tool runpod-template-qwen36.json >/dev/null
+          python3 -c "import json; ps=[json.load(open(f)) for f in ('runpod-template.json','runpod-template-qwen36.json')]; assert all(p['ports'] == ['8000/http', '1111/http', '22/tcp'] and p['volumeMountPath'] == '/workspace' and not p['isServerless'] for p in ps); assert [p['env']['MODEL_PROFILE'] for p in ps] == ['glm52-exl3','qwen36-27b-nvfp4']"
   build:
     # PRs build without pushing, so a broken Dockerfile is caught before main
     runs-on: ubuntu-latest
@@ -31,10 +41,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
