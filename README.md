@@ -134,6 +134,14 @@ Pod. The generated dashboard token persists on `/workspace` so its URL remains
 valid across restarts. The API still requires the separately generated
 `VLLM_API_KEY`, printed in the Pod logs and persisted on the volume.
 
+**Cold-start cost guard:** the pinned inference base makes this image roughly
+30 GB before model weights. On an uncached Runpod machine, `runtime` can remain
+null and the proxy can return 404 while the provider is still pulling the
+image; the machine's advertised network bandwidth is not a guarantee of
+registry throughput. Choose a maximum cold-pull time before renting, record
+the Pod ID immediately, and terminate the Pod if it has no runtime or port
+mappings at that deadline. A stopped Pod still incurs volume-storage charges.
+
 **Long requests:** Runpod documents a 100-second limit on HTTP-proxy
 connections. Long generations and large-context prompts should bypass the
 proxy with the existing SSH port:
