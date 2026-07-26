@@ -428,6 +428,34 @@ if [ "$MTP_TOKENS" != "0" ] && [ "$MTP_TOKENS" -lt "${VLLM_EXL3_TRELLIS_MIN_M:-4
   echo ">>>       (MTP draft captures at m=$MTP_TOKENS, which must lie inside the trellis window)"
   export VLLM_EXL3_TRELLIS_MIN_M=1
 fi
+# Concurrency vs the trellis/capture window. At decode the engine runs
+#   m = MAX_NUM_SEQS * (1 + MTP_TOKENS)
+# query tokens per step. m must stay inside BOTH the CUDA-graph capture window
+# and the EXL3 trellis window [MIN_M, MAX_M], or decode silently falls off the
+# captured trellis fast path onto the eager path once concurrency rises -- a
+# cliff that no boot-time error announces and that only shows up as lost tok/s
+# under real multi-stream load.
+#
+# This is why MAX_NUM_SEQS defaults to 8 and not 32: 8*(1+3)=32 exactly fills the
+# default window. The old default of 32 gave m=128, four times outside it.
+# To genuinely serve more streams, raise all three together, e.g. 16 seqs:
+#   -e MAX_NUM_SEQS=16 \
+#   -e CUDAGRAPH_CAPTURE_SIZES=8,16,24,32,40,48,56,64 \
+#   -e MAX_CUDAGRAPH_CAPTURE_SIZE=64 -e TUNE_VLLM_EXL3_TRELLIS_MAX_M=64
+# (more captured sizes cost capture time and some VRAM, so measure rather than
+# assume it wins).
+_DECODE_M=$(( ${MAX_NUM_SEQS:-8} * (1 + MTP_TOKENS) ))
+_CAP_MAX=${MAX_CUDAGRAPH_CAPTURE_SIZE:-32}
+_TRELLIS_MAX=${VLLM_EXL3_TRELLIS_MAX_M:-32}
+if [ "$_DECODE_M" -gt "$_CAP_MAX" ] || [ "$_DECODE_M" -gt "$_TRELLIS_MAX" ]; then
+  echo "!!! WARNING: MAX_NUM_SEQS=${MAX_NUM_SEQS:-8} x (1+MTP_TOKENS=$MTP_TOKENS) = $_DECODE_M query tokens/step,"
+  echo "!!!          but the cudagraph capture window tops out at $_CAP_MAX and the EXL3 trellis"
+  echo "!!!          window at $_TRELLIS_MAX. Decode will leave the captured trellis path once"
+  echo "!!!          enough streams are concurrent. Raise CUDAGRAPH_CAPTURE_SIZES,"
+  echo "!!!          MAX_CUDAGRAPH_CAPTURE_SIZE and TUNE_VLLM_EXL3_TRELLIS_MAX_M to >= $_DECODE_M,"
+  echo "!!!          or lower MAX_NUM_SEQS to $(( _CAP_MAX / (1 + MTP_TOKENS) ))."
+fi
+
 SPEC_ARGS=()
 if [ "$MTP_TOKENS" != "0" ]; then
   if [ -n "$DRAFT_MODEL" ]; then
@@ -479,12 +507,12 @@ vllm serve "$MODEL_DIR" \
   --dcp-comm-backend a2a --dcp-kv-cache-interleave-size 64 \
   --quantization exl3 --kv-cache-dtype fp8 \
   --attention-backend B12X_MLA_SPARSE --moe-backend b12x --load-format safetensors \
-  --compilation-config '{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":true}}' \
+  --compilation-config "{\"cudagraph_mode\":\"FULL_AND_PIECEWISE\",\"cudagraph_capture_sizes\":[${CUDAGRAPH_CAPTURE_SIZES:-4,8,12,16,20,24,28,32}],\"custom_ops\":[\"all\"],\"pass_config\":{\"fuse_allreduce_rms\":true}}" \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.93}" \
   --max-model-len "${MAX_MODEL_LEN:-524288}" \
-  --max-num-seqs "${MAX_NUM_SEQS:-32}" \
+  --max-num-seqs "${MAX_NUM_SEQS:-8}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS:-3072}" \
-  --max-cudagraph-capture-size 32 \
+  --max-cudagraph-capture-size "${MAX_CUDAGRAPH_CAPTURE_SIZE:-32}" \
   --enable-chunked-prefill --enable-prefix-caching \
   --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 \
   --enable-prompt-tokens-details --enable-force-include-usage \
