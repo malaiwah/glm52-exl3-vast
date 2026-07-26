@@ -216,6 +216,19 @@ config matrix (6 runs, 5 hosts, 4 driver families):
 Base image: `verdictai/glm52-exl3-sparkinfer@sha256:bfd6d667...` (pinned).
 Checkpoint: `brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw`.
 
+### Running it on your own hardware
+
+The same image drops onto an owned box as a transparent replacement for an
+existing endpoint:
+
+| env | default | why you'd change it |
+|---|---|---|
+| `MODEL_DIR` | `/workspace/GLM-5.2-EXL3-TR3-3.0bpw` | point at weights you already have; the download is skipped when `.download-complete` exists |
+| `SERVED_MODEL_NAME` | `GLM-5.2` | whitespace-separated list of aliases, so existing clients keep working (`"GLM-5.2 local-primary"`) |
+| `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
+| `GPU_BLOCKS_OVERRIDE` | `2048` | `0` drops the pin and lets vLLM use all available KV |
+| `OFFLOAD_FRACTION` | `0.70` | fraction of RAM for the DRAM KV tier; `0` disables |
+
 ## Security
 
 **Threat model honestly stated:** a rented host's operator has root — memory,
@@ -223,9 +236,14 @@ VRAM, and traffic on the box are visible to a determined host. These controls
 are the padlock that keeps honest people honest; truly sensitive work belongs
 on hardware you own.
 
-- **API key** (always on): set `VLLM_API_KEY`, or one is auto-generated and
+- **API key** (on by default): set `VLLM_API_KEY`, or one is auto-generated and
   printed in the instance console logs at boot. All /v1 calls need
-  `Authorization: Bearer <key>`.
+  `Authorization: Bearer <key>`. The key is persisted to the volume, so a
+  restart does not silently invalidate client configs.
+- **`AUTH=none` disables authentication entirely.** This exists for dropping the
+  image into a *trusted private network* — e.g. replacing an in-house endpoint
+  whose clients are already configured without a key. It is never appropriate on
+  a rented public host, so it is opt-in and printed as a loud warning at boot.
 - **SSH tunnel** (recommended for solo use): no public exposure needed —
   `ssh -p <ssh-port> root@<ssh-host> -L 8000:localhost:8000`
   then use `http://localhost:8000/v1`. You can omit `-p 8000:8000` from the

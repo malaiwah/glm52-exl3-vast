@@ -196,12 +196,26 @@ unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 # API key: VLLM_API_KEY env > persisted key on the volume > freshly generated.
 # Persisting matters: a restart (supervisor, reboot, manual) that minted a NEW
 # key would silently invalidate every client config the user already pasted.
+#
+# AUTH=none disables authentication entirely. This exists for trusted private
+# networks (e.g. replacing an in-house endpoint whose clients are already
+# configured without a key); it is NEVER appropriate on a rented public host,
+# so it is opt-in and loudly announced. Default stays "always authenticated".
+AUTH="${AUTH:-key}"
 KEYFILE="${MODEL_DIR%/*}/.vllm-api-key"
-if [ -z "${VLLM_API_KEY:-}" ] && [ -s "$KEYFILE" ]; then
+if [ "$AUTH" = "none" ]; then
+  VLLM_API_KEY=""
+  echo "=================================================================="
+  echo ">>> AUTH=none - the endpoint is UNAUTHENTICATED."
+  echo ">>> Only do this on a trusted private network. Anyone who can reach"
+  echo ">>> port ${PORT:-8000} can use this model."
+  echo "=================================================================="
+fi
+if [ "$AUTH" != "none" ] && [ -z "${VLLM_API_KEY:-}" ] && [ -s "$KEYFILE" ]; then
   VLLM_API_KEY="$(cat "$KEYFILE")"
   echo ">>> API key: reusing the persisted key from $KEYFILE"
 fi
-if [ -z "${VLLM_API_KEY:-}" ]; then
+if [ "$AUTH" != "none" ] && [ -z "${VLLM_API_KEY:-}" ]; then
   VLLM_API_KEY="sk-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   ( umask 077; printf '%s' "$VLLM_API_KEY" > "$KEYFILE" ) 2>/dev/null || true
   echo "=================================================================="
@@ -302,8 +316,20 @@ fi
 # a crash-loop that exceeds the budget exits so the instance is visibly failed
 # rather than thrashing. SUPERVISOR=0 disables (single exec, legacy behaviour).
 serve_once() {
+# --served-model-name accepts several aliases; SERVED_MODEL_NAME is split on
+# whitespace so a drop-in replacement can answer to the names existing clients
+# already use (e.g. "GLM-5.2 local-primary") without touching those clients.
+read -r -a SERVED_NAMES <<< "${SERVED_MODEL_NAME:-GLM-5.2}"
+# AUTH=none -> omit --api-key entirely (passing an empty one still enforces auth).
+AUTH_ARGS=()
+[ "${AUTH:-key}" != "none" ] && AUTH_ARGS=(--api-key "$VLLM_API_KEY")
+# Pool sizing: the override pins the pool at 512K so the KV headroom the trellis
+# draft frees is predictable rather than absorbed. Set GPU_BLOCKS_OVERRIDE=0 to
+# drop the flag and let vLLM use all available KV (bigger pool, more concurrency).
+BLOCKS_ARGS=()
+[ "${GPU_BLOCKS_OVERRIDE:-2048}" != "0" ] && BLOCKS_ARGS=(--num-gpu-blocks-override "${GPU_BLOCKS_OVERRIDE:-2048}")
 vllm serve "$MODEL_DIR" \
-  --served-model-name "${SERVED_MODEL_NAME:-GLM-5.2}" \
+  --served-model-name "${SERVED_NAMES[@]}" \
   --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
   --tensor-parallel-size 4 --decode-context-parallel-size 4 \
   --dcp-comm-backend a2a --dcp-kv-cache-interleave-size 64 \
@@ -315,7 +341,6 @@ vllm serve "$MODEL_DIR" \
   --max-num-seqs "${MAX_NUM_SEQS:-32}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS:-3072}" \
   --max-cudagraph-capture-size 32 \
-  --num-gpu-blocks-override 2048 \
   --enable-chunked-prefill --enable-prefix-caching \
   --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 \
   --enable-prompt-tokens-details --enable-force-include-usage \
@@ -323,7 +348,7 @@ vllm serve "$MODEL_DIR" \
   --default-chat-template-kwargs '{"reasoning_effort":"high"}' \
   ${VISION_ARGS[@]+"${VISION_ARGS[@]}"} \
   --hf-overrides '{"use_index_cache":true,"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
-  --api-key "$VLLM_API_KEY" \
+  ${BLOCKS_ARGS[@]+"${BLOCKS_ARGS[@]}"} ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
   "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}"
 }
 
