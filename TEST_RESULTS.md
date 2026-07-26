@@ -13,6 +13,8 @@ environment variables and are not included here.
   `ghcr.io/malaiwah/glm52-exl3-vast:4e35fdf5c1815c118a9d721e7e40a2b23ac42c93`
 - Final image digest:
   `sha256:8b5e957a8328039762616944eafebddd681c1acc35f6b33fa041f10852fc05d9`
+- Registry payload: 46 layers, 12,493,859,286 compressed bytes (11.6 GiB);
+  approximately 30 GB unpacked.
 - Final build:
   <https://github.com/malaiwah/glm52-exl3-vast/actions/runs/30224142616>
 
@@ -117,7 +119,7 @@ Do not repeat a blind Runpod rental. First arrange one of:
 
 1. a Runpod machine known to cache the pinned base image;
 2. a Runpod-supported registry/cache path that can deliver the approximately
-   30 GB appliance image within the chosen cold-start budget; or
+   11.6 GiB compressed appliance image within the chosen cold-start budget; or
 3. a deliberately slimmed base image that preserves the required vLLM fork
    and Blackwell kernels.
 
