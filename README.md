@@ -79,6 +79,46 @@ Full design note: [docs/self-service-config.md](docs/self-service-config.md).
 Requires `OPEN_BUTTON_TOKEN` in the template environment (vast sets it for the
 Open button) — without a token the editor is not exposed at all.
 
+## Terminate + session erase (opt-in, off by default)
+
+When you are done, the landing page can **destroy the instance from inside it**
+— so billing stops the moment you stop working, and so an optional erase can run
+first. Full design note, provider matrix and cited sources:
+[docs/termination-and-erase.md](docs/termination-and-erase.md).
+
+- **Off by default.** Launch with `TERMINATE_ENABLED=1` to get the control at
+  all. Every provider dashboard can already terminate an instance, so the
+  in-container button is a convenience you opt into — not something a leaked
+  landing-page URL hands to a stranger.
+- **`TERMINATE_LOCKED=1`** is a hard lock: termination is refused no matter
+  what. Both switches are **startup environment only**. A state file that tries
+  to set either is rejected outright, and the landing page can only ever make
+  them *more* restrictive — a locked instance cannot be unlocked from the UI, by
+  any token, only by restarting the container with different env.
+- **vast.ai and RunPod**, auto-detected (`TERMINATE_PROVIDER` overrides). An
+  unrecognised provider says so and points at the dashboard instead of failing
+  obscurely. On RunPod, supply `RUNPOD_TERMINATE_API_KEY` (an account key) —
+  it is not confirmed that the pod-scoped key RunPod injects may delete its own
+  pod, and the page checks the credential before you commit.
+- **Typed confirmation**: you type the instance id, plus an explicit
+  acknowledgement checkbox. No single click can destroy anything.
+- **`TERMINATE_DRY_RUN=1`** runs the whole flow and shows the request it would
+  have sent, without sending it.
+- **Session erase** (a checkbox, unchecked): overwrites and unlinks the API key,
+  TLS private key, config state, every log this template writes (prompts
+  included), shell history, SSH material, provider/HF credentials, and anything
+  you added under the model dir. **The public model weights are deliberately not
+  erased** — the checkpoint is downloadable by anyone, so overwriting 332 GB
+  hides nothing. Optional RAM and VRAM zeroing. Read the limits in the design
+  note: on SSDs with wear levelling, on overlay filesystems and on network
+  volumes an overwrite does not guarantee the old bytes are unreachable, and the
+  instance console log in your dashboard is outside our reach entirely.
+
+> **RunPod network volumes:** a network volume survives termination and keeps
+> billing. Everything this template writes lives under `/workspace`, which is
+> where it mounts — so on such a pod the erase is the *only* thing that removes
+> your session data. The page says so in red when it detects one.
+
 ## Vision (default ON)
 
 Images work out of the box: the MoonViT-3d tower (Kimi-K2.6, frozen) plus
@@ -298,6 +338,12 @@ existing endpoint:
 | `VERIFY_LONG_CONTEXT` | `1` | `0` keeps the short-prompt checks only — read the warning above before using it |
 | `VERIFY_NEEDLE_TOKENS` | `32768` | size of the long-context retrieval probe |
 | `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures and logs live |
+| `TERMINATE_ENABLED` | `0` | `1` exposes the terminate control on the landing page (startup env only) |
+| `TERMINATE_LOCKED` | `0` | `1` hard-locks termination for the life of the container (startup env only) |
+| `TERMINATE_PROVIDER` | (auto) | force `vastai` or `runpod` when detection fails |
+| `RUNPOD_TERMINATE_API_KEY` | (unset) | RunPod account API key; the injected pod-scoped key may not be permitted to delete its own pod |
+| `TERMINATE_DRY_RUN` | `0` | `1` prepares the destroy request and does not send it |
+| `TERMINATE_PROBE` | `1` | `0` skips the read-only credential pre-check |
 
 ## Security
 

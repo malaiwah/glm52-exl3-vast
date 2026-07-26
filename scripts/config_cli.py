@@ -10,6 +10,7 @@
                                         preserve the failed config+log, restore the
                                         last known-good, ask for a restart
     config_cli.py should-rollback       exit 0 if a rollback would change anything
+    config_cli.py switches              print the termination switches as JSON
     config_cli.py pending-analysis      print a failure dir that has no analysis yet
     config_cli.py request-restart       set the restart flag
     config_cli.py clear-restart         clear the restart flag
@@ -57,6 +58,10 @@ def _resolved():
 # --------------------------------------------------------------------------
 
 def cmd_snapshot_env(_args):
+    """Once per container start: freeze the env layer AND derive the
+    termination switches from it. Both are per-container by design — the
+    switches live in the runtime dir so that loosening them requires a restart
+    with a different environment, i.e. provider-level access."""
     layer = gc.snapshot_startup_env()
     os.makedirs(gc.state_dir(), exist_ok=True)
     os.makedirs(gc.runtime_dir(), exist_ok=True)
@@ -64,6 +69,10 @@ def cmd_snapshot_env(_args):
     os.makedirs(gc.p_failures(), exist_ok=True)
     print(f"startup env layer: {len(layer)} knob(s) set from the environment"
           + (": " + ", ".join(sorted(layer)) if layer else ""))
+    sw = gc.init_switches()
+    print(">>> termination: kill switch %s, anti-kill switch %s" % (
+        "ON (TERMINATE_ENABLED=1)" if sw["enabled"] else "off (default)",
+        "LOCKED (TERMINATE_LOCKED=1)" if sw["locked"] else "not locked"))
     return 0
 
 
@@ -217,6 +226,13 @@ def cmd_should_rollback(_args):
     return 0 if gc.diff(good.get("effective", {}), effective) else 1
 
 
+def cmd_switches(_args):
+    allowed, reason = gc.termination_allowed()
+    print(json.dumps({"switches": gc.read_switches(), "allowed": allowed,
+                      "reason": reason}, indent=1))
+    return 0
+
+
 def cmd_pending_analysis(_args):
     root = gc.p_failures()
     try:
@@ -254,6 +270,7 @@ COMMANDS = {
     "mark-good": cmd_mark_good,
     "rollback": cmd_rollback,
     "should-rollback": cmd_should_rollback,
+    "switches": cmd_switches,
     "pending-analysis": cmd_pending_analysis,
     "request-restart": cmd_request_restart,
     "clear-restart": cmd_clear_restart,

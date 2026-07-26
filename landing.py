@@ -18,7 +18,9 @@ import json
 import os
 import socket
 import ssl
+import subprocess
 import sys
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
@@ -28,12 +30,19 @@ from urllib.parse import parse_qs, urlparse
 # scripts/glm_config.py so that the entrypoint and this page cannot disagree
 # about them. If it cannot be imported the page still serves — it just loses
 # the config editor rather than the whole landing page.
-sys.path.insert(0, os.environ.get("GLM_SCRIPTS_DIR", "/opt/scripts"))
+SCRIPTS_DIR = os.environ.get("GLM_SCRIPTS_DIR", "/opt/scripts")
+sys.path.insert(0, SCRIPTS_DIR)
 try:
     import glm_config as gc
 except Exception as _e:  # pragma: no cover - import guard
     gc = None
     _GC_ERR = str(_e)
+try:
+    import provider as prov
+    import terminate_worker
+except Exception:        # the terminate control simply does not appear
+    prov = None
+    terminate_worker = None
 
 TOKEN = os.environ.get("OPEN_BUTTON_TOKEN", "")
 MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
@@ -545,7 +554,9 @@ def render_config(tok: str, secure: bool, banner=None, banner_cls="",
              STYLE, CONFIG_STYLE, "</head><body><div class=wrap>",
              "<header class=hero><h1><b>GLM-5.2</b> configuration</h1>"
              f"<span class=sub><a href='/?token={tok_q}'>&larr; status &amp; dashboard</a>"
-             "</span></header>"]
+             + (f" &middot; <a href='/terminate?token={tok_q}'>terminate</a>"
+                if terminate_available() else "")
+             + "</span></header>"]
     if banner:
         parts.append(f"<div class='banner {banner_cls}'>{banner}</div>")
     if not secure:
@@ -651,6 +662,12 @@ def apply_values(values: dict):
     -> (ok, findings, message). Nothing is written when validation finds an
     error: the whole point is that the user never reaches a failed restart for
     a reason that was knowable beforehand."""
+    try:
+        gc.check_forbidden(values)
+    except gc.ConfigError as e:
+        return False, [{"id": "forbidden-key", "level": "error",
+                        "keys": list(gc.FORBIDDEN_STATE_KEYS), "message": str(e)}], \
+            "Nothing was applied."
     minimal = gc.minimize(values)
     effective, _sources, notes = gc.resolve(state_values=minimal)
     findings = gc.validate(effective, {"vision_available": os.path.exists(
@@ -672,6 +689,276 @@ def apply_values(values: dict):
         f.write("landing-page\n")
     return True, findings, ("Applied. vLLM is restarting with:<br><pre>"
                             + html.escape(gc.diff_text(current, effective)) + "</pre>")
+
+
+# ==========================================================================
+# terminate the instance
+# ==========================================================================
+
+TERMINATE_STYLE = """<style>
+.danger{border:1px solid #e5484d;border-radius:12px;padding:1rem;margin:1rem 0;
+background:var(--card)}
+.danger h2{margin-top:0;color:#e5484d}
+.danger ul{margin:.3rem 0 .6rem 1.1rem;padding:0}
+.danger li{margin:.15rem 0}
+button.destroy{background:#e5484d;border-color:#e5484d;color:#fff;font-weight:600}
+button.destroy:hover{filter:brightness(1.1);color:#fff}
+button.destroy:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.lockbox{border:1px solid var(--line);border-radius:12px;padding:.8rem 1rem;
+margin:1rem 0;background:var(--card)}
+input.confirm{font-family:var(--mono);font-size:.95rem;width:100%;max-width:22rem;
+background:var(--bg);color:var(--fg);border:1px solid var(--line);
+border-radius:8px;padding:.4rem .6rem}
+.kv{font-size:.88rem}.kv b{font-family:var(--mono);font-weight:600}
+</style>"""
+
+
+def terminate_available() -> bool:
+    """The control only exists when the shared modules imported AND the page is
+    token-gated. Termination must never be reachable unauthenticated."""
+    return bool(gc is not None and prov is not None and terminate_worker is not None
+                and TOKEN)
+
+
+def _switch_html():
+    st = gc.read_switches()
+    allowed, why = gc.termination_allowed()
+    rows = [
+        ("Kill switch (TERMINATE_ENABLED)",
+         "on — the terminate control is available" if st["enabled"]
+         else "off — terminate from this page is disabled (this is the default)"),
+        ("Anti-kill switch (TERMINATE_LOCKED)",
+         "LOCKED — termination is refused no matter what" if st["locked"]
+         else "not locked"),
+    ]
+    body = "".join(f"<div class=kv><b>{html.escape(k)}</b>: {html.escape(v)}</div>"
+                   for k, v in rows)
+    return ("<div class=lockbox><h3 style='margin:.1rem 0 .5rem;font-size:.85rem;"
+            "text-transform:uppercase;letter-spacing:.06em;color:var(--muted)'>"
+            "Termination switches</h3>" + body +
+            f"<p class=sub style='margin:.5rem 0 0'>{html.escape(why)}</p></div>"), allowed
+
+
+def _progress_html():
+    doc = terminate_worker.read_progress()
+    if not doc:
+        return ""
+    cls = "banner"
+    if doc.get("done"):
+        cls = "banner good" if doc.get("ok") else "banner bad"
+    steps = "".join(
+        f"<li>{html.escape(s.get('phase', ''))}"
+        + (f" — {html.escape(s.get('detail', ''))}" if s.get("detail") else "")
+        + "</li>" for s in doc.get("steps", []))
+    extra = ""
+    if doc.get("dry_run"):
+        extra += ("<p><b>DRY RUN</b> — the destroy request is being prepared but NOT "
+                  "sent. The instance keeps running and keeps billing.</p>")
+    if doc.get("terminate", {}).get("attempts"):
+        rows = "".join(
+            "<li><code>%s %s</code> → HTTP %s</li>" % (
+                html.escape(str(a.get("method"))), html.escape(str(a.get("url"))),
+                html.escape(str(a.get("status"))))
+            for a in doc["terminate"]["attempts"])
+        extra += f"<p class=sub>Provider calls:</p><ul>{rows}</ul>"
+    er = doc.get("erase_result")
+    if er:
+        extra += ("<p class=sub>Erased %s file(s), %.1f MiB overwritten%s.</p>" % (
+            er.get("erased", 0), er.get("bytes", 0) / 2**20,
+            f", {len(er.get('failed', []))} failed" if er.get("failed") else ""))
+    if doc.get("unknown_large"):
+        extra += ("<p class=sub><b>Not erased:</b> %d large file(s) under the model dir "
+                  "could not be told apart from the public checkpoint. They are listed "
+                  "in the progress JSON.</p>" % len(doc["unknown_large"]))
+    head = ("Termination finished" if doc.get("done") else "Termination in progress")
+    return (f"<div class='{cls}'><b>{head}</b> — phase: "
+            f"<code>{html.escape(doc.get('phase', ''))}</code>"
+            f"<p>{html.escape(doc.get('detail', ''))}</p>{extra}"
+            f"<details><summary>steps</summary><ul>{steps}</ul></details></div>")
+
+
+_PROBE_CACHE = {"ts": 0, "state": "unknown", "detail": ""}
+
+
+def credential_probe(p):
+    """Ask the provider whether the credential is even valid, before the user
+    types an instance id. Uses an UNARMED transport: the check is a read, and
+    the page never needs the ability to destroy anything. Cached, because it is
+    a network round trip on a page that gets polled."""
+    if os.environ.get("TERMINATE_PROBE", "1") == "0":
+        return "unknown", "credential pre-check disabled (TERMINATE_PROBE=0)"
+    now = time.time()
+    if now - _PROBE_CACHE["ts"] < 60:
+        return _PROBE_CACHE["state"], _PROBE_CACHE["detail"]
+    try:
+        state, detail = p.probe(prov.HttpTransport(timeout=8))
+    except Exception as e:
+        state, detail = "unknown", f"the credential check could not run ({e})"
+    _PROBE_CACHE.update({"ts": now, "state": state, "detail": detail})
+    return state, detail
+
+
+def render_terminate(tok: str, secure: bool, banner=None, banner_cls="") -> bytes:
+    p = prov.get()
+    desc = p.describe()
+    switch_html, allowed = _switch_html()
+    tok_q = html.escape(tok, quote=True)
+    dry = gc.env_flag(os.environ, "TERMINATE_DRY_RUN", False)
+    expected = desc["instance_id"] or "TERMINATE"
+
+    parts = ["<!doctype html><html><head><title>Terminate this instance</title>"
+             "<meta name=viewport content='width=device-width,initial-scale=1'>",
+             STYLE, CONFIG_STYLE, TERMINATE_STYLE, "</head><body><div class=wrap>",
+             "<header class=hero><h1><b>Terminate</b> this instance</h1>"
+             f"<span class=sub><a href='/?token={tok_q}'>&larr; status</a> &middot; "
+             f"<a href='/config?token={tok_q}'>configuration</a></span></header>"]
+    if banner:
+        parts.append(f"<div class='banner {banner_cls}'>{banner}</div>")
+    progress = _progress_html()
+    if progress:
+        parts.append(progress)
+    parts.append(switch_html)
+
+    parts.append(
+        "<div class=grid>"
+        "<div class=card><h3>Provider</h3><div class=v>%s</div>"
+        "<div class=why>%s</div></div>"
+        "<div class=card><h3>Instance</h3><div class=v><code>%s</code></div>"
+        "<div class=why>%s</div></div></div>" % (
+            html.escape(desc["label"]),
+            html.escape(desc["reason"]),
+            html.escape(desc["instance_id"] or "(unknown)"),
+            html.escape(desc["key_source"] or "no credential found")))
+
+    if desc["supported"] and desc["ready"]:
+        pstate, pdetail = credential_probe(p)
+        cls = {"ok": "banner good", "rejected": "banner bad"}.get(pstate, "banner")
+        parts.append(f"<div class='{cls}'><b>Credential check:</b> "
+                     f"{html.escape(pdetail)}</div>")
+    for w in desc.get("warnings", []):
+        parts.append(f"<div class='banner bad'>{html.escape(w)}</div>")
+
+    if not desc["supported"]:
+        ev = prov.detection_evidence()
+        parts.append(
+            "<div class=danger><h2>Termination is not supported here</h2>"
+            "<p>This image could not identify the cloud provider it is running on, so "
+            "it will not try to destroy anything. <b>Terminate from your provider's "
+            "dashboard</b> — that is what actually stops the billing.</p>"
+            "<p class=sub>If you know the provider, relaunch with "
+            "<code>TERMINATE_PROVIDER=vastai</code> or <code>=runpod</code>.</p>"
+            "<details><summary>what the detector saw</summary><pre>%s</pre></details>"
+            "</div>" % html.escape(json.dumps(ev, indent=1)))
+        parts.append("</div></body></html>")
+        return "".join(parts).encode()
+
+    parts.append("<div class=danger><h2>This is irreversible</h2>"
+                 "<p>Destroying the instance <b>cannot be undone</b>. There is no "
+                 "trash, no grace period, and no support ticket that brings it back.</p>"
+                 "<p><b>Destroyed:</b></p><ul>"
+                 + "".join(f"<li>{html.escape(d)}</li>" for d in desc["destroys"])
+                 + "</ul><p><b>Survives:</b></p><ul>"
+                 + "".join(f"<li>{html.escape(s)}</li>" for s in desc["survives"])
+                 + f"</ul><p class=sub>{html.escape(desc['billing'])}</p></div>")
+
+    if dry:
+        parts.append("<div class=banner><b>TERMINATE_DRY_RUN=1</b> — the destroy "
+                     "request will be prepared and shown, but not sent.</div>")
+
+    if not allowed:
+        parts.append("<p class=sub>The form below is disabled while the switches "
+                     "above refuse termination.</p>")
+
+    dis = "" if allowed else " disabled"
+    parts.append(
+        f"<form method=post action='/terminate?token={tok_q}'>"
+        f"<input type=hidden name=token value='{tok_q}'>"
+        "<h2>Optional: erase this session first</h2>"
+        f"<p><label><input type=checkbox name=erase value=1{dis}> "
+        "<b>Securely erase session data before destroying</b> (default off)</label></p>"
+        "<p class=sub>Overwrites and unlinks the API key, TLS private key, config "
+        "state, every log this template writes (prompts included, where request "
+        "logging put them), shell history, SSH material, provider and Hugging Face "
+        "credentials, and anything you added under the model dir. "
+        "<b>The public model weights are deliberately NOT erased</b> — the checkpoint "
+        "is downloadable by anyone, so overwriting 332 GB hides nothing and would take "
+        "far longer than you have. "
+        "<b>Limits:</b> on SSDs with wear levelling, on overlay/copy-on-write "
+        "filesystems, and on network volumes, an overwrite does not guarantee the old "
+        "bytes are unreachable; provider snapshots and the instance console log in "
+        "your dashboard are outside our reach entirely.</p>"
+        f"<p><label><input type=checkbox name=ram value=1{dis}> also drop the page "
+        "cache and overwrite free RAM</label><br>"
+        f"<label><input type=checkbox name=vram value=1{dis}> also zero GPU memory "
+        "(after the engine stops)</label></p>"
+        "<h2>Confirm</h2>"
+        f"<p class=sub>Type <code>{html.escape(expected)}</code> exactly — the "
+        "instance id. This is deliberately not a one-click action.</p>"
+        f"<p><input class=confirm name=confirm autocomplete=off "
+        f"placeholder='{html.escape(expected, quote=True)}'{dis}></p>"
+        f"<p><label><input type=checkbox name=understand value=1{dis}> I understand "
+        "this destroys the instance and everything on its disks, permanently.</label></p>"
+        f"<p><button class=destroy type=submit{dis}>Destroy this instance</button></p>"
+        "</form>")
+
+    parts.append(
+        f"<div class=lockbox><h2 style='margin-top:.2rem'>Lock this instance instead</h2>"
+        "<p class=sub>Locking is one-way. It refuses termination from this page for the "
+        "life of this container, for anyone holding this token — including you. It "
+        "clears only by restarting the container with <code>TERMINATE_LOCKED</code> "
+        "unset, which needs provider-dashboard access.</p>"
+        f"<form method=post action='/terminate/lock?token={tok_q}'>"
+        f"<input type=hidden name=token value='{tok_q}'>"
+        "<p><label><input type=checkbox name=understand value=1> I understand this "
+        "cannot be undone from this page.</label></p>"
+        "<p><button type=submit name=action value=disable>Disable the terminate "
+        "control</button> <button type=submit name=action value=lock>Lock termination "
+        "(hard)</button></p></form></div>")
+
+    parts.append("</div></body></html>")
+    return "".join(parts).encode()
+
+
+def start_termination(form) -> tuple:
+    """Validate every gate, then hand off to a detached worker.
+
+    -> (started, message, css_class). Returns without acting on any failure."""
+    allowed, why = gc.termination_allowed()
+    if not allowed:
+        return False, html.escape(why), "bad"
+    if form.get("understand", [""])[0] != "1":
+        return False, ("Nothing was done: you did not tick the box confirming you "
+                       "understand this is permanent."), "bad"
+    p = prov.get()
+    ok, reason = p.ready()
+    if not ok:
+        return False, html.escape(reason), "bad"
+    expected = p.instance_id() or "TERMINATE"
+    typed = (form.get("confirm", [""])[0] or "").strip()
+    if typed != expected:
+        return False, ("Nothing was done: the confirmation text did not match. Type "
+                       f"<code>{html.escape(expected)}</code> exactly."), "bad"
+    doc = terminate_worker.read_progress()
+    if doc and not doc.get("done"):
+        return False, "A termination is already in progress.", ""
+    opts = ["--confirm", typed]
+    if form.get("erase", [""])[0] == "1":
+        opts.append("--erase")
+        if form.get("ram", [""])[0] == "1":
+            opts.append("--ram")
+        if form.get("vram", [""])[0] == "1":
+            opts.append("--vram")
+    try:
+        os.makedirs(gc.runtime_dir(), exist_ok=True)
+        logf = open(os.path.join(gc.runtime_dir(), "terminate.log"), "ab")
+        subprocess.Popen(
+            [sys.executable, os.path.join(SCRIPTS_DIR, "terminate_worker.py")] + opts,
+            stdout=logf, stderr=logf, start_new_session=True, close_fds=True)
+    except Exception as e:
+        return False, ("Could not start the termination worker: "
+                       + html.escape(str(e))), "bad"
+    return True, ("Termination started. This page now shows its progress; do not close "
+                  "it until the outcome is reported."), ""
 
 
 def render(secure: bool, tok: str = "") -> bytes:
@@ -740,6 +1027,9 @@ def render(secure: bool, tok: str = "") -> bytes:
         if config_enabled():
             parts.append(f' &middot; <a href="/config?token={tok_esc}">'
                          '<b>Configure &rarr;</b></a>')
+        if terminate_available():
+            parts.append(f' &middot; <a href="/terminate?token={tok_esc}">'
+                         'Terminate instance</a>')
         parts.append('</div></div>')
         if key.startswith("<"):
             parts.append("<p class=sub>The API key is printed in the instance logs "
@@ -795,8 +1085,10 @@ class DualProtocolServer(ThreadingHTTPServer):
         return sock, addr
 
 
-GET_PATHS = ("/", "/chat", "/config", "/config/export", "/config/status")
-POST_PATHS = ("/config/apply", "/config/import", "/config/reset", "/config/restart")
+GET_PATHS = ("/", "/chat", "/config", "/config/export", "/config/status",
+             "/terminate", "/terminate/status")
+POST_PATHS = ("/config/apply", "/config/import", "/config/reset", "/config/restart",
+              "/terminate", "/terminate/lock")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -821,6 +1113,16 @@ class Handler(BaseHTTPRequestHandler):
             return False
         if not TOKEN or tok != TOKEN:
             self.send_error(403, "the config editor requires OPEN_BUTTON_TOKEN")
+            return False
+        return True
+
+    def _terminate_guard(self, tok):
+        """Termination is never reachable unauthenticated, and never reachable
+        at all unless the shared modules are importable."""
+        if not self._config_guard(tok):
+            return False
+        if not terminate_available():
+            self.send_error(503, "termination support is unavailable in this image")
             return False
         return True
 
@@ -884,11 +1186,34 @@ class Handler(BaseHTTPRequestHandler):
                 body = render_config(tok, secure,
                                      "State file removed; restarting on the template "
                                      "environment and the built-in defaults.", "good")
-            else:  # /config/restart
+            elif url.path == "/config/restart":
                 os.makedirs(gc.runtime_dir(), exist_ok=True)
                 with open(gc.p_restart_flag(), "w") as f:
                     f.write("manual\n")
                 body = render_config(tok, secure, "Restart requested.", "good")
+            elif url.path == "/terminate":
+                if not self._terminate_guard(tok):
+                    return
+                started, msg, cls = start_termination(form)
+                body = render_terminate(tok, secure, msg, cls if cls else
+                                        ("good" if started else "bad"))
+            else:  # /terminate/lock — the runtime ratchet, tighten-only
+                if not self._terminate_guard(tok):
+                    return
+                if form.get("understand", [""])[0] != "1":
+                    body = render_terminate(tok, secure, "Nothing changed: tick the "
+                                            "box first.", "bad")
+                else:
+                    action = form.get("action", [""])[0]
+                    if action == "lock":
+                        gc.tighten(locked=True, reason="locked from the landing page")
+                        msg = ("Termination is now LOCKED for the life of this "
+                               "container. This page cannot unlock it.")
+                    else:
+                        gc.tighten(enabled=False, reason="disabled from the landing page")
+                        msg = ("The terminate control is now disabled. It cannot be "
+                               "re-enabled from this page.")
+                    body = render_terminate(tok, secure, msg, "good")
         except Exception as e:  # never take the landing page down on a bad form
             body = render_config(tok, secure,
                                  "Internal error: " + html.escape(str(e)), "bad")
@@ -944,6 +1269,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send(doc, "application/json",
                        extra=(("Content-Disposition",
                                "attachment; filename=glm52-config.json"),))
+            return
+        elif url.path == "/terminate":
+            if not self._terminate_guard(tok):
+                return
+            self._send(render_terminate(tok, secure))
+            return
+        elif url.path == "/terminate/status":
+            if not self._terminate_guard(tok):
+                return
+            allowed, why = gc.termination_allowed()
+            self._send(json.dumps({
+                "switches": gc.read_switches(), "allowed": allowed, "reason": why,
+                "provider": prov.get().describe(),
+                "progress": terminate_worker.read_progress(),
+            }, indent=1).encode(), "application/json")
             return
         elif url.path == "/config/status":
             if not self._config_guard(tok):

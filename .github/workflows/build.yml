@@ -2,9 +2,9 @@ name: build-and-push
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, entrypoint.sh, landing.py, "scripts/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "scripts/**", "tests/**", .github/workflows/build.yml]
   pull_request:
-    paths: [Dockerfile, entrypoint.sh, landing.py, "scripts/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "scripts/**", "tests/**", .github/workflows/build.yml]
   workflow_dispatch:
 jobs:
   lint:
@@ -13,6 +13,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: shellcheck entrypoint
         run: shellcheck entrypoint.sh
+      - name: python syntax
+        run: python3 -m compileall -q landing.py scripts/
+      # Guards the destructive path: provider detection, the terminate
+      # confirmation gates, the kill/anti-kill switch invariants, and the
+      # session erase. Uses stubbed provider clients — it never contacts a
+      # provider API and never destroys anything.
+      - name: termination + switch tests
+        run: python3 tests/test_termination.py
   build:
     # PRs build without pushing, so a broken Dockerfile is caught before main
     runs-on: ubuntu-latest

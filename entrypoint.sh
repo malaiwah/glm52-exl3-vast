@@ -51,8 +51,14 @@ RESTART_FLAG="$GLM_RUNTIME_DIR/restart-request"
 VERIFY_FILE="$GLM_RUNTIME_DIR/verify.json"
 VERIFY_LAST="$GLM_STATE_DIR/verify-last.json"
 CONFIG_ENV="$GLM_RUNTIME_DIR/config.env"
+# Termination handshake files. TERMINATE_FLAG is written by the terminate
+# worker; the supervisor answers by stopping vLLM for good and touching
+# ENGINE_STOPPED. Both live in the runtime dir, so a replaced container starts
+# with a clean slate and can never inherit a stale "please terminate".
+TERMINATE_FLAG="$GLM_RUNTIME_DIR/terminate-in-progress"
+ENGINE_STOPPED="$GLM_RUNTIME_DIR/engine-stopped"
 mkdir -p "$GLM_STATE_DIR" "$GLM_RUNTIME_DIR" "$GLM_LOG_DIR" "$GLM_STATE_DIR/failures"
-rm -f "$RESTART_FLAG" "$VERIFY_FILE"
+rm -f "$RESTART_FLAG" "$VERIFY_FILE" "$TERMINATE_FLAG" "$ENGINE_STOPPED"
 
 # MODEL_DIR set in the template env pins the weights regardless of the model
 # variant knob; unset, the variant chooses the directory name.
@@ -895,6 +901,10 @@ while :; do
   verified=0   # a verdict has been consumed
   good=0       # ... and it was a PASS (only then is the log safe to truncate)
   while :; do
+    if [ -f "$TERMINATE_FLAG" ]; then
+      reason="terminating"
+      break
+    fi
     if [ -f "$RESTART_FLAG" ]; then
       reason="requested"
       break
@@ -943,6 +953,24 @@ gc.set_apply_state('degraded', detail='verification failed and there is no known
   stop_verifier
 
   case "$reason" in
+    terminating)
+      # The terminate worker owns the box from here. Stop the engine for good —
+      # restarting it would rewrite the very logs the worker is erasing and
+      # re-allocate the VRAM it wants to zero — then keep PID 1 alive so the
+      # worker can finish and issue the destroy call. Exiting here would kill
+      # the container mid-erase, which on some providers just restarts it.
+      echo ">>> TERMINATION REQUESTED — stopping vLLM and standing down." >&2
+      status_update terminating
+      kill_server_tree
+      : > "$ENGINE_STOPPED"
+      while [ -f "$TERMINATE_FLAG" ]; do
+        sleep 5
+      done
+      echo ">>> Termination was cancelled (flag cleared) — resuming." >&2
+      rm -f "$ENGINE_STOPPED"
+      attempt=0
+      continue
+      ;;
     requested)
       echo ">>> Config change requested — restarting vLLM with the new configuration"
       status_update applying-config

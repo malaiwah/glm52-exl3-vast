@@ -499,7 +499,125 @@ def load_state_file() -> dict:
     values = doc.get("values", doc)
     if not isinstance(values, dict):
         raise ConfigError("state file 'values' is not a JSON object")
+    check_forbidden(values)
     return values
+
+
+# --------------------------------------------------------------------------
+# termination switches — startup environment ONLY, and one-way at runtime
+# --------------------------------------------------------------------------
+# These are not knobs. A knob is something the landing page may change; these
+# two decide whether the landing page may destroy the instance at all, so the
+# landing page must not be able to grant itself either of them.
+#
+#   TERMINATE_ENABLED  kill switch      — is the terminate control available?
+#   TERMINATE_LOCKED   anti-kill switch — hard lock; termination is refused
+#                                         regardless of TERMINATE_ENABLED
+#
+# Three structural properties, in the order they matter:
+#
+#  1. NOT IN THE STATE FILE. `check_forbidden` REJECTS a state file that even
+#     mentions them, naming the key. Not "ignored" — rejected, because a file
+#     that contains them is evidence of an escalation attempt and the rest of
+#     its contents have not earned any trust either.
+#  2. RATCHET. `tighten()` is the only mutator and it computes
+#         enabled := enabled AND requested_enabled
+#         locked  := locked  OR  requested_locked
+#     so loosening is not "disallowed", it is unrepresentable. There is no
+#     `loosen()` to audit.
+#  3. PER-CONTAINER. The ratchet state lives in the runtime dir, not on the
+#     volume, so it is re-derived from the startup environment on every
+#     container start. Loosening therefore requires editing the template
+#     environment and restarting — i.e. provider-dashboard access, which is
+#     exactly the authority a landing-page user may not have.
+
+FORBIDDEN_STATE_KEYS = ("TERMINATE_ENABLED", "TERMINATE_LOCKED")
+
+
+def check_forbidden(values: dict):
+    """Raise if a state file tries to set a startup-only switch."""
+    for key in FORBIDDEN_STATE_KEYS:
+        if key in values:
+            raise ConfigError(
+                f"state file rejected: '{key}' is a startup-environment control and "
+                "can never be set from the state file or the landing page. "
+                "Termination switches only loosen by restarting the container with a "
+                "different environment, which needs provider-dashboard access. "
+                "Remove the key and try again.")
+
+
+def env_flag(env, name, default=False):
+    v = (env.get(name) or "").strip().lower()
+    if v == "":
+        return default
+    return v in ("1", "true", "yes", "on")
+
+
+def p_switches() -> str:
+    return os.path.join(runtime_dir(), "terminate-switches.json")
+
+
+def switches_from_env(env=None) -> dict:
+    """The startup-environment truth. Defaults are argued in
+    docs/termination-and-erase.md; the short version is that every provider
+    dashboard can already terminate an instance, so the in-container control is
+    a convenience that must be opted into, while the lock is opt-in because a
+    locked instance that nobody can unlock is its own failure mode."""
+    env = os.environ if env is None else env
+    return {"enabled": env_flag(env, "TERMINATE_ENABLED", False),
+            "locked": env_flag(env, "TERMINATE_LOCKED", False),
+            "source": "startup environment"}
+
+
+def init_switches(env=None) -> dict:
+    """Called once per container start by the entrypoint."""
+    st = switches_from_env(env)
+    write_json_atomic(p_switches(), st, mode=0o644)
+    return st
+
+
+def read_switches(env=None) -> dict:
+    """Current effective switches. Falls back to the environment when the
+    runtime file is missing — and the fallback is the RESTRICTIVE direction by
+    construction, since a missing file means a fresh container."""
+    st = read_json(p_switches())
+    if not isinstance(st, dict) or "enabled" not in st or "locked" not in st:
+        return switches_from_env(env)
+    return {"enabled": bool(st.get("enabled")), "locked": bool(st.get("locked")),
+            "source": st.get("source", "runtime")}
+
+
+def tighten(enabled=None, locked=None, reason="") -> dict:
+    """The ONLY mutator. AND/OR with the current state, so it cannot loosen."""
+    cur = read_switches()
+    new = {
+        "enabled": bool(cur["enabled"] and (True if enabled is None else bool(enabled))),
+        "locked": bool(cur["locked"] or (False if locked is None else bool(locked))),
+        "source": "tightened at runtime" + (f": {reason}" if reason else ""),
+    }
+    write_json_atomic(p_switches(), new, mode=0o644)
+    return new
+
+
+def termination_allowed(env=None):
+    """-> (allowed, reason). `reason` is shown to the user verbatim."""
+    st = read_switches(env)
+    if st["locked"]:
+        return False, (
+            "TERMINATION IS LOCKED on this instance (anti-kill switch). This cannot be "
+            "unlocked from this page, by any token, for any reason — the lock only "
+            "clears when the container is restarted with TERMINATE_LOCKED unset in its "
+            "startup environment, which requires access to the provider dashboard or "
+            "the template that launched it. Terminate from the provider dashboard "
+            "instead if that is what you want.")
+    if not st["enabled"]:
+        return False, (
+            "The in-container terminate control is DISABLED (kill switch off, the "
+            "default). It can only be enabled by launching the instance with "
+            "TERMINATE_ENABLED=1 in its environment — not from this page. You can "
+            "always terminate from your provider's dashboard, which is the path that "
+            "actually stops billing.")
+    return True, "termination is available on this instance"
 
 
 def resolve(state_values=None, env_values=None):
