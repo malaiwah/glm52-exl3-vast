@@ -22,7 +22,9 @@ NGPU=$(nvidia-smi -L 2>/dev/null | wc -l)
 if [ -d /root/.ssh ]; then
   chown -R root:root /root/.ssh 2>/dev/null || true
   chmod 700 /root /root/.ssh 2>/dev/null || true
-  [ -f /root/.ssh/authorized_keys ] && chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
+  if [ -f /root/.ssh/authorized_keys ]; then
+    chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
+  fi
   echo ">>> SSH: repaired /root/.ssh ownership+modes (sshd rejects loose perms)"
 fi
 
@@ -336,13 +338,20 @@ serve_once() {
 # already use (e.g. "GLM-5.2 local-primary") without touching those clients.
 read -r -a SERVED_NAMES <<< "${SERVED_MODEL_NAME:-GLM-5.2}"
 # AUTH=none -> omit --api-key entirely (passing an empty one still enforces auth).
+# NB: `[ test ] && ARR=(...)` returns non-zero when the test is false, which
+# under `set -e` kills serve_once outright — precisely in the AUTH=none and
+# GPU_BLOCKS_OVERRIDE=0 cases these branches exist to support. Use if/then.
 AUTH_ARGS=()
-[ "${AUTH:-key}" != "none" ] && AUTH_ARGS=(--api-key "$VLLM_API_KEY")
+if [ "${AUTH:-key}" != "none" ]; then
+  AUTH_ARGS=(--api-key "$VLLM_API_KEY")
+fi
 # Pool sizing: the override pins the pool at 512K so the KV headroom the trellis
 # draft frees is predictable rather than absorbed. Set GPU_BLOCKS_OVERRIDE=0 to
 # drop the flag and let vLLM use all available KV (bigger pool, more concurrency).
 BLOCKS_ARGS=()
-[ "${GPU_BLOCKS_OVERRIDE:-2048}" != "0" ] && BLOCKS_ARGS=(--num-gpu-blocks-override "${GPU_BLOCKS_OVERRIDE:-2048}")
+if [ "${GPU_BLOCKS_OVERRIDE:-2048}" != "0" ]; then
+  BLOCKS_ARGS=(--num-gpu-blocks-override "${GPU_BLOCKS_OVERRIDE:-2048}")
+fi
 vllm serve "$MODEL_DIR" \
   --served-model-name "${SERVED_NAMES[@]}" \
   --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
