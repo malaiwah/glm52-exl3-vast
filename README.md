@@ -109,37 +109,32 @@ if you want that last few percent (not yet the default — wants a larger run).
 Measured 2026-07-26 on owned hardware (4x RTX PRO 6000 Blackwell, **280 W cap**,
 TP4/DCP4-a2a, MTP-3, 512K context, DRAM KV offload on, clean single-stream):
 
-| stack | decode C1 | MAL / accept | KV/GPU | KV pool |
-|---|---|---|---|---|
-| GLM-5.2 NVFP4-NF3 hybrid (previous prod) | 119.2 tok/s | ~3.5 / 0.83 | 4.64 GiB | 537,600 tok |
-| **EXL3-TR3 3bpw + MTP78 trellis** | **127.4 tok/s** | **3.533 / 0.844** | **7.42 GiB** | **860,928 tok** |
-| **the same + vision (MoonViT + projector)** | 110.3 tok/s | 3.528 / 0.843 | 6.11 GiB | 588,544 tok |
+| stack (fp8 KV — what this template ships) | decode C1 | MAL / accept | KV/GPU | KV pool | 505K needle |
+|---|---|---|---|---|---|
+| GLM-5.2 NVFP4-NF3 hybrid (previous prod, calibrated nvfp4 KV) | 119.2 tok/s | ~3.5 / 0.83 | 4.64 GiB | 537,600 tok | 7/7 |
+| **EXL3-TR3 3bpw + MTP78, fp8 KV** | 112.4 tok/s | 3.471 / 0.824 | **8.89 GiB** | **697,600 tok** | **6/6** |
 
-> **CORRECTION (2026-07-26, same day): the two EXL3 rows above were measured with
-> `--kv-cache-dtype nvfp4_ds_mla`, which is NOT the configuration this template
-> ships and is NOT safe at long context.** A 505K needle retrieval on that config
-> returned **0/6 with degenerate output** (`".,, while.,, and and while,,,,"`),
-> while short-context work looked perfect — GSM8K, vision and structured output
-> all passed. The throughput and pool numbers are real but they were bought with
-> a KV cache that silently corrupts past ~150K.
->
-> Root cause: nvfp4 KV needs *per-checkpoint calibrated MLA outer scales*. The
-> hybrid checkpoint has them; the EXL3 checkpoint does not, and reusing the
-> hybrid's would be meaningless. **This template already ships `fp8` KV for
-> exactly this reason** (see the header and Evidence). fp8 costs ~1.7x the KV
-> bytes per token (7.6 GiB vs 4.52 GiB for 512K), which is why the pool is pinned
-> with `--num-gpu-blocks-override 2048` (2048 blocks x 64 tokens x DCP 4 =
-> 524,288). Corrected fp8 numbers will replace this table once re-measured.
->
-> Keeping the note rather than deleting the table: "faster and bigger" was
-> exactly the too-good-to-be-true result that turned out to be measuring a broken
-> configuration, and the failure was invisible to every short-context test.
+**The honest trade: ~6% slower decode for ~30% more KV pool, and vision.** The
+EXL3 weights are ~7 GiB/rank smaller than the hybrid's, which is what pays for
+the bigger pool even though fp8 KV costs ~1.7x the bytes per token that nvfp4
+would. Long-context retrieval is verified clean (6/6 at depths to 490K inside a
+505K request).
 
-**Vision costs 1.31 GiB/GPU and ~13% of text decode.** The memory cost matches
-what we measured on rented hardware; the throughput cost applies to *pure-text*
-requests too, so if you do not need images, run the text-only checkpoint. That
-13% is a real number others have not published — most write-ups treat a vision
-graft as free because they never benchmarked text decode after grafting.
+> **What this table used to say, and why it was wrong.** An earlier revision
+> reported 127.4 tok/s and an 860,928-token pool for this stack — "faster *and*
+> bigger". Those numbers were measured with `--kv-cache-dtype nvfp4_ds_mla`,
+> which this template does not ship. That config fails the same needle test
+> **0/6 with degenerate output** (`".,, while.,, and and while,,,,"`) while
+> GSM8K, vision and structured output all still pass, so nothing short of a
+> long-context retrieval test catches it. nvfp4 KV needs *per-checkpoint
+> calibrated MLA outer scales*: the hybrid checkpoint has them, the EXL3
+> checkpoint does not, and borrowing the hybrid's would be meaningless.
+> If a quantization change ever looks like a free lunch on both axes at once,
+> measure retrieval before believing it.
+
+With vision resident, fp8 sizes the usable ceiling at ~420K rather than 512K
+(vision costs ~1.31 GiB/GPU and ~13% of *text* decode). Set `MAX_MODEL_LEN`
+to 384K-420K for a vision deployment, or `VISION=0` to keep the full 512K.
 
 **MTP survives the graft** (MAL 3.528 with vision vs 3.533 without). Reports of
 *zero* draft acceptance on comparable hybrid grafts come from the speculator not
