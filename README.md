@@ -37,6 +37,37 @@ the incident.** This template is that button: rented GPUs, your keys, your
 data path, ~30 minutes from click to a 512K-context GLM-5.2 endpoint that
 answers only to you.
 
+## Vision (default ON)
+
+Images work out of the box: the MoonViT-3d tower (Kimi-K2.6, frozen) plus
+Baseten's trained 49.5M PatchMerger projector are grafted onto the EXL3 text
+backbone at first boot — **~890 MB**, no text weight touched. `VISION=0` serves
+pure text (fully reversible).
+
+Measured on 4x RTX PRO 6000 (full writeup:
+https://gist.github.com/malaiwah/c004c8b48bb177203f56cb29107f8540):
+
+| what | result |
+|---|---|
+| smoke (chart values / OCR / counting / diagram) | 4/4 exact |
+| multi-image 2 / 4 / 6 / 8 | all correct, ~151 tokens per image |
+| 6 near-identical charts (cross-image binding) | 4/4 |
+| dense 14-model bar chart | all labels + values exact |
+| **MTP speculation under vision** | **MAL 3.526 / 84.2% — unchanged vs text-only** |
+| KV cost of vision | ~1.3 GiB/GPU (still +2.36 GiB vs a BF16 draft) |
+
+**Know the edges:**
+- **Downscale screenshots to <= 4096 px.** 5K images are accepted but unreliable;
+  everything >= 2560 px hits the same ~4250-token patch cap anyway.
+- **Ask for values, not ranks.** It reads text and numbers well; ordinal and
+  counting reasoning is weak (it read all 14 chart values correctly, then put
+  the highlighted model in the wrong rank).
+- **Not for Computer Use.** Coordinate localisation is unusable: 0/6 targets
+  within 40 px, mean error ~191 px, answers snapped to a round grid. The
+  projector was trained at ~0.3 MP with no coordinate supervision. Pair it with
+  a detector (OmniParser / OCR boxes) if you need clicks.
+- Images only — video is not supported by this checkpoint.
+
 ## MTP78: quantized speculative-draft layer (default ON)
 
 The MTP draft layer ships in BF16 (19.3 GB). This template grafts a
@@ -62,6 +93,12 @@ noise. Full writeup, methodology and the two NVFP4 config gotchas:
 **https://gist.github.com/malaiwah/4bbb16bef2e336e94af165076cdba955**
 
 **KV headroom:** available KV memory goes 5.27 -> 8.92 GiB/GPU (**+69%**). This
+**Speculation depth:** the cheaper draft also moves the optimum. Measured
+(GSM8K n=30, +-0.5% noise floor): MTP-2 42.9 tok/s, **MTP-3 51.5** (default),
+**MTP-5 53.4** (+3.7%). MTP-5 used to lose ~22% with the 19.3 GB BF16 draft;
+at 3.7 GB the extra draft tokens are cheap enough to win. Try `MTP_TOKENS=5`
+if you want that last few percent (not yet the default — wants a larger run).
+
 template pins the pool at 512K (`--num-gpu-blocks-override 2048`), so the
 headroom is unspent by default — at ~10.3 KiB/token it is worth roughly
 **+355K tokens of pool (~880K context)** if you lift the override, or the same
