@@ -96,26 +96,31 @@ base_shard = os.path.join(model_dir, "model-layer-078.safetensors")
 weight_map = {k: "model-layer-078.safetensors" for k in keys}
 carried = 0
 if os.path.exists(base_shard):
-    base_name = "base-layer-078.safetensors"
-    base_dst = os.path.join(out_dir, base_name)
-    if not os.path.exists(base_dst):
-        try:
-            os.link(base_shard, base_dst)
-        except OSError:
-            shutil.copy2(base_shard, base_dst)
+    # EXTRACT the non-expert tensors into their own small shard. Hardlinking the
+    # whole BF16 layer-78 shard and merely leaving its experts out of weight_map
+    # does NOT work: vLLM's loader walks the FILES referenced by the index and
+    # yields every tensor inside them, so the 768 BF16 expert weights reach the
+    # model anyway and it dies with
+    #   KeyError: 'model.layers.78.mtp_block.mlp.experts.routed_experts.w2_weight'
+    # (the same mixed BF16+trellis failure the keep64 variants hit — the EXL3
+    # runtime has no mixed-expert path). Only these ~23 tensors may come from BF16.
+    from safetensors import safe_open          # read only what we need
+    from safetensors.torch import save_file
+
     have = set(keys)
-    for k in tensor_names(base_dst):
-        # ONLY the non-expert tensors. The BF16 expert weights live here too
-        # (…experts.N.down_proj.weight) and do not collide by name with the
-        # trellis ones (…experts.N.down_proj.rank0.trellis), so carrying them
-        # would silently hand the draft a mixed BF16+trellis MoE — a path the
-        # EXL3 runtime does not have, which fails as KeyError '…w2_weight'.
-        if (k.startswith("model.layers.78.") and ".experts." not in k
-                and k not in have):
+    want = [k for k in tensor_names(base_shard)
+            if k.startswith("model.layers.78.") and ".experts." not in k
+            and k not in have]
+    if want:
+        base_name = "nonexpert-layer-078.safetensors"
+        # safe_open + per-key get_tensor keeps peak RSS to these tensors only,
+        # instead of pulling the whole 19 GB BF16 shard into memory.
+        with safe_open(base_shard, framework="pt") as fh:
+            save_file({k: fh.get_tensor(k) for k in want},
+                      os.path.join(out_dir, base_name))
+        for k in want:
             weight_map[k] = base_name
-            carried += 1
-    if carried == 0:                      # nothing needed from it -> don't ship it
-        os.remove(base_dst)
+        carried = len(want)
 print(f"  trellis tensors: {len(keys)}  |  BF16 non-expert carried: {carried}")
 total = sum(os.path.getsize(os.path.join(out_dir, f))
             for f in set(weight_map.values())
