@@ -67,15 +67,30 @@ fi
 # (all-256-expert, full-corpus calibrated), validated at BF16 acceptance PARITY
 # while freeing ~3.8 GB/GPU for KV cache.
 #
-# MTP78_MODE=override (default) builds a SEPARATE draft directory and points
-# --speculative-config at it. The target checkpoint is never modified, so there
-# are no .orig backups, no revert path that can fail halfway, and no on-volume
-# "grafted" marker that can disagree with the container. Our 4-arm QC measured
-# this path as the better one too: MAL 3.548 / 84.9% vs 3.517 / 83.9% grafted.
-#   MTP78_MODE=graft  legacy in-place surgery (kept for rollback)
-#   MTP78_MODE=off    stock BF16 draft
+# MTP78_MODE=graft (default) does in-place surgery on layer 78 of the target.
+# It is the default because it is the ONLY mode with long-context correctness
+# evidence behind it: rental needle 6/6 on fp8, and benchmarks/vast-45582113-matrix
+# armC 3/3 at 150K/190K/250K. Both ran VLLM_EXL3_TRELLIS_MIN_M=4.
+#
+#   MTP78_MODE=override  SEPARATE draft dir via --speculative-config. Leaves the
+#     target byte-identical and measured slightly better on acceptance (MAL 3.548 /
+#     84.9% vs 3.517 / 83.9%), but see the warning below -- it does not currently
+#     boot on this image with a correct trellis window.
+#   MTP78_MODE=off       stock BF16 draft
 # MTP78_TRELLIS=0 is still honoured as a synonym for off.
-MTP78_MODE="${MTP78_MODE:-override}"
+#
+# WARNING, measured 2026-07-26 on AIBeast. In override mode the rank-sliced draft is
+# CUDA-graph captured at m=3 and dies with
+#   "EXL3 eager parity path entered during CUDA graph capture (m=3)"
+# m=3 is invariant: it does NOT follow num_speculative_tokens (MTP_TOKENS=4 still
+# reported m=3) and does NOT follow cudagraph_capture_sizes (a list starting at 8
+# still reported m=3). Do NOT make that crash go away by lowering
+# VLLM_EXL3_TRELLIS_MIN_M to 1. That was tried and it converts a loud boot failure
+# into SILENT CORRUPTION -- m=1..3 move off the eager PARITY path onto a trellis
+# kernel nothing has verified there. Result: 32K needle 0/2 and 370K needle 0/5,
+# output pure garbage, while a short-prompt quality gate still passed 6/6.
+# Until the draft's capture size is controllable, graft is the mode to use.
+MTP78_MODE="${MTP78_MODE:-graft}"
 [ "${MTP78_TRELLIS:-1}" = "0" ] && MTP78_MODE=off
 MTP78_DRAFT_DIR="$MODEL_DIR/.mtp78-draft"
 DRAFT_MODEL=""
@@ -423,11 +438,12 @@ MTP_TOKENS="${MTP_TOKENS:-3}"
 # the 1+3 the TARGET captures at. With a separate draft (MTP78_MODE=override) the
 # draft captures at m=3 and the boot fails. Widen the window instead of clamping
 # MTP: MIN_M=1 is the configuration validated on this checkpoint (needle 6/6, fp8).
-if [ "$MTP_TOKENS" != "0" ] && [ "$MTP_TOKENS" -lt "${VLLM_EXL3_TRELLIS_MIN_M:-4}" ] 2>/dev/null; then
-  echo ">>> EXL3: lowering VLLM_EXL3_TRELLIS_MIN_M ${VLLM_EXL3_TRELLIS_MIN_M:-4} -> 1"
-  echo ">>>       (MTP draft captures at m=$MTP_TOKENS, which must lie inside the trellis window)"
-  export VLLM_EXL3_TRELLIS_MIN_M=1
-fi
+# There is deliberately NO auto-lower of VLLM_EXL3_TRELLIS_MIN_M here. An earlier
+# revision lowered it to 1 whenever MTP_TOKENS < MIN_M, to clear the override-mode
+# capture crash. That was wrong twice over: the stated mechanism was false (m does
+# not track MTP_TOKENS), and lowering the window silently corrupts output instead of
+# failing loudly. It also fired in GRAFT mode, where MIN_M=4 is correct and required,
+# so it would have poisoned the one configuration that works. Leave MIN_M at 4.
 # Concurrency vs the trellis/capture window. At decode the engine runs
 #   m = MAX_NUM_SEQS * (1 + MTP_TOKENS)
 # query tokens per step. m must stay inside BOTH the CUDA-graph capture window
