@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""Is the engine actually serving CORRECTLY? — health + short prompt + a
+long-context needle probe.
+
+THE DESIGN LESSON THIS FILE EXISTS FOR: a short-prompt health check is NOT
+evidence of correctness. Measured on 2026-07-26, several configurations passed
+every short-prompt check — including vision smoke tests — while producing pure
+garbage past ~32K tokens:
+
+  * nvfp4 KV without calibrated MLA outer scales : needle 0/6 at 505K, GSM8K fine
+  * VLLM_EXL3_TRELLIS_MIN_M lowered to 1         : needle 0/2 at 32K, 6/6 short
+  * vision on the EXL3-TR3 target                : needle 0/2 at 32K, 6/6 short
+
+So nothing here reports "healthy" on the strength of /health or a two-line
+completion. A verdict carries `long_context_verified` separately, and the
+landing page renders that distinction rather than collapsing it.
+
+    verify_serving.py --base-url http://localhost:8000 --api-key sk-... \
+        --model GLM-5.2 --out /tmp/glm-runtime/verify.json \
+        --max-model-len 524288 --needle-tokens 32768 [--pid 1234]
+
+Exit 0 when the verdict is ok, 1 otherwise. The verdict JSON is always written.
+"""
+import argparse
+import datetime
+import json
+import os
+import random
+import re
+import ssl
+import sys
+import time
+
+import urllib.request
+
+FILLER = [
+    "The maintenance log for bay {i} recorded nominal pressure and no operator action.",
+    "Shift {i} closed with the coolant loop within tolerance and the seals unchanged.",
+    "Inventory pass {i} reconciled without discrepancy against the previous manifest.",
+    "Telemetry window {i} showed steady draw with no excursions worth escalating.",
+    "Review {i} confirmed the checklist was completed in order and countersigned.",
+]
+CITIES = ["Kyoto", "Reykjavik", "Valparaiso", "Ouagadougou", "Trondheim",
+          "Montevideo", "Samarkand", "Wellington"]
+
+
+def _req(url, payload=None, key="", timeout=60):
+    data = json.dumps(payload).encode() if payload is not None else None
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    req = urllib.request.Request(url, data=data, headers=headers,
+                                 method="POST" if data else "GET")
+    ctx = ssl._create_unverified_context() if url.startswith("https") else None
+    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+        body = r.read().decode("utf-8", "replace")
+    return json.loads(body) if body.strip().startswith(("{", "[")) else body
+
+
+def wait_health(base, key, timeout, pid=None, poll=10):
+    """Block until /health answers. Returns (ok, detail). A dead server PID
+    short-circuits: the supervisor handles that case, not us."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if pid and not _alive(pid):
+            return False, f"server process {pid} exited before /health answered"
+        try:
+            _req(base + "/health", key=key, timeout=5)
+            return True, "healthy"
+        except Exception:
+            time.sleep(poll)
+    return False, f"/health did not answer within {timeout}s"
+
+
+def _alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def complete(base, key, model, prompt, max_tokens=64, timeout=300):
+    payload = {"model": model,
+               "messages": [{"role": "user", "content": prompt}],
+               "max_tokens": max_tokens, "temperature": 0.0,
+               "chat_template_kwargs": {"enable_thinking": False}}
+    doc = _req(base + "/v1/chat/completions", payload, key=key, timeout=timeout)
+    choice = (doc.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    return (msg.get("content") or "").strip()
+
+
+DEGENERATE_RE = re.compile(r"^[\s\W_]+$")
+
+
+def degenerate(text: str) -> str:
+    """-> '' when the text looks like language, else why it does not.
+
+    The observed failure mode is not an error, it is text like
+    '".,, while.,, and and while,,,,"' — so the detector looks for punctuation
+    soup and for one short phrase eating the whole answer."""
+    t = text.strip()
+    if len(t) < 2:
+        return "empty answer"
+    if DEGENERATE_RE.match(t):
+        return "answer contains no word characters"
+    nonword = sum(1 for c in t if not (c.isalnum() or c.isspace()))
+    if nonword / max(len(t), 1) > 0.45:
+        return f"{100 * nonword / len(t):.0f}% of the answer is punctuation"
+    words = t.split()
+    if len(words) >= 12:
+        grams = [" ".join(words[i:i + 3]) for i in range(len(words) - 2)]
+        top = max(set(grams), key=grams.count)
+        if grams.count(top) / len(grams) > 0.25:
+            return f"the phrase {top!r} repeats over a quarter of the answer"
+    return ""
+
+
+def count_tokens(base, key, model, text):
+    """Exact count via vLLM's /tokenize; ~3.7 chars/token when unavailable."""
+    try:
+        doc = _req(base + "/tokenize", {"model": model, "prompt": text}, key=key, timeout=60)
+        if isinstance(doc, dict) and isinstance(doc.get("count"), int):
+            return doc["count"], True
+    except Exception:
+        pass
+    return int(len(text) / 3.7), False
+
+
+def build_haystack(target_tokens, depths, seed=20260726):
+    """Filler with codes buried at fractional depths. Returns (text, [(city, code)])."""
+    rng = random.Random(seed)
+    needles = []
+    for d in depths:
+        city = CITIES[len(needles) % len(CITIES)]
+        code = "%s-%04d" % ("".join(rng.choice("ABCDEFGHJKLMNPQRSTUVWXYZ") for _ in range(3)),
+                            rng.randrange(1000, 9999))
+        needles.append((city, code, d))
+    # ~18 tokens per filler line is a starting guess; the caller re-measures.
+    nlines = max(64, int(target_tokens / 18))
+    lines = [FILLER[i % len(FILLER)].format(i=i) for i in range(nlines)]
+    for city, code, d in needles:
+        pos = min(nlines - 1, max(1, int(nlines * d)))
+        lines[pos] = f"IMPORTANT: the access code for {city} is {code}."
+    body = "\n".join(lines)
+    return body, [(c, k) for c, k, _ in needles]
+
+
+def needle_probe(base, key, model, target_tokens, depths, timeout=600):
+    """One prefill, all depths — the harness shape that found the 490K result."""
+    text, needles = build_haystack(target_tokens, depths)
+    actual, exact = count_tokens(base, key, model, text)
+    # one correction pass: scale the line count by the measured tokens/line
+    if actual and abs(actual - target_tokens) / target_tokens > 0.12:
+        lines = text.count("\n") + 1
+        per_line = actual / max(lines, 1)
+        text, needles = build_haystack(int(target_tokens * 18 / max(per_line, 1e-6)), depths)
+        actual, exact = count_tokens(base, key, model, text)
+    asked = ", ".join(c for c, _ in needles)
+    prompt = (text + "\n\n---\nThe document above contains access codes. "
+              f"List the access code for each of these cities: {asked}. "
+              "Answer with one 'City: CODE' pair per line and nothing else.")
+    answer = complete(base, key, model, prompt, max_tokens=256, timeout=timeout)
+    found = [code for _city, code in needles if code in answer]
+    return {
+        "attempted": True,
+        "tokens": actual,
+        "tokens_exact": exact,
+        "depths": depths,
+        "found": len(found),
+        "total": len(needles),
+        "degenerate": degenerate(answer),
+        "answer_head": answer[:400],
+        "ok": len(found) == len(needles) and not degenerate(answer),
+    }
+
+
+SHORT_CHECKS = [
+    ("arithmetic", "What is 17 * 23? Reply with only the number.", r"\b391\b"),
+    ("factual", "What is the capital of France? Reply with only the city name.", r"(?i)paris"),
+    ("instruction", "Reply with exactly the word BANANA and nothing else.", r"(?i)banana"),
+]
+
+
+def short_probe(base, key, model, timeout=180):
+    checks = []
+    for name, prompt, expect in SHORT_CHECKS:
+        try:
+            answer = complete(base, key, model, prompt, max_tokens=32, timeout=timeout)
+        except Exception as e:
+            checks.append({"name": name, "ok": False, "detail": f"request failed: {e}"})
+            continue
+        bad = degenerate(answer)
+        ok = bool(re.search(expect, answer)) and not bad
+        checks.append({"name": name, "ok": ok,
+                       "detail": bad or f"answered {answer[:80]!r}"})
+    return {"ok": all(c["ok"] for c in checks), "checks": checks}
+
+
+def main(argv):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base-url", default="http://localhost:8000")
+    ap.add_argument("--api-key", default="")
+    ap.add_argument("--model", default="GLM-5.2")
+    ap.add_argument("--out", default="")
+    ap.add_argument("--max-model-len", type=int, default=524288)
+    ap.add_argument("--needle-tokens", type=int, default=32768)
+    ap.add_argument("--depths", default="0.15,0.55,0.9")
+    ap.add_argument("--timeout", type=int, default=2400, help="seconds to wait for /health")
+    ap.add_argument("--pid", default="")
+    ap.add_argument("--skip-long-context", action="store_true")
+    args = ap.parse_args(argv)
+
+    base = args.base_url.rstrip("/")
+    started = time.time()
+    verdict = {
+        "ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "base_url": base,
+        "health": False,
+        "short_prompt": {"ok": False, "checks": []},
+        "long_context": {"attempted": False, "ok": False,
+                         "detail": "not attempted"},
+        "long_context_verified": False,
+        "ok": False,
+        "reason": "",
+    }
+
+    ok, detail = wait_health(base, args.api_key, args.timeout, args.pid)
+    verdict["health"] = ok
+    if not ok:
+        verdict["reason"] = detail
+        return _finish(verdict, args, started)
+
+    verdict["short_prompt"] = short_probe(base, args.api_key, args.model)
+    if not verdict["short_prompt"]["ok"]:
+        verdict["reason"] = "short-prompt checks failed: " + "; ".join(
+            f"{c['name']}: {c['detail']}" for c in verdict["short_prompt"]["checks"]
+            if not c["ok"])
+        return _finish(verdict, args, started)
+
+    budget = min(args.needle_tokens, max(0, args.max_model_len - 4096))
+    if args.skip_long_context or budget < 8192:
+        verdict["long_context"] = {
+            "attempted": False, "ok": False,
+            "detail": ("long-context probe disabled by configuration"
+                       if args.skip_long_context else
+                       f"context budget {budget} is too small for a meaningful probe")}
+        verdict["ok"] = True
+        verdict["reason"] = ("serving; SHORT PROMPTS ONLY — long-context correctness is "
+                             "NOT verified")
+        return _finish(verdict, args, started)
+
+    depths = [float(d) for d in args.depths.split(",") if d.strip()]
+    try:
+        lc = needle_probe(base, args.api_key, args.model, budget, depths)
+    except Exception as e:
+        lc = {"attempted": True, "ok": False, "detail": f"probe failed: {e}"}
+    verdict["long_context"] = lc
+    verdict["long_context_verified"] = bool(lc.get("ok"))
+    verdict["ok"] = bool(lc.get("ok"))
+    if not lc.get("ok"):
+        verdict["reason"] = (
+            "LONG-CONTEXT PROBE FAILED: retrieved {f}/{t} codes from a ~{n} token "
+            "context{d}. Short prompts passed, which is exactly the signature of the "
+            "known silent-corruption configurations (nvfp4 KV without calibrated "
+            "scales, trellis MIN_M lowered, vision on the EXL3 target)."
+        ).format(f=lc.get("found", 0), t=lc.get("total", 0), n=lc.get("tokens", 0),
+                 d=" — " + lc["degenerate"] if lc.get("degenerate") else "")
+    else:
+        verdict["reason"] = "serving; long-context retrieval verified"
+    return _finish(verdict, args, started)
+
+
+def _finish(verdict, args, started):
+    verdict["duration_s"] = round(time.time() - started, 1)
+    blob = json.dumps(verdict, indent=1) + "\n"
+    if args.out:
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        tmp = args.out + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(blob)
+        os.replace(tmp, args.out)
+    else:
+        sys.stdout.write(blob)
+    return 0 if verdict["ok"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

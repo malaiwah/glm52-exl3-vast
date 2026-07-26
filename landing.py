@@ -18,10 +18,22 @@ import json
 import os
 import socket
 import ssl
+import sys
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
 from urllib.parse import parse_qs, urlparse
+
+# The knob registry, the inheritance model and the validation matrix live in
+# scripts/glm_config.py so that the entrypoint and this page cannot disagree
+# about them. If it cannot be imported the page still serves — it just loses
+# the config editor rather than the whole landing page.
+sys.path.insert(0, os.environ.get("GLM_SCRIPTS_DIR", "/opt/scripts"))
+try:
+    import glm_config as gc
+except Exception as _e:  # pragma: no cover - import guard
+    gc = None
+    _GC_ERR = str(_e)
 
 TOKEN = os.environ.get("OPEN_BUTTON_TOKEN", "")
 MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
@@ -54,7 +66,14 @@ def status() -> dict:
         return {}
 
 
+def model_dir() -> str:
+    """The entrypoint publishes the live model dir in the status file; it can
+    move under the page's feet when the model-variant knob changes."""
+    return status().get("model_dir") or MODEL_DIR
+
+
 def weights_state() -> str:
+    MODEL_DIR = model_dir()
     if os.path.isfile(os.path.join(MODEL_DIR, ".download-complete")):
         return "ready"
     done = 0
@@ -364,6 +383,296 @@ PAGE_HEAD = ("""<!doctype html><html><head><title>GLM-5.2 EXL3 turnkey</title>
 <meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE +
              """</head><body>""")
 
+# ==========================================================================
+# self-service configuration
+# ==========================================================================
+# Editing what the engine serves is at least as privileged as reading the API
+# key, so the editor is gated on the same OPEN_BUTTON_TOKEN as /chat. It does
+# NOT additionally require TLS: on a rental without a DNS provider there is no
+# cert, and refusing to work there would mean the feature exists only for the
+# minority who set up deSEC. The page says so instead of pretending.
+
+CONFIG_STYLE = """<style>
+table.cfg{width:100%;border-collapse:collapse;font-size:.9rem}
+table.cfg td{padding:.45rem .5rem;border-top:1px solid var(--line);vertical-align:top}
+table.cfg td.k{white-space:nowrap;font-family:var(--mono);font-size:.82rem}
+table.cfg td.v{width:14rem}
+table.cfg input,table.cfg select{font:inherit;font-size:.85rem;width:100%;
+background:var(--bg);color:var(--fg);border:1px solid var(--line);
+border-radius:8px;padding:.25rem .4rem}
+table.cfg input:disabled,table.cfg select:disabled{opacity:.6}
+.src{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;
+border:1px solid var(--line);border-radius:99px;padding:.05rem .45rem;color:var(--muted)}
+.src.file{border-color:var(--accent);color:var(--accent)}
+.src.env{border-color:var(--accent2);color:var(--accent2)}
+.why{color:var(--muted);font-size:.82rem;margin-top:.25rem}
+.finding{border-left:3px solid var(--busy);padding:.4rem .7rem;margin:.4rem 0;
+background:var(--card);border-radius:0 8px 8px 0;font-size:.87rem}
+.finding.error{border-left-color:#e5484d}
+.banner{padding:.7rem .9rem;border-radius:10px;margin:.6rem 0;font-size:.9rem;
+background:var(--card);border:1px solid var(--line)}
+.banner.bad{border-color:#e5484d}
+.banner.good{border-color:var(--ok)}
+textarea.imp{width:100%;min-height:7rem;font-family:var(--mono);font-size:.8rem;
+background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:.5rem}
+</style>"""
+
+
+def config_enabled() -> bool:
+    return gc is not None and bool(TOKEN)
+
+
+def verify_last() -> dict:
+    return gc.read_json(gc.p_verify_last()) if gc else {}
+
+
+def correctness() -> tuple:
+    """-> (headline, ok_bool, detail). Never collapses 'answered a short prompt'
+    into 'healthy': the failure modes this appliance has actually seen all pass
+    short prompts and fail past ~32K tokens."""
+    v = verify_last()
+    if not v:
+        return ("not yet verified", False,
+                "the post-start probe has not reported yet")
+    if not v.get("health"):
+        return ("engine did not come up", False, v.get("reason", ""))
+    if not (v.get("short_prompt") or {}).get("ok"):
+        return ("short-prompt checks FAILED", False, v.get("reason", ""))
+    lc = v.get("long_context") or {}
+    if not lc.get("attempted"):
+        return ("short prompts only — long context UNVERIFIED", False,
+                lc.get("detail", "the long-context probe did not run"))
+    if lc.get("ok"):
+        return ("verified incl. long context (%s/%s codes at ~%s tok)"
+                % (lc.get("found"), lc.get("total"), lc.get("tokens")), True,
+                v.get("reason", ""))
+    return ("LONG-CONTEXT PROBE FAILED (%s/%s codes)"
+            % (lc.get("found", 0), lc.get("total", 0)), False, v.get("reason", ""))
+
+
+def _field(knob, value):
+    key = html.escape(knob["key"])
+    editable = knob.get("editable", True)
+    dis = "" if editable else " disabled"
+    if knob["type"] == "bool":
+        opts = "".join(
+            "<option value='%s'%s>%s</option>" % (
+                v, " selected" if bool(value) == (v == "1") else "", lbl)
+            for v, lbl in (("1", "on"), ("0", "off")))
+        return f"<select name='{key}'{dis}>{opts}</select>"
+    if knob["type"] == "choice":
+        labels = {}
+        if knob["key"] == "MODEL_VARIANT":
+            labels = {k: v["label"] for k, v in gc.VARIANTS.items()}
+        elif knob["key"] == "MTP_DRAFT":
+            labels = {k: v["label"] for k, v in gc.DRAFTS.items()}
+        opts = "".join(
+            "<option value='%s'%s>%s</option>" % (
+                html.escape(c), " selected" if str(value) == c else "",
+                html.escape(labels.get(c, c)))
+            for c in knob["choices"])
+        return f"<select name='{key}'{dis}>{opts}</select>"
+    if knob["type"] in ("int", "float"):
+        step = "1" if knob["type"] == "int" else "0.01"
+        lo = f" min='{knob['min']}'" if "min" in knob else ""
+        hi = f" max='{knob['max']}'" if "max" in knob else ""
+        return (f"<input type=number step='{step}'{lo}{hi} name='{key}' "
+                f"value='{html.escape(gc.to_text(knob, value))}'{dis}>")
+    return (f"<input type=text name='{key}' "
+            f"value='{html.escape(gc.to_text(knob, value))}'{dis}>")
+
+
+def _findings_html(findings):
+    out = []
+    for f in findings:
+        cls = "finding error" if f["level"] == "error" else "finding"
+        keys = ", ".join(f["keys"])
+        out.append(f"<div class='{cls}'><b>{html.escape(f['level'].upper())}</b> "
+                   f"<code>{html.escape(keys)}</code><br>{html.escape(f['message'])}</div>")
+    return "".join(out)
+
+
+def _failures_html():
+    root = gc.p_failures()
+    try:
+        dirs = sorted(os.listdir(root), reverse=True)[:5]
+    except OSError:
+        return ""
+    out = []
+    for d in dirs:
+        fdir = os.path.join(root, d)
+        meta = gc.read_json(os.path.join(fdir, "meta.json"))
+        try:
+            with open(os.path.join(fdir, "diff.txt")) as f:
+                diff = f.read()
+        except OSError:
+            diff = ""
+        analysis = ""
+        try:
+            with open(os.path.join(fdir, "analysis.md")) as f:
+                analysis = f.read()
+        except OSError:
+            analysis = ("_The running model has not produced an explanation yet "
+                        "(it is generated once the known-good config is serving)._")
+        sigs = "".join(f"<li>{html.escape(s)}</li>" for s in meta.get("signatures") or [])
+        out.append(
+            "<details><summary>%s &mdash; %s</summary>"
+            "<p class=sub>%s</p>%s"
+            "<h3 style='font-size:.9rem;margin:.6rem 0 .2rem'>What the model says</h3>"
+            "<pre>%s</pre>"
+            "<h3 style='font-size:.9rem;margin:.6rem 0 .2rem'>Config diff</h3><pre>%s</pre>"
+            "<p class=sub>Full log: <code>%s/error.log</code></p></details>" % (
+                html.escape(d), html.escape(meta.get("reason", "?")),
+                html.escape("known failure signatures matched:") if sigs else "",
+                f"<ul>{sigs}</ul>" if sigs else "",
+                html.escape(analysis), html.escape(diff or "(none)"),
+                html.escape(fdir)))
+    return "".join(out)
+
+
+def render_config(tok: str, secure: bool, banner=None, banner_cls="",
+                  extra_findings=None) -> bytes:
+    effective, sources, notes = gc.resolve()
+    findings = list(extra_findings or []) + gc.validate(
+        effective, {"vision_available": os.path.exists(
+            os.path.join(model_dir(), "vision_tower.safetensors"))})
+    st = gc.apply_state()
+    head, ok, detail = correctness()
+    tok_q = html.escape(tok, quote=True)
+
+    parts = ["<!doctype html><html><head><title>GLM-5.2 configuration</title>"
+             "<meta name=viewport content='width=device-width,initial-scale=1'>",
+             STYLE, CONFIG_STYLE, "</head><body><div class=wrap>",
+             "<header class=hero><h1><b>GLM-5.2</b> configuration</h1>"
+             f"<span class=sub><a href='/?token={tok_q}'>&larr; status &amp; dashboard</a>"
+             "</span></header>"]
+    if banner:
+        parts.append(f"<div class='banner {banner_cls}'>{banner}</div>")
+    if not secure:
+        parts.append("<div class=banner>This page is being served over plain HTTP. "
+                     "The token and everything you type here cross the network in the "
+                     "clear. Set <code>DESEC_TOKEN</code>+<code>DESEC_DOMAIN</code> "
+                     "(or <code>ACME_DOMAIN</code>) to get TLS.</div>")
+
+    cls = "ok" if ok else "busy"
+    parts.append(
+        "<div class=grid>"
+        "<div class=card><h3>Apply state</h3><div class=v>%s</div>"
+        "<div class=why>%s</div></div>"
+        "<div class=card><h3>Correctness</h3>"
+        "<div class=v><span class='pill %s'></span><span class='%s'>%s</span></div>"
+        "<div class=why>%s</div></div></div>" % (
+            html.escape(st.get("mode", "steady")),
+            html.escape(str(st.get("detail") or "")),
+            cls, cls, html.escape(head), html.escape(detail)))
+
+    if st.get("mode") == "rolled-back":
+        parts.append(
+            "<div class='banner bad'><b>The last configuration you applied was rolled "
+            "back.</b> The previous known-good configuration is what is running now. "
+            "The failed configuration, its boot log and a diff are kept below.</div>")
+
+    if notes:
+        parts.append("".join(f"<div class=finding>{html.escape(n)}</div>" for n in notes))
+    if findings:
+        parts.append("<h2>Pre-validation</h2>" + _findings_html(findings))
+
+    parts.append(f"<form method=post action='/config/apply?token={tok_q}'>"
+                 f"<input type=hidden name=token value='{tok_q}'>")
+    group = None
+    parts.append("<table class=cfg>")
+    for knob in gc.KNOBS:
+        if knob.get("group") != group:
+            group = knob.get("group")
+            parts.append(f"<tr><td colspan=3><h2>{html.escape(group)}</h2></td></tr>")
+        key = knob["key"]
+        src = sources[key]
+        locked = "" if knob.get("editable", True) else " <span class=src>locked</span>"
+        parts.append(
+            "<tr><td class=k>%s%s</td><td class=v>%s</td><td>"
+            "<b>%s</b> <span class='src %s'>%s</span><div class=why>%s</div></td></tr>" % (
+                html.escape(key), locked, _field(knob, effective[key]),
+                html.escape(knob.get("label", key)), src, src,
+                html.escape(knob["rationale"])))
+    parts.append("</table>")
+    parts.append(
+        "<p><button class=primary type=submit>Apply &amp; restart vLLM</button> "
+        f"<a href='/config/export?token={tok_q}'><button type=button>Export JSON"
+        "</button></a></p>"
+        "<p class=sub>Apply writes the JSON state file on the volume and restarts the "
+        "engine only &mdash; the container, the weights and the API key are untouched. "
+        "A restart costs a few minutes of engine load; changing the model variant, the "
+        "draft type or vision can cost a download on top. If the new configuration does "
+        "not come up, or comes up and fails the long-context probe, it is rolled back "
+        "automatically.</p></form>")
+
+    parts.append(
+        f"<h2>Import</h2><form method=post action='/config/import?token={tok_q}'>"
+        f"<input type=hidden name=token value='{tok_q}'>"
+        "<textarea class=imp name=doc placeholder='Paste a previously exported "
+        "config JSON here'></textarea>"
+        "<p><button type=submit>Import, validate &amp; restart</button></p></form>")
+
+    parts.append(
+        f"<h2>Reset</h2><form method=post action='/config/reset?token={tok_q}'>"
+        f"<input type=hidden name=token value='{tok_q}'>"
+        "<p class=sub>Deletes the state file, returning to the template environment "
+        "and the built-in defaults.</p>"
+        "<p><button type=submit>Reset to defaults &amp; restart</button></p></form>")
+
+    fails = _failures_html()
+    if fails:
+        parts.append("<h2>Rejected configurations</h2>" + fails)
+
+    parts.append("</div></body></html>")
+    return "".join(parts).encode()
+
+
+def _form_values(form: dict):
+    """Coerce a submitted form into knob values, collecting per-field errors."""
+    values, errs = {}, []
+    for knob in gc.KNOBS:
+        if not knob.get("editable", True):
+            continue
+        raw = form.get(knob["key"], [None])[0]
+        if raw is None:
+            continue
+        try:
+            values[knob["key"]] = gc.coerce(knob, raw)
+        except gc.ConfigError as e:
+            errs.append({"id": "coerce", "level": "error", "keys": [knob["key"]],
+                         "message": str(e)})
+    return values, errs
+
+
+def apply_values(values: dict):
+    """Validate a candidate, persist it, and ask the supervisor for a restart.
+
+    -> (ok, findings, message). Nothing is written when validation finds an
+    error: the whole point is that the user never reaches a failed restart for
+    a reason that was knowable beforehand."""
+    minimal = gc.minimize(values)
+    effective, _sources, notes = gc.resolve(state_values=minimal)
+    findings = gc.validate(effective, {"vision_available": os.path.exists(
+        os.path.join(model_dir(), "vision_tower.safetensors"))})
+    if gc.errors(findings):
+        return False, findings, "Nothing was applied — fix the errors below."
+    good = gc.read_json(gc.p_known_good())
+    current, _s, _n = gc.resolve()
+    if not gc.diff(current, effective):
+        return True, findings, "No change: the submitted configuration is the one running."
+    gc.write_json_atomic(gc.p_state(), {
+        "values": minimal,
+        "written_at": gc.utcnow_iso()}, mode=0o600)
+    gc.set_apply_state("trial", since=gc.utcnow_iso(),
+                       detail="restarting into a candidate configuration",
+                       baseline=good.get("ts"))
+    os.makedirs(gc.runtime_dir(), exist_ok=True)
+    with open(gc.p_restart_flag(), "w") as f:
+        f.write("landing-page\n")
+    return True, findings, ("Applied. vLLM is restarting with:<br><pre>"
+                            + html.escape(gc.diff_text(current, effective)) + "</pre>")
+
 
 def render(secure: bool, tok: str = "") -> bytes:
     st = status()
@@ -396,6 +705,27 @@ def render(secure: bool, tok: str = "") -> bytes:
              card("DRAM KV offload", st.get("offload", "off"),
                   st.get("offload", "off") != "off"),
              "</div>"]
+    if gc is not None:
+        # "Engine: serving" above is a LIVENESS statement. Correctness is a
+        # separate card on purpose — every silent-corruption configuration this
+        # appliance has met answered /health and short prompts perfectly.
+        head, ok, detail = correctness()
+        parts.append("<div class=grid>" + card("Correctness", head, ok) + "</div>"
+                     f"<p class=sub>{html.escape(detail)}</p>")
+        if config_enabled():
+            mode = gc.apply_state().get("mode", "steady")
+            note = ("<b>The last change you applied was rolled back</b> — the previous "
+                    "known-good configuration is running. " if mode == "rolled-back" else "")
+            parts.append(
+                f'<div class=card><h3>Configuration</h3><div class=v>{note}'
+                f'<a href="/config?token={html.escape(tok, quote=True)}">'
+                "Change model, draft, context, concurrency &rarr;</a></div>"
+                "<div class=sub style='margin-top:.3rem'>Edits are written to a JSON "
+                "state file on the volume and applied by restarting vLLM only.</div>"
+                "</div>")
+        else:
+            parts.append("<p class=sub>Set <code>OPEN_BUTTON_TOKEN</code> in the template "
+                         "environment to unlock the self-service configuration editor.</p>")
     if endpoint:
         ep = html.escape(endpoint, quote=True)
         real = st.get("api_key", "")  # from the root-only status file
@@ -407,6 +737,9 @@ def render(secure: bool, tok: str = "") -> bytes:
                      f'<a href="{ep}/metrics">Prometheus /metrics</a>')
         if not key.startswith("<"):
             parts.append(f' &middot; <a href="/chat?token={tok_esc}"><b>Quick chat &rarr;</b></a>')
+        if config_enabled():
+            parts.append(f' &middot; <a href="/config?token={tok_esc}">'
+                         '<b>Configure &rarr;</b></a>')
         parts.append('</div></div>')
         if key.startswith("<"):
             parts.append("<p class=sub>The API key is printed in the instance logs "
@@ -462,13 +795,108 @@ class DualProtocolServer(ThreadingHTTPServer):
         return sock, addr
 
 
+GET_PATHS = ("/", "/chat", "/config", "/config/export", "/config/status")
+POST_PATHS = ("/config/apply", "/config/import", "/config/reset", "/config/restart")
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # keep the vast console log quiet
         pass
 
+    # -- helpers ---------------------------------------------------------
+    def _send(self, body: bytes, ctype="text/html; charset=utf-8", code=200, extra=()):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in extra:
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _config_guard(self, tok):
+        """The editor changes what the box serves; it needs the same token the
+        Open button carries, and it needs the shared registry to be importable."""
+        if gc is None:
+            self.send_error(503, "config editor unavailable (glm_config import failed)")
+            return False
+        if not TOKEN or tok != TOKEN:
+            self.send_error(403, "the config editor requires OPEN_BUTTON_TOKEN")
+            return False
+        return True
+
+    def _read_form(self):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 1 << 20:
+            return {}
+        return parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+
+    def _redirect(self, path):
+        self.send_response(303)
+        self.send_header("Location", path)
+        self.end_headers()
+
+    # -- POST: apply / import / reset / restart --------------------------
+    def do_POST(self):
+        url = urlparse(self.path)
+        if url.path not in POST_PATHS:
+            self.send_error(404)
+            return
+        form = self._read_form()
+        tok = form.get("token", [""])[0] or parse_qs(url.query).get("token", [""])[0]
+        if not self._config_guard(tok):
+            return
+        secure = isinstance(self.connection, ssl.SSLSocket) or ALLOW_INSECURE
+        try:
+            if url.path == "/config/apply":
+                values, errs = _form_values(form)
+                if errs:
+                    body = render_config(tok, secure, "Nothing was applied.", "bad", errs)
+                else:
+                    ok, findings, msg = apply_values(values)
+                    body = render_config(tok, secure, msg, "good" if ok else "bad",
+                                         [] if ok else findings)
+            elif url.path == "/config/import":
+                doc = form.get("doc", [""])[0]
+                try:
+                    parsed = json.loads(doc)
+                    values = parsed.get("values", parsed) if isinstance(parsed, dict) else None
+                    if not isinstance(values, dict):
+                        raise ValueError("expected a JSON object of knob values")
+                except ValueError as e:
+                    body = render_config(tok, secure, f"Import failed: {html.escape(str(e))}",
+                                         "bad")
+                else:
+                    ok, findings, msg = apply_values(values)
+                    body = render_config(tok, secure, msg, "good" if ok else "bad",
+                                         [] if ok else findings)
+            elif url.path == "/config/reset":
+                try:
+                    os.remove(gc.p_state())
+                except OSError:
+                    pass
+                gc.set_apply_state("trial", detail="reset to template env + defaults")
+                os.makedirs(gc.runtime_dir(), exist_ok=True)
+                with open(gc.p_restart_flag(), "w") as f:
+                    f.write("reset\n")
+                body = render_config(tok, secure,
+                                     "State file removed; restarting on the template "
+                                     "environment and the built-in defaults.", "good")
+            else:  # /config/restart
+                os.makedirs(gc.runtime_dir(), exist_ok=True)
+                with open(gc.p_restart_flag(), "w") as f:
+                    f.write("manual\n")
+                body = render_config(tok, secure, "Restart requested.", "good")
+        except Exception as e:  # never take the landing page down on a bad form
+            body = render_config(tok, secure,
+                                 "Internal error: " + html.escape(str(e)), "bad")
+        self._send(body)
+
     def do_GET(self):
         url = urlparse(self.path)
-        if url.path not in ("/", "/chat"):
+        if url.path not in GET_PATHS:
             self.send_error(404)
             return
         tok = parse_qs(url.query).get("token", [""])[0]
@@ -493,14 +921,47 @@ class Handler(BaseHTTPRequestHandler):
                 return
             body = CHAT_PAGE.substitute(ep=st["endpoint"], key=key,
                                         token=html.escape(tok, quote=True)).encode()
+        elif url.path == "/config":
+            if not self._config_guard(tok):
+                return
+            self._send(render_config(tok, secure))
+            return
+        elif url.path == "/config/export":
+            if not self._config_guard(tok):
+                return
+            effective, sources, _notes = gc.resolve()
+            try:
+                values = gc.load_state_file()
+            except Exception:
+                values = {}
+            doc = json.dumps({
+                "exported_at": gc.utcnow_iso(),
+                "note": ("'values' is what an import applies: only the knobs that "
+                         "override the defaults and the template environment. "
+                         "'effective' and 'sources' are informational."),
+                "values": values, "effective": effective, "sources": sources,
+            }, indent=1).encode()
+            self._send(doc, "application/json",
+                       extra=(("Content-Disposition",
+                               "attachment; filename=glm52-config.json"),))
+            return
+        elif url.path == "/config/status":
+            if not self._config_guard(tok):
+                return
+            head, ok, detail = correctness()
+            self._send(json.dumps({
+                "apply_state": gc.apply_state(), "verify": verify_last(),
+                "correctness": {"headline": head, "ok": ok, "detail": detail},
+                "phase": status().get("phase", ""),
+            }, indent=1).encode(), "application/json")
+            return
         else:
             body = render(secure, tok)
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send(body)
 
 
 if __name__ == "__main__":
-    DualProtocolServer(("0.0.0.0", 1111), Handler).serve_forever()
+    # 1111 is the port the vast template maps and the Open button hits;
+    # LANDING_PORT exists so the page can be exercised somewhere else.
+    DualProtocolServer(("0.0.0.0", int(os.environ.get("LANDING_PORT", "1111"))),
+                       Handler).serve_forever()

@@ -37,6 +37,48 @@ the incident.** This template is that button: rented GPUs, your keys, your
 data path, ~30 minutes from click to a 512K-context GLM-5.2 endpoint that
 answers only to you.
 
+## Self-service configuration (no rebuild, no re-rent)
+
+The image is locked in when you rent, but the *deployment* is not. The landing
+page on `:1111` has a **Configure** panel: every knob with its current value,
+where that value came from (built-in default / template env / your saved file),
+and a rationale explaining what it does and what it costs. Change what you
+want, hit apply, and **vLLM restarts — the container, the weights, the API key
+and the TLS cert are untouched.**
+
+Full design note: [docs/self-service-config.md](docs/self-service-config.md).
+
+- **Inheritance**: built-in defaults < startup environment < a JSON state file
+  on the volume. The file wins on purpose: template env cannot be edited after
+  launch, so the page has to be able to override it. The file stores only what
+  you actually changed.
+- **Pre-validation**: combinations that are known to be broken are refused
+  before anything is written — the rank-sliced EXL3 draft on the v20 base, an
+  NVFP4 draft without `DRAFT_QUANTIZATION`, nvfp4 KV on a checkpoint with no
+  calibrated MLA scales, a decode width outside the CUDA-graph/trellis window,
+  a pinned pool smaller than `MAX_MODEL_LEN`. Each refusal quotes the measured
+  reason.
+- **Rollback**: if the new configuration does not come up, *or comes up and
+  fails the long-context probe*, the last known-good configuration is restored
+  and restarted automatically. The failed config, its boot log and the diff are
+  kept under `.glm-config/failures/`.
+- **Self-analysis**: once the known-good config is serving again, the model
+  itself is handed the failed log, the working log and the diff, and writes a
+  plain-language explanation onto the page.
+- **Export / import**: download the saved config as JSON, paste it into the
+  next instance.
+
+> **"Healthy" is not a short prompt.** Every silent-corruption configuration
+> measured on this stack — nvfp4 KV without calibrated scales, a lowered
+> `VLLM_EXL3_TRELLIS_MIN_M`, vision on the EXL3 target — answers `/health` and
+> short prompts *perfectly* and produces garbage past ~32K tokens. So the
+> post-restart check includes a **long-context needle probe**, and the page
+> reports **Correctness** separately from **Engine**. If the probe did not run,
+> it says "long context UNVERIFIED"; it never claims health it did not measure.
+
+Requires `OPEN_BUTTON_TOKEN` in the template environment (vast sets it for the
+Open button) — without a token the editor is not exposed at all.
+
 ## Vision (default ON)
 
 Images work out of the box: the MoonViT-3d tower (Kimi-K2.6, frozen) plus
@@ -213,8 +255,9 @@ within sampling noise (~±3).
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
   extra env: `OPEN_BUTTON_PORT=1111` — the dashboard **Open** button then hits
   the landing page: live boot status (weight-download progress, TLS, engine),
-  ready-to-paste client configs (oh-my-pi, opencode, Claude Code, Codex), and
-  a minimal streaming chat UI at `/chat`. Token-gated; with TLS configured the
+  ready-to-paste client configs (oh-my-pi, opencode, Claude Code, Codex),
+  a minimal streaming chat UI at `/chat`, and the **self-service config editor**
+  at `/config` (needs `OPEN_BUTTON_TOKEN`; see the section above). Token-gated; with TLS configured the
   page upgrades plain-HTTP hits to HTTPS and only then embeds the API key.
   On ready, the instance labels itself "GLM-5.2 READY <endpoint>" in your dashboard
 
@@ -249,7 +292,12 @@ existing endpoint:
 | `GPU_BLOCKS_OVERRIDE` | `2048` | `0` drops the pin and lets vLLM use all available KV |
 | `OFFLOAD_FRACTION` | `0.70` | fraction of RAM for the DRAM KV tier; `0` disables |
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
-| `MTP78_MODE` | `override` | `override` points `--speculative-config` at a separate draft dir (target checkpoint untouched); `graft` is the legacy in-place surgery; `off` uses the stock BF16 draft |
+| `MTP78_MODE` | `graft` | `graft` is in-place surgery on layer 78 and the only mode with long-context evidence; `override` points `--speculative-config` at a separate draft dir but does not boot on the v20 base; `off` uses the stock BF16 draft. Prefer the `MTP_DRAFT` knob on the config page. |
+| `OPEN_BUTTON_TOKEN` | (unset) | required to expose the `:1111` config editor; vast sets it for the Open button |
+| `VERIFY` | `1` | `0` disables the post-start correctness probe entirely (the page then reports "unverified" and nothing rolls back) |
+| `VERIFY_LONG_CONTEXT` | `1` | `0` keeps the short-prompt checks only — read the warning above before using it |
+| `VERIFY_NEEDLE_TOKENS` | `32768` | size of the long-context retrieval probe |
+| `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures and logs live |
 
 ## Security
 
