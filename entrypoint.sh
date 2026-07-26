@@ -496,9 +496,21 @@ if [ "$_DECODE_M" -gt "$_CAP_MAX" ] || [ "$_DECODE_M" -gt "$_TRELLIS_MAX" ]; the
 fi
 
 SPEC_ARGS=()
+# DRAFT_QUANTIZATION: the draft's own quantization method. Without it the draft
+# INHERITS the target's --quantization (exl3 here), so a non-EXL3 draft is loaded
+# through the EXL3 path and dies in _apply_rank_sliced during speculator capture
+# with the m=3 trellis-window error -- which looks identical to the v20 EXL3-draft
+# bug but has a completely different cause. Measured on AIBeast 2026-07-26 with the
+# NVFP4 draft from lukealonso/GLM-5.2-NVFP4 (quant_algo NVFP4, quant_method modelopt):
+# vLLM's method name for it is "modelopt_fp4".
+_SPEC_QUANT=""
+if [ -n "${DRAFT_QUANTIZATION:-}" ]; then
+  _SPEC_QUANT=",\"quantization\":\"${DRAFT_QUANTIZATION}\""
+  echo ">>> Draft quantization: ${DRAFT_QUANTIZATION} (overrides the target's --quantization)"
+fi
 if [ "$MTP_TOKENS" != "0" ]; then
   if [ -n "$DRAFT_MODEL" ]; then
-    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS,\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
+    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS,\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"${_SPEC_QUANT}}")
   else
     SPEC_ARGS=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS,\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
   fi
