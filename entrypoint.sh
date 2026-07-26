@@ -367,7 +367,6 @@ vllm serve "$MODEL_DIR" \
   "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}"
 }
 
-export -f serve_once
 if [ "${SUPERVISOR:-1}" = "0" ]; then
   serve_once
   exit $?
@@ -392,6 +391,9 @@ kill_server_tree() {
 }
 
 MAXR="${SUPERVISOR_MAX_RESTARTS:-5}"
+# Job control: gives every background job its own process group, so the
+# supervisor can reap the whole vLLM tree without spawning a detached bash.
+set -m
 for attempt in $(seq 0 "$MAXR"); do
   if [ "$attempt" -gt 0 ]; then
     status_update restarting
@@ -399,7 +401,16 @@ for attempt in $(seq 0 "$MAXR"); do
     sleep $((attempt*15))
     kill_server_tree
   fi
-  setsid bash -c 'serve_once' &
+  # Run in a SUBSHELL of this shell, not `setsid bash -c`. A fresh bash only
+  # inherits exported variables, and bash cannot export arrays at all — so the
+  # old form started vLLM with an empty MODEL_DIR (`vllm serve ""` ->
+  # HFValidationError) and, had that been fixed, would have silently dropped
+  # SPEC_ARGS / KVT_ARGS / VISION_ARGS / TLS_ARGS: no speculative decode, no
+  # DRAM KV offload, no vision, no TLS, on a server that looks like it booted.
+  # `set -m` (job control, enabled above) puts each background job in its own
+  # process group, so kill_server_tree's `kill -- -$SRV_PID` still reaps the
+  # whole tree — which was the only reason setsid was used.
+  serve_once &
   SRV_PID=$!
   # Death = the session leader is gone. (Health is not a liveness proxy: the
   # engine legitimately takes ~15 min of JIT/cudagraph work before it answers.)
