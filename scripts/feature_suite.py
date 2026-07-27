@@ -117,14 +117,19 @@ def release_ok(checks):
     return all(item["ok"] for item in checks if item.get("required", True))
 
 
-def run(base, key, model, vision):
+def run(base, key, model, vision, auth_enabled=None):
     checks = []
+    if auth_enabled is None:
+        auth_enabled = bool(key)
     try:
         json_request(base + "/v1/models", key="definitely-wrong")
-        record(checks, "auth-rejects-bad-key", False, "bad key was accepted")
+        record(checks, "auth-rejects-bad-key", not auth_enabled,
+               ("bad key was accepted as expected because authentication is disabled"
+                if not auth_enabled else "bad key was accepted"))
     except urllib.error.HTTPError as error:
-        record(checks, "auth-rejects-bad-key", error.code in (401, 403),
-               f"HTTP {error.code}")
+        record(checks, "auth-rejects-bad-key",
+               auth_enabled and error.code in (401, 403),
+               f"HTTP {error.code}; authentication configured={auth_enabled}")
 
     tokenized = json_request(
         base + "/tokenize", {"model": model, "prompt": "one two three"}, key)
@@ -330,7 +335,7 @@ def main(argv):
     base = args.base_url.rstrip("/")
     models = json_request(base + "/v1/models", key=key).get("data") or []
     model = args.model or (models[0]["id"] if models else "")
-    checks = run(base, key, model, args.vision)
+    checks = run(base, key, model, args.vision, auth_enabled=bool(key))
     doc = {
         "schema": 1,
         "ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

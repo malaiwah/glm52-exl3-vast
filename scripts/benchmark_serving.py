@@ -363,19 +363,37 @@ def main(argv):
         "metadata": metadata,
         "prefill": [],
         "concurrency": [],
+        "complete": False,
+        "ok": False,
     }
-    for index in range(args.warmup):
-        run_level(base, key, model, 256, 32, 1, 1, args.timeout, args.insecure)
-    for tokens in parse_ints(args.prefill_tokens):
-        result = run_level(
-            base, key, model, tokens, 1, 1, 1, args.timeout, args.insecure)
-        result["target_prompt_tokens"] = tokens
-        doc["prefill"].append(result)
-    for concurrency in parse_ints(args.concurrency):
-        count = max(concurrency, args.requests_per_level)
-        doc["concurrency"].append(run_level(
-            base, key, model, args.input_tokens, args.output_tokens,
-            concurrency, count, args.timeout, args.insecure))
+
+    def checkpoint():
+        # Paid-runtime results are valuable even when a later level kills the
+        # engine. Do not wait until the entire matrix succeeds to persist them.
+        if args.out:
+            write_result(args.out, doc)
+
+    checkpoint()
+    try:
+        for index in range(args.warmup):
+            run_level(base, key, model, 256, 32, 1, 1, args.timeout, args.insecure)
+        for tokens in parse_ints(args.prefill_tokens):
+            result = run_level(
+                base, key, model, tokens, 1, 1, 1, args.timeout, args.insecure)
+            result["target_prompt_tokens"] = tokens
+            doc["prefill"].append(result)
+            checkpoint()
+        for concurrency in parse_ints(args.concurrency):
+            count = max(concurrency, args.requests_per_level)
+            doc["concurrency"].append(run_level(
+                base, key, model, args.input_tokens, args.output_tokens,
+                concurrency, count, args.timeout, args.insecure))
+            checkpoint()
+    except BaseException as exc:
+        doc["fatal_error"] = f"{type(exc).__name__}: {exc}"
+        checkpoint()
+        raise
+    doc["complete"] = True
     doc["ok"] = all(row["failed"] == 0 for row in
                     doc["prefill"] + doc["concurrency"])
     write_result(args.out, doc)

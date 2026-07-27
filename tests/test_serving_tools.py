@@ -77,6 +77,31 @@ not_a_number NaN
             finally:
                 os.chdir(old)
 
+    def test_matrix_persists_completed_levels_before_a_later_crash(self):
+        row = {"failed": 0}
+        with tempfile.TemporaryDirectory() as directory:
+            output = os.path.join(directory, "partial.json")
+            calls = [
+                row,
+                ConnectionResetError("engine died"),
+            ]
+            with mock.patch.object(bench, "run_level", side_effect=calls), \
+                 mock.patch.object(bench, "discover_model", return_value="model"):
+                with self.assertRaises(ConnectionResetError):
+                    bench.main([
+                        "--base-url", "http://test",
+                        "--prefill-tokens", "1024,8192",
+                        "--concurrency", "",
+                        "--warmup", "0",
+                        "--out", output,
+                    ])
+            with open(output) as handle:
+                partial = json.load(handle)
+            self.assertFalse(partial["complete"])
+            self.assertFalse(partial["ok"])
+            self.assertEqual(partial["prefill"][0]["target_prompt_tokens"], 1024)
+            self.assertIn("ConnectionResetError", partial["fatal_error"])
+
 
 class NeedleTests(unittest.TestCase):
     def test_haystack_is_seeded_unique_and_contains_every_needle(self):
@@ -112,6 +137,24 @@ class NeedleTests(unittest.TestCase):
         self.assertEqual(result["seed"], 99)
         self.assertEqual(result["found"], 2)
         self.assertGreaterEqual(result["duration_s"], 0)
+
+    def test_probe_calibrates_to_within_one_percent_of_requested_tokens(self):
+        def fake_count(_base, _key, _model, text):
+            return (text.count("\n") + 1) * 16, True
+
+        def fake_complete(_base, _key, _model, prompt, **_kwargs):
+            return " ".join(
+                line.rsplit(" ", 1)[-1].rstrip(".")
+                for line in prompt.splitlines()
+                if line.startswith("IMPORTANT:")
+            )
+
+        with mock.patch.object(verify, "count_tokens", side_effect=fake_count), \
+             mock.patch.object(verify, "complete", side_effect=fake_complete):
+            result = verify.needle_probe(
+                "http://test", "", "model", 8192, [0.1, 0.9], seed=100)
+        self.assertLessEqual(abs(result["tokens"] - 8192) / 8192, 0.01)
+        self.assertTrue(result["ok"])
 
     def test_matrix_caps_deduplicates_and_sorts_sizes(self):
         self.assertEqual(

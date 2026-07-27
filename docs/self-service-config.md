@@ -101,6 +101,8 @@ knobs to the model. Summary of the trade each one makes:
 | `MTP_TOKENS` | Depth of speculation. With the cheap trellis draft MTP-5 beats MTP-3 (53.4 vs 51.5 tok/s); with the 19.3 GB BF16 draft it lost 22%. Also widens the decode query width. |
 | `MTP_DRAFT_SAMPLE_METHOD` | `greedy` drafting for EXL3 vs the MadeBy561 daily-driver's `probabilistic` proposals; either remains explicitly overridable. |
 | `DCP` | KV sharded across ranks (4) vs replicated (1). DCP=4 is what makes 512K fit. |
+| `DCP_CKV_PREFETCH_DEPTH`, `DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS` | Topology overlap and the context crossover for query splitting. `auto`/`-1` retain calibration; the MadeBy561 profile pins the measured 0/8,192 shape. |
+| `F8_DMA`, `PCIE_DMA_MIN_BYTES`, `PCIE_CALIBRATION` | Collective wire format and byte crossover. The family stays lossless/automatic; the MadeBy561 profile pins the 521K-qualified FP8 ring/393,216-byte shape. |
 | `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM v29 default) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
 | `MAX_MODEL_LEN` | Longest request, and a hard startup gate against available KV. |
 | `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool (~1.0–1.1M on the release shape); a positive value pins a reproducible smaller pool. |
@@ -338,21 +340,31 @@ only for the minority who set up deSEC); over plain HTTP the page says so.
   `VERIFY_LONG_CONTEXT`, `VERIFY_NEEDLE_TOKENS`, `VERIFY_HEALTH_TIMEOUT_S`,
   `SERVE_LOG_MAX_MB`, `LANDING_PORT`.
 
-## 8. Not verified without a container
+## 8. Live qualification status
 
-Listed honestly, because none of it can be proven by reading:
+This layer is no longer justified only by static substitutions:
 
-- No vLLM was started. The serve arguments derived from the new knobs
-  (`--quantization`, `--kv-cache-dtype`, `--decode-context-parallel-size`) are
-  string substitutions of values the previous version hard-coded, but the
-  NVFP4 variant path in particular is **derived, not measured**: repo name,
-  quantization method and the `hf-overrides` block are assumptions.
-- The needle probe's prompt has never been answered by GLM-5.2 here — it was
-  exercised against a fake OpenAI server. Its retrieval threshold (all codes
-  must be found) may need tuning against the real model's phrasing.
-- `prepare_checkpoint()` re-running on a live restart (graft/vision transitions
-  without a container replacement) is exercised only by the reconciler's unit
-  test against a synthetic checkpoint, not against the 332 GB real one.
-- The supervisor state machine was driven end-to-end with stubbed
-  `serve_once`/`start_verifier` (see the report), not with a real engine, so
-  the timing of `/health` against a 15-minute JIT boot is untested in situ.
+- The custom/Qwen path, provider detection, configuration UI, authentication,
+  restart persistence, supervisor recovery, Runpod proxy, direct TLS and DNS
+  lifecycle were exercised on live Vast and Runpod Blackwell rentals.
+- Both the 303 GB rank-sliced EXL3 checkpoint and the 341 GB MadeBy561 hybrid
+  have booted through the resolved GLM arguments on four RTX PRO 6000
+  Blackwell GPUs. The hybrid's native quantizer, stock BF16 MTP draft,
+  calibrated KV, explicit pool, chunk/workspace controls, and C1–C8 serving
+  have been measured rather than inferred.
+- The real GLM-5.2 model answered three fresh 32K probes (15/15 needles) and
+  both lossless and FP8-ring five-depth probes above 521K. Exact matrices are
+  recorded in `TEST_RESULTS.md`, not hidden behind `/health`.
+- Checkpoint reconciliation observed the current per-expert rank-sliced
+  layer-78 tensors on the real EXL3 snapshot. Unit fixtures retain packed,
+  rank-sliced, BF16, stale-marker, vision, and dry-run coverage.
+- Cached-weight engine restart and verifier timing is measured in situ:
+  6m31s to health and 6m49s to verified on AIBeast with populated AOT caches;
+  the fully warmed repeat was verified in 5m00s and the 32K gate itself takes
+  17–19s there.
+
+Absolute v20 throughput is confirmed on the all-NODE AIBeast host at 280 W/card:
+2,701 tok/s at 8K, 1,987 at 66K, 121.6 tok/s C1 and 269.7 aggregate at C8.
+Remaining claims stay narrow: InstantTensor remains opt-in until repeat cold
+starts are reliable, and GLM vision remains a separate
+short-context experiment rather than part of the text flagship envelope.

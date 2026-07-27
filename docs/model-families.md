@@ -33,7 +33,7 @@ now supplied by the family and absent for anything else:
 | `--moe-backend b12x` | GLM-5.2 is MoE; Qwen3.6-27B is dense |
 | `--quantization exl3` | checkpoint-specific — and naming a method the checkpoint does not carry is a boot failure |
 | `--tool-call-parser glm47`, `--reasoning-parser glm45` | GLM chat-template grammars |
-| `--hf-overrides {"use_index_cache":true,"index_topk_pattern":"FFFSSS…"}` | the sparse indexer's per-layer pattern; meaningless elsewhere |
+| `--hf-overrides {"use_index_cache":true,"max_position_embeddings":<context>,"index_topk_pattern":"FFFSSS…"}` | sparse-indexer layout plus a clamp that avoids allocating the checkpoint's unused 1M-position BF16 RoPE tables when serving 512K; meaningless elsewhere |
 | `--default-chat-template-kwargs {"reasoning_effort":"high"}` | a GLM chat-template kwarg |
 | `custom_ops:["all"]`, `pass_config.fuse_allreduce_rms` in the compilation config | b12x fusion passes |
 | the whole MTP78 apparatus (graft, overlay download, draft dir, `DRAFT_*`) | surgery on GLM-5.2's layer 78 |
@@ -153,6 +153,7 @@ KV, parsers and tool surface while replacing the target quantizer and draft:
 | max context / pool | 524,288 / 2,048 blocks (exactly one maximum-length logical pool) |
 | batch / DCP workspace | 2,048 / 512 MiB |
 | utilization | 0.98, safe only because the pool is explicitly pinned |
+| transport | FP8 ring; query split at 8,192 context tokens; DMA at 393,216 bytes; CKV prefetch off |
 
 These values are atomic defaults but not locks. An explicit template or saved
 value still wins. That distinction matters: v20 auto-sized 551,680 logical KV
@@ -161,10 +162,12 @@ A 3,072-token batch passed repeated 32K and C1–C8 but OOMed immediately at
 520K. The variant default keeps the request limit while reducing transient
 activation pressure.
 
-The known-good v19 control on an all-NODE 4x96 GB host uses the same checkpoint
-and MTP depth, with a 537,600-token pool, and measures 2,299 tok/s at 8K,
-2,192 tok/s at 64K and 119.2 tok/s C1. The mixed-topology Vast host is a
-correctness and relative-tuning platform, not an absolute-performance proxy.
+On the all-NODE 4x96 GB AIBeast host at 280 W/card, this v20 turnkey profile
+measures 2,701 tok/s at 8K, 2,176 at 32K, 1,987 at 66K and 121.6 tok/s C1;
+aggregate decode reaches 269.7 tok/s at C8. It retrieved all five needles from
+a 521,277-token haystack. The v19 control measured 2,299 at 8K, 2,192 at 64K
+and 119.2 C1. The mixed-topology Vast host remains a correctness and relative-
+tuning platform, not an absolute-performance proxy.
 
 ---
 

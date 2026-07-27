@@ -848,10 +848,29 @@ prepare_checkpoint() {
   # destructive — anywhere else, so they are gated on the family rather than on
   # their own knobs, which the config layer has already marked inapplicable.
   if [ "${MODEL_FAMILY:-glm52}" = "glm52" ]; then
-    prepare_mtp78
-    prepare_vision
-    python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-0}" || \
-      echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
+    if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
+      # Local/NFS deployments can expose a checkpoint directly from their shared
+      # Hugging Face cache. Never run graft, vision, or reconciliation writes on
+      # that source: a turnkey experiment must not mutate the canonical weights.
+      if [ "${MTP78_MODE:-off}" != "off" ] || [ "${VISION:-0}" = "1" ]; then
+        echo "FATAL: MODEL_READ_ONLY=1 requires MTP78_MODE=off and VISION=0."
+        echo "       Prepare a writable derivative checkpoint for graft or vision."
+        exit 1
+      fi
+      if [ "${MODEL_VARIANT:-exl3-tr3}" = "exl3-tr3" ]; then
+        python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" \
+          --vision 0 --dry-run --quiet || {
+          echo "FATAL: read-only EXL3 checkpoint does not pass reconciliation."
+          exit 1
+        }
+      fi
+      echo ">>> Checkpoint is read-only; mutation steps skipped."
+    else
+      prepare_mtp78
+      prepare_vision
+      python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-0}" || \
+        echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
+    fi
   elif [ "${MODEL_FAMILY:-}" = "qwen36" ]; then
     MODEL_DIR="$MODEL_DIR" MTP_TOKENS="${MTP_TOKENS:-0}" python3 - <<'PY'
 import json
@@ -1073,6 +1092,15 @@ unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
     unset _cal_gpus _cal_env _cal_line
   elif [ "${DCP_CKV_PREFETCH_DEPTH:-auto}" = "auto" ]; then
     export VLLM_B12X_MLA_CKV_PREFETCH_DEPTH=0
+  fi
+  # Named profiles may pin measured crossovers after the topology calibrator.
+  # -1 keeps the calibrated value; explicit values make a qualified profile
+  # reproducible on providers where the calibration helper is unavailable.
+  if [ "${DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS:--1}" != "-1" ]; then
+    export VLLM_DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS="$DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS"
+  fi
+  if [ "${PCIE_DMA_MIN_BYTES:--1}" != "-1" ]; then
+    export VLLM_PCIE_DMA_MIN_BYTES="$PCIE_DMA_MIN_BYTES"
   fi
 else
   echo ">>> ${MODEL_FAMILY:-?}: skipping the GLM-5.2 engine environment (b12x kernels,"

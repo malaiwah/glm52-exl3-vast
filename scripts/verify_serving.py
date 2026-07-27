@@ -155,14 +155,20 @@ def needle_probe(base, key, model, target_tokens, depths, timeout=600,
                  seed=20260726):
     """One prefill, all depths — the harness shape that found the 490K result."""
     started = time.perf_counter()
-    text, needles = build_haystack(target_tokens, depths, seed)
+    build_target = target_tokens
+    text, needles = build_haystack(build_target, depths, seed)
     actual, exact = count_tokens(base, key, model, text)
-    # one correction pass: scale the line count by the measured tokens/line
-    if actual and abs(actual - target_tokens) / target_tokens > 0.12:
+    # Calibrate against the served tokenizer. Filler token density varies by
+    # tokenizer, and a loose estimate can silently turn a claimed 520K probe
+    # into a materially shorter request. Two proportional corrections normally
+    # land within one percent while keeping the expensive inference count at one.
+    for _ in range(2):
+        if not actual or abs(actual - target_tokens) / target_tokens <= 0.01:
+            break
         lines = text.count("\n") + 1
         per_line = actual / max(lines, 1)
-        text, needles = build_haystack(
-            int(target_tokens * 18 / max(per_line, 1e-6)), depths, seed)
+        build_target = int(target_tokens * 18 / max(per_line, 1e-6))
+        text, needles = build_haystack(build_target, depths, seed)
         actual, exact = count_tokens(base, key, model, text)
     asked = ", ".join(c for c, _ in needles)
     prompt = (text + "\n\n---\nThe document above contains access codes. "
