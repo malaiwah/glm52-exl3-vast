@@ -94,16 +94,21 @@ FAMILIES = {
         "own_knobs": ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
                       "MTP_DRAFT_SAMPLE_METHOD", "VLLM_EXL3_TRELLIS_MAX_M",
                       "DCP_PREFILL_WORKSPACE_MIB", "DCP_CKV_PREFETCH_DEPTH",
+                      "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS",
                       "B12X_PCIE_DMA", "F8_DMA", "PCIE_CALIBRATION",
-                      "VISION", "VISION_CHUNKS"),
+                      "PCIE_DMA_MIN_BYTES",
+                      "CLAMP_ROPE_TABLES", "VISION", "VISION_CHUNKS"),
         "defaults": {
             "MAX_MODEL_LEN": 524288, "MODEL_OUTPUT_LIMIT": 131072, "MTP_TOKENS": 3,
             "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
             "DCP_PREFILL_WORKSPACE_MIB": 1024,
             "DCP_CKV_PREFETCH_DEPTH": "auto",
+            "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": -1,
             "B12X_PCIE_DMA": True,
             "F8_DMA": "0",
             "PCIE_CALIBRATION": "auto",
+            "PCIE_DMA_MIN_BYTES": -1,
+            "CLAMP_ROPE_TABLES": True,
             "GPU_MEMORY_UTILIZATION": 0.96, "GPU_BLOCKS_OVERRIDE": 0,
             "OFFLOAD_FRACTION": 0, "VISION": False,
             "KV_CACHE_DTYPE": "nvfp4_ds_mla",
@@ -274,10 +279,15 @@ VARIANTS = {
             "GPU_MEMORY_UTILIZATION": 0.98,
             "GPU_BLOCKS_OVERRIDE": 2048,
             "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
+            "DCP_CKV_PREFETCH_DEPTH": "0",
+            "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": 8192,
+            "F8_DMA": "ring",
+            "PCIE_CALIBRATION": "off",
+            "PCIE_DMA_MIN_BYTES": 393216,
         },
         "kv_scales_calibrated": True,
         "download_gib": 341,
-        "tested": False,
+        "tested": True,
     },
     "qwen36-nvfp4": {
         "family": "qwen36",
@@ -404,6 +414,15 @@ KNOBS = [
              "with the model's max seq len ... larger than the available KV cache "
              "memory' — it is a startup gate, not a throughput knob. Vision has its "
              "own memory profile and must re-pass the startup/needle gate.")),
+
+    dict(key="CLAMP_ROPE_TABLES", families=("glm52",), type="bool", default=True,
+         group="Memory", scope="engine", label="Clamp RoPE tables to served context",
+         rationale=(
+             "Overrides the checkpoint's max_position_embeddings with MAX_MODEL_LEN. "
+             "The MadeBy561 checkpoint advertises 1,048,576 positions while the "
+             "turnkey profile serves 524,288; the known-good v19 launcher clamps it "
+             "to avoid allocating unused target and draft BF16 RoPE tables. Disable "
+             "only for a controlled A/B against the checkpoint-native allocation.")),
 
     dict(key="GPU_BLOCKS_OVERRIDE", type="int", default=0, min=0, max=65536,
          group="Model", scope="engine", label="KV pool pin (--num-gpu-blocks-override)",
@@ -534,6 +553,16 @@ KNOBS = [
              "crosses CPU sockets; 0 disables the overlap without disabling the "
              "full-CKV path. The calibrated decision is cached on the model volume.")),
 
+    dict(key="DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS", families=("glm52",), type="int",
+         default=-1, min=-1, max=1048576,
+         group="Performance", scope="engine",
+         label="DCP query-split minimum context",
+         rationale=(
+             "-1 accepts the topology calibrator's result. A non-negative value "
+             "overrides the context-length crossover after calibration. The measured "
+             "MadeBy561 profile uses 8,192: shorter prompts avoid split overhead while "
+             "long prefills use the DCP query-split path.")),
+
     dict(key="B12X_PCIE_DMA", families=("glm52",), type="bool", default=True,
          group="Performance", scope="engine", label="B12X PCIe DMA transport",
          rationale=(
@@ -562,6 +591,15 @@ KNOBS = [
              "force measures again, and off uses conservative fixed fallbacks. It "
              "selects the lossless DMA size crossover, query-split crossover, and "
              "whether CKV prefetch overlap is beneficial before model weights load.")),
+
+    dict(key="PCIE_DMA_MIN_BYTES", families=("glm52",), type="int",
+         default=-1, min=-1, max=67108864,
+         group="Performance", scope="engine", label="PCIe DMA crossover (bytes)",
+         rationale=(
+             "-1 accepts the topology calibrator's result. A non-negative value "
+             "overrides its payload-size crossover after calibration. The measured "
+             "MadeBy561 ring profile uses 393,216 bytes; change it only with an "
+             "isolated throughput and maximum-context correctness A/B.")),
 
     dict(key="MAX_CUDAGRAPH_CAPTURE_SIZE", type="int", default=32, min=1, max=512,
          group="Concurrency", scope="engine", label="Max CUDA-graph capture size",
@@ -1183,6 +1221,17 @@ def family_serve_args(cfg: dict):
     fam = family(cfg.get("MODEL_FAMILY"))
     subs = {k: to_text(KNOB_BY_KEY[k], v) for k, v in cfg.items() if k in KNOB_BY_KEY}
     args = [a % subs if "%(" in a else a for a in fam.get("serve_args", [])]
+    if cfg.get("MODEL_FAMILY") == "glm52" and cfg.get("CLAMP_ROPE_TABLES", True):
+        # Keep this conditional rather than formatting a sentinel into the JSON:
+        # disabling the experiment must omit the override entirely so the checkpoint's
+        # native value is used, exactly matching the pre-clamp rental control.
+        try:
+            index = args.index("--hf-overrides") + 1
+            overrides = json.loads(args[index])
+            overrides["max_position_embeddings"] = cfg["MAX_MODEL_LEN"]
+            args[index] = json.dumps(overrides, separators=(",", ":"))
+        except (ValueError, KeyError, json.JSONDecodeError):
+            pass
     variant = VARIANTS.get(cfg.get("MODEL_VARIANT"), {})
     if variant.get("quantization"):
         args = ["--quantization", variant["quantization"]] + args
@@ -1427,6 +1476,26 @@ def validate(cfg: dict, context=None):
         warn("chunk-bigger-than-context", ["MAX_NUM_BATCHED_TOKENS", "MAX_MODEL_LEN"],
              "the prefill chunk is larger than the whole context window; it will simply "
              "be clamped.")
+    qualified_madeby_ring = (
+        cfg.get("MODEL_VARIANT") == "madeby561-hybrid"
+        and cfg["F8_DMA"] == "ring"
+        and cfg["MAX_MODEL_LEN"] == 524288
+        and cfg["MAX_NUM_BATCHED_TOKENS"] == 2048
+        and cfg["DCP_PREFILL_WORKSPACE_MIB"] == 512
+        and cfg["GPU_BLOCKS_OVERRIDE"] == 2048
+        and str(cfg["DCP_CKV_PREFETCH_DEPTH"]) == "0"
+        and cfg["DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS"] == 8192
+        and cfg["PCIE_DMA_MIN_BYTES"] == 393216
+    )
+    if is_glm and cfg["F8_DMA"] != "0" and not qualified_madeby_ring:
+        warn("compressed-dma-needs-retrieval",
+             ["F8_DMA", "MAX_MODEL_LEN"],
+             f"F8_DMA={cfg['F8_DMA']} compresses collective traffic. It may improve "
+             "PCIe-limited throughput, but it is a quality-affecting path rather than "
+             "the lossless auto-calibrated default. Re-run cold near-maximum retrieval "
+             "and degeneration checks on this exact shape before promoting it. The "
+             "unmodified MadeBy561 ring preset is exempt because it passed the "
+             "five-depth 521K gate on the final v20 turnkey image.")
 
     # 8. parallelism (DCP is an MLA-path feature: GLM only) -------------------
     if is_glm and int(cfg["TENSOR_PARALLEL_SIZE"]) % int(cfg["DCP"]) != 0:

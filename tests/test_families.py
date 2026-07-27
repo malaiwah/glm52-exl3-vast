@@ -91,6 +91,12 @@ def test_glm_release_defaults():
     check("hf_overrides still carries the sparse-indexer pattern",
           "index_topk_pattern" in line and "FFFSSS" in line)
     check("hf_overrides still sets use_index_cache", '"use_index_cache":true' in line)
+    check("GLM RoPE tables are clamped to the served context",
+          '"max_position_embeddings":524288' in line)
+    unclamped, _, _ = resolved(gpus=4, CLAMP_ROPE_TABLES=False)
+    check("the pre-clamp control can omit the RoPE override for a clean A/B",
+          "max_position_embeddings" not in " ".join(
+              gc.family_serve_args(unclamped)))
     check("compilation config still has custom_ops + fuse_allreduce_rms",
           '"custom_ops":["all"]' in line and '"fuse_allreduce_rms":true' in line)
     check("capture sizes are substituted from the knob",
@@ -127,6 +133,9 @@ def test_glm_release_integration():
           in entry)
     check("the stable loader is the GLM default",
           gc.family("glm52")["defaults"]["LOAD_FORMAT"] == "safetensors")
+    check("local shared checkpoints have an explicit immutable mode",
+          'if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then' in entry
+          and "Checkpoint is read-only; mutation steps skipped." in entry)
     check("InstantTensor is an explicit opt-in",
           gc.KNOB_BY_KEY["LOAD_FORMAT"]["choices"] == ["safetensors", "instanttensor"])
     check("the CLI explains the variant inheritance layer",
@@ -139,12 +148,14 @@ def test_glm_release_integration():
           runpod["env"]["MTP_DRAFT_SAMPLE_METHOD"] == "greedy")
     for setting in ("VLLM_USE_B12X_PCIE_DMA", "VLLM_PCIE_DMA_FP8",
                     "SPARKINFER_PCIE_DMA_FP8", "PCIE_CALIBRATION_ONLY=1",
-                    "VLLM_USE_MEGA_AOT_ARTIFACT=1"):
+                    "VLLM_USE_MEGA_AOT_ARTIFACT=1",
+                    "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS:--1",
+                    "PCIE_DMA_MIN_BYTES:--1"):
         check(f"the v20 transport path includes {setting}", setting in entry)
 
 
 def test_madeby561_hybrid():
-    section("the MadeBy561 v19 daily-driver control")
+    section("the MadeBy561 v20 qualified profile")
     eff, src, _ = resolved(gpus=4, MODEL_VARIANT="madeby561-hybrid")
     check("the variant selects the published hybrid checkpoint",
           gc.derive(eff)["MODEL_REPO"]
@@ -157,10 +168,19 @@ def test_madeby561_hybrid():
             ("DCP_PREFILL_WORKSPACE_MIB", 512),
             ("GPU_MEMORY_UTILIZATION", 0.98),
             ("GPU_BLOCKS_OVERRIDE", 2048),
-            ("MTP_DRAFT_SAMPLE_METHOD", "probabilistic")):
+            ("MTP_DRAFT_SAMPLE_METHOD", "probabilistic"),
+            ("DCP_CKV_PREFETCH_DEPTH", "0"),
+            ("DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS", 8192),
+            ("F8_DMA", "ring"),
+            ("PCIE_CALIBRATION", "off"),
+            ("PCIE_DMA_MIN_BYTES", 393216)):
         check(f"the measured hybrid memory shape sets {key}",
               eff[key] == expected and src[key] == "variant",
               f"{eff[key]} / {src[key]}")
+    check("the maximum-context ring profile is flagged tested",
+          gc.VARIANTS["madeby561-hybrid"]["tested"] is True)
+    check("the exact 521K-qualified ring shape does not warn new users",
+          "compressed-dma-needs-retrieval" not in ids(gc.validate(eff)))
     check("MTP3 remains enabled", eff["MTP_TOKENS"] == 3)
     line = " ".join(gc.family_serve_args(eff))
     check("the native hybrid quantizer is selected",
@@ -320,6 +340,9 @@ def test_rules_are_family_scoped():
     eff, _, _ = resolved(MTP_DRAFT="tr3-override")
     check("v29 accepts the separately rank-sliced EXL3 draft",
           "tr3-draft-on-v20" not in ids(gc.validate(eff)))
+    eff, _, _ = resolved(F8_DMA="ring")
+    check("compressed DMA demands a new retrieval gate",
+          "compressed-dma-needs-retrieval" in ids(gc.validate(eff)))
 
 
 def test_family_coherence_rules():

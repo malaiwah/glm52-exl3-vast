@@ -42,6 +42,8 @@ INDIRECT = {
                          "profile's auto-tool-choice flags"),
     "MULTIMODAL": ("read by glm_config.family_serve_args to add or omit "
                    "--language-model-only"),
+    "CLAMP_ROPE_TABLES": ("read by glm_config.family_serve_args to add the "
+                          "served MAX_MODEL_LEN to GLM hf_overrides"),
     "MODEL_OUTPUT_LIMIT": ("read by landing.deployment for generated client "
                            "configuration and quick-chat max_tokens"),
     "MTP_DRAFT": ("read by glm_config.derive, which turns it into MTP78_MODE, "

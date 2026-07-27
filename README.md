@@ -92,7 +92,9 @@ shape; it is not merely a different download URL:
 | KV | `nvfp4_ds_mla`, 2,048 blocks | exactly 524,288 logical tokens; one full solo session |
 | prefill chunk / workspace | 2,048 / 512 MiB | preserves the transient NF3/MTP allocation at near-full KV |
 | request / concurrency limits | 524,288 / 8 | one maximum-length request, or up to eight shorter requests |
+| positional tables | clamp checkpoint 1M metadata to 524,288 | avoids allocating unused target/draft BF16 RoPE rows |
 | GPU utilization | 0.98 with the explicit pool pin | the pin, rather than admission-only auto-sizing, preserves runtime headroom |
+| transport | FP8 ring; query split from 8,192; DMA from 393,216 bytes; CKV prefetch off | best isolated AIBeast A/B and clean at 521K |
 | vision / structured output | off / optional | neither is required for tool calling or agentic use |
 
 The 2,048 chunk is intentional. On v20, a 3,072-token chunk with a 512 MiB
@@ -104,20 +106,21 @@ needle—is not a 512K profile.
 
 #### Performance: compare like with like
 
-The authoritative owned-hardware control is AIBeast: 4x RTX PRO 6000
-Blackwell, all four GPU paths `NODE`, v19, the same MadeBy561 checkpoint,
-TP4/DCP4/MTP3, 537,600-token KV pool. Unique-prefix measurements are:
+The authoritative owned-hardware comparison is AIBeast: 4x RTX PRO 6000
+Blackwell, all four GPU paths `NODE`, TP4/DCP4/MTP3, with every card
+power-limited to 280 W. These are isolated unique-prefix measurements:
 
-| environment | uncached prefill | C1 decode | note |
+| environment | uncached prefill | aggregate decode | correctness |
 |---|---:|---:|---|
-| AIBeast v19 daily driver | **2,299 tok/s @8K; 2,192 @64K** | **119.2 tok/s** isolated baseline | 490K long retrieval clean; production reference |
-| Vast qualification host, v20 | 271 @1K; 392 @8K; 141 @32K | 12–18 tok/s across candidates | mixed `SYS/NODE/PIX`, cross-socket host; relative tuning only |
+| v19 daily driver, same checkpoint | 2,299 tok/s @8K; 2,192 @64K | C1 119.2 tok/s | 490K/505K clean |
+| v20 turnkey, lossless DMA | 2,474 @1K; 2,581 @8K; 2,142 @32K; 1,925 @66K | C1 121.8; C2 142.6; C4 205.8; C8 267.6 | 521,276 tokens, 5/5 depths |
+| **v20 turnkey, FP8 ring default** | **2,286 @1K; 2,701 @8K; 2,176 @32K; 1,987 @66K** | **C1 121.6; C2 142.3; C4 208.4; C8 269.7** | **521,277 tokens, 5/5 depths** |
+| Vast qualification host, v20 | 271 @1K; 392 @8K; 141 @32K | 12–18 tok/s across candidates | mixed `SYS/NODE/PIX`; relative tuning only |
 
-The Vast host is deliberately not used to predict the AIBeast absolute. It is
-useful for A/B direction, memory faults, concurrency, features and retrieval.
-The release goal remains >=2,500 tok/s prefill and >=100 tok/s C1 on an
-all-NODE host; the v19 control already clears C1 and is close on prefill, while
-the final v20 image still needs the same-image AIBeast confirmation.
+The ring sweep completed eight 512-token requests at each concurrency with no
+failure or preemption. Mean speculative acceptance length was 3.66–3.95. The
+280 W result clears the >=2,500 tok/s short-prefill, >=100 tok/s C1, and C8
+throughput goals; long-prefill rate naturally declines as context grows.
 
 Do not read a single periodic vLLM line as an end-to-end prefill benchmark.
 The logger defaults to a 10-second interval and counts each scheduled chunk
@@ -152,14 +155,25 @@ explicit landing-page option and defaults off.
 #### What startup looks like
 
 On the well-connected Vast qualification host, the 341 GiB MadeBy561 snapshot
-downloaded through authenticated Hugging Face Xet in **3m45s**. Local
-safetensor reads then took **34–36s**, but vLLM compilation, kernel warmup,
-memory profiling and CUDA-graph capture make a cached-weight engine restart
-roughly **4–7 minutes**. The appliance's required 32K, three-depth retrieval
-gate adds about **4 minutes** on this poor topology, so the landing page may
-remain `STARTING`/`VERIFYING` for **8–12 minutes after weights are present**.
-That is expected; `/health` becoming available is not yet the correctness
-verdict. First download time remains host-network dependent.
+downloaded through authenticated Hugging Face Xet in **3m45s**. On AIBeast's
+NFS plus `cachefilesd`, the 184 target shards load in **128–142s** and the
+complete target/draft model reports loaded in **161–179s**. A first
+configuration boot reached health in **9m43s** and finished verification in
+**10m44s**; after AOT caches existed, a new transport configuration reached
+health in **6m31s** and was verified in **6m49s**; once its ring-specific CuTe
+kernels were cached too, the final repeat was verified in **5m00s**. The 32K
+retrieval gate itself takes only **17–19s** on AIBeast but roughly four minutes
+on the poor-topology Vast host. Seeing `STARTING`/`VERIFYING` for 7–12 minutes
+with cached weights is
+therefore normal. `/health` becoming available is not yet the correctness
+verdict, and first-download time remains host-network dependent.
+
+`SymmMemCommunicator: native P2P atomics are not supported` appears on both
+v19 and v20 because this PCIe topology supports peer reads/writes but not
+system-scope P2P atomics. PyTorch's symmetric-memory one/two-shot collective
+is disabled to avoid an unsafe barrier; logs separately confirm the B12X PCIe
+fused all-reduce and DCP collectives remain active. It is a fallback notice,
+not evidence that all peer transport is disabled.
 
 ## Launch GLM-5.2 on Vast.ai
 
@@ -671,6 +685,9 @@ existing endpoint:
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
 | `MTP78_MODE` | `graft` | `graft` is in-place surgery on layer 78; `override` points at a separate v29-compatible rank-sliced draft; `off` uses the stock BF16 draft. Prefer the `MTP_DRAFT` knob on the config page. |
 | `MTP_DRAFT_SAMPLE_METHOD` | `greedy` | v29-qualified draft proposal mode; `probabilistic` is available for controlled A/B tests |
+| `F8_DMA` | `0` family / `ring` MadeBy561 | compressed PCIe collective mode; the hybrid override passed the 521K five-depth gate |
+| `DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS` | `-1` family / `8192` MadeBy561 | `-1` keeps topology calibration; the hybrid pins its measured crossover |
+| `PCIE_DMA_MIN_BYTES` | `-1` family / `393216` MadeBy561 | `-1` keeps topology calibration; the hybrid pins its measured byte crossover |
 | `OPEN_BUTTON_TOKEN` | provider-specific | required to expose the `:1111` config editor; Vast supplies it and Runpod gets a persisted generated token when one is not set |
 | `SOUL_AUTONOMY_LEVEL` | `0` | enable the embedded diagnostic SOUL: observer `1`, shell investigator `2`, or bounded proactive diagnostician `3` |
 | `SOUL_AUTONOMY_MAX_LEVEL` | `3` | startup-only ceiling for landing-page overrides; invalid values fail closed to `0` |

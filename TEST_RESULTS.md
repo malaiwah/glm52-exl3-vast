@@ -234,10 +234,11 @@ restart-persistence, vision, MTP, and full-profile qualification rows from
 
 ## GLM-5.2 flagship qualification — 2026-07-27
 
-The production-scale pass uses Vast instance `45997603`, four RTX PRO 6000
-Blackwell 96 GB GPUs, and an 850 GB disk. The rental is useful for
-correctness, memory-fault reproduction, and same-host A/B tests, but not as an
-absolute performance reference:
+The production-scale pass began on Vast instance `45997603`, four RTX PRO 6000
+Blackwell 96 GB GPUs and an 850 GB disk, then pivoted to the owned AIBeast
+four-GPU host for absolute performance and maximum-context work. The rental
+was destroyed after the pivot. It was useful for memory-fault reproduction
+and same-host A/B tests, but not as an absolute performance reference:
 
 - GPU 0 reaches the other three GPUs through `SYS`; GPUs 1–3 are `NODE` and
   GPUs 2–3 are `PIX`.
@@ -253,29 +254,38 @@ roughly 4–7 minutes after compilation, warmup, memory profiling, and CUDA
 graph capture. The appliance's 32K retrieval gate adds about four minutes on
 this topology.
 
-### Read-only AIBeast control
+### Preserved AIBeast control and turnkey pivot
 
 The owned-production control is the same MadeBy561 checkpoint at revision
 `68babde27a97a4c980c2494e830dd424975cd5a3` on the v19 image. Its four GPU
 paths are all `NODE` on one NUMA node. The production launch uses
 TP4/DCP4/MTP3, probabilistic proposals, a 3,072-token prefill chunk,
 `nvfp4_ds_mla` KV, a 537,600-token pool, and 128 GiB of host KV offload.
+It also uses the compressed `F8_DMA=ring` path and clamps the checkpoint's
+1,048,576-position metadata to the served 524,288-token context so unused
+target/draft BF16 RoPE rows are not allocated.
 
 Trusted isolated measurements recorded in its handoff are 2,299 prompt
 tokens/s at 8K, 2,192 at 64K, and 119.2 output tokens/s at C1. Production logs
 observed during ordinary traffic showed roughly 92–96 output tokens/s and mean
 speculative acceptance length around 2.94–3.12. Prior seeded retrieval was
-clean at 490K and 505K. The endpoint was inspected read-only and was not
-restarted or benchmarked while serving the owner.
+clean at 490K and 505K.
+
+Before experimentation, the exact v19 image was tagged locally, its launcher,
+override, patches, scales and checksums were copied under
+`/mnt/vault/llm/vllm+lmcache/control-backups/20260727-control-v19`, and the
+stopped control container was retained. The turnkey mounted the same NFS
+checkpoint and completion marker read-only, with separate writable cache/state
+volumes. `SOUL_AUTONOMY_LEVEL` and its startup ceiling remained zero.
 
 ### v20 MadeBy561 memory search
 
 Every candidate used TP4/DCP4, MTP3, the stock BF16 draft, calibrated
 `nvfp4_ds_mla` KV, synchronous scheduling, B12X MLA/MoE, and a maximum request
 length of 524,288. The v20 topology calibrator selected lossless PCIe DMA at a
-393,216-byte crossover and disabled CKV prefetch overlap on this cross-socket
-host; its microbenchmark found DMA about 61–63% faster than NCCL above the
-crossover.
+393,216-byte crossover, enabled DCP query splitting from 8,192 context tokens,
+and disabled CKV prefetch overlap on this cross-socket host; its microbenchmark
+found DMA about 61–63% faster than NCCL above the crossover.
 
 | candidate | result |
 |---|---|
@@ -284,7 +294,8 @@ crossover.
 | pinned 524,288-token pool, batch 2,048, workspace 1,024 MiB | 32K 3/3 and full feature suite passed |
 | same pin, batch 3,072, workspace 1,024 MiB | one 32K pass, then later 32K/benchmark OOM |
 | same pin, batch 3,072, workspace 512 MiB | three uncached 32K passes and C1–C8 passed, but a 520,192-token request immediately OOMed |
-| same pin, batch 2,048, workspace 512 MiB | selected maximum-context candidate |
+| same pin, batch 2,048, workspace 512 MiB, lossless | 32K repeated 3/3; 521,276 tokens retrieved 5/5 depths |
+| same pin and transport crossovers, FP8 ring | selected candidate; 521,277 tokens retrieved 5/5 depths |
 
 The failure shape is important. Startup admission and one short request are
 not sufficient evidence for this target: the NF3/MTP transient allocation is
@@ -293,7 +304,7 @@ supplies the pool, chunk, workspace, utilization, stock draft, and proposal
 method as one `madeby561-hybrid` variant default while retaining explicit
 per-knob overrides.
 
-The selected candidate's required feature suite passes authenticated discovery,
+The selected candidate's required feature suite passes discovery/auth mode,
 exact tokenization, ordinary and thinking chat, SSE usage, multi-turn with
 preserved reasoning, one automatic tool call, and tool-result continuation.
 Structured JSON also passed but remains informational. Forced
@@ -301,18 +312,26 @@ Structured JSON also passed but remains informational. Forced
 tool choice emitted exactly one, so normal agentic workloads remain a release
 gate while forced mode does not.
 
-### Same-host performance
+### AIBeast absolute performance (280 W/card)
 
-The mixed-topology host is slow in absolute terms. Its purpose here is to
-compare configurations without changing hardware:
+AIBeast has four all-`NODE` RTX PRO 6000 Blackwell 96 GB GPUs on one NUMA node.
+All cards were power-limited to 280 W. Each concurrency level used eight
+unique 1K prompts requesting 512 output tokens:
 
-| target / candidate | unique prefill | aggregate decode |
+| target / candidate | unique prefill | aggregate decode / MAL |
 |---|---|---|
-| EXL3, MTP3, batch 3,072 | 286 tok/s @1K; 379 @8K | C1 18.9, C2 26.3, C4 29.8, C8 28.0 |
-| MadeBy561, batch 2,048, workspace 1,024 | 271 @1K; 392 @8K; 141 @32K | C1 12.4, C2 22.7, C4 32.0, C8 25.6 |
-| MadeBy561, batch 3,072, workspace 512, greedy | about 135 tok/s sustained long prefill | C1 14.5, C2 27.4, C4 31.2, C8 29.9 |
-| MadeBy561, batch 3,072, workspace 512, probabilistic | same prefill arm | C1 17.5, C2 23.0, C4 19.9, C8 29.6 |
-| MadeBy561, MTP off, batch 6,144 | — | C1 16.5, C2 21.5, C4 25.2, C8 36.6 |
+| v19 daily-driver control | 2,299 tok/s @8K; 2,192 @64K | C1 119.2 |
+| v20, lossless DMA | 2,474 @1K; 2,581 @8K; 2,142 @32K; 1,925 @66K | C1 121.8 / 3.789; C2 142.6 / 3.668; C4 205.8 / 3.899; C8 267.6 / 3.876 |
+| **v20, FP8 ring selected** | **2,286 @1K; 2,701 @8K; 2,176 @32K; 1,987 @66K** | **C1 121.6 / 3.941; C2 142.3 / 3.657; C4 208.4 / 3.954; C8 269.7 / 3.913** |
+
+Both v20 sweeps completed without request failure or preemption. The selected
+profile also passed three fresh 32K probes (15/15 needles total). The corrected
+live-tokenizer harness built a 521,277-token haystack and recovered five codes
+at depths 1%, 15%, 50%, 90% and 99% while KV occupancy reached 99.5%.
+
+For reference, the discarded Vast results were 271 @1K, 392 @8K, 141 @32K
+and 12–18 tok/s C1 across candidates. Its mixed topology explains the order-of-
+magnitude gap; those measurements remain useful only as a same-host A/B.
 
 Periodic vLLM logger values were not used as these throughput measurements.
 Its default ten-second logger increments prompt tokens only when a scheduled
@@ -320,3 +339,19 @@ chunk completes, then resets the interval. A 2,048-token chunk therefore
 prints `204.8`, `0`, `204.8`, `0` when successive chunks straddle alternating
 buckets, and `409.6` when two land together. Exact unique prompt tokens divided
 by end-to-end prefill time are the comparable metric.
+
+The warning that native P2P atomics are unavailable was present in both v19
+and v20. Peer reads/writes pass, but PyTorch symmetric-memory barriers require
+system-scope atomic CAS and disable that one/two-shot communicator. Separate
+v20 logs confirm B12X PCIe fused all-reduce and B12X DCP collectives are active,
+so the warning is not an all-P2P fallback.
+
+### Startup timing
+
+Authenticated Hugging Face Xet downloaded the 341 GiB checkpoint on Vast in
+3m45s. On AIBeast NFS plus `cachefilesd`, target shards loaded in 128–142s and
+the complete model reported loaded in 161–179s. The first turnkey
+configuration reached health in 9m43s and was verified in 10m44s; with AOT
+caches populated, the ring configuration reached health in 6m31s and was
+verified in 6m49s. With the ring-specific CuTe kernels cached too, the final
+repeat was verified in exactly 5m00s. Its 32K gate took 17–19s.
