@@ -11,8 +11,10 @@ soon as their evidence is collected.
   a manual workflow dispatch.
 - Use one on-demand GPU at a time and record the provider's hourly price before
   accepting the rental.
-- Prefer an RTX 5090 because the pinned CUDA image targets Blackwell. Set an
-  automatic provider termination deadline where supported.
+- Require an RTX 5090 or RTX PRO 6000 Blackwell because the pinned CUDA image
+  and custom kernels target `sm120+`. Do not substitute an RTX 4090/Ada GPU
+  merely because the smoke-test model fits. Set an automatic provider
+  termination deadline where supported.
 - Use a 60 GB local disk on Vast and a 50 GB container disk plus 20 GB
   `/workspace` volume on Runpod.
 - Use `Qwen/Qwen3.5-0.8B` through the `custom` profile with an 8K context. Its

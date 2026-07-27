@@ -8,15 +8,15 @@ environment variables and are not included here.
 
 - Branch: `codex/appliance-live-test`
 - Final runtime-image commit:
-  `4e35fdf5c1815c118a9d721e7e40a2b23ac42c93`
+  `09c14e07f5529d18380572830e2b4e47bb16cc49`
 - Final immutable image:
-  `ghcr.io/malaiwah/glm52-exl3-vast:4e35fdf5c1815c118a9d721e7e40a2b23ac42c93`
+  `ghcr.io/malaiwah/glm52-exl3-vast:09c14e07f5529d18380572830e2b4e47bb16cc49`
 - Final image digest:
-  `sha256:8b5e957a8328039762616944eafebddd681c1acc35f6b33fa041f10852fc05d9`
-- Registry payload: 46 layers, 12,493,859,286 compressed bytes (11.6 GiB);
-  approximately 30 GB unpacked.
+  `sha256:9d4114dae30953e19eaf2e7af221f2259e0277147c9257764091de479582a528`
+- Registry payload remains approximately 11.6 GiB compressed and 30 GB
+  unpacked; the follow-up adds the small `socat` TLS-forwarder package.
 - Final build:
-  <https://github.com/malaiwah/glm52-exl3-vast/actions/runs/30224142616>
+  <https://github.com/malaiwah/glm52-exl3-vast/actions/runs/30225872241>
 
 The final build passed lint and image publication with SHA-pinned Node 24
 actions, least-privilege permissions, per-ref concurrency, timeouts, maximum
@@ -101,29 +101,47 @@ again returned zero instances.
 
 ## Runpod live execution
 
-Static REST/template validation passed, and authenticated Runpod inventory and
-GPU-stock queries worked.
+Initial attempts established that advertised machine bandwidth does not predict
+Runpod's private registry-provisioning time: earlier Community placements
+failed before allocation, and two Secure Pods were terminated before their
+containers started. A follow-up tested the hybrid networking revision.
 
-Placement results:
+The first follow-up allocation accidentally targeted an RTX 4090 and was
+destroyed after 39 seconds when the `sm120+` Blackwell requirement was caught.
+A Secure RTX 5090 attempt was then stopped at the original five-minute image
+pull limit. At the user's direction, one final retry on the same machine was
+given ten minutes:
 
-- Two Community create attempts returned Runpod's machine-resource HTTP 500
-  before a Pod ID was allocated; inventory remained empty.
-- Secure RTX 4090 stock reported `High` at `$0.69/hour`.
-- Two Secure Pods were allocated sequentially. Both remained in provider image
-  provisioning with `runtime: null`, no public IP/port mappings, and proxy
-  HTTP 404. They were terminated at 228 and 437 seconds respectively.
-- One attempt used the provenance/SBOM image index and one used the prior
-  single-platform immutable image manifest. Neither reached the container
-  entrypoint, so the manifest form did not explain the delay.
+- The public IP and TCP mappings appeared around 9 minutes.
+- The token-gated landing page and deSEC A record proved the entrypoint had
+  started around 10 minutes even though Runpod REST still reported
+  `runtime: null`.
+- The 0.8B model became ready at approximately 15 minutes 47 seconds from Pod
+  allocation.
 
-Estimated Runpod compute exposure was about `$0.13` before storage rounding.
-The final Runpod REST inventory returned zero Pods.
+Passed on the Secure RTX 5090:
 
-Because Runpod never started the container, Runpod-specific runtime checks
-(proxy TLS, generated URLs, SSH, restart persistence, vision, MTP, and
-supervisor recovery) are **blocked by cold-image provisioning**, not passed.
-They must not be inferred from the successful Vast run or the static template
-checks.
+- Blackwell GPU guard, provider detection, model download, and vLLM/JIT boot.
+- Hybrid ports: dashboard on `1111/http`, secure API fallback on `8000/http`,
+  and direct appliance TLS on `8443/tcp`.
+- deSEC public-IP registration, DNS-01 validation, and ACME TXT cleanup.
+- Trusted Let's Encrypt certificate with the per-Pod hostname as CN and SAN.
+- Direct and proxy `/health` returned 200.
+- Both routes returned 401 without the API key and authenticated
+  `/v1/models` returned `qwen-smoke`.
+- Direct-TLS and proxy chat completions both returned the requested response.
+- The token-gated dashboard and `/chat` rendered through Runpod HTTPS, exposed
+  the direct endpoint, and included the multi-turn `Preserve thinking` option.
+- Key-only SSH over the mapped public port.
+
+The successful retry ran 1,172 seconds at `$0.99/hour` (about `$0.32`). The
+preceding five-minute RTX 5090 attempt was about `$0.09`; the 39-second 4090
+correction was negligible. Including earlier placement experiments, documented
+Runpod exposure was approximately `$0.55` before storage rounding.
+
+The final Pod was deleted, its A record returned API 404, the ACME TXT count
+was zero, authoritative DNS no longer answered, and Runpod inventory returned
+zero Pods.
 
 ## Coverage summary
 
@@ -135,20 +153,15 @@ checks.
 | Qwen reasoning/tool parser with small live model | Passed on Vast |
 | UI reasoning compatibility and multi-turn behavior | Fixed and browser-tested |
 | Runpod template/API schema and placement handling | Passed |
-| Runpod container/runtime compatibility | Blocked before entrypoint |
+| Runpod hybrid proxy/direct-TLS runtime compatibility | Passed on Secure RTX 5090 |
 | Small-model vision and `qwen3_next_mtp` | Not reached |
 | GLM TP4/DCP4, EXL3/MTP78, 512K, production vision/offload | Explicit release qualification gap |
 | Final provider resources | Vast: 0; Runpod: 0 |
 
 ## Next economical live pass
 
-Do not repeat a blind Runpod rental. First arrange one of:
-
-1. a Runpod machine known to cache the pinned base image;
-2. a Runpod-supported registry/cache path that can deliver the approximately
-   11.6 GiB compressed appliance image within the chosen cold-start budget; or
-3. a deliberately slimmed base image that preserves the required vLLM fork
-   and Blackwell kernels.
-
-Then reuse the same 0.8B profile and execute only the still-uncovered Runpod,
-vision, and MTP rows from `TEST_PLAN.md`.
+Prefer a Runpod Secure Blackwell machine known to cache the pinned image; the
+validated host took roughly nine minutes merely to expose mappings despite
+advertising multi-gigabit networking. Reuse the 0.8B profile and execute only
+the still-uncovered restart-persistence, vision, MTP, and full-profile
+qualification rows from `TEST_PLAN.md`.

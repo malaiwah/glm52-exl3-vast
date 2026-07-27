@@ -84,6 +84,11 @@ This image is a **Runpod Pod** template, not a Serverless worker or Hub
 application. It runs a persistent OpenAI-compatible service and does not
 implement Runpod's Serverless handler contract.
 
+> **Blackwell is required.** The pinned CUDA/vLLM image and its custom kernels
+> are built for `sm120+`. Use an RTX 5090 or RTX PRO 6000 Blackwell; an RTX
+> 4090 is Ada-generation (`sm89`) and is not a supported appliance target even
+> when the selected model would otherwise fit its VRAM.
+
 The checked-in manifests follow Runpod's current
 [Pod template REST schema](https://docs.runpod.io/pods/templates/manage-templates):
 
@@ -109,7 +114,7 @@ the same values:
 - **Compute:** select exactly 4x RTX PRO 6000 Blackwell for the GLM manifest,
   or one RTX PRO 6000 Blackwell/RTX 5090 for the Qwen manifest. GPU type/count
   are selected at Pod deployment and are not fields in the reusable template
-  schema.
+  schema. Do not select RTX 4090 or another pre-Blackwell GPU.
 - **Storage:** use a 50 GB container disk; mount at least 450 GB for GLM or
   80 GB for Qwen at `/workspace`. A volume disk survives stops/restarts but is
   deleted with the Pod; use a network volume if weights must survive deletion. See
