@@ -93,13 +93,21 @@ FAMILIES = {
         # knobs that only make sense here; everything else is generic
         "own_knobs": ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
                       "MTP_DRAFT_SAMPLE_METHOD", "VLLM_EXL3_TRELLIS_MAX_M",
+                      "DCP_PREFILL_WORKSPACE_MIB", "DCP_CKV_PREFETCH_DEPTH",
+                      "B12X_PCIE_DMA", "F8_DMA", "PCIE_CALIBRATION",
                       "VISION", "VISION_CHUNKS"),
         "defaults": {
             "MAX_MODEL_LEN": 524288, "MODEL_OUTPUT_LIMIT": 131072, "MTP_TOKENS": 3,
             "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
+            "DCP_PREFILL_WORKSPACE_MIB": 1024,
+            "DCP_CKV_PREFETCH_DEPTH": "auto",
+            "B12X_PCIE_DMA": True,
+            "F8_DMA": "0",
+            "PCIE_CALIBRATION": "auto",
             "GPU_MEMORY_UTILIZATION": 0.96, "GPU_BLOCKS_OVERRIDE": 0,
             "OFFLOAD_FRACTION": 0, "VISION": False,
             "KV_CACHE_DTYPE": "nvfp4_ds_mla",
+            "LOAD_FORMAT": "safetensors",
             "MTP_DRAFT_SAMPLE_METHOD": "greedy",
             "SERVED_MODEL_NAME": "GLM-5.2",
         },
@@ -110,7 +118,7 @@ FAMILIES = {
             "--dcp-kv-cache-interleave-size", "64",
             "--attention-backend", "B12X_MLA_SPARSE",
             "--moe-backend", "b12x",
-            "--load-format", "safetensors",
+            "--load-format", "%(LOAD_FORMAT)s",
             "--enable-auto-tool-choice",
             "--tool-call-parser", "glm47",
             "--reasoning-parser", "glm45",
@@ -147,11 +155,12 @@ FAMILIES = {
             "GPU_BLOCKS_OVERRIDE": 0,
             "OFFLOAD_FRACTION": 0,
             "KV_CACHE_DTYPE": "auto",
+            "LOAD_FORMAT": "safetensors",
             "SERVED_MODEL_NAME": "Qwen3.6-27B",
             "MULTIMODAL": False,
         },
         "serve_args": [
-            "--load-format", "safetensors",
+            "--load-format", "%(LOAD_FORMAT)s",
             "--enable-auto-tool-choice",
             "--tool-call-parser", "qwen3_coder",
             "--reasoning-parser", "qwen3",
@@ -184,6 +193,7 @@ FAMILIES = {
             "GPU_BLOCKS_OVERRIDE": 0,
             "OFFLOAD_FRACTION": 0,
             "KV_CACHE_DTYPE": "auto",
+            "LOAD_FORMAT": "safetensors",
             "SERVED_MODEL_NAME": "Local-model",
             "MODEL_ID": "",
             "QUANTIZATION": "",
@@ -233,6 +243,40 @@ VARIANTS = {
         "quantization": "modelopt_fp4",
         "kv_scales_calibrated": True,
         "download_gib": 400,
+        "tested": False,
+    },
+    "madeby561-hybrid": {
+        "family": "glm52",
+        "label": "MadeBy561 MXFP8/NVFP4/NF3 hybrid (512K MTP3 profile)",
+        "repo": "madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid",
+        "revision": "68babde27a97a4c980c2494e830dd424975cd5a3",
+        "dirname": "GLM-5.2-MXFP8-NVFP4-NF3-Hybrid",
+        "quantization": "nvfp4_nf3_hybrid",
+        "quantization_config": (
+            '{"linear":{"weight":"mxfp8"},'
+            '"shared_experts":{"weight":"mxfp8"},'
+            '"ignore":["re:^model\\\\.layers\\\\.0\\\\.",'
+            '"re:.*\\\\.self_attn\\\\.indexer\\\\.",'
+            '"re:.*\\\\.mlp\\\\.gate$",'
+            '"model.layers.78.eh_proj","lm_head"]}'
+        ),
+        "default_draft": "bf16",
+        # v20's automatic pool sizing consumed the memory that the hybrid MTP
+        # proposal needs on its first real request. Pinning exactly one 512K
+        # request preserves runtime headroom. A 3072-token chunk with a 512 MiB
+        # workspace passed three uncached 32K prefills plus C1/C2/C4/C8, but
+        # OOMed immediately at 520K. Keep the v20 NF3 default chunk at 2048;
+        # the smaller borrowed DCP workspace retains additional room for the
+        # maximum-context runtime path.
+        "defaults": {
+            "MAX_NUM_BATCHED_TOKENS": 2048,
+            "DCP_PREFILL_WORKSPACE_MIB": 512,
+            "GPU_MEMORY_UTILIZATION": 0.98,
+            "GPU_BLOCKS_OVERRIDE": 2048,
+            "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
+        },
+        "kv_scales_calibrated": True,
+        "download_gib": 341,
         "tested": False,
     },
     "qwen36-nvfp4": {
@@ -467,6 +511,58 @@ KNOBS = [
              "chunk waits for it). 3072 is the shipped balance for a 512K-context "
              "single-stream workload.")),
 
+    dict(key="DCP_PREFILL_WORKSPACE_MIB", families=("glm52",), type="int",
+         default=1024, min=256, max=16384,
+         group="Memory", scope="engine", label="DCP full-CKV workspace (MiB/GPU)",
+         rationale=(
+             "Scratch space per GPU for the fast transient full-CKV prefill path. "
+             "In the current v29 runtime, 1,024 MiB covers 16,384 logical context "
+             "tokens; longer prompts fall back to the lower-memory borrowed-workspace "
+             "path. Raising this may improve long-prefill speed, especially across "
+             "weak PCIe topologies, but every added MiB comes directly out of the KV "
+             "pool. Keep enough KV for one MAX_MODEL_LEN request and confirm with the "
+             "long-context gate. This is an empirical A/B control, not a promise that "
+             "the largest value is fastest.")),
+
+    dict(key="DCP_CKV_PREFETCH_DEPTH", families=("glm52",), type="choice",
+         default="auto", choices=["auto", "0", "1"],
+         group="Performance", scope="engine", label="DCP CKV prefetch overlap",
+         rationale=(
+             "auto asks the base image's PCIe calibrator whether overlapping the "
+             "next CKV gather helps on this exact GPU/NUMA topology. A value of 1 "
+             "can win on a single-root NODE layout and lose badly when one rank "
+             "crosses CPU sockets; 0 disables the overlap without disabling the "
+             "full-CKV path. The calibrated decision is cached on the model volume.")),
+
+    dict(key="B12X_PCIE_DMA", families=("glm52",), type="bool", default=True,
+         group="Performance", scope="engine", label="B12X PCIe DMA transport",
+         rationale=(
+             "Enables SparkInfer/B12X's PCIe DMA path for collective payloads. "
+             "The v20 image calibrates the lossless BF16 crossover before loading "
+             "the model and retains NCCL below that size. Disable only for an A/B "
+             "control or when diagnosing a platform-specific transport failure.")),
+
+    dict(key="F8_DMA", families=("glm52",), type="choice", default="0",
+         choices=["0", "ag", "ring", "a2a", "i8", "i8_ring", "i8_a2a",
+                  "mx", "mx_ring", "mx_a2a"],
+         group="Performance", scope="engine", label="Compressed DMA wire mode",
+         rationale=(
+             "0 is the lossless release default and is eligible for automatic PCIe "
+             "crossover calibration. ag/ring/a2a and the i8/mx variants compress "
+             "collective traffic and can materially improve a constrained PCIe "
+             "topology, but they are explicit quality/performance experiments. "
+             "Any nonzero mode must re-pass maximum-context needles and degeneration "
+             "checks before it should be used as a local profile default.")),
+
+    dict(key="PCIE_CALIBRATION", families=("glm52",), type="choice",
+         default="auto", choices=["auto", "off", "force"],
+         group="Performance", scope="engine", label="Topology calibration",
+         rationale=(
+             "auto reuses a cached v20 PCIe microbenchmark for this GPU topology; "
+             "force measures again, and off uses conservative fixed fallbacks. It "
+             "selects the lossless DMA size crossover, query-split crossover, and "
+             "whether CKV prefetch overlap is beneficial before model weights load.")),
+
     dict(key="MAX_CUDAGRAPH_CAPTURE_SIZE", type="int", default=32, min=1, max=512,
          group="Concurrency", scope="engine", label="Max CUDA-graph capture size",
          rationale=(
@@ -503,6 +599,18 @@ KNOBS = [
              "pool; other families provide their own conservative default. "
              "Memory-profile draws vary by a few hundred MiB run to run, so a value "
              "that boots 2 times in 3 is not a value that boots.")),
+
+    dict(key="LOAD_FORMAT", type="choice", default="safetensors",
+         choices=["safetensors", "instanttensor"],
+         group="Memory", scope="engine", label="Weight loader",
+         rationale=(
+             "safetensors is the conservative, repeatable default. instanttensor uses "
+             "the base image's distributed BUFFERED loader and can reduce model-load "
+             "time on a suitable filesystem, but it has shown intermittent startup "
+             "behavior in rental environments. Treat it as experimental until the "
+             "same host passes several cold starts plus short and long correctness "
+             "gates; the appliance never enables it merely because the package is "
+             "installed.")),
 
     dict(key="MODEL_OUTPUT_LIMIT", type="int", default=131072, min=256, max=262144,
          group="Serving", scope="engine", label="Client output limit",
@@ -995,6 +1103,25 @@ def resolve(state_values=None, env_values=None):
     unknown = [k for k in state_values if k not in KNOB_BY_KEY]
     if unknown:
         notes.append("state file has unknown keys, ignored: " + ", ".join(sorted(unknown)))
+    # A checkpoint variant may need a coherent measured memory shape, not just
+    # a different repository. Apply that layer above family defaults but below
+    # explicit template/state choices so selecting a variant is safe while
+    # every individual knob remains overridable.
+    variant = VARIANTS.get(effective.get("MODEL_VARIANT"), {})
+    for key, raw in variant.get("defaults", {}).items():
+        if key not in KNOB_BY_KEY or sources.get(key) not in ("default", "family"):
+            continue
+        try:
+            effective[key] = coerce(KNOB_BY_KEY[key], raw)
+            sources[key] = "variant"
+        except ConfigError as e:
+            notes.append(f"variant default {e}")
+    # A variant may also carry a stock draft with a different representation
+    # from the family's default.
+    if (fam_name == "glm52" and variant.get("default_draft")
+            and sources.get("MTP_DRAFT") in ("default", "family")):
+        effective["MTP_DRAFT"] = variant["default_draft"]
+        sources["MTP_DRAFT"] = "variant"
     return effective, sources, notes
 
 
@@ -1059,6 +1186,8 @@ def family_serve_args(cfg: dict):
     variant = VARIANTS.get(cfg.get("MODEL_VARIANT"), {})
     if variant.get("quantization"):
         args = ["--quantization", variant["quantization"]] + args
+    if variant.get("quantization_config"):
+        args += ["--quantization-config", variant["quantization_config"]]
     if cfg.get("MODEL_FAMILY") in ("qwen36", "custom") and not cfg.get("MULTIMODAL"):
         args += ["--language-model-only"]
     if cfg.get("MODEL_FAMILY") == "custom":
@@ -1269,12 +1398,22 @@ def validate(cfg: dict, context=None):
              "download during the restart.")
 
     # 7. memory / pool sanity ------------------------------------------------
-    if cfg["GPU_MEMORY_UTILIZATION"] > 0.95:
+    if cfg["GPU_MEMORY_UTILIZATION"] > 0.95 and not cfg["GPU_BLOCKS_OVERRIDE"]:
         warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
              f"{cfg['GPU_MEMORY_UTILIZATION']} leaves very little headroom. The memory "
              "profile varies by a few hundred MiB between boots, so a value that boots "
              "two times in three is not a value that boots — it is a rollback waiting to "
              "happen.")
+    if (is_glm and cfg["MODEL_VARIANT"] == "madeby561-hybrid"
+            and cfg["MAX_MODEL_LEN"] >= 524288
+            and not cfg["GPU_BLOCKS_OVERRIDE"]):
+        warn("hybrid-512k-needs-pool-pin",
+             ["MODEL_VARIANT", "MAX_MODEL_LEN", "GPU_BLOCKS_OVERRIDE"],
+             "the v20 hybrid target can pass startup admission with an automatically "
+             "sized pool and still OOM in the first MTP proposal: the pool consumes "
+             "the proposal's transient allocation. The measured 512K profile pins "
+             "2048 blocks. Keep that pin, or re-run the 32K and near-maximum needle "
+             "gates before trusting this configuration.")
     if cfg["GPU_BLOCKS_OVERRIDE"] and cfg["GPU_BLOCKS_OVERRIDE"] * 256 < cfg["MAX_MODEL_LEN"]:
         err("pool-smaller-than-context", ["GPU_BLOCKS_OVERRIDE", "MAX_MODEL_LEN"],
             f"the pinned KV pool is {cfg['GPU_BLOCKS_OVERRIDE']} blocks = "

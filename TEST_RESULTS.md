@@ -231,3 +231,92 @@ showed that provider bandwidth does not predict the host-to-Hugging-Face CAS
 route. Reuse the 0.8B profile and execute only the still-uncovered
 restart-persistence, vision, MTP, and full-profile qualification rows from
 `TEST_PLAN.md`.
+
+## GLM-5.2 flagship qualification — 2026-07-27
+
+The production-scale pass uses Vast instance `45997603`, four RTX PRO 6000
+Blackwell 96 GB GPUs, and an 850 GB disk. The rental is useful for
+correctness, memory-fault reproduction, and same-host A/B tests, but not as an
+absolute performance reference:
+
+- GPU 0 reaches the other three GPUs through `SYS`; GPUs 1–3 are `NODE` and
+  GPUs 2–3 are `PIX`.
+- The machine has two CPU sockets and four NUMA nodes.
+- CUDA peer reads/writes work, while native peer atomics do not.
+- The provider charged `$7.248/hour`, including the enlarged disk.
+
+Both checkpoints fit simultaneously: approximately 303 GB for EXL3 and
+341 GB for `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid`. The authenticated
+MadeBy561 Hugging Face Xet transfer completed in 3 minutes 45 seconds. Local
+safetensor reads take about 34–36 seconds, but full engine restarts take
+roughly 4–7 minutes after compilation, warmup, memory profiling, and CUDA
+graph capture. The appliance's 32K retrieval gate adds about four minutes on
+this topology.
+
+### Read-only AIBeast control
+
+The owned-production control is the same MadeBy561 checkpoint at revision
+`68babde27a97a4c980c2494e830dd424975cd5a3` on the v19 image. Its four GPU
+paths are all `NODE` on one NUMA node. The production launch uses
+TP4/DCP4/MTP3, probabilistic proposals, a 3,072-token prefill chunk,
+`nvfp4_ds_mla` KV, a 537,600-token pool, and 128 GiB of host KV offload.
+
+Trusted isolated measurements recorded in its handoff are 2,299 prompt
+tokens/s at 8K, 2,192 at 64K, and 119.2 output tokens/s at C1. Production logs
+observed during ordinary traffic showed roughly 92–96 output tokens/s and mean
+speculative acceptance length around 2.94–3.12. Prior seeded retrieval was
+clean at 490K and 505K. The endpoint was inspected read-only and was not
+restarted or benchmarked while serving the owner.
+
+### v20 MadeBy561 memory search
+
+Every candidate used TP4/DCP4, MTP3, the stock BF16 draft, calibrated
+`nvfp4_ds_mla` KV, synchronous scheduling, B12X MLA/MoE, and a maximum request
+length of 524,288. The v20 topology calibrator selected lossless PCIe DMA at a
+393,216-byte crossover and disabled CKV prefetch overlap on this cross-socket
+host; its microbenchmark found DMA about 61–63% faster than NCCL above the
+crossover.
+
+| candidate | result |
+|---|---|
+| auto pool, GMU 0.96, batch 3,072 | startup KV admission failure |
+| auto pool 551,680 tokens, GMU 0.98, batch 3,072 | first 32K request OOM; only 24.75 MiB free for a 36 MiB NF3 target allocation |
+| pinned 524,288-token pool, batch 2,048, workspace 1,024 MiB | 32K 3/3 and full feature suite passed |
+| same pin, batch 3,072, workspace 1,024 MiB | one 32K pass, then later 32K/benchmark OOM |
+| same pin, batch 3,072, workspace 512 MiB | three uncached 32K passes and C1–C8 passed, but a 520,192-token request immediately OOMed |
+| same pin, batch 2,048, workspace 512 MiB | selected maximum-context candidate |
+
+The failure shape is important. Startup admission and one short request are
+not sufficient evidence for this target: the NF3/MTP transient allocation is
+not fully represented by the apparent KV headroom. The configurator therefore
+supplies the pool, chunk, workspace, utilization, stock draft, and proposal
+method as one `madeby561-hybrid` variant default while retaining explicit
+per-knob overrides.
+
+The selected candidate's required feature suite passes authenticated discovery,
+exact tokenization, ordinary and thinking chat, SSE usage, multi-turn with
+preserved reasoning, one automatic tool call, and tool-result continuation.
+Structured JSON also passed but remains informational. Forced
+`tool_choice=required` emitted five duplicate calls on this build; automatic
+tool choice emitted exactly one, so normal agentic workloads remain a release
+gate while forced mode does not.
+
+### Same-host performance
+
+The mixed-topology host is slow in absolute terms. Its purpose here is to
+compare configurations without changing hardware:
+
+| target / candidate | unique prefill | aggregate decode |
+|---|---|---|
+| EXL3, MTP3, batch 3,072 | 286 tok/s @1K; 379 @8K | C1 18.9, C2 26.3, C4 29.8, C8 28.0 |
+| MadeBy561, batch 2,048, workspace 1,024 | 271 @1K; 392 @8K; 141 @32K | C1 12.4, C2 22.7, C4 32.0, C8 25.6 |
+| MadeBy561, batch 3,072, workspace 512, greedy | about 135 tok/s sustained long prefill | C1 14.5, C2 27.4, C4 31.2, C8 29.9 |
+| MadeBy561, batch 3,072, workspace 512, probabilistic | same prefill arm | C1 17.5, C2 23.0, C4 19.9, C8 29.6 |
+| MadeBy561, MTP off, batch 6,144 | — | C1 16.5, C2 21.5, C4 25.2, C8 36.6 |
+
+Periodic vLLM logger values were not used as these throughput measurements.
+Its default ten-second logger increments prompt tokens only when a scheduled
+chunk completes, then resets the interval. A 2,048-token chunk therefore
+prints `204.8`, `0`, `204.8`, `0` when successive chunks straddle alternating
+buckets, and `409.6` when two land together. Exact unique prompt tokens divided
+by end-to-end prefill time are the comparable metric.

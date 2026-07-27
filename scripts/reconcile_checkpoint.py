@@ -47,8 +47,20 @@ IDX = "model.safetensors.index.json"
 LSHARD = "model-layer-078.safetensors"
 VISION_SHARDS = ("vision_tower.safetensors", "mm_projector.safetensors")
 MTP_LAYER = 78
-PER_EXPERT_RE = re.compile(r"^model\.layers\.%d\.mlp\.experts\.\d+\." % MTP_LAYER)
-LAYER78_EXPERT_RE = re.compile(r"^model\.layers\.%d\..*experts" % MTP_LAYER)
+TRELLIS_EXPERT_RE = re.compile(
+    r"^model\.layers\.%d\.mlp\.experts\.\d+\."
+    r"(?:gate_proj|up_proj|down_proj)\.rank\d+\."
+    r"(?:trellis|suh|svh|mcg|mul1)$" % MTP_LAYER
+)
+BF16_EXPERT_RE = re.compile(
+    r"^model\.layers\.%d\.mlp\.experts\.\d+\."
+    r"(?:gate_proj|up_proj|down_proj)\.(?:weight|weight_scale|weight_scale_inv)$"
+    % MTP_LAYER
+)
+PACKED_TRELLIS_RE = re.compile(
+    r"^model\.layers\.%d\..*experts.*"
+    r"(?:trellis|suh|svh|mcg|mul1)$" % MTP_LAYER
+)
 
 
 # --------------------------------------------------------------------------
@@ -67,10 +79,13 @@ def tensor_names(path):
 def observe_layer78(model_dir):
     """-> 'trellis' | 'bf16' | 'absent'
 
-    BF16 layer 78 stores one tensor per expert (`...experts.<int>....`); the
-    trellis overlay stores packed expert tensors under names that are not
-    per-expert. That distinction is the observable, and it is what the runtime
-    actually cares about."""
+    BF16 layer 78 stores one `.weight` tensor per expert. Current rank-sliced
+    EXL3 overlays are also per-expert, but store one
+    `.rank{r}.{trellis|suh|svh|mcg|mul1}` payload per TP rank and projection.
+    Older overlays used packed expert names without the numeric expert segment.
+    Check the payload suffixes, not merely whether the name is per-expert: the
+    latter misclassified the current 3bpw-keep0 overlay as BF16 and made the
+    reconciler undo a valid graft before every v29 boot."""
     path = os.path.join(model_dir, LSHARD)
     if not os.path.exists(path):
         return "absent"
@@ -78,11 +93,12 @@ def observe_layer78(model_dir):
         names = tensor_names(path)
     except (OSError, ValueError, struct.error):
         return "absent"
-    per_expert = any(PER_EXPERT_RE.match(n) for n in names)
-    packed = any(LAYER78_EXPERT_RE.match(n) and not PER_EXPERT_RE.match(n) for n in names)
-    if per_expert:
+    if any(TRELLIS_EXPERT_RE.match(n) or PACKED_TRELLIS_RE.match(n)
+           for n in names):
+        return "trellis"
+    if any(BF16_EXPERT_RE.match(n) for n in names):
         return "bf16"
-    return "trellis" if packed else "absent"
+    return "absent"
 
 
 def observe_vision(model_dir):

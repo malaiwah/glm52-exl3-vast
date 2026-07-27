@@ -3,7 +3,15 @@
 One image, coherent profiles for **GLM-5.2**, **Qwen3.6-27B**, and compatible
 vLLM checkpoints. It supplies an authenticated OpenAI-compatible endpoint,
 persistent model downloads and compile caches, a live dashboard, key-only SSH,
-provider-aware URLs, optional TLS, and crash supervision.
+provider-aware URLs, optional TLS, crash supervision, and an opt-in embedded
+diagnostic SOUL.
+
+The [embedded appliance SOUL](docs/soul.md) uses Nanobot 0.3.0 against the
+local endpoint to monitor health, interpret incidents, and keep a blog-style
+journal. It runs inside this container with no extra port or setup and ships at
+autonomy level `0` (off). Levels 1–3 are explicitly enabled by environment or
+the token-gated landing page; startup verification and rollback remain
+authoritative.
 
 The default `glm52-exl3` profile is the flagship production stack: EXL3
 Trellis weights (~77 GiB/rank), calibrated `nvfp4_ds_mla` KV, synchronous
@@ -61,6 +69,97 @@ TOOL_CALL_PARSER=qwen3_coder
 The custom profile deliberately omits GLM backends, grafts and fixed KV block
 counts. Compatibility still depends on the vLLM build in the base image; add a
 named profile when a model needs more than conventional vLLM flags.
+
+### GLM-5.2 flagship model card (beta)
+
+There are two first-class GLM checkpoint variants. `exl3-tr3` remains the
+provider-template default. `madeby561-hybrid` is the production-control
+variant used to tune the newer runtime without changing model family:
+
+```text
+MODEL_PROFILE=glm52-exl3
+MODEL_VARIANT=madeby561-hybrid
+```
+
+Selecting the hybrid variant also selects its coherent memory and speculation
+shape; it is not merely a different download URL:
+
+| setting | MadeBy561 v20 turnkey default | reason |
+|---|---:|---|
+| target | `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid` at `68babde…` | immutable production control |
+| TP / DCP | 4 / 4 | four 96 GB Blackwell cards, KV sharded across all ranks |
+| MTP | 3, stock BF16 layer, probabilistic proposals | matches the known-good v19 daily driver |
+| KV | `nvfp4_ds_mla`, 2,048 blocks | exactly 524,288 logical tokens; one full solo session |
+| prefill chunk / workspace | 2,048 / 512 MiB | preserves the transient NF3/MTP allocation at near-full KV |
+| request / concurrency limits | 524,288 / 8 | one maximum-length request, or up to eight shorter requests |
+| GPU utilization | 0.98 with the explicit pool pin | the pin, rather than admission-only auto-sizing, preserves runtime headroom |
+| vision / structured output | off / optional | neither is required for tool calling or agentic use |
+
+The 2,048 chunk is intentional. On v20, a 3,072-token chunk with a 512 MiB
+workspace passed three uncached 32K prefills and a C1/C2/C4/C8 sweep, but
+immediately OOMed in the target NF3 MoE output allocation at a 520,192-token
+prompt. A 1 GiB workspace was worse: it passed the first 32K gate and OOMed on
+the next request. A configuration that only boots—or even passes one short
+needle—is not a 512K profile.
+
+#### Performance: compare like with like
+
+The authoritative owned-hardware control is AIBeast: 4x RTX PRO 6000
+Blackwell, all four GPU paths `NODE`, v19, the same MadeBy561 checkpoint,
+TP4/DCP4/MTP3, 537,600-token KV pool. Unique-prefix measurements are:
+
+| environment | uncached prefill | C1 decode | note |
+|---|---:|---:|---|
+| AIBeast v19 daily driver | **2,299 tok/s @8K; 2,192 @64K** | **119.2 tok/s** isolated baseline | 490K long retrieval clean; production reference |
+| Vast qualification host, v20 | 271 @1K; 392 @8K; 141 @32K | 12–18 tok/s across candidates | mixed `SYS/NODE/PIX`, cross-socket host; relative tuning only |
+
+The Vast host is deliberately not used to predict the AIBeast absolute. It is
+useful for A/B direction, memory faults, concurrency, features and retrieval.
+The release goal remains >=2,500 tok/s prefill and >=100 tok/s C1 on an
+all-NODE host; the v19 control already clears C1 and is close on prefill, while
+the final v20 image still needs the same-image AIBeast confirmation.
+
+Do not read a single periodic vLLM line as an end-to-end prefill benchmark.
+The logger defaults to a 10-second interval and counts each scheduled chunk
+when it completes. With a 2,048-token chunk, one completed chunk prints
+`204.8 tok/s`, two print `409.6`, and a bucket with no completed chunk prints
+`0`; `204.8, 0, 204.8, 0` is therefore ordinary boundary quantization. Use
+exact prompt tokens divided by TTFT, with a unique prefix so prefix caching
+cannot contaminate the result.
+
+#### Feature status
+
+The live hybrid suite passes authenticated model discovery, exact
+tokenization, ordinary chat, thinking-content visibility, streaming with
+usage, multi-turn with preserved reasoning, structured JSON (informational),
+one automatic tool call, and tool-result continuation. `tool_choice=required`
+is intentionally an optional probe: this active vLLM build emits five
+duplicate calls there, while `tool_choice=auto` emits exactly one. The
+duplication matches the class of [vLLM MTP/tool-parser issue
+#34449](https://github.com/vllm-project/vllm/issues/34449); it is not
+interleaved thinking and does not block normal automatic tool or agent
+workloads.
+
+[`preserve thinking`](https://docs.z.ai/guides/capabilities/thinking-mode)
+means forwarding the assistant's complete, unmodified prior
+`reasoning_content` in the next request. [Interleaved
+thinking](https://docs.vllm.ai/en/latest/features/interleaved_thinking/) is the
+model reasoning again between tool calls and tool results. They are related
+history semantics, not synonyms; interleaved tool use needs its intervening
+thinking blocks preserved, while general multi-turn preservation remains an
+explicit landing-page option and defaults off.
+
+#### What startup looks like
+
+On the well-connected Vast qualification host, the 341 GiB MadeBy561 snapshot
+downloaded through authenticated Hugging Face Xet in **3m45s**. Local
+safetensor reads then took **34–36s**, but vLLM compilation, kernel warmup,
+memory profiling and CUDA-graph capture make a cached-weight engine restart
+roughly **4–7 minutes**. The appliance's required 32K, three-depth retrieval
+gate adds about **4 minutes** on this poor topology, so the landing page may
+remain `STARTING`/`VERIFYING` for **8–12 minutes after weights are present**.
+That is expected; `/health` becoming available is not yet the correctness
+verdict. First download time remains host-network dependent.
 
 ## Launch GLM-5.2 on Vast.ai
 
@@ -573,6 +672,9 @@ existing endpoint:
 | `MTP78_MODE` | `graft` | `graft` is in-place surgery on layer 78; `override` points at a separate v29-compatible rank-sliced draft; `off` uses the stock BF16 draft. Prefer the `MTP_DRAFT` knob on the config page. |
 | `MTP_DRAFT_SAMPLE_METHOD` | `greedy` | v29-qualified draft proposal mode; `probabilistic` is available for controlled A/B tests |
 | `OPEN_BUTTON_TOKEN` | provider-specific | required to expose the `:1111` config editor; Vast supplies it and Runpod gets a persisted generated token when one is not set |
+| `SOUL_AUTONOMY_LEVEL` | `0` | enable the embedded diagnostic SOUL: observer `1`, shell investigator `2`, or bounded proactive diagnostician `3` |
+| `SOUL_AUTONOMY_MAX_LEVEL` | `3` | startup-only ceiling for landing-page overrides; invalid values fail closed to `0` |
+| `SOUL_HEARTBEAT_INTERVAL_S` / `SOUL_JOURNAL_INTERVAL_S` | `300` / `3600` | deterministic snapshot and blog-style journal cadence; changing these does not restart vLLM |
 | `VERIFY` | `1` | `0` disables the post-start correctness probe entirely (the page then reports "unverified" and nothing rolls back) |
 | `VERIFY_LONG_CONTEXT` | `1` | `0` keeps the short-prompt checks only — read the warning above before using it |
 | `VERIFY_NEEDLE_TOKENS` | `32768` | size of the long-context retrieval probe |

@@ -43,6 +43,11 @@ try:
 except Exception:        # the terminate control simply does not appear
     prov = None
     terminate_worker = None
+try:
+    import soul_config as soul
+except Exception as _e:  # SOUL is optional and defaults to disabled
+    soul = None
+    _SOUL_ERR = str(_e)
 
 TOKEN = os.environ.get("OPEN_BUTTON_TOKEN", "")
 MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
@@ -79,6 +84,152 @@ def status() -> dict:
             return json.load(f)
     except (OSError, ValueError):
         return {}
+
+
+def soul_status(sanitized=False) -> dict:
+    """SOUL status with config-derived defaults when its process is off."""
+    if soul is None:
+        return {"state": "Error", "level": 0, "controllerHealthy": False,
+                "latestHeadline": "SOUL support is unavailable"}
+    config, _sources, notes = soul.resolve()
+    doc = soul.read_json(soul.paths()["status"], {}) or {}
+    doc.update({
+        "level": config["autonomyLevel"],
+        "requestedLevel": config["requestedLevel"],
+        "maximumLevel": config["maximumLevel"],
+        "config": config,
+        "configNotes": notes,
+    })
+    for key, default in (("lastRunAt", None), ("nextRunAt", None),
+                         ("pendingIncidents", 0), ("controllerHealthy", False)):
+        doc.setdefault(key, default)
+    if config["autonomyLevel"] == 0:
+        doc.update({"state": "Disabled", "controllerHealthy": False,
+                    "latestHeadline": doc.get("latestHeadline", "")})
+    elif not doc.get("state"):
+        doc["state"] = "Waiting for model"
+    pid = doc.get("controllerPid")
+    if config["autonomyLevel"] > 0 and pid:
+        try:
+            os.kill(int(pid), 0)
+        except (OSError, ValueError):
+            doc.update({"state": "Error", "controllerHealthy": False})
+    if sanitized:
+        return {
+            "state": str(doc.get("state", "Disabled"))[:80],
+            "level": int(doc.get("level", 0)),
+            "controllerHealthy": bool(doc.get("controllerHealthy", False)),
+            "latestHeadline": str(soul.redact(
+                str(doc.get("latestHeadline", ""))))[:160],
+        }
+    return soul.redact(doc)
+
+
+def render_soul_card(tok="") -> str:
+    doc = soul_status(sanitized=True)
+    state = doc["state"]
+    ok = state in ("Observing", "Investigating")
+    level = doc["level"]
+    headline = doc.get("latestHeadline") or (
+        "Proactive diagnostics are off." if level == 0 else
+        "The SOUL is waiting for the verified local model.")
+    link = ""
+    if TOKEN and tok:
+        link = (f' <a href="/soul?token={html.escape(tok, quote=True)}">'
+                "Open journal &amp; settings &rarr;</a>")
+    return (
+        "<div class=card><h3>Appliance SOUL</h3>"
+        f"<div class=v><span class='pill {'ok' if ok else 'busy'}'></span>"
+        f"<span class={'ok' if ok else 'busy'}>{html.escape(state)}</span>"
+        f" <span class=sub>level {level}</span></div>"
+        f"<div class=sub style='margin-top:.45rem'>{html.escape(headline)}{link}</div>"
+        "</div>")
+
+
+def _soul_evidence(ref):
+    if soul is None or not isinstance(ref, str):
+        return None
+    root = soul.paths()["root"].resolve()
+    try:
+        target = (root / ref).resolve()
+        if root not in target.parents or not target.is_file():
+            return None
+        return soul.redact(json.loads(target.read_text(encoding="utf-8")))  # type: ignore
+    except (OSError, ValueError):
+        return None
+
+
+def render_soul(tok, secure, message="", cls="", before="") -> bytes:
+    doc = soul_status()
+    config = doc.get("config", {})
+    entries = soul.read_journal(limit=20, before=before) if soul is not None else []
+    tok_q = html.escape(tok, quote=True)
+    parts = [page_head("Appliance SOUL"),
+             "<div class='wrap'><header class=hero><h1><b>Appliance SOUL</b></h1>"
+             "<span class=sub>A local diagnostic journal. Startup verification and "
+             "rollback remain authoritative.</span></header>",
+             f"<p><a href='/?token={tok_q}'>&larr; Appliance</a></p>",
+             render_soul_card(tok)]
+    if message:
+        parts.append(f"<div class='card {html.escape(cls)}'>{html.escape(message)}</div>")
+    parts.append("<div class=card><h3>Autonomy</h3>"
+                 f"<p class=sub>Startup ceiling: level {int(doc.get('maximumLevel', 0))}. "
+                 "A landing-page override can lower or raise the request only within "
+                 "that ceiling; changing it does not restart vLLM.</p>"
+                 f"<form method=post action='/soul/config?token={tok_q}'>"
+                 f"<input type=hidden name=token value='{tok_q}'>"
+                 "<label>Level <select name=autonomyLevel>")
+    labels = {
+        0: "0 — off", 1: "1 — observer", 2: "2 — investigator",
+        3: "3 — proactive diagnostician",
+    }
+    for level, label in labels.items():
+        selected = " selected" if level == int(config.get("requestedLevel", 0)) else ""
+        disabled = " disabled" if level > int(doc.get("maximumLevel", 0)) else ""
+        parts.append(f"<option value={level}{selected}{disabled}>{html.escape(label)}</option>")
+    parts.append(
+        "</select></label>"
+        f"<label> Snapshot interval (seconds) <input name=heartbeatIntervalS type=number "
+        f"min=30 max=86400 value='{int(config.get('heartbeatIntervalS', 300))}'></label>"
+        f"<label> Journal interval (seconds) <input name=journalIntervalS type=number "
+        f"min=300 max=604800 value='{int(config.get('journalIntervalS', 3600))}'></label>"
+        f"<label> Timezone <input name=timezone maxlength=64 "
+        f"value='{html.escape(str(config.get('timezone', 'UTC')), quote=True)}'></label>"
+        "<p><button type=submit>Save SOUL settings</button></p></form></div>")
+    parts.append("<h2>Journal</h2>")
+    if not entries:
+        parts.append("<div class=card><p class=sub>No journal entries yet.</p></div>")
+    for entry in entries:
+        severity = html.escape(str(entry.get("severity", "info")))
+        headline = html.escape(str(entry.get("headline", "Untitled")))
+        stamp = html.escape(str(entry.get("timestamp", "")))
+        summary = html.escape(str(entry.get("summary", "")))
+        parts.append(
+            f"<article class=card><h3>{headline}</h3><div class=sub>{stamp} "
+            f"&middot; {severity} &middot; {html.escape(str(entry.get('kind', 'status')))}</div>"
+            f"<p>{summary}</p>")
+        observations = entry.get("observations") or []
+        if observations:
+            parts.append("<h3>Observations</h3><ul>" + "".join(
+                "<li>" + html.escape(str(item)) + "</li>" for item in observations) + "</ul>")
+        suggestions = entry.get("suggestions") or []
+        if suggestions:
+            parts.append("<h3>Suggestions</h3><ul>" + "".join(
+                "<li>" + html.escape(str(item)) + "</li>" for item in suggestions) + "</ul>")
+        for ref in entry.get("evidenceRefs") or []:
+            evidence = _soul_evidence(ref)
+            if evidence is None:
+                continue
+            encoded = json.dumps(evidence, ensure_ascii=False, indent=1)[:80_000]
+            parts.append("<details><summary>Evidence "
+                         + html.escape(str(ref)) + "</summary><pre>"
+                         + html.escape(encoded) + "</pre></details>")
+        parts.append("</article>")
+    if entries:
+        before = html.escape(str(entries[-1].get("id", "")), quote=True)
+        parts.append(f"<p><a href='/soul?token={tok_q}&before={before}'>Older entries</a></p>")
+    parts.append("</div></body></html>")
+    return "".join(parts).encode()
 
 
 def js_literal(value) -> str:
@@ -716,8 +867,19 @@ def _failures_html():
             with open(os.path.join(fdir, "analysis.md")) as f:
                 analysis = f.read()
         except OSError:
-            analysis = ("_The running model has not produced an explanation yet "
-                        "(it is generated once the known-good config is serving)._")
+            marker = os.path.join(gc.state_dir(), "soul", "incidents",
+                                  "rollback-" + d + ".json")
+            soul_analysis = gc.read_json(marker).get("record", {})
+            if soul_analysis:
+                analysis = (str(soul_analysis.get("headline", "")) + "\n\n"
+                            + str(soul_analysis.get("summary", "")))
+                suggestions = soul_analysis.get("suggestions") or []
+                if suggestions:
+                    analysis += "\n\nSuggestions:\n" + "\n".join(
+                        "- " + str(item) for item in suggestions)
+            else:
+                analysis = ("_The running model has not produced an explanation yet "
+                            "(it is generated once the known-good config is serving)._")
         sigs = "".join(f"<li>{html.escape(s)}</li>" for s in meta.get("signatures") or [])
         out.append(
             "<details><summary>%s &mdash; %s</summary>"
@@ -1232,6 +1394,7 @@ def render(secure: bool, tok: str = "") -> bytes:
             if dep.get("gpus") else "",
             (" &middot; provider %s" % html.escape(dep["provider"]))
             if dep.get("provider") and dep["provider"] != "unknown" else ""))
+    parts.append(render_soul_card(tok))
     if gc is not None:
         # "Engine: serving" above is a LIVENESS statement. Correctness is a
         # separate card on purpose — every silent-corruption configuration this
@@ -1349,9 +1512,10 @@ class DualProtocolServer(ThreadingHTTPServer):
 
 
 GET_PATHS = ("/", "/chat", "/config", "/config/export", "/config/status",
+             "/soul", "/soul/status", "/soul/journal",
              "/terminate", "/terminate/status")
 POST_PATHS = ("/config/apply", "/config/import", "/config/reset", "/config/restart",
-              "/terminate", "/terminate/lock")
+              "/soul/config", "/terminate", "/terminate/lock")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1463,6 +1627,19 @@ class Handler(BaseHTTPRequestHandler):
                 with open(gc.p_restart_flag(), "w") as f:
                     f.write("manual\n")
                 body = render_config(tok, secure, "Restart requested.", "good")
+            elif url.path == "/soul/config":
+                if soul is None:
+                    self.send_error(503, "SOUL support is unavailable")
+                    return
+                values = soul.load_override()
+                for name in (*soul.FIELDS, "timezone"):
+                    if name in form:
+                        values[name] = form[name][0]
+                effective = soul.write_override(values)
+                body = render_soul(
+                    tok, secure,
+                    f"SOUL settings saved. Effective autonomy level is "
+                    f"{effective['autonomyLevel']}.", "good")
             elif url.path == "/terminate":
                 if not self._terminate_guard(tok):
                     return
@@ -1528,6 +1705,33 @@ class Handler(BaseHTTPRequestHandler):
             if not self._config_guard(tok):
                 return
             self._send(render_config(tok, secure))
+            return
+        elif url.path == "/soul":
+            if not self._config_guard(tok):
+                return
+            before = parse_qs(url.query).get("before", [""])[0]
+            self._send(render_soul(tok, secure, before=before))
+            return
+        elif url.path == "/soul/status":
+            if not self._config_guard(tok):
+                return
+            self._send(json.dumps(soul_status(), ensure_ascii=False, indent=1).encode(),
+                       "application/json")
+            return
+        elif url.path == "/soul/journal":
+            if not self._config_guard(tok):
+                return
+            if soul is None:
+                self.send_error(503, "SOUL support is unavailable")
+                return
+            query = parse_qs(url.query)
+            try:
+                limit = max(1, min(int(query.get("limit", ["20"])[0]), 50))
+            except ValueError:
+                limit = 20
+            before = query.get("before", [""])[0]
+            self._send(json.dumps(soul.read_journal(limit=limit, before=before),
+                                  ensure_ascii=False).encode(), "application/json")
             return
         elif url.path == "/config/export":
             if not self._config_guard(tok):

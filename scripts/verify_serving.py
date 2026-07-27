@@ -212,6 +212,8 @@ def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--api-key", default="")
+    ap.add_argument("--api-key-env", default="",
+                    help="read the API key from this environment variable")
     ap.add_argument("--model", default="model")
     ap.add_argument("--out", default="")
     ap.add_argument("--max-model-len", type=int, default=524288)
@@ -221,6 +223,8 @@ def main(argv):
     ap.add_argument("--pid", default="")
     ap.add_argument("--skip-long-context", action="store_true")
     args = ap.parse_args(argv)
+    if args.api_key_env:
+        args.api_key = os.environ.get(args.api_key_env, "")
 
     base = args.base_url.rstrip("/")
     started = time.time()

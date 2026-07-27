@@ -72,13 +72,15 @@ its default; what is GLM-only is the MTP78 draft machinery —
 ## 2. The inheritance model gains a layer
 
 ```
-built-in defaults  <  FAMILY defaults  <  startup environment  <  JSON state file
+built-in defaults  <  FAMILY defaults  <  VARIANT defaults  <  startup environment  <  JSON state file
 ```
 
-The family layer is what "GLM-5.2 wants TP=4 and Qwen3.6 wants TP=1" means. It
-sits below the environment so an operator can still override it from the
-template, and below the state file so the landing page can. `/config` shows the
-source of every value, and `family` is now one of them.
+The family layer is what "GLM-5.2 wants TP=4 and Qwen3.6 wants TP=1" means.
+The variant layer is what "this GLM checkpoint needs the stock BF16 draft and
+an explicitly bounded 512K memory shape" means. Both sit below the environment
+so an operator can still override them from the template, and below the state
+file so the landing page can. `/config` shows the source of every value;
+`family` and `variant` are both possible sources.
 
 `minimize()` — the function that decides what actually gets written — compares
 each knob against **the selected family's** baseline, so a value left at that
@@ -137,7 +139,36 @@ NVFP4 profile). A family cannot opt out of being verified.
 
 ---
 
-## 4. The Qwen3.6-27B NVFP4 preset
+## 4. The MadeBy561 GLM-5.2 hybrid variant
+
+`madeby561-hybrid` is a checkpoint variant inside the measured `glm52` family,
+not a custom model. It therefore keeps GLM's sparse MLA, DCP, calibrated NVFP4
+KV, parsers and tool surface while replacing the target quantizer and draft:
+
+| knob | variant default |
+|---|---|
+| repository | `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid`, revision `68babde…` |
+| quantization | `nvfp4_nf3_hybrid` with the checkpoint's MXFP8 dense/shared-expert overlay |
+| MTP | 3 tokens, in-checkpoint BF16 draft, probabilistic proposals |
+| max context / pool | 524,288 / 2,048 blocks (exactly one maximum-length logical pool) |
+| batch / DCP workspace | 2,048 / 512 MiB |
+| utilization | 0.98, safe only because the pool is explicitly pinned |
+
+These values are atomic defaults but not locks. An explicit template or saved
+value still wins. That distinction matters: v20 auto-sized 551,680 logical KV
+tokens and passed startup admission, then OOMed in the first 32K MTP proposal.
+A 3,072-token batch passed repeated 32K and C1–C8 but OOMed immediately at
+520K. The variant default keeps the request limit while reducing transient
+activation pressure.
+
+The known-good v19 control on an all-NODE 4x96 GB host uses the same checkpoint
+and MTP depth, with a 537,600-token pool, and measures 2,299 tok/s at 8K,
+2,192 tok/s at 64K and 119.2 tok/s C1. The mixed-topology Vast host is a
+correctness and relative-tuning platform, not an absolute-performance proxy.
+
+---
+
+## 5. The Qwen3.6-27B NVFP4 preset
 
 Facts below are from the [model card](https://huggingface.co/Qwen/Qwen3.6-27B);
 quantization details come from the
@@ -178,7 +209,7 @@ the explicit remaining residual.
 
 ---
 
-## 5. Tensor parallelism follows the hardware
+## 6. Tensor parallelism follows the hardware
 
 `--tensor-parallel-size 4` was a literal; then it was a knob defaulting to 4.
 Both are wrong for an image people rent on arbitrary hardware — a 1-, 2- or
@@ -237,7 +268,7 @@ is enough. TP comes from detection, so nothing else needs setting.
 
 ---
 
-## 6. Checking a configuration without renting anything
+## 7. Checking a configuration without renting anything
 
 ```
 docker run --rm -e CONFIG_SMOKE=1 -e MODEL_FAMILY=qwen36 <image>
@@ -255,7 +286,7 @@ have answered all three in seconds. It is the first thing to run after changing
 anything in the config layer, and the first thing to ask for when someone
 reports that a setting had no effect.
 
-## 7. Remaining qualification
+## 8. Remaining qualification
 
 The generic one-GPU path, profile switching, parsers, tools, multimodal input,
 MTP, provider proxying, and GPU visibility handling were exercised live with a

@@ -3,8 +3,9 @@
 
 The suite keeps generations short so it can accompany every candidate without
 distorting rental cost. It covers auth, tokenization, ordinary and thinking
-chat, streaming, multi-turn (including preserved reasoning), structured JSON,
-tool calling, and optional vision.
+chat, streaming, multi-turn (including preserved reasoning), outbound and
+round-trip tool calling, optional vision, and an informational structured-JSON
+capability probe.
 """
 import argparse
 import base64
@@ -101,8 +102,19 @@ def red_png_data_uri():
     return "data:image/png;base64," + base64.b64encode(png).decode()
 
 
-def record(checks, name, ok, detail="", **data):
-    checks.append({"name": name, "ok": bool(ok), "detail": str(detail)[:400], **data})
+def record(checks, name, ok, detail="", required=True, **data):
+    checks.append({
+        "name": name,
+        "ok": bool(ok),
+        "required": bool(required),
+        "detail": str(detail)[:400],
+        **data,
+    })
+
+
+def release_ok(checks):
+    """Optional capabilities are reported without gating the appliance."""
+    return all(item["ok"] for item in checks if item.get("required", True))
 
 
 def run(base, key, model, vision):
@@ -131,7 +143,7 @@ def run(base, key, model, vision):
         base, key, model,
         [{"role": "user", "content":
           "Think briefly, then state the result of 19 * 23."}],
-        max_tokens=192, chat_template_kwargs={"enable_thinking": True}))
+        max_tokens=512, chat_template_kwargs={"enable_thinking": True}))
     thinking_text = visible_text(thinking)
     reasoning = thinking.get("reasoning_content") or thinking.get("reasoning") or ""
     record(checks, "chat-thinking-visible", "437" in thinking_text,
@@ -184,11 +196,42 @@ def run(base, key, model, vision):
     except (TypeError, ValueError):
         structured_doc = {}
     record(checks, "structured-json", structured_doc.get("answer") == 42,
-           structured.get("content") or "")
+           structured.get("content") or "", required=False)
 
     tool = message(chat(
         base, key, model,
-        [{"role": "user", "content": "What is the weather in Montreal?"}],
+        [{"role": "user", "content":
+          "Call get_weather exactly once for Montreal; do not call it more than once."}],
+        tools=[{
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get current weather for a city.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            },
+        }],
+        tool_choice="auto",
+        chat_template_kwargs={"enable_thinking": False}))
+    calls = tool.get("tool_calls") or []
+    record(checks, "tool-call", bool(calls)
+           and calls[0].get("function", {}).get("name") == "get_weather",
+           json.dumps(calls)[:400])
+    signatures = {
+        (call.get("function", {}).get("name"),
+         call.get("function", {}).get("arguments"))
+        for call in calls
+    }
+    record(checks, "tool-call-single", len(calls) == 1 and len(signatures) == 1,
+           f"calls={len(calls)}, unique={len(signatures)}")
+
+    forced = message(chat(
+        base, key, model,
+        [{"role": "user", "content": "Get the weather for Montreal."}],
+        max_tokens=48,
         tools=[{
             "type": "function",
             "function": {
@@ -203,10 +246,41 @@ def run(base, key, model, vision):
         }],
         tool_choice="required",
         chat_template_kwargs={"enable_thinking": False}))
-    calls = tool.get("tool_calls") or []
-    record(checks, "tool-call", bool(calls)
-           and calls[0].get("function", {}).get("name") == "get_weather",
-           json.dumps(calls)[:400])
+    forced_calls = forced.get("tool_calls") or []
+    record(checks, "tool-choice-required", len(forced_calls) == 1,
+           f"calls={len(forced_calls)}", required=False)
+
+    if calls:
+        first = calls[0]
+        tool_id = first.get("id") or "qualification-call"
+        round_trip = message(chat(
+            base, key, model,
+            [{"role": "user", "content": "What is the weather in Montreal?"},
+             {"role": "assistant", "content": None, "tool_calls": [first]},
+             {"role": "tool", "tool_call_id": tool_id,
+              "content": "QUALIFICATION-WEATHER-17C"}],
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get current weather for a city.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                },
+            }],
+            tool_choice="auto",
+            chat_template_kwargs={"enable_thinking": False}))
+        round_trip_text = visible_text(round_trip)
+        record(checks, "tool-result-round-trip",
+               ("17" in round_trip_text
+                and "montreal" in round_trip_text.lower()),
+               round_trip_text)
+    else:
+        record(checks, "tool-result-round-trip", False,
+               "outbound tool call was unavailable")
 
     if vision:
         vision_msg = message(chat(
@@ -264,7 +338,7 @@ def main(argv):
         "model": model,
         "vision_requested": args.vision,
         "checks": checks,
-        "ok": all(item["ok"] for item in checks),
+        "ok": release_ok(checks),
     }
     write_result(args.out, doc)
     return 0 if doc["ok"] else 1

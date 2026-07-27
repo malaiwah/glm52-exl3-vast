@@ -69,6 +69,10 @@ def test_glm_release_defaults():
     check("vision is an opt-in feature profile", eff["VISION"] is False)
     check("the v29-qualified draft method is greedy",
           eff["MTP_DRAFT_SAMPLE_METHOD"] == "greedy")
+    check("lossless B12X PCIe DMA is on and topology-calibrated",
+          eff["B12X_PCIE_DMA"] is True and eff["F8_DMA"] == "0"
+          and eff["PCIE_CALIBRATION"] == "auto"
+          and eff["DCP_CKV_PREFETCH_DEPTH"] == "auto")
     check("served name GLM-5.2", eff["SERVED_MODEL_NAME"] == "GLM-5.2")
 
     args = gc.family_serve_args(eff)
@@ -102,26 +106,87 @@ def test_glm_release_integration():
     section("the v29 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
+    config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
     check("the base image is the pinned v29 manifest",
           "sha256:2996b8ac37ff126a8aeebaa24df72e2154a2a1573df41f99eb48a4275e33eb41"
           in dockerfile)
     check("the target/draft trellis minimum is role-aware",
-          "unset VLLM_EXL3_TRELLIS_MIN_M" in entry and
-          "export VLLM_EXL3_TRELLIS_MIN_M=" not in entry)
+          'if [ "${MTP_TOKENS:-3}" = "0" ]; then' in entry and
+          "export VLLM_EXL3_TRELLIS_MIN_M=1" in entry and
+          "unset VLLM_EXL3_TRELLIS_MIN_M" in entry)
     for setting in (
             "VLLM_DCP_QUERY_SPLIT=1",
             "VLLM_DCP_TOPK_OWNER_MERGE=1",
-            "VLLM_B12X_MLA_CKV_PREFETCH_DEPTH=1",
+            'VLLM_B12X_MLA_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-auto}"',
             "VLLM_DCP_PROJECT_BEFORE_MERGE=1",
             "VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1"):
         check(f"prefill policy includes {setting}", setting in entry)
+    check("the DCP prefill workspace is self-service",
+          'VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}"'
+          in entry)
+    check("the stable loader is the GLM default",
+          gc.family("glm52")["defaults"]["LOAD_FORMAT"] == "safetensors")
+    check("InstantTensor is an explicit opt-in",
+          gc.KNOB_BY_KEY["LOAD_FORMAT"]["choices"] == ["safetensors", "instanttensor"])
+    check("the CLI explains the variant inheritance layer",
+          "default < family < variant < env < state file" in config_cli)
     check("offload is divided across TP workers",
           "OFF_BYTES=$((OFF_TOTAL_BYTES / OFFLOAD_RANKS))" in entry)
     check("the Runpod GLM template does not override safe defaults",
           runpod["env"]["OFFLOAD_FRACTION"] == "0" and
           runpod["env"]["VISION"] == "0" and
           runpod["env"]["MTP_DRAFT_SAMPLE_METHOD"] == "greedy")
+    for setting in ("VLLM_USE_B12X_PCIE_DMA", "VLLM_PCIE_DMA_FP8",
+                    "SPARKINFER_PCIE_DMA_FP8", "PCIE_CALIBRATION_ONLY=1",
+                    "VLLM_USE_MEGA_AOT_ARTIFACT=1"):
+        check(f"the v20 transport path includes {setting}", setting in entry)
+
+
+def test_madeby561_hybrid():
+    section("the MadeBy561 v19 daily-driver control")
+    eff, src, _ = resolved(gpus=4, MODEL_VARIANT="madeby561-hybrid")
+    check("the variant selects the published hybrid checkpoint",
+          gc.derive(eff)["MODEL_REPO"]
+          == "madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid")
+    check("the variant chooses the stock BF16 MTP draft by default",
+          eff["MTP_DRAFT"] == "bf16" and src["MTP_DRAFT"] == "variant",
+          f"{eff['MTP_DRAFT']} / {src['MTP_DRAFT']}")
+    for key, expected in (
+            ("MAX_NUM_BATCHED_TOKENS", 2048),
+            ("DCP_PREFILL_WORKSPACE_MIB", 512),
+            ("GPU_MEMORY_UTILIZATION", 0.98),
+            ("GPU_BLOCKS_OVERRIDE", 2048),
+            ("MTP_DRAFT_SAMPLE_METHOD", "probabilistic")):
+        check(f"the measured hybrid memory shape sets {key}",
+              eff[key] == expected and src[key] == "variant",
+              f"{eff[key]} / {src[key]}")
+    check("MTP3 remains enabled", eff["MTP_TOKENS"] == 3)
+    line = " ".join(gc.family_serve_args(eff))
+    check("the native hybrid quantizer is selected",
+          "--quantization nvfp4_nf3_hybrid" in line, line[:300])
+    check("the published MXFP8 dense/shared-expert overlay is selected",
+          "--quantization-config" in line
+          and '"shared_experts":{"weight":"mxfp8"}' in line, line[-500:])
+    check("the stock draft needs no graft or external quantizer",
+          gc.derive(eff)["MTP78_MODE"] == "off"
+          and gc.derive(eff)["DRAFT_QUANTIZATION"] == "")
+    explicit, explicit_src, _ = resolved(
+        gpus=4, MODEL_VARIANT="madeby561-hybrid", MTP_DRAFT="off")
+    check("an explicit draft choice still wins",
+          explicit["MTP_DRAFT"] == "off"
+          and explicit_src["MTP_DRAFT"] == "file")
+    overridden, overridden_src, _ = resolved(
+        gpus=4, MODEL_VARIANT="madeby561-hybrid",
+        MAX_NUM_BATCHED_TOKENS=2048, GPU_MEMORY_UTILIZATION=0.97,
+        GPU_BLOCKS_OVERRIDE=2304)
+    check("explicit memory choices still win over the variant profile",
+          overridden["MAX_NUM_BATCHED_TOKENS"] == 2048
+          and overridden["GPU_MEMORY_UTILIZATION"] == 0.97
+          and overridden["GPU_BLOCKS_OVERRIDE"] == 2304
+          and all(overridden_src[k] == "file" for k in (
+              "MAX_NUM_BATCHED_TOKENS", "GPU_MEMORY_UTILIZATION",
+              "GPU_BLOCKS_OVERRIDE")))
 
 
 def test_qwen_preset():
@@ -320,7 +385,7 @@ def test_long_context_gate_is_family_independent():
 
 
 def test_env_layer_still_wins_over_family():
-    section("layering: default < family < env < file")
+    section("layering: default < family < variant < env < file")
     env = {"TENSOR_PARALLEL_SIZE": 2, "GLM_GPU_COUNT": "8"}
     eff, src, _ = gc.resolve(state_values={"MODEL_FAMILY": "qwen36"}, env_values=env)
     check("the template env overrides detection",
@@ -352,6 +417,7 @@ def main():
     try:
         test_glm_release_defaults()
         test_glm_release_integration()
+        test_madeby561_hybrid()
         test_qwen_preset()
         test_custom_profile()
         test_inapplicable_knobs()

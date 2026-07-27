@@ -34,6 +34,15 @@ class FeatureSuiteTests(unittest.TestCase):
         feature.record(checks, "x", False, "a" * 1000, extra=True)
         self.assertEqual(len(checks[0]["detail"]), 400)
         self.assertTrue(checks[0]["extra"])
+        self.assertTrue(checks[0]["required"])
+
+    def test_optional_capability_does_not_gate_release(self):
+        checks = []
+        feature.record(checks, "required", True)
+        feature.record(checks, "nice-to-have", False, required=False)
+        self.assertTrue(feature.release_ok(checks))
+        feature.record(checks, "required-failure", False)
+        self.assertFalse(feature.release_ok(checks))
 
     def test_feature_matrix_exercises_expected_request_shapes(self):
         calls = []
@@ -44,8 +53,13 @@ class FeatureSuiteTests(unittest.TestCase):
                 raise urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
             if url.endswith("/tokenize"):
                 return {"count": 3}
+            messages = (payload or {}).get("messages") or []
+            if messages and messages[-1].get("role") == "tool":
+                return {"choices": [{"message": {
+                    "content": "Montreal is currently 17 degrees."}}]}
             if payload and payload.get("tools"):
                 return {"choices": [{"message": {"tool_calls": [{
+                    "id": "call-1",
                     "function": {"name": "get_weather", "arguments":
                                  json.dumps({"city": "Montreal"})}}]}}]}
             if payload and payload.get("response_format"):
@@ -67,12 +81,16 @@ class FeatureSuiteTests(unittest.TestCase):
                                return_value=("STREAM-OK", {"completion_tokens": 2})):
             checks = feature.run("http://test", "key", "model", vision=False)
         self.assertTrue(all(item["ok"] for item in checks))
+        structured = next(
+            item for item in checks if item["name"] == "structured-json")
+        self.assertFalse(structured["required"])
         self.assertEqual(
             {item["name"] for item in checks},
             {"auth-rejects-bad-key", "tokenize", "chat-no-thinking",
              "chat-thinking-visible", "streaming-with-usage",
              "multi-turn-preserve-thinking", "structured-json", "tool-call",
-             "vision-red-image"})
+             "tool-call-single", "tool-choice-required",
+             "tool-result-round-trip", "vision-red-image"})
         self.assertTrue(any(
             payload and payload.get("chat_template_kwargs", {}).get("enable_thinking")
             for _url, payload, _key in calls))

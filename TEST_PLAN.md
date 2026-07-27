@@ -114,3 +114,51 @@ correctness. The real 27B NVFP4 profile also requires a separate performance
 and memory qualification before its conservative 32K default is raised. These
 are release qualification tests, not economical provider-integration smoke
 tests.
+
+## Flagship GLM-5.2 qualification
+
+The production pass reuses one 4x RTX PRO 6000 Blackwell rental and downloads
+both GLM variants once. Provider plumbing is not repeated: the economical
+matrix above already gates Vast, Runpod, DNS, TLS, proxying, SSH, restart,
+persistence, and teardown. The expensive pass concentrates on model-specific
+correctness, memory, and performance.
+
+Execute in this order so a failure cannot contaminate later conclusions:
+
+1. Record immutable image/checkpoint revisions, GPU/NUMA/PCIe topology, P2P
+   capabilities, driver, CUDA, vLLM, B12X, free disk, and wall-clock startup
+   phases. Treat a mixed-root rental as a correctness and relative A/B host,
+   not an absolute AIBeast performance proxy.
+2. Establish one stable loader, target, MTP, KV, batch, workspace, graph, and
+   pool baseline. Require three consecutive uncached 32K retrieval probes
+   before changing more than one parameter at a time.
+3. Sweep prefill chunk/workspace, lossless PCIe-DMA crossover, DCP query split,
+   CKV prefetch depth, MTP depth/proposal method, and MTP-off control. Reject
+   any arm that boots but later OOMs, degenerates, or loses retrieval.
+4. On the selected arm, run authenticated discovery/tokenization, ordinary
+   and thinking chat, SSE usage, multi-turn with optional preserved thinking,
+   automatic tool call and tool-result continuation. Structured output,
+   forced-tool mode, and vision are informational rather than release gates.
+5. Measure unique-prefix prefill at 1K/8K/32K and aggregate decode at
+   C1/C2/C4/C8. Record TTFT, output throughput, failures, preemptions, mean
+   speculative acceptance length, per-position acceptance, and the exact
+   request shape. Periodic vLLM logger buckets are diagnostic only.
+6. Run seeded needles at 32K and near maximum context, including depths near
+   both ends. A clean short needle does not qualify 512K. Preserve partial
+   results atomically so a late failure does not erase hours of evidence.
+7. Only after that stable baseline, cold-start the InstantTensor loader at
+   least three times. Keep it opt-in unless all starts, warmups, and first
+   uncached requests pass; loader speed cannot compensate for a race.
+8. Compare the EXL3 and MadeBy561 variants on the same host. Compare the final
+   image read-only against the owned AIBeast v19 daily-driver control, then
+   repeat the winning v20 image on AIBeast before claiming absolute production
+   throughput.
+9. Destroy the rental, delete its DNS record and temporary credentials, verify
+   zero Vast/Runpod resources, and retain only bounded, credential-free JSON
+   evidence.
+
+Release goals on an all-NODE 4x96 GB host are at least 2,500 prompt tokens/s,
+100 C1 output tokens/s, useful aggregate scaling through C8, one usable
+512K–520K solo session, and clean maximum-context retrieval. A rental with
+`SYS` GPU paths can validate the configuration but cannot fail the absolute
+throughput goals.

@@ -14,6 +14,8 @@ The parts:
 | `scripts/config_cli.py` | the shell-facing side: `env`, `show`, `validate`, `mark-good`, `should-rollback`, `rollback`, `pending-analysis`. |
 | `scripts/verify_serving.py` | health + short prompts + **long-context needle probe**. Decides whether a config is good. |
 | `scripts/analyze_failure.py` | asks the running model to explain the config that failed. |
+| `scripts/soul_controller.py` | optional embedded Nanobot monitoring, incident interpretation, and journal. At levels 1–3 it replaces the duplicate direct rollback analyzer call. |
+| `scripts/soul_config.py` | independent SOUL configuration, ceiling, redaction, atomic state, journal pagination, and audit helpers. |
 | `scripts/reconcile_checkpoint.py` | makes `config.json` + the weight index match the tensors actually on disk. |
 | `landing.py` | `/config` editor, `/config/apply`, `/config/import`, `/config/export`, `/config/reset`, `/config/status`. |
 | `entrypoint.sh` | resolves the config before **every** vLLM start; runs the trial / verify / rollback state machine. |
@@ -60,6 +62,7 @@ before stopped working.
 |---|---|---|
 | `$GLM_STATE_DIR` (`/workspace/.glm-config`) | `config.json`, `known-good.json`, `apply-state.json`, `verify-last.json`, `checkpoint-baseline.json`, `failures/`, `logs/` | the volume — survives container replacement |
 | `$GLM_RUNTIME_DIR` (`/tmp/glm-runtime`) | `startup-env.json`, `config.env`, `verify.json`, `restart-request` | the container |
+| `$GLM_STATE_DIR/soul` | optional SOUL config, status, JSONL journal, incidents, evidence, snapshots, Nanobot workspace/sessions and logs | the volume — fully selected by secure erase |
 
 The split is deliberate. A restart flag or a verify verdict that survived a
 container swap would fire once more against a configuration that was never
@@ -93,10 +96,10 @@ knobs to the model. Summary of the trade each one makes:
 
 | knob | trades |
 |---|---|
-| `MODEL_VARIANT` | EXL3-TR3 (measured; smallest weights, biggest pool) vs NVFP4 (faster decode, calibrated KV scales, ~30% less pool, **untested here**). Switching costs a full re-download. |
+| `MODEL_VARIANT` | EXL3-TR3 (provider default), the measured MadeBy561 MXFP8/NVFP4/NF3 hybrid, the legacy experimental NVFP4 checkpoint, or a family-specific development target. A variant may supply a coherent draft/memory preset; switching costs a full re-download. |
 | `MTP_DRAFT` | `tr3-graft` (3.7 GB, +3.8 GB/GPU of KV) / v29-compatible separate `tr3-override` / `nvfp4` (external dir, needs `DRAFT_QUANTIZATION`) / `bf16` (19.3 GB) / `off` (~30% slower decode). |
 | `MTP_TOKENS` | Depth of speculation. With the cheap trellis draft MTP-5 beats MTP-3 (53.4 vs 51.5 tok/s); with the 19.3 GB BF16 draft it lost 22%. Also widens the decode query width. |
-| `MTP_DRAFT_SAMPLE_METHOD` | v29-qualified `greedy` drafting vs opt-in `probabilistic` proposals. |
+| `MTP_DRAFT_SAMPLE_METHOD` | `greedy` drafting for EXL3 vs the MadeBy561 daily-driver's `probabilistic` proposals; either remains explicitly overridable. |
 | `DCP` | KV sharded across ranks (4) vs replicated (1). DCP=4 is what makes 512K fit. |
 | `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM v29 default) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
 | `MAX_MODEL_LEN` | Longest request, and a hard startup gate against available KV. |

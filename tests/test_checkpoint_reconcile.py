@@ -70,11 +70,22 @@ class ReconcileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             shard = os.path.join(directory, reconcile.LSHARD)
             write_safetensors(
-                shard, ["model.layers.78.mlp.experts.0.w2_weight"])
+                shard, ["model.layers.78.mlp.experts.0.down_proj.weight"])
             self.assertEqual(reconcile.observe_layer78(directory), "bf16")
             write_safetensors(
-                shard, ["model.layers.78.mlp.experts.w2_weight"])
+                shard, [
+                    "model.layers.78.mlp.experts.0.down_proj.rank0.mcg",
+                    "model.layers.78.mlp.experts.0.down_proj.rank0.suh",
+                    "model.layers.78.mlp.experts.0.down_proj.rank0.svh",
+                    "model.layers.78.mlp.experts.0.down_proj.rank0.trellis",
+                ])
             self.assertEqual(reconcile.observe_layer78(directory), "trellis")
+            write_safetensors(
+                shard, ["model.layers.78.mlp.experts.w2_trellis"])
+            self.assertEqual(reconcile.observe_layer78(directory), "trellis")
+            write_safetensors(
+                shard, ["model.layers.78.mlp.experts.0.router_bias"])
+            self.assertEqual(reconcile.observe_layer78(directory), "absent")
 
     def test_bf16_text_only_repairs_stale_graft_and_index(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -90,7 +101,7 @@ class ReconcileTests(unittest.TestCase):
                 text_config(77, ignored=True))
             write_safetensors(
                 os.path.join(directory, reconcile.LSHARD),
-                ["model.layers.78.mlp.experts.0.w2_weight"])
+                ["model.layers.78.mlp.experts.0.down_proj.weight"])
             write_safetensors(
                 os.path.join(directory, "model-layer-001.safetensors"),
                 ["model.layers.1.weight"])
@@ -126,7 +137,7 @@ class ReconcileTests(unittest.TestCase):
                 text_config(77, ignored=True))
             write_safetensors(
                 os.path.join(directory, reconcile.LSHARD),
-                ["model.layers.78.mlp.experts.w2_weight"])
+                ["model.layers.78.mlp.experts.0.down_proj.rank0.trellis"])
             write_safetensors(
                 os.path.join(directory, "vision_tower.safetensors"),
                 ["vision.weight"])
@@ -173,7 +184,7 @@ class ReconcileTests(unittest.TestCase):
                 text_config(77, ignored=True))
             write_safetensors(
                 os.path.join(directory, reconcile.LSHARD),
-                ["model.layers.78.mlp.experts.0.w2_weight"])
+                ["model.layers.78.mlp.experts.0.down_proj.weight"])
             before = read_bytes(os.path.join(directory, reconcile.CFG))
             state = os.path.join(directory, ".state")
             with mock.patch.dict(os.environ, {"GLM_STATE_DIR": state}, clear=False):
