@@ -877,7 +877,7 @@ if [ "$MODEL_PROFILE" = "glm52-exl3" ] && [ "$MTP_TOKENS" != "0" ]; then
     SPEC_ARGS=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS,\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
   fi
 elif [ "$MODEL_PROFILE" = "qwen36-27b-nvfp4" ] && [ "$MTP_TOKENS" != "0" ]; then
-  SPEC_ARGS=(--speculative-config "{\"method\":\"qwen3_next_mtp\",\"num_speculative_tokens\":$MTP_TOKENS}")
+  SPEC_ARGS=(--speculative-config "{\"method\":\"mtp\",\"num_speculative_tokens\":$MTP_TOKENS}")
   echo ">>> Qwen MTP: $MTP_TOKENS speculative token(s) (opt-in; profile default is off)"
 elif [ "$MODEL_PROFILE" = "custom" ] && [ -n "${SPECULATIVE_CONFIG:-}" ]; then
   SPEC_ARGS=(--speculative-config "$SPECULATIVE_CONFIG")

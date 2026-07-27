@@ -170,6 +170,42 @@ The follow-up cost about `$0.30` at `$0.99/hour`. The Pod was deleted
 immediately after the completion marker, its ephemeral volume was discarded,
 and final Runpod inventory returned zero Pods.
 
+### Remaining economical qualification follow-up
+
+Two additional Secure RTX 5090 Runpod attempts were each given the full
+ten-minute startup grace. Both landed on the same `EUR-IS-2` machine but
+returned no runtime, public address, or port mappings before the cutoff. They
+were destroyed without reaching appliance code, and Runpod inventory returned
+zero Pods. This added about `$0.33` before storage rounding.
+
+The already-validated Vast RTX 5090 host then completed the provider-neutral
+feature rows against the same immutable image:
+
+- Native Qwen vision booted with the multimodal encoder and correctly counted
+  two cats in a public test image. The 0.8B model returned the answer through
+  `reasoning` with `content: null`, independently confirming the UI
+  compatibility case.
+- A key-only SSH tunnel carried a 2,520-token prefill to the private API and
+  returned `TUNNEL_OK`.
+- Terminating the vLLM server made health unavailable; the supervisor started
+  a new server, authenticated `/v1/models` returned HTTP 200 with the same
+  key, and health recovered.
+- A provider stop/start preserved the checkpoint marker byte-for-byte and did
+  not redownload the model.
+- A separate text-only MTP boot resolved `Qwen3_5MTP`, shared the target
+  embeddings and LM head with the draft, and reached health. After first-use
+  compilation, an eight-token completion returned in one second; metrics
+  recorded six draft tokens and five accepted tokens.
+
+The pinned runtime warned that `qwen3_next_mtp` is a deprecated alias for
+`mtp`; the profile and test plan now use the current method name. A cleanup
+audit also caught two Vast destroy commands waiting for interactive
+confirmation. Both contracts and the final MTP contract were then explicitly
+destroyed, and final Vast inventory returned zero instances. The Vast
+follow-up was approximately `$0.65` before bandwidth/storage rounding,
+including the two contracts that remained live until the confirmation issue
+was caught.
+
 ## Coverage summary
 
 | Area | Result |
@@ -182,7 +218,7 @@ and final Runpod inventory returned zero Pods.
 | Runpod template/API schema and placement handling | Passed |
 | Runpod hybrid proxy/direct-TLS runtime compatibility | Passed on Secure RTX 5090 |
 | Authenticated HF Xet cold download (Qwen 27B) | Passed; 20.435 GiB in 18m14s |
-| Small-model vision and `qwen3_next_mtp` | Not reached |
+| Small-model native vision and MTP | Passed on Vast RTX 5090 |
 | GLM TP4/DCP4, EXL3/MTP78, 512K, production vision/offload | Explicit release qualification gap |
 | Final provider resources | Vast: 0; Runpod: 0 |
 

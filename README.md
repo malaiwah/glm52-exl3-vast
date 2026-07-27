@@ -38,7 +38,8 @@ native vision encoder, or opt into its included MTP module with
 
 The [Qwen3.6-27B model card](https://huggingface.co/Qwen/Qwen3.6-27B)
 documents the architecture, native context, text-only switch, Qwen parsers,
-and `qwen3_next_mtp`. The
+and its MTP module. The pinned vLLM runtime uses the current speculative method
+name `mtp` (the older `qwen3_next_mtp` alias is deprecated). The
 [NVIDIA NVFP4 checkpoint card](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4)
 specifies the ModelOpt loader and 262K serving command. This image's
 [pinned vLLM source](https://github.com/voipmonitor/vllm/tree/551719766029e78824a30d97ae6ac63917405b5f)
@@ -420,7 +421,7 @@ Base runtime image:
 `verdictai/glm52-exl3-sparkinfer@sha256:2bb9e804a283d1da3b7e3425ff87375121285141d0d0a40d3dc09d41bf881a10`
 (pinned). It contains the specialized GLM extensions, but also includes native
 vLLM support for `Qwen3_5ForConditionalGeneration`, ModelOpt/NVFP4, Qwen
-parsers and `qwen3_next_mtp`.
+parsers, and MTP speculative decoding.
 
 Profile checkpoints:
 

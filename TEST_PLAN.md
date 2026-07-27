@@ -44,7 +44,7 @@ soon as their evidence is collected.
 | Qwen reasoning and automatic tool-call parser | — | yes | yes |
 | Qwen text-only mode | — | yes | yes |
 | Native Qwen vision mode | — | one provider | one provider if time remains |
-| `qwen3_next_mtp` speculative decoding | config | one provider | one provider if time remains |
+| Qwen MTP speculative decoding | config | one provider | one provider if time remains |
 | Supervisor recovery after terminating the engine child | — | yes | yes |
 | Vast readiness label | — | yes | — |
 | Runpod HTTPS proxy and dashboard URL | — | — | yes |
@@ -77,7 +77,7 @@ passes, restart once with:
 
 ```text
 MULTIMODAL=1
-SPECULATIVE_CONFIG={"method":"qwen3_next_mtp","num_speculative_tokens":2}
+SPECULATIVE_CONFIG={"method":"mtp","num_speculative_tokens":2}
 ```
 
 If combining vision and MTP obscures a failure, test them separately on the
