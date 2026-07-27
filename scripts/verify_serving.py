@@ -16,7 +16,7 @@ completion. A verdict carries `long_context_verified` separately, and the
 landing page renders that distinction rather than collapsing it.
 
     verify_serving.py --base-url http://localhost:8000 --api-key sk-... \
-        --model GLM-5.2 --out /tmp/glm-runtime/verify.json \
+        --model served-model --out /tmp/model-runtime/verify.json \
         --max-model-len 524288 --needle-tokens 32768 [--pid 1234]
 
 Exit 0 when the verdict is ok, 1 otherwise. The verdict JSON is always written.
@@ -202,7 +202,7 @@ def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--api-key", default="")
-    ap.add_argument("--model", default="GLM-5.2")
+    ap.add_argument("--model", default="model")
     ap.add_argument("--out", default="")
     ap.add_argument("--max-model-len", type=int, default=524288)
     ap.add_argument("--needle-tokens", type=int, default=32768)

@@ -7,7 +7,7 @@ and writes a plain-language explanation into the failure directory, which the
 landing page renders.
 
     analyze_failure.py --dir /workspace/.glm-config/failures/2026...Z \
-        --base-url http://localhost:8000 --api-key sk-... --model GLM-5.2
+        --base-url http://localhost:8000 --api-key sk-... --model served-model
 
 Deliberately conservative: at most MAX_ATTEMPTS tries per failure, thinking
 disabled (this is a summarisation job on a box whose GPUs belong to the user's
@@ -28,7 +28,7 @@ FAILED_LOG_CHARS = 14000
 GOOD_LOG_CHARS = 3000
 
 SYSTEM = (
-    "You are the diagnostic assistant embedded in a GLM-5.2 inference appliance. "
+    "You are the diagnostic assistant embedded in a multi-model inference appliance. "
     "A user changed the serving configuration, the engine failed to come up or failed "
     "its correctness probe, and the appliance automatically rolled back to the previous "
     "working configuration. Explain, in plain language, what went wrong and what to do "
@@ -100,7 +100,7 @@ def main(argv):
     ap.add_argument("--dir", required=True)
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--api-key", default="")
-    ap.add_argument("--model", default="GLM-5.2")
+    ap.add_argument("--model", default="model")
     args = ap.parse_args(argv)
 
     fdir = args.dir

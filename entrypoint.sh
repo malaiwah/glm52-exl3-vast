@@ -1,9 +1,7 @@
 #!/bin/bash
-# GLM-5.2 EXL3 turnkey for vast.ai — 4x RTX PRO 6000 Blackwell (96GB), TP4/DCP4,
-# 512K context, fp8 KV (correct on stock drivers — see evidence gists in labels),
-# MTP speculative decode, DRAM KV offload auto-sized to a fraction of the
-# instance's RAM allocation (cgroup-aware).
-# All logs go to stdout (vast.ai console). SSH per vast standards works alongside.
+# Multi-model Blackwell vLLM turnkey for Vast.ai and Runpod Pods.
+# MODEL_PROFILE is the provider-template compatibility name; MODEL_FAMILY and
+# MODEL_VARIANT are the self-service configuration names persisted by the UI.
 #
 # SELF-SERVICE CONFIG (docs/self-service-config.md). Every tunable is resolved
 # from three layers — built-in defaults < startup environment < the JSON state
@@ -15,8 +13,32 @@
 set -e
 
 SCRIPTS_DIR="${SCRIPTS_DIR:-/opt/scripts}"
-echo "=== vLLM turnkey (GLM-5.2 default; see MODEL_FAMILY) ==="
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | head -4 || true
+MODEL_PROFILE="${MODEL_PROFILE:-}"
+case "$MODEL_PROFILE" in
+  ""|glm52-exl3)
+    export MODEL_FAMILY="${MODEL_FAMILY:-glm52}"
+    export MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3}"
+    MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}"
+    ;;
+  qwen36-27b-nvfp4)
+    export MODEL_FAMILY="${MODEL_FAMILY:-qwen36}"
+    export MODEL_VARIANT="${MODEL_VARIANT:-qwen36-nvfp4}"
+    ;;
+  custom)
+    export MODEL_FAMILY="${MODEL_FAMILY:-custom}"
+    export MODEL_VARIANT="${MODEL_VARIANT:-custom}"
+    ;;
+  *)
+    echo "FATAL: unknown MODEL_PROFILE=$MODEL_PROFILE"
+    echo "FATAL: choose glm52-exl3, qwen36-27b-nvfp4, or custom"
+    exit 1
+    ;;
+esac
+export MODEL_PROFILE
+echo "=== vLLM turnkey (profile $MODEL_PROFILE; family $MODEL_FAMILY) ==="
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | head -4 || true
+fi
 # What can this container ACTUALLY use? nvidia-smi intersected with
 # NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES — see scripts/gpu_detect.py.
 # This is the only place that shells out to nvidia-smi; the config layer reads
@@ -39,8 +61,47 @@ import sys; sys.path.insert(0, '${SCRIPTS_DIR:-/opt/scripts}')
 try:
     import provider; print(provider.detect())
 except Exception: print('unknown')" 2>/dev/null || echo unknown)
-echo ">>> GPUs visible to this container: $NGPU${GPU_NAME:+ ($GPU_NAME)}  provider: $GLM_PROVIDER"
+case "$GLM_PROVIDER" in
+  vastai) PLATFORM=vast ;;
+  runpod) PLATFORM=runpod ;;
+  *) PLATFORM=generic ;;
+esac
+INSTANCE_ID="$(printf '%s' "${CONTAINER_ID:-${RUNPOD_POD_ID:-}}" | tr -cd '[:alnum:]-' | cut -c1-40)"
+echo ">>> GPUs visible to this container: $NGPU${GPU_NAME:+ ($GPU_NAME)}  provider: $PLATFORM"
+case "${DESEC_TOKEN:-}" in
+  *RUNPOD_SECRET_*) DESEC_TOKEN="" ;;
+esac
+if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" = "auto" ]; then
+  if [ -n "${RUNPOD_TCP_PORT_8443:-}" ] &&
+     { { [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ]; } ||
+       { [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ]; }; }; then
+    RUNPOD_DIRECT_TLS=1
+  else
+    RUNPOD_DIRECT_TLS=0
+    echo ">>> Runpod direct TLS not configured; using the managed HTTPS proxy fallback."
+  fi
+fi
+if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" = "1" ]; then
+  [ -n "${RUNPOD_TCP_PORT_8443:-}" ] || {
+    echo "FATAL: RUNPOD_DIRECT_TLS=1 requires exposing container port 8443 as TCP."
+    exit 1
+  }
+  if ! { [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ]; } &&
+     ! { [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ]; }; then
+    echo "FATAL: RUNPOD_DIRECT_TLS=1 requires ACME_DOMAIN + ACME_DNS_PROVIDER,"
+    echo "FATAL: or DESEC_TOKEN + DESEC_DOMAIN."
+    exit 1
+  fi
+fi
 if [ "$NGPU" = "0" ]; then
+  if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+    case "$MODEL_PROFILE" in
+      qwen36-27b-nvfp4|custom) NGPU="${TENSOR_PARALLEL_SIZE:-1}" ;;
+      *) NGPU="${TENSOR_PARALLEL_SIZE:-4}" ;;
+    esac
+    export GLM_GPU_COUNT="$NGPU"
+    echo ">>> config smoke: simulating $NGPU visible GPU(s); no GPU will be touched"
+  else
   # Never silently fall back to 4. A wrong TP is a boot failure either way; the
   # only thing that changes is whether the user can tell why.
   echo "FATAL: no usable GPU detected."
@@ -49,6 +110,7 @@ if [ "$NGPU" = "0" ]; then
   echo "       If you believe this is wrong, run:  python3 ${SCRIPTS_DIR:-/opt/scripts}/gpu_detect.py --json"
   echo "       and set TENSOR_PARALLEL_SIZE explicitly to override the detected count."
   exit 1
+  fi
 fi
 # The GPU-count gate used to be `-ge 4` right here, before any configuration was
 # read, because the serve line hard-coded --tensor-parallel-size 4. That made the
@@ -78,7 +140,11 @@ fi
 # it survives a container replacement. The runtime dir must NOT be on the volume:
 # a stale restart flag or verify verdict surviving a container swap would fire
 # once more against a config that was never applied.
-MODEL_ROOT="${MODEL_ROOT:-/workspace}"
+if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  MODEL_ROOT="${MODEL_ROOT:-/tmp/model-turnkey-smoke}"
+else
+  MODEL_ROOT="${MODEL_ROOT:-/workspace}"
+fi
 export GLM_STATE_DIR="${GLM_STATE_DIR:-$MODEL_ROOT/.glm-config}"
 export GLM_RUNTIME_DIR="${GLM_RUNTIME_DIR:-/tmp/glm-runtime}"
 GLM_LOG_DIR="$GLM_STATE_DIR/logs"
@@ -132,6 +198,12 @@ apply_config() {
     # shellcheck disable=SC1090
     . "$CONFIG_ENV"
   fi
+  case "${MODEL_FAMILY:-glm52}" in
+    glm52) MODEL_PROFILE=glm52-exl3 ;;
+    qwen36) MODEL_PROFILE=qwen36-27b-nvfp4 ;;
+    custom) MODEL_PROFILE=custom ;;
+  esac
+  export MODEL_PROFILE
   if ! python3 "$SCRIPTS_DIR/config_cli.py" validate --quiet; then
     echo "!!! config: the resolved configuration FAILS pre-validation:"
     python3 "$SCRIPTS_DIR/config_cli.py" validate || true
@@ -241,8 +313,8 @@ setup_sshd() {
     echo ">>> sshd: disabled (SSHD=0)"
     return 0
   fi
-  # RunPod injects PUBLIC_KEY; vast injects SSH_PUBLIC_KEY and already runs sshd.
-  local keys="${PUBLIC_KEY:-}"
+  # RunPod injects PUBLIC_KEY; Vast injects SSH_PUBLIC_KEY.
+  local keys="${SSH_PUBLIC_KEY:-${PUBLIC_KEY:-}}"
   if [ "$mode" = "auto" ] && [ -z "$keys" ]; then
     SSHD_STATE="not needed (no PUBLIC_KEY; the provider runs its own)"
     return 0
@@ -306,6 +378,10 @@ setup_sshd
 # Holds the API key once generated -> keep it root-only.
 STATUS_FILE="${STATUS_FILE:-/tmp/glm-boot-status.json}"
 EP_URL="" TLS_STATE="not configured" HTTPS_HOSTPORT="" CERT_PATH="" KEY_PATH="" OFFLOAD_STATE="off"
+if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" != "1" ]; then
+  EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
+  TLS_STATE="https:// managed by Runpod proxy"
+fi
 status_update() {
   printf '{"phase":"%s","endpoint":"%s","tls":"%s","https_hostport":"%s","cert":"%s","keyfile":"%s","offload":"%s","api_key":"%s","model_dir":"%s","gpus":"%s","gpu_name":"%s","sshd":"%s","provider":"%s"}\n' \
     "$1" "$EP_URL" "$TLS_STATE" "$HTTPS_HOSTPORT" "$CERT_PATH" "$KEY_PATH" "$OFFLOAD_STATE" "${VLLM_API_KEY:-}" "$MODEL_DIR" \
@@ -313,18 +389,38 @@ status_update() {
   chmod 600 "$STATUS_FILE" 2>/dev/null || true
 }
 
-# Landing page for the vast "Open" button (:1111, dual-protocol TLS+plain).
+# Landing page (:1111, dual-protocol TLS+plain or behind Runpod's HTTPS proxy).
 # Started before the weight download so status is visible from minute one.
 # Needs OPEN_BUTTON_PORT=1111 env + '-p 1111:1111' in the template.
 # It also hosts the config editor, so it gets the state/runtime dirs and the
 # scripts dir (for the shared knob registry in glm_config.py).
 if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
    && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+  LANDING_TRUST_PROXY_HTTPS="${LANDING_TRUST_PROXY_HTTPS:-0}"
+  if [ "$PLATFORM" = "runpod" ]; then
+    LANDING_TRUST_PROXY_HTTPS=1
+    if [ -z "${OPEN_BUTTON_TOKEN:-}" ]; then
+      OPEN_BUTTON_TOKEN_FILE="${OPEN_BUTTON_TOKEN_FILE:-/workspace/.model-turnkey-landing-token}"
+      mkdir -p "$(dirname "$OPEN_BUTTON_TOKEN_FILE")"
+      if [ -s "$OPEN_BUTTON_TOKEN_FILE" ]; then
+        OPEN_BUTTON_TOKEN="$(cat "$OPEN_BUTTON_TOKEN_FILE")"
+      else
+        OPEN_BUTTON_TOKEN="lp-$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+        ( umask 077; printf '%s\n' "$OPEN_BUTTON_TOKEN" > "$OPEN_BUTTON_TOKEN_FILE" )
+      fi
+      chmod 600 "$OPEN_BUTTON_TOKEN_FILE" 2>/dev/null || true
+    fi
+    export OPEN_BUTTON_TOKEN
+  fi
   status_update booting
   MODEL_DIR="$MODEL_DIR" STATUS_FILE="$STATUS_FILE" GLM_SCRIPTS_DIR="$SCRIPTS_DIR" \
     GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
+    MODEL_PROFILE="$MODEL_PROFILE" LANDING_TRUST_PROXY_HTTPS="$LANDING_TRUST_PROXY_HTTPS" \
     LANDING_API_PORT="${PORT:-8000}" python3 /opt/landing.py &
   echo ">>> Landing page (Open button) live on :1111"
+  if [ "$PLATFORM" = "runpod" ]; then
+    echo ">>> Runpod dashboard: https://${RUNPOD_POD_ID}-1111.proxy.runpod.net/?token=${OPEN_BUTTON_TOKEN}"
+  fi
 fi
 
 fetch_weights() {
@@ -333,6 +429,9 @@ fetch_weights() {
   # moves with the family — and downloading one model on top of another produces
   # a directory that is neither, with a boot failure a long way from the cause.
   _repo_marker="$MODEL_DIR/.download-repo"
+  _complete_marker="$MODEL_DIR/.download-complete"
+  _complete_repo=""
+  [ -f "$_complete_marker" ] && _complete_repo="$(cat "$_complete_marker" 2>/dev/null || true)"
   if [ -f "$_repo_marker" ]; then
     _have=$(cat "$_repo_marker" 2>/dev/null || echo "")
     if [ -n "$_have" ] && [ "$_have" != "${MODEL_REPO:-}" ]; then
@@ -341,11 +440,16 @@ fetch_weights() {
       echo "       Point MODEL_DIR somewhere else, or delete that directory first."
       exit 1
     fi
+  elif [ -n "$_complete_repo" ] && [ "$_complete_repo" != "${MODEL_REPO:-}" ]; then
+    echo "FATAL: $MODEL_DIR holds '$_complete_repo' but this configuration wants"
+    echo "       '${MODEL_REPO:-?}'. Refusing to mix checkpoints in one directory."
+    exit 1
   fi
   # Gate on a completion marker, not config.json: small files land early in the
   # parallel download, so config.json existing does not mean the shards made it.
   # snapshot_download resumes/verifies incrementally, so re-running is safe.
-  if [ -f "$MODEL_DIR/.download-complete" ]; then
+  if [ -f "$_complete_marker" ] &&
+     { [ -z "$_complete_repo" ] || [ "$_complete_repo" = "${MODEL_REPO:-}" ]; }; then
     return 0
   fi
   status_update downloading-weights
@@ -360,7 +464,7 @@ fetch_weights() {
   HF_HUB_OFFLINE=0 HF_XET_HIGH_PERFORMANCE=1 python3 -c "
 from huggingface_hub import snapshot_download
 snapshot_download('${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}', local_dir='$MODEL_DIR', max_workers=16)"
-  touch "$MODEL_DIR/.download-complete"
+  printf '%s\n' "${MODEL_REPO:-}" > "$_complete_marker"
   printf '%s' "${MODEL_REPO:-}" > "$MODEL_DIR/.download-repo" 2>/dev/null || true
   boot_note ">>> Weights ready (${MODEL_REPO:-?})."
   return 0
@@ -581,6 +685,41 @@ prepare_checkpoint() {
     prepare_vision
     python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-1}" || \
       echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
+  elif [ "${MODEL_FAMILY:-}" = "qwen36" ]; then
+    MODEL_DIR="$MODEL_DIR" MTP_TOKENS="${MTP_TOKENS:-0}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+model_dir = Path(os.environ["MODEL_DIR"])
+config = json.loads((model_dir / "config.json").read_text())
+architectures = config.get("architectures") or []
+if "Qwen3_5ForConditionalGeneration" not in architectures:
+    raise SystemExit(
+        "FATAL: qwen36-nvfp4 requires Qwen3_5ForConditionalGeneration; "
+        f"checkpoint declares {architectures!r}"
+    )
+quant = config.get("quantization_config") or {}
+method = str(quant.get("quant_method", "")).lower()
+algorithm = str(quant.get("quant_algo", "")).upper()
+if method != "modelopt" or algorithm not in {
+    "MIXED_PRECISION", "NVFP4", "W4A16_NVFP4"
+}:
+    raise SystemExit(
+        "FATAL: qwen36-nvfp4 requires a ModelOpt NVFP4-compatible checkpoint; "
+        f"found quant_method={method!r}, quant_algo={algorithm!r}"
+    )
+if int(os.environ["MTP_TOKENS"]) > 0:
+    index_path = model_dir / "model.safetensors.index.json"
+    weight_map = (
+        json.loads(index_path.read_text()).get("weight_map") if index_path.is_file() else {}
+    ) or {}
+    if not any(name.startswith("mtp.") for name in weight_map):
+        raise SystemExit(
+            "FATAL: Qwen MTP was enabled but the checkpoint has no mtp.* weights"
+        )
+print(f">>> Qwen checkpoint verified: {architectures[0]}, ModelOpt {algorithm}")
+PY
   else
     echo ">>> ${MODEL_FAMILY:-glm52}: no checkpoint surgery (MTP78 graft and the vision"
     echo ">>> wrapper are GLM-5.2-specific); serving the downloaded weights as they are."
@@ -596,6 +735,10 @@ KVT_ARGS=()
 compute_offload() {
   KVT_ARGS=()
   local off_fraction="${OFFLOAD_FRACTION:-0.70}"
+  if [ "$off_fraction" != "0" ] && [ ! -r /proc/meminfo ]; then
+    echo ">>> DRAM KV offload sizing skipped: /proc/meminfo is unavailable on this smoke host"
+    off_fraction=0
+  fi
   if [ "$off_fraction" != "0" ]; then
     MEM_BYTES=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') * 1024 ))
     CG_LIMIT=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo max)
@@ -693,6 +836,15 @@ unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 else
   echo ">>> ${MODEL_FAMILY:-?}: skipping the GLM-5.2 engine environment (b12x kernels,"
   echo ">>> MLA/DCP path, EXL3 trellis). Only the common block above is exported."
+  # The base image carries GLM-specific OCI environment values. Remove them for
+  # Qwen/custom so a profile switch cannot inherit MLA, EXL3, or custom NCCL
+  # behavior merely because the container image was built for GLM.
+  unset VLLM_EXL3_EXT_PATH VLLM_EXL3_ABI_SHIM VLLM_NVFP4_MLA_SCALES_FILE
+  unset VLLM_ENABLE_PCIE_ALLREDUCE VLLM_PCIE_ALLREDUCE_BACKEND
+  unset VLLM_CPP_AR_1STAGE_NCCL_CUTOFF VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS
+  unset VLLM_RTX6K_FUSED_ALLREDUCE_ADD VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER
+  unset VLLM_DISABLE_SHARED_EXPERTS_STREAM VLLM_DISABLED_KERNELS
+  unset NCCL_LOCAL_INFERENCE_PATH NCCL_PR2127_PATH VLLM_NCCL_SO_PATH LD_PRELOAD
 fi
 
 # ---- tuning overrides -------------------------------------------------------
@@ -768,13 +920,31 @@ status_update configuring
 # (e.g. CLOUDFLARE_DNS_API_TOKEN, or DUCKDNS_TOKEN). Certs persist on the
 # volume and are reused while valid >7 days, else re-issued at boot.
 # Turnkey auto-DNS (deSEC): set DESEC_TOKEN + DESEC_DOMAIN (your *.dedyn.io zone).
-# A per-instance name — stable across reboots (keyed to CONTAINER_ID) so DNS
-# records don't pile up in the zone and the LE cert can be reused — is
-# registered at startup and pointed at this instance.
-if [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAIN:-}" ] \
-   && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
-  SUB="glm-${CONTAINER_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
-  MYIP="${PUBLIC_IPADDR:-$(curl -s -m 10 https://api.ipify.org)}"
+# A per-instance name — stable across reboots (keyed to the provider instance
+# ID) so records do not pile up and the LE certificate can be reused.
+current_public_ip() {
+  local live_ip=""
+  live_ip="$(curl -fsS -m 10 https://api.ipify.org 2>/dev/null || true)"
+  printf '%s' "${live_ip:-${PUBLIC_IPADDR:-${RUNPOD_PUBLIC_IP:-}}}"
+}
+PUBLIC_IP_CURRENT="$(current_public_ip)"
+
+# Runpod's HTTP proxy terminates TLS and forwards plain HTTP to the container.
+# App-level TLS is only appropriate on the separately exposed direct TCP port.
+ACME_DIRECT=1
+if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" != "1" ]; then
+  ACME_DIRECT=0
+  if [ -n "${ACME_DOMAIN:-}${DESEC_TOKEN:-}${DESEC_DOMAIN:-}" ]; then
+    echo "!!! Runpod proxy mode ignores ACME/deSEC settings; the proxy already terminates TLS."
+    echo "!!! Expose 8443/tcp and set RUNPOD_DIRECT_TLS=auto or 1 for direct TCP TLS."
+  fi
+fi
+
+if [ "$ACME_DIRECT" = "1" ] && [ -n "${DESEC_TOKEN:-}" ] &&
+   [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAIN:-}" ] &&
+   [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+  SUB="model-${INSTANCE_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
+  MYIP="$PUBLIC_IP_CURRENT"
   if [ -z "$MYIP" ]; then
     echo "!!! Could not determine public IP; skipping deSEC auto-DNS"
   else
@@ -784,19 +954,22 @@ if [ -n "${DESEC_TOKEN:-}" ] && [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAI
       -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json" \
       -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"${MYIP}\"]}]" >/dev/null \
       && export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN \
-      && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-<mapped-port>}/v1" \
+      && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-<mapped-port>}}/v1" \
       || echo "!!! deSEC registration failed (HTTP error — check DESEC_TOKEN/DESEC_DOMAIN); continuing without auto-DNS"
   fi
 fi
 
 TLS_ARGS=()
-if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null \
-   && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+TLS_ENABLED=0
+if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
+   [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null &&
+   [ "${CONFIG_SMOKE:-0}" != "1" ]; then
   CRT="/workspace/.lego/certificates/${ACME_DOMAIN}.crt"
   KEY="/workspace/.lego/certificates/${ACME_DOMAIN}.key"
   # /workspace persists across reboots: reuse a cert with >7 days left instead of
   # re-issuing every boot (LE duplicate-cert limit is 5/week; a reboot loop burns it)
-  if [ -f "$CRT" ] && openssl x509 -checkend 604800 -noout -in "$CRT" >/dev/null 2>&1; then
+  if [ -f "$CRT" ] && [ -f "$KEY" ] &&
+     openssl x509 -checkend 604800 -noout -in "$CRT" >/dev/null 2>&1; then
     echo ">>> Reusing persisted cert for $ACME_DOMAIN (>7 days validity left)"
   else
     echo ">>> Issuing LetsEncrypt cert for $ACME_DOMAIN via DNS-01 ($ACME_DNS_PROVIDER)"
@@ -813,21 +986,53 @@ if [ -n "${ACME_DOMAIN:-}" ] && [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v le
       sleep 30
     done
   fi
-  [ -f "$CRT" ] && TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY") && echo ">>> TLS enabled: https://$ACME_DOMAIN:${VAST_TCP_PORT_8000:-<mapped-port>}/v1"
+  if [ -f "$CRT" ] && [ -f "$KEY" ]; then
+    TLS_ENABLED=1
+    if [ "$PLATFORM" = "runpod" ]; then
+      # Keep vLLM plain on :8000 for the managed proxy; provide a second,
+      # idle-safe direct TLS listener on :8443.
+      socat "OPENSSL-LISTEN:8443,cert=${CRT},key=${KEY},verify=0,reuseaddr,fork" \
+        "TCP4:127.0.0.1:${PORT:-8000}" &
+      TLS_PROXY_PID=$!
+      sleep 1
+      kill -0 "$TLS_PROXY_PID" 2>/dev/null || {
+        echo "!!! Runpod direct-TLS proxy failed to start; using managed HTTPS proxy"
+        TLS_ENABLED=0
+      }
+    else
+      TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY")
+    fi
+    if [ "$TLS_ENABLED" = "1" ]; then
+      echo ">>> TLS enabled: https://$ACME_DOMAIN:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-<mapped-port>}}/v1"
+    fi
+  fi
 fi
 
 # Feed the final endpoint/TLS picture to the landing page's status file
-if [ ${#TLS_ARGS[@]} -gt 0 ]; then
-  EP_URL="https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-8000}"
+if [ "$TLS_ENABLED" = "1" ]; then
+  EP_URL="https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-8443}}"
   TLS_STATE="https://${ACME_DOMAIN}"
-  HTTPS_HOSTPORT="${ACME_DOMAIN}:${VAST_TCP_PORT_1111:-1111}"
+  if [ "$PLATFORM" != "runpod" ]; then
+    HTTPS_HOSTPORT="${ACME_DOMAIN}:${VAST_TCP_PORT_1111:-1111}"
+  fi
   CERT_PATH="$CRT" KEY_PATH="$KEY"
-  LOCAL_SCHEME="https"
+elif [ "$PLATFORM" = "runpod" ]; then
+  EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
+  TLS_STATE="https:// managed by Runpod proxy"
 else
-  EP_URL="http://${PUBLIC_IPADDR:-localhost}:${VAST_TCP_PORT_8000:-8000}"
-  LOCAL_SCHEME="http"
+  EP_URL="http://${PUBLIC_IP_CURRENT:-localhost}:${VAST_TCP_PORT_8000:-8000}"
 fi
+LOCAL_SCHEME="http"
+[ "$TLS_ENABLED" = "1" ] && [ "$PLATFORM" != "runpod" ] && LOCAL_SCHEME="https"
 LOCAL_BASE="$LOCAL_SCHEME://localhost:${PORT:-8000}"
+
+if [ "$PLATFORM" = "runpod" ] && [ "$TLS_ENABLED" != "1" ]; then
+  echo ">>> Runpod proxy endpoint: ${EP_URL}/v1"
+  echo "!!! Runpod's HTTP proxy has a 100-second connection limit; use the SSH tunnel"
+  echo "!!! documented in README.md for long generations and large-context requests."
+elif [ "$PLATFORM" = "runpod" ]; then
+  echo ">>> Runpod direct-TCP TLS endpoint: ${EP_URL}/v1"
+fi
 
 # Egress hygiene: no telemetry; offline mode once weights are local
 # Keep the torch.compile / AOT cache on the persistent volume. It defaults to
@@ -911,9 +1116,8 @@ build_spec_args() {
     return 0
   fi
   # Speculation is not GLM-only, but its shape is family-specific: GLM-5.2 uses
-  # method "mtp" with a triton MoE backend for the draft and (optionally) a
-  # separate draft checkpoint, while Qwen3.6's model card calls for
-  # method "qwen3_next_mtp" and nothing else. SPEC_METHOD comes from the family.
+  # method "mtp" with a triton MoE backend and an optional draft checkpoint;
+  # Qwen uses the current vLLM "mtp" method without the GLM draft apparatus.
   if [ "${MODEL_FAMILY:-glm52}" != "glm52" ]; then
     SPEC_ARGS=(--speculative-config "{\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-2}}")
     return 0
@@ -933,10 +1137,13 @@ build_spec_args() {
 
 # Best-effort: surface readiness + endpoint into the vast.ai dashboard label
 if [ -n "${CONTAINER_API_KEY:-}" ] && [ -n "${CONTAINER_ID:-}" ]; then
-  ( EP="${ACME_DOMAIN:+https://$ACME_DOMAIN}"; EP="${EP:-http://${PUBLIC_IPADDR:-?}}"
-    PORTPART="${VAST_TCP_PORT_8000:+:$VAST_TCP_PORT_8000}"
-    until curl -sf "http://localhost:${PORT:-8000}/health" >/dev/null 2>&1; do sleep 20; done
-    curl -s -X PUT "https://console.vast.ai/api/v0/instances/${CONTAINER_ID}/"       -H "Authorization: Bearer ${CONTAINER_API_KEY}" -H "Content-Type: application/json"       -d "{\"label\": \"GLM-5.2 READY ${EP}${PORTPART}/v1\"}" >/dev/null 2>&1 || true
+  ( until curl -skf "$LOCAL_BASE/health" >/dev/null 2>&1; do sleep 20; done
+    MODEL_LABEL="${SERVED_MODEL_NAME%% *} READY ${EP_URL}/v1"
+    LABEL_JSON="$(MODEL_LABEL="$MODEL_LABEL" python3 -c \
+      'import json,os; print(json.dumps({"label": os.environ["MODEL_LABEL"]}))')"
+    curl -s -X PUT "https://console.vast.ai/api/v0/instances/${CONTAINER_ID}/" \
+      -H "Authorization: Bearer ${CONTAINER_API_KEY}" \
+      -H "Content-Type: application/json" -d "$LABEL_JSON" >/dev/null 2>&1 || true
   ) &
 fi
 
@@ -948,7 +1155,7 @@ serve_once() {
 # --served-model-name accepts several aliases; SERVED_MODEL_NAME is split on
 # whitespace so a drop-in replacement can answer to the names existing clients
 # already use (e.g. "GLM-5.2 local-primary") without touching those clients.
-read -r -a SERVED_NAMES <<< "${SERVED_MODEL_NAME:-GLM-5.2}"
+read -r -a SERVED_NAMES <<< "${SERVED_MODEL_NAME:-model}"
 # AUTH=none -> omit --api-key entirely (passing an empty one still enforces auth).
 # NB: `[ test ] && ARR=(...)` returns non-zero when the test is false, which
 # under `set -e` kills serve_once outright — precisely in the AUTH=none and
@@ -1069,7 +1276,7 @@ start_verifier() {
   if [ "${VERIFY_LONG_CONTEXT:-1}" = "0" ]; then
     _skip_lc=(--skip-long-context)
   fi
-  read -r -a _names <<< "${SERVED_MODEL_NAME:-GLM-5.2}"
+  read -r -a _names <<< "${SERVED_MODEL_NAME:-model}"
   python3 "$SCRIPTS_DIR/verify_serving.py" \
     --base-url "$LOCAL_BASE" --api-key "${VLLM_API_KEY:-}" --model "${_names[0]}" \
     --out "$VERIFY_FILE" --pid "$SRV_PID" \
@@ -1113,7 +1320,7 @@ maybe_self_analyze() {
   if [ -z "$fdir" ]; then
     return 0
   fi
-  read -r -a _names <<< "${SERVED_MODEL_NAME:-GLM-5.2}"
+  read -r -a _names <<< "${SERVED_MODEL_NAME:-model}"
   echo ">>> Self-analysis: asking the running model why $fdir failed"
   python3 "$SCRIPTS_DIR/analyze_failure.py" --dir "$fdir" \
     --base-url "$LOCAL_BASE" --api-key "${VLLM_API_KEY:-}" --model "${_names[0]}" \

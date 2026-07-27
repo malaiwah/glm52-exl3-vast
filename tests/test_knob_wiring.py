@@ -32,6 +32,18 @@ INDIRECT = {
                      "FAMILY_SERVE_ARGS, SPEC_METHOD and MODEL_REPO"),
     "MODEL_VARIANT": ("read by glm_config.derive to produce MODEL_REPO, "
                       "MODEL_DIRNAME and the family's --quantization"),
+    "MODEL_ID": ("read by glm_config.derive to produce MODEL_REPO and "
+                 "MODEL_DIRNAME for the custom family"),
+    "QUANTIZATION": ("read by glm_config.family_serve_args for the custom "
+                     "profile's --quantization flag"),
+    "REASONING_PARSER": ("read by glm_config.family_serve_args for the custom "
+                         "profile's --reasoning-parser flag"),
+    "TOOL_CALL_PARSER": ("read by glm_config.family_serve_args for the custom "
+                         "profile's auto-tool-choice flags"),
+    "MULTIMODAL": ("read by glm_config.family_serve_args to add or omit "
+                   "--language-model-only"),
+    "MODEL_OUTPUT_LIMIT": ("read by landing.deployment for generated client "
+                           "configuration and quick-chat max_tokens"),
     "MTP_DRAFT": ("read by glm_config.derive, which turns it into MTP78_MODE, "
                   "DRAFT_MODEL and DRAFT_QUANTIZATION — the three values the "
                   "entrypoint actually consumes"),
@@ -114,6 +126,24 @@ def main():
           "download size must come from the resolved variant")
     check("the landing page reads the resolved config for its header",
           "resolve()" in landing and "family(" in landing)
+    check("chat accepts both GLM and Qwen reasoning delta fields",
+          "d.reasoning_content??d.reasoning" in landing)
+    check("chat sends the accumulated multi-turn history",
+          "messages:wireMessages()" in landing and 'MODEL=$model_js, msgs=[]' in landing)
+    check("preserve-thinking is available and defaults off",
+          'id=preserve>' in landing and 'id=preserve checked' not in landing)
+    check("reasoning-only output remains visible assistant content",
+          "const stopped=ctrl&&ctrl.signal.aborted,finalText=answer||reasoning" in landing
+          and "if(!answer&&reasoning){out.textContent=reasoning" in landing)
+    check("Runpod proxy HTTPS is treated as a secure landing connection",
+          "LANDING_TRUST_PROXY_HTTPS" in landing
+          and "or TRUST_PROXY_HTTPS" in landing)
+    check("chat JavaScript values are safely escaped for inline scripts",
+          "model_js=js_literal" in landing and "key_js=js_literal" in landing
+          and "ep_js=js_literal" in landing and '.replace("<", "\\\\u003c")' in landing)
+    check("credential-bearing pages are never cached or framed",
+          'self.send_header("Cache-Control", "no-store")' in landing
+          and 'self.send_header("X-Frame-Options", "DENY")' in landing)
 
     print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")
     for name, detail in FAILURES:

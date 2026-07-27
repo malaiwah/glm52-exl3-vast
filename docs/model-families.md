@@ -15,9 +15,9 @@ mean anything, and which of the measured failure rules apply.
 | `scripts/glm_config.py` | `FAMILIES` registry, family-aware resolver, family-scoped validation |
 | `entrypoint.sh` | family-guarded env block, generic serve line + `FAMILY_SERVE_ARGS` |
 | `scripts/gpu_detect.py` | what the container can actually use, from nvidia-smi ∩ the visibility variables |
-| `tests/test_families.py` | 118 assertions: GLM unchanged, Qwen coherent, rules scoped |
+| `tests/test_families.py` | 126 assertions: GLM unchanged, Qwen/custom coherent, rules scoped |
 | `tests/test_gpu_detect.py` | 20 assertions against injected device lists |
-| `tests/test_knob_wiring.py` | every knob has a consumer; the UI hardcodes nothing |
+| `tests/test_knob_wiring.py` | 51 assertions: every knob has a consumer; the UI hardcodes nothing |
 
 ---
 
@@ -51,10 +51,9 @@ now supplied by the family and absent for anything else:
 ### One thing deliberately did NOT move
 
 Speculative decoding. It is easy to assume MTP is a GLM feature, but Qwen3.6's
-own model card gives
-`--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'`.
-So `MTP_TOKENS` is a **generic** knob and the family supplies the *method*
-(`mtp` vs `qwen3_next_mtp`); what is GLM-only is the MTP78 draft machinery —
+checkpoint includes MTP weights and the bundled vLLM exposes the generic
+`mtp` method. So `MTP_TOKENS` is a **generic** knob and each family supplies
+its default; what is GLM-only is the MTP78 draft machinery —
 `MTP_DRAFT`, `DRAFT_MODEL`, `DRAFT_QUANTIZATION`.
 
 ### Where each half lives, and why the split looks untidy
@@ -134,49 +133,49 @@ an MLA KV layout), `knob-inapplicable` (error), `family-untested` (warn),
 registry. The needle probe is the gate for **any** model: short prompts remain
 insufficient regardless of architecture, and the probe simply sizes itself
 against whatever `MAX_MODEL_LEN` the family resolved to (512K for GLM, 256K for
-Qwen). A family cannot opt out of being verified.
+the upstream Qwen model, with a conservative 32K appliance default for the
+NVFP4 profile). A family cannot opt out of being verified.
 
 ---
 
-## 4. The Qwen3.6-27B preset — UNVALIDATED
-
-**Nobody has booted this image with it.** It exists so the template can start on
-one GPU and be iterated on. Treat a clean boot as the beginning of validation,
-not the end.
+## 4. The Qwen3.6-27B NVFP4 preset
 
 Facts below are from the [model card](https://huggingface.co/Qwen/Qwen3.6-27B);
-the serve line is derived from the card's own vLLM example.
+quantization details come from the
+[NVIDIA NVFP4 checkpoint card](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4).
+The full 27B profile has completed cold download and checkpoint inspection on a
+live Blackwell host. The same image/profile path was boot-qualified with the
+small Qwen3.5 representative model, including reasoning, tools, vision and MTP.
+The remaining qualification item is a full 27B serving boot and benchmark.
 
 | | from the model card |
 |---|---|
 | architecture | **dense** 27B, hidden 5120, 64 layers, hybrid: `16 × (3 × (Gated DeltaNet → FFN) → 1 × (Gated Attention → FFN))` |
 | attention | Gated DeltaNet (48 V heads / 16 QK heads, dim 128) + Gated Attention (24 Q / 4 KV heads, dim 256, RoPE). **Not MLA, not MoE.** |
 | context | 262,144 native, ~1,010,000 with YaRN rope scaling |
-| size | ~55.6 GB at BF16 — fits one 96 GB card |
+| size | ~55.6 GB at BF16; the selected NVFP4 checkpoint downloads about 21 GiB |
 | reasoning | thinking on by default; `chat_template_kwargs: {"enable_thinking": false}`, `{"preserve_thinking": true}` |
 | card's vLLM line | `vllm serve Qwen/Qwen3.6-27B --port 8000 --tensor-parallel-size 8 --max-model-len 262144 --reasoning-parser qwen3` |
-| card's speculation | `--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'` |
+| appliance support | bundled vLLM recognizes `Qwen3_5ForConditionalGeneration`, ModelOpt/NVFP4, Qwen parsers, and the `mtp` speculative method |
 
 Preset choices and why:
 
 | knob | value | reasoning |
 |---|---|---|
-| repo | `Qwen/Qwen3.6-27B` | the upstream BF16 checkpoint; **override it with `MODEL_VARIANT`/`MODEL_DIR` if you want a quant** |
-| `--quantization` | *omitted* | the checkpoint is BF16. Naming a method it does not carry is a boot failure, and guessing a quant repo that may not exist is worse than not guessing. |
-| `TENSOR_PARALLEL_SIZE` | **1** | ~56 GB fits one 96 GB card. The card's own example says 8, but that is for their 1M-context reference; TP=1 is what makes this preset useful on a single-GPU rental. |
-| `MAX_MODEL_LEN` | 262144 | the native length. Going beyond needs YaRN rope scaling, which this preset does not configure. |
-| `MTP_TOKENS` | 2 | the card's number, with `method: qwen3_next_mtp` |
+| repo | `nvidia/Qwen3.6-27B-NVFP4` | the vendor-published low-weight development checkpoint |
+| `--quantization` | `modelopt` | matches the checkpoint metadata and the quantizer bundled in the pinned image |
+| `TENSOR_PARALLEL_SIZE` | **1** | the point of this profile is an inexpensive single-Blackwell development rental |
+| `MAX_MODEL_LEN` | **32768** | conservative profile default; the upstream architecture supports 262,144 natively, but the full NVFP4 memory envelope still needs measurement |
+| `MTP_TOKENS` | **0** | opt in only after a full-checkpoint boot; the method, when enabled, is `mtp` |
 | `KV_CACHE_DTYPE` | `auto` | let vLLM choose; `fp8` is offered, `nvfp4_ds_mla` is refused as an MLA layout |
 | `GPU_BLOCKS_OVERRIDE` | 0 | the 2048-block pin is a GLM-specific 512K trick |
 | `GPU_MEMORY_UTILIZATION` | 0.90 | conservative; 0.93 was tuned for the GLM memory profile |
-| tool-call parser | *none* | the card does not name one. `--enable-auto-tool-choice` without a valid parser fails at startup, so guessing (`hermes`?) would trade a missing feature for an unbootable engine. |
+| parsers | `qwen3` reasoning, `qwen3_coder` tools | both are present in the pinned vLLM and were exercised with the representative Qwen model |
+| multimodal | off by default | `--language-model-only`; opt in after budgeting the vision encoder's VRAM |
 
-**Unknowns that only a boot can settle:** whether this vLLM fork implements
-Gated DeltaNet at all, whether `qwen3_next_mtp` exists in it, whether the
-`FULL_AND_PIECEWISE` cudagraph mode is right for a hybrid-attention model, and
-what the actual memory profile looks like. If the engine refuses the
-speculative config, set `MTP_TOKENS=0`; if it refuses the compilation config,
-that is the next thing to strip.
+The conservative defaults intentionally separate feature-development testing
+from final model qualification. See `TEST_RESULTS.md` for the live evidence and
+the explicit remaining residual.
 
 ---
 

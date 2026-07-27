@@ -442,11 +442,11 @@ Beyond termination, these differ in ways that affect this image.
 | | vast.ai | RunPod |
 |---|---|---|
 | **persistent path** | the instance's own disk; this template uses `/workspace` and nothing survives a destroy | **volume disk** mounted at `/workspace` by default; survives stop, destroyed on terminate. A **network volume** also mounts at `/workspace`, replaces the volume disk, and survives the pod entirely |
-| **SSH** | vast runs sshd; the entrypoint only repairs key permissions | nothing runs sshd unless the image does — this image now starts one when `PUBLIC_KEY` is present (`SSHD=0` to opt out) |
-| **port exposure** | `-p 8000:8000 -p 1111:1111` in Docker options; external ports arrive as `VAST_TCP_PORT_8000` etc. and are usually *not* the same numbers | **ports must be requested AT POD CREATION** (`--ports "22/tcp,1111/http,8000/http"`); HTTP ports are proxied at `https://[POD_ID]-[PORT].proxy.runpod.net` (max 10, **100-second Cloudflare timeout**); raw TCP needs a public IP and symmetrical ports above 70000, surfaced as `RUNPOD_TCP_PORT_*` |
+| **SSH** | Vast commonly starts sshd; the entrypoint installs injected keys first and starts its bundled key-only daemon if needed | the image installs `PUBLIC_KEY` and starts its bundled key-only sshd when nothing is already listening (`SSHD=0` opts out) |
+| **port exposure** | Docker options expose the service ports; external ports arrive as `VAST_TCP_PORT_*` and are usually *not* the same numbers | **ports must be requested at Pod creation** (`22/tcp`, `1111/http`, `8000/http`, `8443/tcp`); HTTP ports use managed HTTPS, while raw TCP plus deSEC supplies direct appliance TLS for long requests |
 | **HF cache location** | `~/.cache/huggingface` on the instance disk; dies with the instance | PID 1 sets `HF_HOME=/runpod-volume/.cache/huggingface/` — **the network volume by default**, which survives termination and keeps billing |
-| **landing page on :1111** | works; `OPEN_BUTTON_PORT=1111` makes the dashboard's Open button hit it | reachable via the HTTP proxy at `https://<pod>-1111.proxy.runpod.net`; there is no Open button, so the URL must be constructed by hand, and `OPEN_BUTTON_TOKEN` is not injected — **it must be set manually or the config/terminate UI stays disabled** |
-| **streaming / long requests** | direct TCP; a 20-minute generation is fine | the HTTP proxy's **100 s timeout kills long non-streaming requests** (524). Use the TCP-mapped port for the API, not the proxy, or keep responses streaming |
+| **landing page on :1111** | works; the ready label contains the endpoint | served through managed HTTPS at `https://<pod>-1111.proxy.runpod.net`; if no token was supplied, the entrypoint creates and persists one and prints the complete URL |
+| **streaming / long requests** | direct TLS or an SSH tunnel avoids intermediary request limits | the managed proxy is the secure fallback; use deSEC direct TLS on mapped `8443/tcp` or an SSH tunnel for long prefills and generations |
 | **env vars** | template env + injected `CONTAINER_ID`, `CONTAINER_API_KEY`, `PUBLIC_IPADDR`, `VAST_TCP_PORT_*`, `DATA_DIRECTORY`, `SSH_PUBLIC_KEY` | template/pod env + injected `RUNPOD_POD_ID`, `RUNPOD_API_KEY`, `RUNPOD_DC_ID`, `RUNPOD_PUBLIC_IP`, `RUNPOD_TCP_PORT_22`, `RUNPOD_VOLUME_ID`, `PUBLIC_KEY` |
 | **GPU selection** | host filters in the template (4× RTX PRO 6000, disk, bandwidth) | GPU type and count chosen at deploy time; no equivalent of vast's host-level filters for disk speed or network |
 | **billing while idle** | stopped instances keep paying for storage | stopped pods keep paying for volume storage; **network volumes bill whether or not a pod exists** |
@@ -475,37 +475,26 @@ download.
 So a RunPod deployment of this image **must** request, at creation time:
 
 ```
---ports "22/tcp,1111/http,8000/http"
+22/tcp,1111/http,8000/http,8443/tcp
 ```
 
-`1111/http` is the landing page (config editor + terminate control), `8000/http`
-is the OpenAI-compatible endpoint, `22/tcp` is SSH. Remember the proxy's
-100-second timeout applies to the `/http` ports: keep long generations
-streaming, or reach the API over a TCP-mapped port instead.
+`1111/http` is the landing page, `8000/http` is the secure managed-proxy API
+fallback, `8443/tcp` is direct appliance TLS when deSEC is configured, and
+`22/tcp` is SSH. For long generations or prefills, prefer direct TLS or an SSH
+tunnel instead of relying on the HTTP proxy.
 
 ### RunPod: this image now starts sshd, because nothing else will
 
-**MEASURED.** This image does not run `sshd`, and RunPod does not run one for
-you — their SSH works because *their* base images start one. With this image as
-PID 1 the pod reports RUNNING, `runpodctl ssh info` resolves happily, and every
-connection is refused. RunPod injects `PUBLIC_KEY`, but something in the
-container has to consume it.
+The first live Runpod attempt proved that a custom PID 1 must consume the
+injected `PUBLIC_KEY` and run an SSH daemon; otherwise the Pod can report
+RUNNING while every connection is refused.
 
 Combined with the ports trap above, that produced the worst possible failure
 mode: a pod that is billing, looks healthy, and is a **black box** — no shell,
 no landing page, only the console log.
 
-**Measured again on 2026-07-26, and it is worse than it looked:** with the image
-running as PID 1 on a live pod, `ssh` was refused while `runpodctl ssh info`
-happily returned an ip and port. The most likely cause is that **the base image
-has no `sshd` binary at all** — in which case the code below cannot start one
-and says so, loudly, in the boot log. That boot log is itself unreachable on
-RunPod, which is why those warnings are now mirrored onto the landing page (§
-"Boot log highlights"). Until someone confirms the binary is present, **assume
-RunPod users get no shell** and treat the landing page as the only channel.
-
-**Decision: start sshd when the provider handed us keys** (`SSHD=auto`, the
-default), rather than documenting "RunPod users get no SSH". The argument:
+The production image now installs OpenSSH at build time and starts sshd when
+the provider handed us keys (`SSHD=auto`, the default). The argument:
 
 * *Against* starting it: more surface, more moving parts, and one more thing
   that can fail at boot.
@@ -525,12 +514,6 @@ sshd already runs, is untouched) and only when nothing is already listening on
 `SSHD=1` forces it, `SSHD=0` disables it entirely for anyone who wants the
 smaller surface.
 
-If the image has no `sshd` binary, it says so loudly and names the consequence —
-"there is NO SHELL ACCESS on providers that expect the container to run one;
-the landing page on :1111 is the only way in" — rather than failing silently.
-`SSHD_INSTALL=1` will `apt-get` it at boot for anyone who wants that instead of
-a rebuild.
-
 The generated host keys are added to the session erase: they are what
 fingerprints this box to a client.
 
@@ -542,39 +525,28 @@ sshd that rejects the only key the provider handed out — and the sshd state
 `disabled`) is reported in the status file and on the landing page instead of
 only in a log nobody can read.
 
-### What in the current entrypoint assumes vast.ai
+### Provider-specific behavior retained by the entrypoint
 
-Flagged rather than changed — none of it breaks a RunPod boot, but a RunPod
-template needs to know:
+The shared entrypoint now detects and normalizes both providers. The remaining
+intentional differences are:
 
-1. **`VAST_TCP_PORT_8000` / `VAST_TCP_PORT_1111`** are used to build the
-   endpoint URL printed in the logs, the landing page and the dashboard label.
-   On RunPod these are unset, so the URL falls back to
-   `http://$PUBLIC_IPADDR:8000` — and `PUBLIC_IPADDR` is also vast-only
-   (RunPod's is `RUNPOD_PUBLIC_IP`). **The endpoint URL shown on a RunPod pod
-   will be wrong or empty.**
-2. **The dashboard-label update** (`PUT console.vast.ai/api/v0/instances/...`)
-   is vast-specific; it is already conditional on `CONTAINER_API_KEY` +
-   `CONTAINER_ID`, so it silently does nothing on RunPod. There is no RunPod
-   equivalent.
-3. **`OPEN_BUTTON_TOKEN`** is a vast concept. On RunPod nothing sets it, so the
-   config editor and the terminate control are simply absent until the user sets
-   it in the pod environment.
-4. **`/workspace` as the volume root** happens to be correct on both, but for
+1. **The ready-label update** (`PUT console.vast.ai/api/v0/instances/...`) is
+   Vast-specific and conditional on Vast's injected credentials. Runpod has no
+   equivalent label API.
+2. **`/workspace` as the volume root** is correct on both, but for
    different reasons — on RunPod it is the volume-disk mount point, and if a
    *network* volume is attached it replaces that mount, which means the 332 GB
    download lands on shared, billed-separately storage that survives the pod.
-5. **`--ulimit memlock` / `--ipc=host`** are passed as vast Docker options.
+3. **`--ulimit memlock` / `--ipc=host`** are passed as Vast Docker options.
    RunPod's UI does not expose arbitrary Docker flags, so DRAM KV offload runs
-   under whatever memlock the pod has — the warn-and-proceed default already
-   covers this, but it is untested there.
-6. **SSH key repair** targets `/root/.ssh/authorized_keys`, which vast injects.
-   RunPod injects `PUBLIC_KEY` and expects the image to install it and to run
-   sshd — **now handled** (see above); on vast nothing changes, because
-   `PUBLIC_KEY` is unset there and sshd is already listening.
+   under the Pod's limits; the entrypoint's measured-capacity check and
+   warn-and-proceed default still apply.
+4. **Connectivity defaults differ.** Runpod always gets managed HTTPS URLs for
+   the dashboard and fallback API. When deSEC credentials are present, the
+   appliance additionally publishes direct TLS on mapped port 8443. Vast uses
+   the same deSEC pattern on its mapped API port.
 
-Making the image fully RunPod-native is a separate piece of work; this document
-is the list it would start from.
+The live matrix in `TEST_RESULTS.md` covers both provider paths.
 
 ---
 

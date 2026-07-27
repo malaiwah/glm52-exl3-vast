@@ -5,8 +5,8 @@
 
 Nothing here starts an engine or touches a GPU: it exercises the resolver, the
 family-scoped validation matrix, and the exact argv the serve line would be
-given. The Qwen preset is UNTESTED BY CONSTRUCTION — these tests prove the
-plumbing is coherent and that the GLM path is unchanged, not that Qwen3.6 runs.
+given. These tests prove profile plumbing and preserve the measured GLM path;
+full-checkpoint runtime qualification remains a separate live test.
 """
 import json
 import os
@@ -104,17 +104,17 @@ def test_qwen_preset():
     eff8, src8, _ = resolved("qwen36", gpus=8)
     check("and on an 8-GPU host it uses all 8 rather than leaving 7 idle",
           eff8["TENSOR_PARALLEL_SIZE"] == 8)
-    check("context is the card's native 262144", eff["MAX_MODEL_LEN"] == 262144)
-    check("MTP depth is the card's 2", eff["MTP_TOKENS"] == 2)
+    check("economical profile defaults to a 32K context", eff["MAX_MODEL_LEN"] == 32768)
+    check("MTP is opt-in for the development profile", eff["MTP_TOKENS"] == 0)
     check("KV dtype is auto, not the MLA fp8 default", eff["KV_CACHE_DTYPE"] == "auto")
     check("the KV pool pin is dropped", eff["GPU_BLOCKS_OVERRIDE"] == 0)
-    check("variant follows the family", eff["MODEL_VARIANT"] == "qwen36-bf16")
+    check("variant follows the family", eff["MODEL_VARIANT"] == "qwen36-nvfp4")
 
     d = gc.derive(eff)
     line = " ".join(d["FAMILY_SERVE_ARGS"])
-    check("repo is the real model card's", d["MODEL_REPO"] == "Qwen/Qwen3.6-27B")
-    check("no --quantization is passed for a BF16 checkpoint",
-          "--quantization" not in line, line)
+    check("repo is the NVFP4 development checkpoint",
+          d["MODEL_REPO"] == "nvidia/Qwen3.6-27B-NVFP4")
+    check("ModelOpt quantization is selected", "--quantization modelopt" in line, line)
     for flag in ("--decode-context-parallel-size", "--dcp-comm-backend",
                  "--dcp-kv-cache-interleave-size", "B12X_MLA_SPARSE",
                  "--moe-backend", "index_topk_pattern", "use_index_cache",
@@ -122,18 +122,44 @@ def test_qwen_preset():
                  "fuse_allreduce_rms"):
         check(f"no GLM-ism leaks through: {flag}", flag not in line, line[:200])
     check("the card's reasoning parser is set", "--reasoning-parser qwen3" in line)
-    check("no tool-call parser is guessed",
-          "--tool-call-parser" not in line and "--enable-auto-tool-choice" not in line)
-    check("cudagraph capture sizes are still passed",
-          '"cudagraph_capture_sizes":[4,8,12,16,20,24,28,32]' in line)
+    check("the qualified Qwen tool parser is selected",
+          "--tool-call-parser qwen3_coder" in line and
+          "--enable-auto-tool-choice" in line)
+    check("the economical profile is text-only by default",
+          "--language-model-only" in line)
     check("the generic env block is selected", d["FAMILY_ENV_BLOCK"] == "generic")
-    check("spec method is the card's qwen3_next_mtp",
-          d["SPEC_METHOD"] == "qwen3_next_mtp")
+    check("spec method uses vLLM's current mtp name", d["SPEC_METHOD"] == "mtp")
     check("the MTP78 apparatus is forced off", d["MTP78_MODE"] == "off")
     check("no draft dir or draft quantization is derived",
           d["DRAFT_MODEL"] == "" and d["DRAFT_QUANTIZATION"] == "")
     check("vision is forced off", d["VISION"] is False)
     check("the family is flagged untested", gc.family("qwen36")["tested"] is False)
+
+
+def test_custom_profile():
+    section("the custom profile")
+    missing, _, _ = resolved("custom", gpus=1)
+    check("a custom profile without MODEL_ID is refused",
+          "custom-model-required" in errs(gc.validate(missing)))
+    eff, _, _ = resolved(
+        "custom", gpus=1, MODEL_ID="Qwen/Qwen3.5-0.8B",
+        QUANTIZATION="modelopt", REASONING_PARSER="qwen3",
+        TOOL_CALL_PARSER="qwen3_coder", MULTIMODAL=False)
+    d = gc.derive(eff)
+    line = " ".join(d["FAMILY_SERVE_ARGS"])
+    check("the requested repository is preserved",
+          d["MODEL_REPO"] == "Qwen/Qwen3.5-0.8B")
+    check("its directory is isolated under models/",
+          d["MODEL_DIRNAME"] == "models/Qwen-Qwen3.5-0.8B")
+    check("custom quantization is wired", "--quantization modelopt" in line, line)
+    check("custom reasoning is wired", "--reasoning-parser qwen3" in line, line)
+    check("custom tools are wired",
+          "--enable-auto-tool-choice" in line and
+          "--tool-call-parser qwen3_coder" in line, line)
+    check("text-only mode is wired", "--language-model-only" in line, line)
+    check("GLM flags stay absent",
+          not any(x in line for x in ("B12X_MLA_SPARSE", "--dcp-comm-backend",
+                                      "--quantization exl3")), line)
 
 
 def test_inapplicable_knobs():
@@ -164,8 +190,8 @@ def test_inapplicable_knobs():
           out.get("MODEL_FAMILY") == "qwen36", str(out))
     check("a knob left at the new family's own default is NOT pinned",
           "MAX_MODEL_LEN" not in gc.minimize({"MODEL_FAMILY": "qwen36",
-                                              "MAX_MODEL_LEN": 262144}),
-          str(gc.minimize({"MODEL_FAMILY": "qwen36", "MAX_MODEL_LEN": 262144})))
+                                              "MAX_MODEL_LEN": 32768}),
+          str(gc.minimize({"MODEL_FAMILY": "qwen36", "MAX_MODEL_LEN": 32768})))
     check("but an override of it is",
           gc.minimize({"MODEL_FAMILY": "qwen36",
                        "MAX_MODEL_LEN": 131072}).get("MAX_MODEL_LEN") == 131072)
@@ -270,7 +296,7 @@ def test_long_context_gate_is_family_independent():
     check("and the needle probe is the thing that sets it",
           "needle_probe" in src and "long_context_verified" in src)
     # the probe budget follows MAX_MODEL_LEN, which is a family default
-    for fam, expected in (("glm52", 524288), ("qwen36", 262144)):
+    for fam, expected in (("glm52", 524288), ("qwen36", 32768)):
         eff, _, _ = resolved(fam)
         check(f"{fam} probes against its own context ceiling ({expected})",
               eff["MAX_MODEL_LEN"] == expected)
@@ -311,6 +337,7 @@ def main():
     try:
         test_glm_unchanged()
         test_qwen_preset()
+        test_custom_profile()
         test_inapplicable_knobs()
         test_rules_are_family_scoped()
         test_family_coherence_rules()

@@ -63,6 +63,7 @@ RunPod
 """
 import json
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -180,6 +181,9 @@ class Provider:
     def instance_id(self):
         return ""
 
+    def valid_instance_id(self):
+        return True
+
     def api_key(self):
         return ""
 
@@ -196,6 +200,8 @@ class Provider:
                 "If you know the provider, set TERMINATE_PROVIDER=vastai|runpod.")
         if not self.instance_id():
             return False, f"{self.label}: the instance id is not in the environment"
+        if not self.valid_instance_id():
+            return False, f"{self.label}: the instance id has an invalid format"
         if not self.api_key():
             return False, f"{self.label}: no API credential is available"
         return True, "ready"
@@ -239,6 +245,9 @@ class VastAI(Provider):
 
     def instance_id(self):
         return (self.env.get("CONTAINER_ID") or "").strip()
+
+    def valid_instance_id(self):
+        return bool(re.fullmatch(r"[0-9]+", self.instance_id()))
 
     def api_key(self):
         return (self.env.get("VAST_API_KEY") or self.env.get("CONTAINER_API_KEY") or "").strip()
@@ -303,6 +312,13 @@ class RunPod(Provider):
 
     def instance_id(self):
         return (self.env.get("RUNPOD_POD_ID") or "").strip()
+
+    def valid_instance_id(self):
+        # Provider-generated Pod ids are short URL-safe identifiers. Reject
+        # quotes, slashes and GraphQL punctuation before the id reaches either
+        # a URL path or the measured inline GraphQL operation.
+        return bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}",
+                                 self.instance_id()))
 
     def api_key(self):
         return (self.env.get("RUNPOD_TERMINATE_API_KEY")

@@ -138,6 +138,18 @@ def test_detection():
     ev = provider.detection_evidence({"CONTAINER_ID": "42", "CONTAINER_API_KEY": "secret"})
     check("detection evidence never echoes a key",
           ev["CONTAINER_ID"] == "42" and "secret" not in json.dumps(ev), json.dumps(ev))
+    bad_vast = provider.get({"CONTAINER_ID": "../42", "CONTAINER_API_KEY": "k"})
+    check("a malformed Vast instance id is not actionable",
+          bad_vast.ready()[0] is False and "invalid format" in bad_vast.ready()[1])
+    bad_runpod = provider.get({
+        "RUNPOD_POD_ID": 'pod") } mutation { podTerminate',
+        "RUNPOD_API_KEY": "k",
+    })
+    check("GraphQL punctuation is refused in a Runpod pod id",
+          bad_runpod.ready()[0] is False and "invalid format" in bad_runpod.ready()[1])
+    no_calls = StubTransport([])
+    bad_runpod.terminate(no_calls)
+    check("an invalid provider id cannot reach the transport", no_calls.calls == [])
 
 
 def test_unknown_provider_degrades():
@@ -781,6 +793,16 @@ def http(method, path, data=None, port=18333):
         return None, str(e)
 
 
+def http_headers(path, port=18333):
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}{path}", timeout=10) as response:
+            response.read()
+            return dict(response.headers.items())
+    except Exception:
+        return {}
+
+
 def test_landing(tmp):
     section("landing page: auth, confirmation, locked refusal")
     root = os.path.join(tmp, "inst5")
@@ -803,6 +825,14 @@ def test_landing(tmp):
             if http("GET", "/?token=tok")[0] == 200:
                 break
             time.sleep(0.25)
+
+        headers = {k.lower(): v for k, v in http_headers("/?token=tok").items()}
+        check("credential-bearing landing responses are not cached",
+              headers.get("cache-control") == "no-store", str(headers))
+        check("landing capability tokens are not sent as referrers",
+              headers.get("referrer-policy") == "no-referrer", str(headers))
+        check("the landing page cannot be framed",
+              headers.get("x-frame-options") == "DENY", str(headers))
 
         code, _ = http("GET", "/terminate")
         check("GET /terminate with no token is refused", code == 403, str(code))

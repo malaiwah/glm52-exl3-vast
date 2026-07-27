@@ -95,7 +95,7 @@ FAMILIES = {
                       "VLLM_EXL3_TRELLIS_MAX_M", "VLLM_EXL3_TRELLIS_MIN_M",
                       "VISION", "VISION_CHUNKS", "BASE_GENERATION"),
         "defaults": {
-            "MAX_MODEL_LEN": 524288, "MTP_TOKENS": 3,
+            "MAX_MODEL_LEN": 524288, "MODEL_OUTPUT_LIMIT": 131072, "MTP_TOKENS": 3,
             "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
             "GPU_MEMORY_UTILIZATION": 0.93, "GPU_BLOCKS_OVERRIDE": 2048,
             "KV_CACHE_DTYPE": "fp8", "SERVED_MODEL_NAME": "GLM-5.2",
@@ -125,49 +125,74 @@ FAMILIES = {
                   "default here has a measurement behind it; see README.md."),
     },
     "qwen36": {
-        "label": "Qwen3.6 27B (dense, hybrid Gated DeltaNet) — UNTESTED here",
+        "label": "Qwen3.6 27B NVFP4 — low-cost Blackwell development profile",
         "tested": False,
         "env_block": "generic",
-        "default_variant": "qwen36-bf16",
+        "default_variant": "qwen36-nvfp4",
         # nvfp4_ds_mla is an MLA KV layout; it does not exist for this family.
         "kv_dtypes": ["auto", "fp8"],
-        # The model card's own vLLM line uses
-        #   --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
-        # so speculation applies here too — with a different method and without
-        # any of the MTP78 draft machinery.
-        "spec_method": "qwen3_next_mtp",
-        "own_knobs": (),
+        "spec_method": "mtp",
+        "own_knobs": ("MULTIMODAL",),
         "defaults": {
-            # No TP here either: it comes from the GPUs actually visible. 27B at
-            # BF16 is ~55.6 GB, so it fits one 96 GB card, which is what makes
-            # this preset useful on a single-GPU rental — but on a 4-GPU box
-            # there is no reason to leave three idle.
-            "MAX_MODEL_LEN": 262144,        # native; 1M needs YaRN rope scaling
-            "MTP_TOKENS": 2,                # the model card's number
-            "MAX_NUM_SEQS": 8,
-            "MAX_NUM_BATCHED_TOKENS": 3072,
+            "TENSOR_PARALLEL_SIZE": 1,
+            "MAX_MODEL_LEN": 32768,
+            "MODEL_OUTPUT_LIMIT": 8192,
+            "MTP_TOKENS": 0,
+            "MAX_NUM_SEQS": 4,
+            "MAX_NUM_BATCHED_TOKENS": 4096,
             "GPU_MEMORY_UTILIZATION": 0.90,
-            "GPU_BLOCKS_OVERRIDE": 0,       # let vLLM size the pool
+            "GPU_BLOCKS_OVERRIDE": 0,
+            "OFFLOAD_FRACTION": 0,
             "KV_CACHE_DTYPE": "auto",
             "SERVED_MODEL_NAME": "Qwen3.6-27B",
+            "MULTIMODAL": False,
         },
         "serve_args": [
+            "--load-format", "safetensors",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser", "qwen3_coder",
             "--reasoning-parser", "qwen3",
         ],
-        "compilation_config": (
-            '{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":'
-            '[%(CUDAGRAPH_CAPTURE_SIZES)s]}'),
         "notes": (
-            "UNVALIDATED PRESET. Qwen3.6-27B is a DENSE 27B model with hybrid "
-            "attention (16 x (3 x Gated DeltaNet -> FFN) + 1 x Gated Attention -> FFN), "
-            "262,144 native context extensible to ~1M with YaRN. It is not MLA, so "
-            "DCP, the sparse-indexer hf_overrides and the EXL3 trellis have no meaning "
-            "here and are refused rather than silently ignored. Facts from the model "
-            "card (huggingface.co/Qwen/Qwen3.6-27B); the serve line is derived from "
-            "the card's own vLLM example. NOBODY HAS BOOTED THIS IMAGE WITH IT: "
-            "whether this vLLM fork implements Gated DeltaNet and qwen3_next_mtp is "
-            "unknown. No tool-call parser is set — the card does not name one, and "
-            "guessing wrong makes --enable-auto-tool-choice fail at startup."),
+            "ModelOpt NVFP4 checkpoint sized for one Blackwell GPU. The appliance "
+            "path, native vision handling, thinking-content normalization and MTP "
+            "method were live-qualified with a small Qwen3.5 checkpoint; the full "
+            "27B checkpoint remains a production-scale residual test. MTP is opt-in "
+            "and uses vLLM's current 'mtp' method. GLM-only MLA/DCP/EXL3 settings "
+            "are removed rather than inherited from the base image."),
+    },
+    "custom": {
+        "label": "Custom checkpoint — conservative generic vLLM profile",
+        "tested": False,
+        "env_block": "generic",
+        "default_variant": "custom",
+        "kv_dtypes": ["auto", "fp8"],
+        "spec_method": "mtp",
+        "own_knobs": ("MODEL_ID", "QUANTIZATION", "REASONING_PARSER",
+                      "TOOL_CALL_PARSER", "MULTIMODAL"),
+        "defaults": {
+            "TENSOR_PARALLEL_SIZE": 1,
+            "MAX_MODEL_LEN": 32768,
+            "MODEL_OUTPUT_LIMIT": 8192,
+            "MTP_TOKENS": 0,
+            "MAX_NUM_SEQS": 4,
+            "MAX_NUM_BATCHED_TOKENS": 4096,
+            "GPU_MEMORY_UTILIZATION": 0.90,
+            "GPU_BLOCKS_OVERRIDE": 0,
+            "OFFLOAD_FRACTION": 0,
+            "KV_CACHE_DTYPE": "auto",
+            "SERVED_MODEL_NAME": "Local-model",
+            "MODEL_ID": "",
+            "QUANTIZATION": "",
+            "REASONING_PARSER": "",
+            "TOOL_CALL_PARSER": "",
+            "MULTIMODAL": True,
+        },
+        "serve_args": [],
+        "notes": (
+            "Generic profile for another Hugging Face checkpoint. It deliberately "
+            "does not guess architecture-specific parsers, quantization, speculative "
+            "decoding, or GLM kernel settings."),
     },
 }
 
@@ -204,16 +229,24 @@ VARIANTS = {
         "download_gib": 400,
         "tested": False,
     },
-    "qwen36-bf16": {
+    "qwen36-nvfp4": {
         "family": "qwen36",
-        "label": "Qwen3.6-27B BF16 (UNVALIDATED preset)",
-        "repo": "Qwen/Qwen3.6-27B",
-        "dirname": "Qwen3.6-27B",
-        # No --quantization at all: the upstream checkpoint is BF16, and naming a
-        # quantization method the checkpoint does not carry is a boot failure.
+        "label": "Qwen3.6-27B ModelOpt NVFP4",
+        "repo": "nvidia/Qwen3.6-27B-NVFP4",
+        "dirname": "Qwen3.6-27B-NVFP4",
+        "quantization": "modelopt",
+        "kv_scales_calibrated": False,
+        "download_gib": 21,
+        "tested": False,
+    },
+    "custom": {
+        "family": "custom",
+        "label": "Custom Hugging Face checkpoint",
+        "repo": "",
+        "dirname": "custom",
         "quantization": "",
         "kv_scales_calibrated": False,
-        "download_gib": 56,
+        "download_gib": 0,
         "tested": False,
     },
 }
@@ -256,10 +289,10 @@ KNOBS = [
              "engine flags, which knobs exist, and which of the measured failure rules "
              "apply — MLA-only features like DCP and the EXL3 trellis are refused "
              "outside GLM rather than silently ignored. 'glm52' is the family every "
-             "number in this README was measured on. 'qwen36' is a dense 27B preset "
-             "that nobody has booted with this image: it exists so the template can "
-             "run on one GPU and be iterated on, not because it is known to work. "
-             "Changing family triggers a fresh download.")),
+             "production number in this README was measured on. 'qwen36' is the "
+             "one-GPU NVFP4 development profile; 'custom' accepts another Hugging "
+             "Face checkpoint without guessing architecture-specific flags. Changing "
+             "family triggers a fresh download.")),
 
     dict(key="TENSOR_PARALLEL_SIZE", type="int", default=4, min=1, max=16,
          group="Parallelism", scope="engine", label="Tensor parallel size",
@@ -285,6 +318,37 @@ KNOBS = [
              "disk, gives up ~30% of the KV pool, and this template's serve args for "
              "it are derived, not measured. Switching variants triggers a fresh "
              "multi-hundred-GB download.")),
+
+    dict(key="MODEL_ID", families=("custom",), type="str", default="",
+         group="Model", scope="download", label="Hugging Face model ID",
+         rationale=(
+             "Repository to download for the custom profile, for example "
+             "'Qwen/Qwen3.5-0.8B'. Required when MODEL_FAMILY=custom.")),
+
+    dict(key="QUANTIZATION", families=("custom",), type="str", default="",
+         group="Model", scope="engine", label="vLLM quantization method",
+         rationale=(
+             "Optional --quantization value for a custom checkpoint. Leave empty "
+             "when the checkpoint auto-detects its quantization.")),
+
+    dict(key="REASONING_PARSER", families=("custom",), type="str", default="",
+         group="Serving", scope="engine", label="Reasoning parser",
+         rationale=(
+             "Optional vLLM reasoning parser for the custom checkpoint. It is not "
+             "guessed because a wrong parser can hide or corrupt response content.")),
+
+    dict(key="TOOL_CALL_PARSER", families=("custom",), type="str", default="",
+         group="Serving", scope="engine", label="Tool-call parser",
+         rationale=(
+             "Optional vLLM tool-call parser. Supplying one also enables automatic "
+             "tool choice; leave empty for models without a verified parser.")),
+
+    dict(key="MULTIMODAL", families=("qwen36", "custom"), type="bool", default=True,
+         group="Multimodal", scope="engine", label="Load native multimodal encoder",
+         rationale=(
+             "When off, passes --language-model-only to save VRAM. Qwen's economical "
+             "profile defaults off; enabling it uses the checkpoint's native vision "
+             "encoder. GLM's grafted vision path remains controlled by VISION.")),
 
     dict(key="MAX_MODEL_LEN", type="int", default=524288, min=4096, max=1048576,
          group="Model", scope="engine", label="Max context length",
@@ -439,6 +503,13 @@ KNOBS = [
              "0.93 is the value the 512K fp8 pool was validated at on 96 GB cards. "
              "Memory-profile draws vary by a few hundred MiB run to run, so a value "
              "that boots 2 times in 3 is not a value that boots.")),
+
+    dict(key="MODEL_OUTPUT_LIMIT", type="int", default=131072, min=256, max=262144,
+         group="Serving", scope="engine", label="Client output limit",
+         rationale=(
+             "Maximum generation length advertised by the landing-page client "
+             "snippets and used by quick chat. This does not enlarge the model's "
+             "context window; prompt plus output must still fit MAX_MODEL_LEN.")),
 
     dict(key="OFFLOAD_FRACTION", type="float", default=0.70, min=0.0, max=0.95,
          group="Memory", scope="engine", label="DRAM KV offload fraction",
@@ -995,6 +1066,16 @@ def family_serve_args(cfg: dict):
     variant = VARIANTS.get(cfg.get("MODEL_VARIANT"), {})
     if variant.get("quantization"):
         args = ["--quantization", variant["quantization"]] + args
+    if cfg.get("MODEL_FAMILY") in ("qwen36", "custom") and not cfg.get("MULTIMODAL"):
+        args += ["--language-model-only"]
+    if cfg.get("MODEL_FAMILY") == "custom":
+        if cfg.get("QUANTIZATION"):
+            args = ["--quantization", cfg["QUANTIZATION"]] + args
+        if cfg.get("REASONING_PARSER"):
+            args += ["--reasoning-parser", cfg["REASONING_PARSER"]]
+        if cfg.get("TOOL_CALL_PARSER"):
+            args += ["--enable-auto-tool-choice", "--tool-call-parser",
+                     cfg["TOOL_CALL_PARSER"]]
     comp = fam.get("compilation_config")
     if comp:
         args += ["--compilation-config", comp % subs]
@@ -1008,9 +1089,16 @@ def derive(cfg: dict) -> dict:
     variant = VARIANTS.get(cfg["MODEL_VARIANT"], VARIANTS["exl3-tr3"])
     draft = DRAFTS.get(cfg["MTP_DRAFT"], DRAFTS["tr3-graft"])
     out = dict(cfg)
-    out["MODEL_REPO"] = variant["repo"]
-    out["MODEL_DIRNAME"] = variant["dirname"]
-    out["QUANTIZATION"] = variant["quantization"]
+    if fam_name == "custom":
+        model_id = cfg.get("MODEL_ID", "")
+        dirname = re.sub(r"[^A-Za-z0-9._-]", "-", model_id).strip("-") or "custom"
+        out["MODEL_REPO"] = model_id
+        out["MODEL_DIRNAME"] = os.path.join("models", dirname)
+        out["QUANTIZATION"] = cfg.get("QUANTIZATION", "")
+    else:
+        out["MODEL_REPO"] = variant["repo"]
+        out["MODEL_DIRNAME"] = variant["dirname"]
+        out["QUANTIZATION"] = variant["quantization"]
     out["FAMILY_ENV_BLOCK"] = fam.get("env_block", "generic")
     out["SPEC_METHOD"] = fam.get("spec_method", "mtp")
     out["FAMILY_SERVE_ARGS"] = family_serve_args(cfg)
@@ -1063,11 +1151,13 @@ def validate(cfg: dict, context=None):
     # 0. family coherence ---------------------------------------------------
     if not fam.get("tested"):
         warn("family-untested", ["MODEL_FAMILY"],
-             f"{fam['label']}: NOBODY HAS BOOTED THIS IMAGE WITH THIS FAMILY. The serve "
-             "arguments are derived from the model card, not measured, and it is unknown "
-             "whether this vLLM build implements the architecture at all. Expect to "
-             "iterate, and treat a clean boot as the beginning of validation rather than "
-             "the end of it.")
+             f"{fam['label']}: this exact full-size checkpoint/profile has not completed "
+             "the production-scale qualification matrix. Treat a clean boot as the "
+             "beginning of model-specific validation rather than the end of it.")
+    if fam_name == "custom" and not cfg.get("MODEL_ID"):
+        err("custom-model-required", ["MODEL_ID"],
+            "MODEL_FAMILY=custom requires MODEL_ID=<Hugging Face repo>; refusing "
+            "to guess or silently download GLM-5.2.")
     if variant.get("family") and variant["family"] != fam_name:
         err("variant-family-mismatch", ["MODEL_VARIANT", "MODEL_FAMILY"],
             f"model variant '{cfg['MODEL_VARIANT']}' belongs to the "

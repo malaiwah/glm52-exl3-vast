@@ -48,10 +48,16 @@ TOKEN = os.environ.get("OPEN_BUTTON_TOKEN", "")
 MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
 STATUS_FILE = os.environ.get("STATUS_FILE", "/tmp/glm-boot-status.json")
 ALLOW_INSECURE = os.environ.get("LANDING_ALLOW_INSECURE", "0") == "1"
+TRUST_PROXY_HTTPS = os.environ.get("LANDING_TRUST_PROXY_HTTPS", "0") == "1"
 API_PORT = os.environ.get("LANDING_API_PORT", "8000")
 
 
 _ssl_ctx = None
+
+
+def is_secure_connection(connection) -> bool:
+    """Runpod's managed proxy terminates TLS before forwarding to this port."""
+    return isinstance(connection, ssl.SSLSocket) or ALLOW_INSECURE or TRUST_PROXY_HTTPS
 
 
 def ssl_ctx():
@@ -73,6 +79,16 @@ def status() -> dict:
             return json.load(f)
     except (OSError, ValueError):
         return {}
+
+
+def js_literal(value) -> str:
+    """JSON string safe to embed inside an inline HTML script element."""
+    return (json.dumps(value)
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029"))
 
 
 def model_dir() -> str:
@@ -142,7 +158,7 @@ SNIPPETS = [
       "name": "$model",
       "options": {"baseURL": "$ep/v1", "apiKey": "$key"},
       "models": {
-        "$model": {"name": "$model", "limit": {"context": $ctx, "output": 131072}}
+        "$model": {"name": "$model", "limit": {"context": $ctx, "output": $output}}
       }
     }
   }
@@ -235,6 +251,27 @@ label.thinkbox{font-size:.78rem;color:var(--muted);white-space:nowrap}
 .legend{font-size:.72rem;color:var(--muted)}
 .legend i{display:inline-block;width:.9em;height:3px;border-radius:2px;
 vertical-align:middle;margin:0 .3em 0 .8em}
+.chatempty{height:100%;min-height:10rem;display:grid;place-content:center;text-align:center;
+padding:1.25rem;color:var(--muted)}
+.chatempty-icon{font-size:1.4rem;color:var(--accent);margin-bottom:.45rem}
+.chatempty strong{display:block;color:var(--fg);font-size:.9rem;margin-bottom:.2rem}
+.chatempty span{display:block;font-size:.76rem;max-width:15rem}
+.composer{display:block;padding:.65rem;border-top:1px solid var(--line)}
+.inputrow{display:flex;gap:.5rem;align-items:flex-end}
+.composerbar{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.5rem}
+.chatprefs,.composer-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+.turncount{color:var(--muted);font-size:.7rem}
+.thinkbox{position:relative;display:flex;align-items:center;gap:.35rem;color:var(--muted);
+font-size:.73rem;white-space:nowrap;cursor:pointer;user-select:none}
+.thinkbox input{position:absolute;opacity:0;pointer-events:none}
+.switch{position:relative;width:1.8rem;height:1rem;border-radius:99px;background:var(--line)}
+.switch:after{content:"";position:absolute;top:.13rem;left:.13rem;width:.74rem;height:.74rem;
+border-radius:50%;background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.2);
+transition:transform .18s ease}
+.thinkbox input:checked+.switch{background:var(--accent)}
+.thinkbox input:checked+.switch:after{transform:translateX(.8rem)}
+@media(max-width:38rem){.composerbar{align-items:flex-start;flex-direction:column}
+.composer-actions{width:100%;justify-content:flex-end}}
 </style>"""
 
 # Live dashboard: the browser scrapes $ep/metrics (Bearer $key unless placeholder).
@@ -256,7 +293,7 @@ METRICS_SECTION = Template("""
 </div>
 <script>
 (function(){
-var EP="$ep", KEY="$key";
+var EP=$ep_js, KEY=$key_js;
 var HDRS = KEY.charAt(0)==="<" ? {} : {"Authorization":"Bearer "+KEY};
 var N=100, S={gen:[],pro:[],run:[],wai:[],kv:[],hit:[]};
 var prev=null, prevT=0;
@@ -339,65 +376,130 @@ tick();
 </script>""")
 
 
-CHAT_WIDGET = """<div id=log></div>
+CHAT_WIDGET = """<div id=log aria-live=polite>
+ <div class=chatempty id=chatempty>
+  <div><div class=chatempty-icon aria-hidden=true>✦</div>
+  <strong>Start a conversation</strong>
+  <span>Follow up naturally — this chat keeps the conversation until you clear it.</span></div>
+ </div>
+</div>
 <div class=composer>
-<textarea id=in placeholder="Message (Ctrl+Enter to send)"></textarea>
-<div class=side>
-<button id=send class=primary>Send</button>
-<button id=stop disabled>Stop</button>
-<button id=clear>Clear</button>
-<label class=thinkbox><input type=checkbox id=think checked> thinking</label>
-</div></div>"""
+ <div class=inputrow>
+  <textarea id=in rows=2 aria-label="Chat message"
+   placeholder="Message the model…"></textarea>
+  <button id=send class=primary type=button>Send</button>
+ </div>
+ <div class=composerbar>
+  <div class=chatprefs>
+   <label class=thinkbox title="Ask the model to reason before answering">
+    <input type=checkbox id=think checked><span class=switch aria-hidden=true></span>
+    Thinking
+   </label>
+   <label class=thinkbox title="Include saved reasoning in later turns">
+    <input type=checkbox id=preserve><span class=switch aria-hidden=true></span>
+    Preserve thinking
+   </label>
+  </div>
+  <div class=composer-actions>
+   <span class=turncount id=turns>New conversation</span>
+   <button id=stop type=button disabled>Stop</button>
+   <button id=clear type=button>Clear</button>
+  </div>
+ </div>
+</div>"""
 
 CHAT_JS = """<script>
-const EP="$ep", KEY="$key", MODEL="$model", msgs=[];
+const EP=$ep_js, KEY=$key_js, MODEL=$model_js, msgs=[];
 const log=document.getElementById("log"), inp=document.getElementById("in");
 let ctrl=null;
-function el(tag,cls,txt){const e=document.createElement(tag);if(cls)e.className=cls;if(txt)e.textContent=txt;log.appendChild(e);log.scrollTop=log.scrollHeight;return e}
+function el(tag,cls,txt){
+  const empty=document.getElementById("chatempty");if(empty)empty.remove();
+  const e=document.createElement(tag);if(cls)e.className=cls;
+  if(txt)e.textContent=txt;log.appendChild(e);log.scrollTop=log.scrollHeight;return e
+}
+function emptyState(){
+  log.innerHTML='<div class="chatempty" id="chatempty"><div><div class="chatempty-icon" aria-hidden="true">✦</div><strong>Start a conversation</strong><span>Follow up naturally — this chat keeps the conversation until you clear it.</span></div></div>'
+}
+function wireMessages(){
+  const keep=document.getElementById("preserve").checked;
+  return msgs.map(m=>{
+    const wire={role:m.role,content:m.content};
+    if(keep&&m.role==="assistant"&&m.reasoning&&!m.reasoningOnly)
+      wire[m.reasoningField||"reasoning_content"]=m.reasoning;
+    return wire;
+  });
+}
+function updateTurns(){
+  const n=msgs.filter(m=>m.role==="assistant").length;
+  document.getElementById("turns").textContent=n?n+" turn"+(n===1?"":"s"):"New conversation";
+}
 async function send(){
   const text=inp.value.trim(); if(!text||ctrl)return;
-  inp.value=""; msgs.push({role:"user",content:text}); el("div","msg you",text);
+  inp.value="";inp.style.height="";msgs.push({role:"user",content:text});el("div","msg you",text);
   const think=el("details","think"); think.appendChild(document.createElement("summary")).textContent="thinking…";
   const tbody=think.appendChild(document.createElement("div"));
   const out=el("div","msg bot","");
-  ctrl=new AbortController(); document.getElementById("stop").disabled=false;
-  let answer="", reasoning="";
+  ctrl=new AbortController();document.getElementById("stop").disabled=false;
+  document.getElementById("send").disabled=true;
+  let answer="",reasoning="",reasoningField="",failed=false;
   try{
     const r=await fetch(EP+"/v1/chat/completions",{method:"POST",signal:ctrl.signal,
       headers:{"Authorization":"Bearer "+KEY,"Content-Type":"application/json"},
-      body:JSON.stringify({model:MODEL,messages:msgs,stream:true,max_tokens:8192,
+      body:JSON.stringify({model:MODEL,messages:wireMessages(),stream:true,max_tokens:$output,
         chat_template_kwargs:{enable_thinking:document.getElementById("think").checked}})});
-    if(!r.ok){out.textContent="HTTP "+r.status+": "+await r.text();return}
+    if(!r.ok){failed=true;out.textContent="HTTP "+r.status+": "+await r.text();return}
     const rd=r.body.getReader(), dec=new TextDecoder(); let buf="";
     for(;;){const {done,value}=await rd.read(); if(done)break;
       buf+=dec.decode(value,{stream:true}); const lines=buf.split("\\n"); buf=lines.pop();
       for(const ln of lines){ if(!ln.startsWith("data: ")||ln.includes("[DONE]"))continue;
-        const ch=JSON.parse(ln.slice(6)).choices;
+        let packet;try{packet=JSON.parse(ln.slice(6))}catch(_){continue}
+        const ch=packet.choices;
         if(!ch||!ch.length)continue; // final usage chunk has choices:[]
         const d=ch[0].delta||{};
-        if(d.reasoning_content){reasoning+=d.reasoning_content;tbody.textContent=reasoning;think.open=true}
+        const thought=d.reasoning_content??d.reasoning;
+        if(thought){
+          reasoningField=d.reasoning_content!=null?"reasoning_content":"reasoning";
+          reasoning+=thought;tbody.textContent=reasoning;think.open=true
+        }
         if(d.content){answer+=d.content;out.textContent=answer;
           if(think.open){think.open=false;think.querySelector("summary").textContent="thinking ("+reasoning.length+" chars)"}}
         log.scrollTop=log.scrollHeight;}}
-  }catch(e){if(e.name!=="AbortError")out.textContent+="\\n[error: "+e+"]"}
-  finally{ctrl=null;document.getElementById("stop").disabled=true;
-    if(!reasoning)think.remove();
-    msgs.push({role:"assistant",content:answer});}
+  }catch(e){if(e.name!=="AbortError"){failed=true;out.textContent="Request failed. "+e}}
+  finally{
+    const stopped=ctrl&&ctrl.signal.aborted,finalText=answer||reasoning;
+    ctrl=null;document.getElementById("stop").disabled=true;
+    document.getElementById("send").disabled=false;
+    if(!answer&&reasoning){out.textContent=reasoning;think.remove()}
+    else if(!reasoning)think.remove();
+    else think.querySelector("summary").textContent="thinking ("+reasoning.length+" chars)";
+    if(!finalText&&!failed)out.textContent=stopped?"Generation stopped.":"The model returned no text.";
+    if(finalText){
+      const preserve=document.getElementById("preserve").checked;
+      msgs.push({role:"assistant",content:finalText,
+        reasoning:preserve&&answer?reasoning:"",
+        reasoningField:reasoningField||"reasoning_content",
+        reasoningOnly:!answer&&!!reasoning});
+      updateTurns();
+    }
+    else if(msgs.length&&msgs[msgs.length-1].role==="user")msgs.pop();
+    inp.focus();
+  }
 }
 document.getElementById("send").onclick=send;
 document.getElementById("stop").onclick=()=>ctrl&&ctrl.abort();
-document.getElementById("clear").onclick=()=>{msgs.length=0;log.innerHTML=""};
+document.getElementById("clear").onclick=()=>{msgs.length=0;emptyState();updateTurns();inp.focus()};
 inp.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter")send()});
+inp.addEventListener("input",()=>{inp.style.height="";inp.style.height=Math.min(inp.scrollHeight,144)+"px"});
 </script>"""
 
-CHAT_PAGE = Template("""<!doctype html><html><head><title>$model chat</title>
+CHAT_PAGE = Template("""<!doctype html><html><head><title>$model_html chat</title>
 <meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE + """<style>
 .wrap{max-width:52rem;display:flex;flex-direction:column;height:100vh;padding-bottom:1rem}
 #log{flex:1;overflow-y:auto;padding:.5rem 0}
 .msg.bot{background:var(--card)}
 </style></head><body><div class=wrap>
-<header class=hero><h1><b>$model</b> quick chat</h1>
-<span class=sub><a href="/?token=$token">&larr; status &amp; dashboard</a></span></header>
+<header class=hero><h1><b>$model_html</b> quick chat</h1>
+<span class=sub><a href="/?token=$token_html">&larr; status &amp; dashboard</a></span></header>
 """ + CHAT_WIDGET + CHAT_JS + """<script>inp.focus();</script></div></body></html>""")
 
 def page_head(title="vLLM turnkey"):
@@ -494,6 +596,7 @@ def deployment() -> dict:
     out["family"] = fam["label"]
     out["title"] = f"{served} turnkey"
     out["context"] = int(eff.get("MAX_MODEL_LEN") or 0)
+    out["output"] = int(eff.get("MODEL_OUTPUT_LIMIT") or 8192)
     out["served_names"] = str(eff.get("SERVED_MODEL_NAME", served)).split()
     ctx = out["context"]
     ctx_s = f"{ctx // 1024}K" if ctx >= 1024 else str(ctx)
@@ -508,7 +611,7 @@ def deployment() -> dict:
                                if str(gpus) != str(tp) else
                                f" x {out['gpu_name'] or 'GPU'}"))
     out["chips"] = chips
-    out["repo"] = variant.get("repo", "")
+    out["repo"] = gc.derive(eff).get("MODEL_REPO", variant.get("repo", ""))
     out["tested"] = fam.get("tested", True)
     return out
 
@@ -1101,10 +1204,11 @@ def render(secure: bool, tok: str = "") -> bytes:
              f"<header class=hero><h1><b>{html.escape(dep['model'] or 'vLLM')}</b> "
              f"turnkey</h1><span class=sub>{subtitle}</span></header>",]
     if not dep.get("tested", True):
-        parts.append("<div class=card style='border-color:#e5484d'><h3>Untested "
-                     "preset</h3><div class=v>" + html.escape(dep["family"]) +
-                     "</div><div class=sub>Nobody has booted this image with this "
-                     "model family. Treat every default as a starting point.</div>"
+        parts.append("<div class=card style='border-color:#e5484d'><h3>Residual "
+                     "qualification</h3><div class=v>" + html.escape(dep["family"]) +
+                     "</div><div class=sub>This exact full-size checkpoint/profile "
+                     "has not completed the production-scale matrix. Treat a clean "
+                     "boot as the start of model-specific validation.</div>"
                      "</div>")
     parts += [
              "<div class=grid>",
@@ -1180,12 +1284,13 @@ def render(secure: bool, tok: str = "") -> bytes:
                                        "<code>VLLM_API_KEY</code> yourself")
             parts.append(f"<p class=sub>The API key is printed in {where}.</p>")
         if serving:
-            parts.append(METRICS_SECTION.substitute(ep=endpoint, key=key))
+            parts.append(METRICS_SECTION.substitute(
+                ep_js=js_literal(endpoint), key_js=js_literal(key)))
         parts.append("<h2>Client configs</h2>")
         for name, where, body in SNIPPETS:
             filled = Template(body).substitute(
                 ep=endpoint, key=key, model=dep["model"] or "model",
-                ctx=dep.get("context") or 32768)
+                ctx=dep.get("context") or 32768, output=dep.get("output") or 8192)
             parts.append(f"<details><summary>{html.escape(name)}</summary>"
                          f"<p class=sub><code>{html.escape(where)}</code></p>"
                          f"<pre>{html.escape(filled)}</pre></details>")
@@ -1217,7 +1322,9 @@ def render(secure: bool, tok: str = "") -> bytes:
     if chat_ok:
         parts.append("<aside class=chatpane><h2>Quick chat</h2>" + CHAT_WIDGET +
                      "</aside>" + Template(CHAT_JS).substitute(
-                         ep=endpoint, key=real0, model=dep["model"] or "model"))
+                         ep_js=js_literal(endpoint), key_js=js_literal(real0),
+                         model_js=js_literal(dep["model"] or "model"),
+                         output=dep.get("output") or 8192))
     parts.append("</div></div></body></html>")
     return "".join(parts).encode()
 
@@ -1250,6 +1357,15 @@ POST_PATHS = ("/config/apply", "/config/import", "/config/reset", "/config/resta
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # keep the vast console log quiet
         pass
+
+    def end_headers(self):
+        # Pages contain bearer credentials and capability tokens. Keep them out
+        # of browser/proxy caches, referrers, MIME sniffing and framing contexts.
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        super().end_headers()
 
     # -- helpers ---------------------------------------------------------
     def _send(self, body: bytes, ctype="text/html; charset=utf-8", code=200, extra=()):
@@ -1306,7 +1422,7 @@ class Handler(BaseHTTPRequestHandler):
         tok = form.get("token", [""])[0] or parse_qs(url.query).get("token", [""])[0]
         if not self._config_guard(tok):
             return
-        secure = isinstance(self.connection, ssl.SSLSocket) or ALLOW_INSECURE
+        secure = is_secure_connection(self.connection)
         try:
             if url.path == "/config/apply":
                 values, errs = _form_values(form)
@@ -1384,7 +1500,7 @@ class Handler(BaseHTTPRequestHandler):
         if TOKEN and tok != TOKEN:
             self.send_error(403, "bad token (use the vast console Open button)")
             return
-        secure = isinstance(self.connection, ssl.SSLSocket) or ALLOW_INSECURE
+        secure = is_secure_connection(self.connection)
         hostport = status().get("https_hostport", "")
         if not secure and ssl_ctx() and hostport:
             # Upgrade the Open button's plain-HTTP hit to the TLS view of this page
@@ -1400,9 +1516,14 @@ class Handler(BaseHTTPRequestHandler):
             if not (secure and TOKEN and key and st.get("endpoint")):
                 self.send_error(403, "chat needs TLS + token gate + a running endpoint")
                 return
-            body = CHAT_PAGE.substitute(ep=st["endpoint"], key=key,
-                                        model=deployment()["model"] or "model",
-                                        token=html.escape(tok, quote=True)).encode()
+            dep = deployment()
+            body = CHAT_PAGE.substitute(
+                                        ep_js=js_literal(st["endpoint"]),
+                                        key_js=js_literal(key),
+                                        model_js=js_literal(dep["model"] or "model"),
+                                        model_html=html.escape(dep["model"] or "model"),
+                                        output=dep.get("output") or 8192,
+                                        token_html=html.escape(tok, quote=True)).encode()
         elif url.path == "/config":
             if not self._config_guard(tok):
                 return
