@@ -1,11 +1,12 @@
-# v26 = GG v20 final + EXL3 (upstream local-inference-lab/vllm#139 rebased on
-# gilded-gnosis v20). The previous pin (sha256:bfd6d667, vllm 0.17.0rc1.dev4499+g60c82d972)
-# was the PRE-convergence EXL3 build and carried none of the GG v20 work.
-FROM docker.io/verdictai/glm52-exl3-sparkinfer@sha256:2bb9e804a283d1da3b7e3425ff87375121285141d0d0a40d3dc09d41bf881a10
+# v29 = GG v20 + the current EXL3/Trellis layer. In particular, draft layers
+# now advertise a capturable m=1 minimum while target layers retain m=4. That
+# removes the old global VLLM_EXL3_TRELLIS_MIN_M workaround and its startup
+# failure at the MTP draft's m=1..3 graph shapes.
+FROM docker.io/verdictai/glm52-exl3-sparkinfer@sha256:2996b8ac37ff126a8aeebaa24df72e2154a2a1573df41f99eb48a4275e33eb41
 LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai and Runpod" \
       org.opencontainers.image.description="Profile-driven OpenAI endpoint: validated GLM-5.2 EXL3 production defaults plus a low-cost Qwen3.6-27B NVFP4 development profile. Weights auto-download on first boot." \
       ai.malaiwah.evidence="gists: cae272443a 7d5d7e68 f3096ae9 e8a587ad 65bb725e 929d7d8e" \
-      ai.malaiwah.base="verdictai/glm52-exl3-sparkinfer@sha256:2bb9e804a283d1da3b7e3425ff87375121285141d0d0a40d3dc09d41bf881a10"
+      ai.malaiwah.base="verdictai/glm52-exl3-sparkinfer@sha256:2996b8ac37ff126a8aeebaa24df72e2154a2a1573df41f99eb48a4275e33eb41"
 RUN pip install --no-cache-dir huggingface_hub && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && curl -sSL -o /tmp/lego.tgz https://github.com/go-acme/lego/releases/download/v4.21.0/lego_v4.21.0_linux_amd64.tar.gz \

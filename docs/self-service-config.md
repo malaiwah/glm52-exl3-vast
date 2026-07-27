@@ -75,9 +75,8 @@ applied in that container.
 ```
 
 `values` holds knob keys from the registry only; unknown keys are ignored with
-a note, out-of-range values fall back to the layer below with a note, and
-non-editable keys (`VLLM_EXL3_TRELLIS_MIN_M`, `BASE_GENERATION`) are ignored
-outright. A state file that is not valid JSON is ignored entirely rather than
+a note and out-of-range values fall back to the layer below with a note. A
+state file that is not valid JSON is ignored entirely rather than
 bricking the boot — the note appears in the boot log and on `/config`.
 
 `known-good.json` stores `{ts, values, effective, sources, verify}`. Restoring
@@ -95,17 +94,17 @@ knobs to the model. Summary of the trade each one makes:
 | knob | trades |
 |---|---|
 | `MODEL_VARIANT` | EXL3-TR3 (measured; smallest weights, biggest pool) vs NVFP4 (faster decode, calibrated KV scales, ~30% less pool, **untested here**). Switching costs a full re-download. |
-| `MTP_DRAFT` | `tr3-graft` (3.7 GB, +3.8 GB/GPU of KV, the only draft with long-context evidence) / `tr3-override` (best acceptance, **unbootable on v20**) / `nvfp4` (external dir, needs `DRAFT_QUANTIZATION`) / `bf16` (19.3 GB, always works) / `off` (~30% slower decode). |
+| `MTP_DRAFT` | `tr3-graft` (3.7 GB, +3.8 GB/GPU of KV) / v29-compatible separate `tr3-override` / `nvfp4` (external dir, needs `DRAFT_QUANTIZATION`) / `bf16` (19.3 GB) / `off` (~30% slower decode). |
 | `MTP_TOKENS` | Depth of speculation. With the cheap trellis draft MTP-5 beats MTP-3 (53.4 vs 51.5 tok/s); with the 19.3 GB BF16 draft it lost 22%. Also widens the decode query width. |
+| `MTP_DRAFT_SAMPLE_METHOD` | v29-qualified `greedy` drafting vs opt-in `probabilistic` proposals. |
 | `DCP` | KV sharded across ranks (4) vs replicated (1). DCP=4 is what makes 512K fit. |
-| `KV_CACHE_DTYPE` | fp8 (safe, ~1.7x bytes/token) vs nvfp4 (needs calibrated MLA outer scales; silent long-context corruption without them). |
+| `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM v29 default) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
 | `MAX_MODEL_LEN` | Longest request, and a hard startup gate against available KV. |
-| `GPU_BLOCKS_OVERRIDE` | Predictable 512K pool vs "take everything" (~697K tokens measured). |
-| `OFFLOAD_FRACTION` | Host RAM for a pinned KV tier; pure cache, `recompute` on miss. |
+| `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool (~1.0–1.1M on the release shape); a positive value pins a reproducible smaller pool. |
+| `OFFLOAD_FRACTION` | Opt-in host RAM for a pinned KV tier; total bytes are divided across TP workers; pure cache, `recompute` on miss. |
 | `VISION` | Image input vs long-context correctness on EXL3 (see rule 6) and ~1.31 GiB/GPU + ~13% text decode. |
 | `MAX_NUM_SEQS`, `MAX_NUM_BATCHED_TOKENS`, `GPU_MEMORY_UTILIZATION` | Concurrency and prefill chunk against the capture window and against VRAM headroom. |
 | `MAX_CUDAGRAPH_CAPTURE_SIZE`, `CUDAGRAPH_CAPTURE_SIZES`, `VLLM_EXL3_TRELLIS_MAX_M` | The three ceilings that must move together to serve more streams. |
-| `VLLM_EXL3_TRELLIS_MIN_M` | **Locked at 4.** Displayed with the reason, not editable. |
 
 ---
 
@@ -124,27 +123,14 @@ concurrency and loses throughput. Raising concurrency requires raising
 `VLLM_EXL3_TRELLIS_MAX_M` together. This is why `MAX_NUM_SEQS` defaults to 8:
 `8 * (1+3) = 32` exactly fills the window.
 
-### `trellis-min-m` — error
-`VLLM_EXL3_TRELLIS_MIN_M` must stay 4. Lowering it to 1 makes an EXL3 capture
-crash disappear but **silently corrupts output**: measured 32K needle 0/2 and
-370K 0/5, pure garbage, while short-prompt checks still passed 6/6. The knob is
-non-editable in the UI and a state file that carries a different value is
-rejected.
-
-### `capture-below-trellis-min` — error
-Any entry in `CUDAGRAPH_CAPTURE_SIZES` below the trellis minimum puts capture on
-the eager parity path and the worker dies with `EXL3 eager parity path entered
-during CUDA graph capture (m=N)`. The fix is a bigger capture size, never a
-smaller window.
-
-### `tr3-draft-on-v20` — error
-On the **GG v20 base only**, an EXL3 rank-sliced MTP draft (`MTP_DRAFT=tr3-override`)
-cannot be CUDA-graph captured: `SpeculatorCudaGraphManager` captures at m
-outside the trellis window `[4,32]` and the engine dies with `EXL3 eager parity
-path entered during CUDA graph capture (m=3)`. m=3 is invariant — it follows
-neither `num_speculative_tokens` nor `cudagraph_capture_sizes`. Valid on the
-pre-v20 base; `BASE_GENERATION` is a read-only knob so the draft type is
-validated against the image it will actually run on. `bf16` drafts work on both.
+### Role-aware Trellis minimum — fixed in v29
+The old base treated target and draft layers as if they shared one minimum.
+That made the MTP draft's m=1..3 graph shapes fail unless a global
+`VLLM_EXL3_TRELLIS_MIN_M=1` workaround was used. v29 stamps the draft role at
+construction: target layers retain m=4 and draft layers advertise a capturable
+m=1 floor. The appliance therefore leaves the variable absent. Advanced
+experiments can still set `TUNE_VLLM_EXL3_TRELLIS_MIN_M`, but it is not a
+self-service profile knob.
 
 ### `draft-quant-inherit` — error
 A draft inherits the target's `--quantization` unless its `SpeculativeConfig`
@@ -155,18 +141,18 @@ cause; a config trap, not a bug. Selecting `MTP_DRAFT=nvfp4` fills it in
 automatically, and clearing it is an error.
 
 ### `kv-nvfp4-uncalibrated` — error
-KV dtype `nvfp4_ds_mla` requires per-checkpoint calibrated MLA outer scales. The
-EXL3 checkpoint has none: with nvfp4 KV, long context silently degenerates
-(needle 0/6 at 505K, output like `".,, while.,, and and while,,,,"`) while
-GSM8K, vision and structured output all pass. fp8 is the safe default; it costs
-~1.7x KV bytes/token. Allowed on the NVFP4 variant, which does have them.
+KV dtype `nvfp4_ds_mla` requires model-calibrated MLA outer scales. v29 ships
+the GLM-5.2 scale file used by the EXL3 profile, so calibrated NVFP4 KV is its
+default. Uncalibrated earlier experiments silently degenerated at long context
+while short checks passed; other families/variants remain blocked unless their
+registry entry explicitly declares equivalent calibration.
 
 ### `vision-long-context` — warn (blunt)
 `VISION=1` on the EXL3-TR3 checkpoint **corrupts long-context output**: measured
 32K needle 0/2 with degenerate text on both the v20 and pre-v20 bases, while
 short-prompt and vision smoke tests passed 6/6. Marked EXPERIMENTAL /
-known-broken-at-long-context rather than blocked, because vision is the shipped
-default and is genuinely useful for short-prompt image work. The long-context
+known-broken-at-long-context rather than blocked, because vision is genuinely
+useful for short-prompt image work. Vision is opt-in; the long-context
 probe fails this configuration by design, so it will be reported as unverified
 rather than healthy.
 

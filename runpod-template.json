@@ -9,9 +9,10 @@
     "LANDING_PAGE": "1",
     "MODEL_PROFILE": "glm52-exl3",
     "MTP78_MODE": "graft",
-    "OFFLOAD_FRACTION": "0.70",
+    "MTP_DRAFT_SAMPLE_METHOD": "greedy",
+    "OFFLOAD_FRACTION": "0",
     "RUNPOD_DIRECT_TLS": "auto",
-    "VISION": "1"
+    "VISION": "0"
   },
   "imageName": "ghcr.io/malaiwah/glm52-exl3-vast:latest",
   "isPublic": false,

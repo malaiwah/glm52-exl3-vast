@@ -52,8 +52,8 @@ def errs(findings):
 
 # --------------------------------------------------------------------------
 
-def test_glm_unchanged():
-    section("the GLM path is exactly what it was")
+def test_glm_release_defaults():
+    section("the GLM v29 release defaults")
     eff, src, _ = resolved(gpus=4)
     check("family defaults to glm52", eff["MODEL_FAMILY"] == "glm52")
     check("TP is 4 on a 4-GPU box, and it is DETECTED not assumed",
@@ -62,10 +62,13 @@ def test_glm_unchanged():
     check("DCP follows TP", eff["DCP"] == "4" and src["DCP"] == "detected")
     check("context is 512K", eff["MAX_MODEL_LEN"] == 524288)
     check("MTP-3", eff["MTP_TOKENS"] == 3)
-    check("fp8 KV", eff["KV_CACHE_DTYPE"] == "fp8")
-    check("pool pinned at 2048 blocks", eff["GPU_BLOCKS_OVERRIDE"] == 2048)
-    check("util 0.93", eff["GPU_MEMORY_UTILIZATION"] == 0.93)
-    check("vision on", eff["VISION"] is True)
+    check("calibrated NVFP4 MLA KV", eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla")
+    check("KV pool is auto-profiled", eff["GPU_BLOCKS_OVERRIDE"] == 0)
+    check("util 0.96", eff["GPU_MEMORY_UTILIZATION"] == 0.96)
+    check("DRAM offload is opt-in", eff["OFFLOAD_FRACTION"] == 0)
+    check("vision is an opt-in feature profile", eff["VISION"] is False)
+    check("the v29-qualified draft method is greedy",
+          eff["MTP_DRAFT_SAMPLE_METHOD"] == "greedy")
     check("served name GLM-5.2", eff["SERVED_MODEL_NAME"] == "GLM-5.2")
 
     args = gc.family_serve_args(eff)
@@ -93,6 +96,32 @@ def test_glm_unchanged():
     check("spec method is mtp", d["SPEC_METHOD"] == "mtp")
     check("the MTP78 graft is still the default draft", d["MTP78_MODE"] == "graft")
     check("repo unchanged", d["MODEL_REPO"] == "brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw")
+
+
+def test_glm_release_integration():
+    section("the v29 runtime integration matches the measured launch contract")
+    entry = open(os.path.join(REPO, "entrypoint.sh")).read()
+    dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
+    runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
+    check("the base image is the pinned v29 manifest",
+          "sha256:2996b8ac37ff126a8aeebaa24df72e2154a2a1573df41f99eb48a4275e33eb41"
+          in dockerfile)
+    check("the target/draft trellis minimum is role-aware",
+          "unset VLLM_EXL3_TRELLIS_MIN_M" in entry and
+          "export VLLM_EXL3_TRELLIS_MIN_M=" not in entry)
+    for setting in (
+            "VLLM_DCP_QUERY_SPLIT=1",
+            "VLLM_DCP_TOPK_OWNER_MERGE=1",
+            "VLLM_B12X_MLA_CKV_PREFETCH_DEPTH=1",
+            "VLLM_DCP_PROJECT_BEFORE_MERGE=1",
+            "VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1"):
+        check(f"prefill policy includes {setting}", setting in entry)
+    check("offload is divided across TP workers",
+          "OFF_BYTES=$((OFF_TOTAL_BYTES / OFFLOAD_RANKS))" in entry)
+    check("the Runpod GLM template does not override safe defaults",
+          runpod["env"]["OFFLOAD_FRACTION"] == "0" and
+          runpod["env"]["VISION"] == "0" and
+          runpod["env"]["MTP_DRAFT_SAMPLE_METHOD"] == "greedy")
 
 
 def test_qwen_preset():
@@ -166,8 +195,8 @@ def test_inapplicable_knobs():
     section("knobs that cannot apply are refused, not ignored")
     eff, src, _ = resolved("qwen36")
     for key in ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
-                "VLLM_EXL3_TRELLIS_MAX_M", "VLLM_EXL3_TRELLIS_MIN_M",
-                "VISION", "VISION_CHUNKS", "BASE_GENERATION"):
+                "MTP_DRAFT_SAMPLE_METHOD", "VLLM_EXL3_TRELLIS_MAX_M",
+                "VISION", "VISION_CHUNKS"):
         check(f"{key} is marked n/a on qwen36", src[key] == "n/a", src[key])
         check(f"{key} is applicable on glm52",
               gc.applies_to(gc.KNOB_BY_KEY[key], "glm52"))
@@ -214,8 +243,6 @@ def test_rules_are_family_scoped():
     f = gc.validate(eff)
     check("the trellis concurrency rule does not apply to a dense model",
           "concurrency-window" not in ids(f), str(ids(f)))
-    check("nor does the trellis minimum rule", "trellis-min-m" not in ids(f))
-    check("nor the EXL3 draft/base rule", "tr3-draft-on-v20" not in ids(f))
     check("nor the vision long-context rule", "vision-long-context" not in ids(f))
     check("nor the DCP rules",
           not {"dcp-divides-tp", "dcp-reduces-pool"} & ids(f), str(ids(f)))
@@ -225,21 +252,9 @@ def test_rules_are_family_scoped():
     f = gc.validate(eff)
     check("the concurrency rule still fires on GLM",
           "concurrency-window" in errs(f), str(errs(f)))
-    # The trellis minimum is doubly protected: the knob is non-editable AND
-    # range-locked to 4, so a state file cannot even get a 1 into the resolver.
-    eff, _, _ = resolved(VLLM_EXL3_TRELLIS_MIN_M=1)
-    check("a state file cannot lower the trellis minimum at all",
-          eff["VLLM_EXL3_TRELLIS_MIN_M"] == 4, str(eff["VLLM_EXL3_TRELLIS_MIN_M"]))
-    # ... and if something ever did, the rule still catches it on GLM only.
-    forced = dict(eff, VLLM_EXL3_TRELLIS_MIN_M=1)
-    check("the rule still fires on GLM when the value is forced",
-          "trellis-min-m" in errs(gc.validate(forced)))
-    forced_q = dict(resolved("qwen36")[0], VLLM_EXL3_TRELLIS_MIN_M=1)
-    check("but not on a family without a trellis",
-          "trellis-min-m" not in ids(gc.validate(forced_q)))
     eff, _, _ = resolved(MTP_DRAFT="tr3-override")
-    check("the v20 rank-sliced draft rule still fires on GLM",
-          "tr3-draft-on-v20" in errs(gc.validate(eff)))
+    check("v29 accepts the separately rank-sliced EXL3 draft",
+          "tr3-draft-on-v20" not in ids(gc.validate(eff)))
 
 
 def test_family_coherence_rules():
@@ -335,7 +350,8 @@ def main():
     os.makedirs(os.environ["GLM_STATE_DIR"], exist_ok=True)
     os.makedirs(os.environ["GLM_RUNTIME_DIR"], exist_ok=True)
     try:
-        test_glm_unchanged()
+        test_glm_release_defaults()
+        test_glm_release_integration()
         test_qwen_preset()
         test_custom_profile()
         test_inapplicable_knobs()

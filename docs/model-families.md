@@ -15,9 +15,9 @@ mean anything, and which of the measured failure rules apply.
 | `scripts/glm_config.py` | `FAMILIES` registry, family-aware resolver, family-scoped validation |
 | `entrypoint.sh` | family-guarded env block, generic serve line + `FAMILY_SERVE_ARGS` |
 | `scripts/gpu_detect.py` | what the container can actually use, from nvidia-smi ∩ the visibility variables |
-| `tests/test_families.py` | 126 assertions: GLM unchanged, Qwen/custom coherent, rules scoped |
-| `tests/test_gpu_detect.py` | 20 assertions against injected device lists |
-| `tests/test_knob_wiring.py` | 51 assertions: every knob has a consumer; the UI hardcodes nothing |
+| `tests/test_families.py` | release defaults, Qwen/custom coherence, and rule scoping |
+| `tests/test_gpu_detect.py` | injected visibility/device-list behavior |
+| `tests/test_knob_wiring.py` | every knob has a consumer; the UI hardcodes nothing |
 
 ---
 
@@ -104,9 +104,9 @@ A knob scoped to a family it is not in resolves with source `n/a`:
 * A hand-edited state file that carries one is an **error**, naming the key —
   the same treatment the termination switches get.
 
-GLM-only: `MTP_DRAFT`, `DRAFT_MODEL`, `DRAFT_QUANTIZATION`, `DCP`,
-`VLLM_EXL3_TRELLIS_MAX_M`, `VLLM_EXL3_TRELLIS_MIN_M`, `VISION`,
-`VISION_CHUNKS`, `BASE_GENERATION`.
+GLM-only: `MTP_DRAFT`, `MTP_DRAFT_SAMPLE_METHOD`, `DRAFT_MODEL`,
+`DRAFT_QUANTIZATION`, `DCP`, `VLLM_EXL3_TRELLIS_MAX_M`, `VISION`, and
+`VISION_CHUNKS`.
 
 This is the point of the exercise: nobody should be able to assemble a
 configuration that hits the `m=3` capture class of bug on a model where the
@@ -114,8 +114,7 @@ trellis does not exist in the first place.
 
 ### The measured rules are scoped too
 
-`concurrency-window`, `trellis-min-m`, `capture-below-trellis-min`,
-`tr3-draft-on-v20`, `tr3-draft-needs-exl3`, `draft-quant-inherit`,
+`concurrency-window`, `tr3-draft-needs-exl3`, `draft-quant-inherit`,
 `kv-nvfp4-uncalibrated`, `vision-long-context`, `vision-kv-pressure`,
 `dcp-divides-tp` and `dcp-reduces-pool` now fire **only** for `glm52`. They
 describe EXL3 kernels, an MLA KV layout and a GLM vision wrapper; letting them
@@ -216,7 +215,7 @@ from one 4× RTX PRO 6000 box:
 | setting | moves with TP? |
 |---|---|
 | `DCP` | **yes** — it is a KV shard count, one per rank; defaults to TP |
-| `GPU_BLOCKS_OVERRIDE` (the 512K pool pin) | **yes, and it is not automatic**. 2048 blocks was chosen to mean exactly 512K tokens at TP=4/DCP=4. At another rank count that arithmetic no longer holds, so a warning fires and points at `GPU_BLOCKS_OVERRIDE=0` |
+| `GPU_BLOCKS_OVERRIDE` | **yes** when explicitly pinned. The release default is 0, so vLLM profiles the pool for the actual per-rank memory envelope. |
 | the memory profile / KV headroom | **yes** — per-rank weights change, so the pool that fits changes |
 | `MAX_NUM_SEQS × (1 + MTP_TOKENS) ≤ 32` | **NO.** This is a per-kernel batch width — the CUDA-graph capture window and the EXL3 trellis window — and has nothing to do with how many ranks exist. The rule applies unchanged at any TP, and the warning says so explicitly so nobody "fixes" it by scaling with GPUs |
 | `dcp-kv-cache-interleave-size 64` | independent of rank count (it is an interleave granularity); left alone |
@@ -256,22 +255,11 @@ have answered all three in seconds. It is the first thing to run after changing
 anything in the config layer, and the first thing to ask for when someone
 reports that a setting had no effect.
 
-## 7. Untested
+## 7. Remaining qualification
 
-- **The Qwen preset has never been booted**, by anyone, with this image. Every
-  value above is either quoted from the model card or reasoned from it. A live
-  RunPod pod did get as far as resolving it correctly and starting the download
-  (verified: repo, directory, TP and argv are all Qwen), but no engine has run.
-- **GPU detection has never seen a real multi-GPU narrowing.** The logic is
-  tested against injected device lists — the development host's 4 GPUs are busy
-  serving production traffic and were not touched. `CUDA_VISIBLE_DEVICES`
-  semantics in particular are implemented from documentation, not observed.
-- The family-guarded env block: the GLM branch is byte-identical to what shipped
-  and is exercised daily, but the `generic` branch (what a non-GLM family gets)
-  has never run an engine.
-- `FAMILY_SERVE_ARGS` as a bash array: the quoting is exercised by
-  `tests/test_families.py` against the exact argv, and `bash -n` + shellcheck
-  pass, but no vLLM has consumed it.
-- The 1-GPU path end to end. The gate arithmetic is tested; the engine is not.
-- `MODEL_FAMILY` switching on a live instance (it triggers a fresh download and
-  a full restart, both of which are implemented but unexercised for Qwen).
+The generic one-GPU path, profile switching, parsers, tools, multimodal input,
+MTP, provider proxying, and GPU visibility handling were exercised live with a
+small Qwen3.5 checkpoint. The exact Qwen3.6-27B NVFP4 checkpoint has completed
+cold download and metadata inspection but still needs a full serving
+performance run. GLM-5.2 is the flagship hardware-qualified profile; custom
+checkpoints remain compatibility-by-vLLM rather than a blanket support claim.

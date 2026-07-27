@@ -47,10 +47,6 @@ INDIRECT = {
     "MTP_DRAFT": ("read by glm_config.derive, which turns it into MTP78_MODE, "
                   "DRAFT_MODEL and DRAFT_QUANTIZATION — the three values the "
                   "entrypoint actually consumes"),
-    "BASE_GENERATION": ("read-only; consumed by the validation matrix "
-                        "(tr3-draft-on-v20), never by the serve path"),
-    "VLLM_EXL3_TRELLIS_MIN_M": ("exported as an engine env var by config.env and "
-                                "read by the EXL3 kernel, not by this script"),
     "VLLM_EXL3_TRELLIS_MAX_M": ("exported as an engine env var by config.env and "
                                 "read by the EXL3 kernel, not by this script"),
 }

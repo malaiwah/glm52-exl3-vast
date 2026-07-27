@@ -8,7 +8,7 @@ every short-prompt check — including vision smoke tests — while producing pu
 garbage past ~32K tokens:
 
   * nvfp4 KV without calibrated MLA outer scales : needle 0/6 at 505K, GSM8K fine
-  * VLLM_EXL3_TRELLIS_MIN_M lowered to 1         : needle 0/2 at 32K, 6/6 short
+  * uncalibrated nvfp4 MLA KV on earlier runtimes : long retrieval failed, short passed
   * vision on the EXL3-TR3 target                : needle 0/2 at 32K, 6/6 short
 
 So nothing here reports "healthy" on the strength of /health or a two-line
@@ -273,8 +273,8 @@ def main(argv):
         verdict["reason"] = (
             "LONG-CONTEXT PROBE FAILED: retrieved {f}/{t} codes from a ~{n} token "
             "context{d}. Short prompts passed, which is exactly the signature of the "
-            "known silent-corruption configurations (nvfp4 KV without calibrated "
-            "scales, trellis MIN_M lowered, vision on the EXL3 target)."
+            "known silent-corruption class (for example NVFP4 MLA KV without "
+            "model-calibrated scales, or an unqualified vision/runtime combination)."
         ).format(f=lc.get("found", 0), t=lc.get("total", 0), n=lc.get("tokens", 0),
                  d=" — " + lc["degenerate"] if lc.get("degenerate") else "")
     else:

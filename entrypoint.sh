@@ -475,30 +475,15 @@ snapshot_download('${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}', local_d
 # while freeing ~3.8 GB/GPU for KV cache.
 #
 # MTP78_MODE=graft (default) does in-place surgery on layer 78 of the target.
-# It is the default because it is the ONLY mode with long-context correctness
-# evidence behind it: rental needle 6/6 on fp8, and benchmarks/vast-45582113-matrix
-# armC 3/3 at 150K/190K/250K. Both ran VLLM_EXL3_TRELLIS_MIN_M=4.
+# It avoids a second draft directory and has the longest appliance evidence.
 #
 #   MTP78_MODE=override  SEPARATE draft dir via --speculative-config. Leaves the
 #     target byte-identical and measured slightly better on acceptance (MAL 3.548 /
-#     84.9% vs 3.517 / 83.9%), but see the warning below -- it does not currently
-#     boot on this image with a correct trellis window.
+#     84.9% vs 3.517 / 83.9%). v29 stamps it as a draft at construction and
+#     gives its m=1..3 graph shapes the capturable Trellis plan they require.
 #   MTP78_MODE=off       stock BF16 draft
 # MTP78_TRELLIS=0 is still honoured as a synonym for off (it is folded into the
 # MTP_DRAFT knob by the config resolver, which also accepts MTP78_MODE directly).
-#
-# WARNING, measured 2026-07-26 on AIBeast. In override mode the rank-sliced draft is
-# CUDA-graph captured at m=3 and dies with
-#   "EXL3 eager parity path entered during CUDA graph capture (m=3)"
-# m=3 is invariant: it does NOT follow num_speculative_tokens (MTP_TOKENS=4 still
-# reported m=3) and does NOT follow cudagraph_capture_sizes (a list starting at 8
-# still reported m=3). Do NOT make that crash go away by lowering
-# VLLM_EXL3_TRELLIS_MIN_M to 1. That was tried and it converts a loud boot failure
-# into SILENT CORRUPTION -- m=1..3 move off the eager PARITY path onto a trellis
-# kernel nothing has verified there. Result: 32K needle 0/2 and 370K needle 0/5,
-# output pure garbage, while a short-prompt quality gate still passed 6/6.
-# Until the draft's capture size is controllable, graft is the mode to use.
-# The config layer refuses MTP_DRAFT=tr3-override on the v20 base for this reason.
 MTP78_DRAFT_DIR=""
 
 fetch_mtp78_overlay() {
@@ -516,8 +501,7 @@ prepare_mtp78() {
   # MTP78_MODE. This is how a non-EXL3 draft (e.g. the NVFP4 MTP draft from
   # lukealonso/GLM-5.2-NVFP4, model-mtp.safetensors, 5.6 GiB) is used: it recovers
   # most of the KV that the BF16 fallback draft gives up, while still avoiding
-  # _apply_rank_sliced -- so it does not hit the v20 speculator capture bug that
-  # makes an EXL3 rank-sliced draft unbootable (see the warning above).
+  # _apply_rank_sliced, which is useful for comparing quantization formats.
   if [ -n "${DRAFT_MODEL:-}" ]; then
     echo ">>> Draft: external checkpoint $DRAFT_MODEL (MTP78_MODE=$MTP78_MODE ignored for draft selection)"
     MTP78_MODE=off
@@ -566,7 +550,7 @@ prepare_mtp78() {
   return 0
 }
 
-# Vision (default ON): MoonViT-3d tower (Kimi-K2.6, frozen) + Baseten's trained
+# Vision (opt-in): MoonViT-3d tower (Kimi-K2.6, frozen) + Baseten's trained
 # 49.5M-param PatchMerger projector, bolted onto our EXL3 text backbone. Both
 # vision parts are BF16 and checkpoint-agnostic — only ~1 GB, no text weight is
 # touched. VISION=0 serves pure text.
@@ -579,7 +563,7 @@ prepare_mtp78() {
 # post-restart probe fails it by design.
 prepare_vision() {
   VISION_REPO="${VISION_REPO:-chronarion/GLM-5.2-Vision-MXFP8-NVFP4-NF3-Hybrid}"
-  if [ "${VISION:-1}" = "1" ]; then
+  if [ "${VISION:-0}" = "1" ]; then
     # Gate on what config.json ACTUALLY says, not just the marker file. An MTP78 graft
     # REVERT rewrites config.json back to its pre-vision form, which silently strips the
     # Glm5v wrapper while leaving .vision-enabled in place -- the installer then reported
@@ -683,7 +667,7 @@ prepare_checkpoint() {
   if [ "${MODEL_FAMILY:-glm52}" = "glm52" ]; then
     prepare_mtp78
     prepare_vision
-    python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-1}" || \
+    python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-0}" || \
       echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
   elif [ "${MODEL_FAMILY:-}" = "qwen36" ]; then
     MODEL_DIR="$MODEL_DIR" MTP_TOKENS="${MTP_TOKENS:-0}" python3 - <<'PY'
@@ -727,14 +711,14 @@ PY
   return 0
 }
 
-# DRAM KV offload: OFFLOAD_FRACTION of the instance's RAM allocation (default
-# 0.70); OFFLOAD_FRACTION=0 disables. Sized from min(cgroup limit, MemTotal) —
+# DRAM KV offload: OFFLOAD_FRACTION of the instance's RAM allocation;
+# OFFLOAD_FRACTION=0 (the default) disables. Sized from min(cgroup limit, MemTotal) —
 # inside a container /proc/meminfo shows the whole host's RAM, but a partial
 # rental (e.g. 4 of 8 GPUs) only gets a slice of it.
 KVT_ARGS=()
 compute_offload() {
   KVT_ARGS=()
-  local off_fraction="${OFFLOAD_FRACTION:-0.70}"
+  local off_fraction="${OFFLOAD_FRACTION:-0}"
   if [ "$off_fraction" != "0" ] && [ ! -r /proc/meminfo ]; then
     echo ">>> DRAM KV offload sizing skipped: /proc/meminfo is unavailable on this smoke host"
     off_fraction=0
@@ -745,7 +729,14 @@ compute_offload() {
     if [ "$CG_LIMIT" != "max" ] && [ "$CG_LIMIT" -lt "$MEM_BYTES" ] 2>/dev/null; then
       MEM_BYTES=$CG_LIMIT
     fi
-    OFF_BYTES=$(python3 -c "print(int($MEM_BYTES*$off_fraction))")
+    # The connector is constructed once per tensor-parallel worker, and
+    # cpu_bytes_to_use is therefore a PER-WORKER value. Passing the entire
+    # instance allocation to every rank multiplies the requested RAM by TP
+    # (measured live: 4 x 385 GB allocations on a 550 GB rental).
+    OFF_TOTAL_BYTES=$(python3 -c "print(int($MEM_BYTES*$off_fraction))")
+    OFFLOAD_RANKS="${TENSOR_PARALLEL_SIZE:-1}"
+    [ "$OFFLOAD_RANKS" -gt 0 ] 2>/dev/null || OFFLOAD_RANKS=1
+    OFF_BYTES=$((OFF_TOTAL_BYTES / OFFLOAD_RANKS))
     MEMLOCK_KB=$(ulimit -l)
     if [ "$MEMLOCK_KB" != "unlimited" ] && [ "$MEMLOCK_KB" -lt "$((OFF_BYTES / 1024))" ] 2>/dev/null; then
       echo "!!! WARNING: memlock ulimit (${MEMLOCK_KB} KB) is below the $((OFF_BYTES/1073741824)) GiB KV pool to pin."
@@ -770,8 +761,9 @@ compute_offload() {
     fi
   fi
   if [ "$off_fraction" != "0" ]; then
-    OFFLOAD_STATE="$((OFF_BYTES/1073741824)) GiB pinned DRAM"
-    echo ">>> DRAM KV offload: $((OFF_BYTES/1073741824)) GiB (${off_fraction} of instance RAM allocation)"
+    OFFLOAD_STATE="$((OFF_TOTAL_BYTES/1073741824)) GiB pinned DRAM total"
+    echo ">>> DRAM KV offload: $((OFF_TOTAL_BYTES/1073741824)) GiB total (${off_fraction} of instance RAM allocation),"
+    echo ">>>                    $((OFF_BYTES/1073741824)) GiB per rank x ${OFFLOAD_RANKS} TP workers"
     # kv_load_failure_policy=recompute: a KV block that cannot be fetched back from
     # the DRAM tier is recomputed instead of failing the request. The vLLM default
     # is "fail", which would turn any offload hiccup into a terminal error — not an
@@ -791,7 +783,7 @@ compute_offload() {
 VISION_ARGS=()
 compute_vision_args() {
   VISION_ARGS=()
-  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] && [ "${VISION:-1}" = "1" ] \
+  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] && [ "${VISION:-0}" = "1" ] \
      && [ -f "$MODEL_DIR/.vision-enabled" ]; then
     VISION_ARGS=(--limit-mm-per-prompt "{\"vision_chunk\":${VISION_CHUNKS:-8}}" --trust-remote-code)
   fi
@@ -828,9 +820,18 @@ export B12X_MLA_SM120_UNIFIED=1 B12X_DENSE_SPLITK_TURBO=1 B12X_W4A16_TC_DECODE=1
 export VLLM_DISABLE_SHARED_EXPERTS_STREAM=1 VLLM_DISABLED_KERNELS=MarlinFP8ScaledMMLinearKernel
 export VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE=0 VLLM_B12X_MLA_SPEC_DECODE_MAX_Q=8
 export VLLM_USE_B12X_DCP_A2A=1 VLLM_DCP_A2A_MAX_TOKENS=16 VLLM_DCP_A2A_LARGE_BACKEND=ag_rs
-export VLLM_DCP_GLOBAL_TOPK=1 VLLM_DCP_SHARD_DRAFT=1 VLLM_DCP_QUERY_SPLIT=0
+export VLLM_DCP_GLOBAL_TOPK=1 VLLM_DCP_SHARD_DRAFT=1 VLLM_DCP_QUERY_SPLIT=1
+export VLLM_DCP_TOPK_OWNER_MERGE=1 VLLM_DCP_INDEXER_SHARDS=0
 export VLLM_B12X_MLA_CKV_GATHER=1 VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS=512 VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS=16384
-export VLLM_EXL3_TRELLIS_MIN_M=4 VLLM_EXL3_TRELLIS_MAX_M=32 VLLM_EXL3_TRELLIS_BLOCK_M=8 VLLM_EXL3_PREFILL_CHUNK=128
+export VLLM_B12X_MLA_CKV_PREFETCH_DEPTH=1 VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB=1024
+export VLLM_DCP_PROJECT_BEFORE_MERGE=1 VLLM_DCP_PROJECT_BEFORE_MERGE_MIN_PREFILL_TOKENS=1024
+export VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1
+# v29 classifies the target and draft independently: the target keeps m=4,
+# while the MTP draft declares MIN_CAPTURABLE_TRELLIS_M=1. A global value
+# overrides both roles and reintroduces the draft capture failure, so auto is
+# represented by the variable being genuinely absent.
+unset VLLM_EXL3_TRELLIS_MIN_M
+export VLLM_EXL3_TRELLIS_MAX_M=32 VLLM_EXL3_TRELLIS_BLOCK_M=8 VLLM_EXL3_PREFILL_CHUNK=128
 export VLLM_MEMORY_PROFILE_INCLUDE_ATTN=1 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
 unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 else
@@ -863,9 +864,9 @@ fi
 # configuration that produced it, e.g.
 #     podman run -e TUNE_VLLM_EXL3_PREFILL_CHUNK=256 ...
 #
-# NB: the two trellis-window variables above are ALSO self-service knobs. The
-# authoritative block runs once, at boot; apply_config re-exports the resolved
-# values before every vLLM start, so a state-file change wins over both.
+# VLLM_EXL3_TRELLIS_MIN_M deliberately is not a self-service knob on v29:
+# leaving it absent is the role-aware safe setting. Advanced experiments can
+# still set TUNE_VLLM_EXL3_TRELLIS_MIN_M explicitly.
 while IFS='=' read -r _k _v; do
   case "$_k" in
     TUNE_*)
@@ -1035,35 +1036,33 @@ elif [ "$PLATFORM" = "runpod" ]; then
 fi
 
 # Egress hygiene: no telemetry; offline mode once weights are local
-# Keep the torch.compile / AOT cache on the persistent volume. It defaults to
-# /root/.cache/vllm inside the container, so a replaced container recompiles the
+# Keep torch.compile, Triton and extension caches on the persistent volume.
+# The upstream image exports /cache/jit paths, but /cache is not a mounted
+# volume on Vast or Runpod, so a replaced container recompiles the
 # backbone and the eagle head from scratch — ~100 s of every boot, for ~1.6 GB of
 # artifacts. VLLM_DISABLE_COMPILE_CACHE is NOT set here (that guard belongs to the
 # gilded-gnosis fork's cache bug); verify decode tok/s after enabling this.
-export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-$MODEL_DIR/.vllm-cache}"
-mkdir -p "$VLLM_CACHE_ROOT" 2>/dev/null || true
+unset VLLM_CACHE_DIR
+case "${VLLM_CACHE_ROOT:-}" in
+  ""|/cache/jit*) export VLLM_CACHE_ROOT="$MODEL_DIR/.vllm-cache" ;;
+esac
+case "${TRITON_CACHE_DIR:-}" in
+  ""|/cache/jit*) export TRITON_CACHE_DIR="$MODEL_DIR/.vllm-cache/triton" ;;
+esac
+case "${TORCH_EXTENSIONS_DIR:-}" in
+  ""|/cache/jit*) export TORCH_EXTENSIONS_DIR="$MODEL_DIR/.vllm-cache/torch_extensions" ;;
+esac
+case "${TORCHINDUCTOR_CACHE_DIR:-}" in
+  ""|/cache/jit*) export TORCHINDUCTOR_CACHE_DIR="$MODEL_DIR/.vllm-cache/torchinductor" ;;
+esac
+mkdir -p "$VLLM_CACHE_ROOT" "$TRITON_CACHE_DIR" "$TORCH_EXTENSIONS_DIR" \
+  "$TORCHINDUCTOR_CACHE_DIR" 2>/dev/null || true
 
 export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
 export HF_HUB_OFFLINE=1
 echo ">>> Listening sockets at boot (expect only vllm on ${PORT:-8000} + vast ssh):"
 (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | head -8 || true
 
-# EXL3 trellis window vs speculative capture. The MTP draft is CUDA-graph captured
-# at m=MTP_TOKENS. If that falls below VLLM_EXL3_TRELLIS_MIN_M the EXL3 kernel
-# hands off to its eager parity path, which cannot be captured, and the engine dies:
-#   RuntimeError: EXL3 eager parity path entered during CUDA graph capture (m=3);
-#                 capture sizes must lie inside the Trellis window [4, 32]
-# The default MIN_M=4 is therefore only safe by coincidence -- it happens to equal
-# the 1+3 the TARGET captures at. With a separate draft (MTP78_MODE=override) the
-# draft captures at m=3 and the boot fails.
-# There is deliberately NO auto-lower of VLLM_EXL3_TRELLIS_MIN_M here. An earlier
-# revision lowered it to 1 whenever MTP_TOKENS < MIN_M, to clear the override-mode
-# capture crash. That was wrong twice over: the stated mechanism was false (m does
-# not track MTP_TOKENS), and lowering the window silently corrupts output instead of
-# failing loudly. It also fired in GRAFT mode, where MIN_M=4 is correct and required,
-# so it would have poisoned the one configuration that works. Leave MIN_M at 4 —
-# the config layer marks it non-editable and rejects any state file that moves it.
-#
 # Concurrency vs the trellis/capture window. At decode the engine runs
 #   m = MAX_NUM_SEQS * (1 + MTP_TOKENS)
 # query tokens per step. m must stay inside BOTH the CUDA-graph capture window
@@ -1128,9 +1127,9 @@ build_spec_args() {
     echo ">>> Draft quantization: ${DRAFT_QUANTIZATION} (overrides the target's --quantization)"
   fi
   if [ -n "${DRAFT_MODEL:-}" ]; then
-    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"${_SPEC_QUANT}}")
+    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"${MTP_DRAFT_SAMPLE_METHOD:-greedy}\"${_SPEC_QUANT}}")
   else
-    SPEC_ARGS=(--speculative-config "{\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
+    SPEC_ARGS=(--speculative-config "{\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"${MTP_DRAFT_SAMPLE_METHOD:-greedy}\"}")
   fi
   return 0
 }
@@ -1164,12 +1163,12 @@ AUTH_ARGS=()
 if [ "${AUTH:-key}" != "none" ]; then
   AUTH_ARGS=(--api-key "$VLLM_API_KEY")
 fi
-# Pool sizing: the override pins the pool at 512K so the KV headroom the trellis
-# draft frees is predictable rather than absorbed. Set GPU_BLOCKS_OVERRIDE=0 to
-# drop the flag and let vLLM use all available KV (bigger pool, more concurrency).
+# Pool sizing: auto-profile by default. On the v29 EXL3/MTP3 release this is
+# about 1.1M tokens on four 96 GB cards, enough for two full 524K requests.
+# A positive override remains available for reproducible smaller pools.
 BLOCKS_ARGS=()
-if [ "${GPU_BLOCKS_OVERRIDE:-2048}" != "0" ]; then
-  BLOCKS_ARGS=(--num-gpu-blocks-override "${GPU_BLOCKS_OVERRIDE:-2048}")
+if [ "${GPU_BLOCKS_OVERRIDE:-0}" != "0" ]; then
+  BLOCKS_ARGS=(--num-gpu-blocks-override "${GPU_BLOCKS_OVERRIDE:-0}")
 fi
 # stdout still goes to the vast console; the tee copy is what a rollback
 # preserves as the failed boot's error log. Process substitution (not a pipe) so
@@ -1185,8 +1184,8 @@ _SERVE_CMD=(vllm serve "$MODEL_DIR" \
   --served-model-name "${SERVED_NAMES[@]}" \
   --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
   --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-4}" \
-  --kv-cache-dtype "${KV_CACHE_DTYPE:-fp8}" \
-  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.93}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE:-nvfp4_ds_mla}" \
+  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.96}" \
   --max-model-len "${MAX_MODEL_LEN:-524288}" \
   --max-num-seqs "${MAX_NUM_SEQS:-8}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS:-3072}" \
@@ -1256,10 +1255,10 @@ kill_server_tree() {
 }
 
 # ---- correctness verification ------------------------------------------------
-# A short-prompt health check is NOT evidence of correctness: nvfp4 KV without
-# calibrated scales, a lowered trellis MIN_M and vision on the EXL3 target all
-# pass /health and a two-line completion while producing garbage past ~32K
-# tokens. So every start is followed by a probe that includes a long-context
+# A short-prompt health check is NOT evidence of correctness: earlier
+# uncalibrated NVFP4 KV and vision experiments passed /health and a two-line
+# completion while failing long retrieval. So every start is followed by a
+# probe that includes a long-context
 # needle retrieval, and the landing page reports the two results separately.
 # VERIFY=0 turns the probe off entirely (the UI then says so, it does not claim
 # health); VERIFY_LONG_CONTEXT=0 keeps the short checks only, with the same

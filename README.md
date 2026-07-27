@@ -5,14 +5,14 @@ vLLM checkpoints. It supplies an authenticated OpenAI-compatible endpoint,
 persistent model downloads and compile caches, a live dashboard, key-only SSH,
 provider-aware URLs, optional TLS, and crash supervision.
 
-The default `glm52-exl3` profile remains the validated production stack:
-EXL3 trellis weights (~77 GiB/rank — fits commodity 95.01-GiB cards),
-**fp8 KV cache** (correct on stock drivers — the nvfp4 default silently
-corrupts >~150K context without a host driver P2P override; see Evidence),
-MTP speculative decoding **with a quantized trellis draft** (see MTP78 below),
-and DRAM KV offload auto-sized to 70% of the instance's RAM allocation
-(cgroup-aware — partial rentals don't oversize it). Weights auto-download on
-first boot (~332 GB — pick a fast-net host).
+The default `glm52-exl3` profile is the flagship production stack: EXL3
+Trellis weights (~77 GiB/rank), calibrated `nvfp4_ds_mla` KV, synchronous
+MTP-3 with a quantized Trellis draft, full-and-piecewise CUDA graphs through
+C8, and a 524,288-token request limit. vLLM auto-profiles the KV pool at
+`GPU_MEMORY_UTILIZATION=0.96` (about 1.1M tokens on the qualified 4x96 GB
+shape). Vision and DRAM KV offload are opt-in so a first boot starts from the
+fastest correctness-qualified text profile. Weights auto-download on first
+boot (~332 GB — pick a fast-net host).
 
 ## Model profiles
 
@@ -240,11 +240,10 @@ Full design note: [docs/self-service-config.md](docs/self-service-config.md).
   launch, so the page has to be able to override it. The file stores only what
   you actually changed.
 - **Pre-validation**: combinations that are known to be broken are refused
-  before anything is written — the rank-sliced EXL3 draft on the v20 base, an
-  NVFP4 draft without `DRAFT_QUANTIZATION`, nvfp4 KV on a checkpoint with no
-  calibrated MLA scales, a decode width outside the CUDA-graph/trellis window,
-  a pinned pool smaller than `MAX_MODEL_LEN`. Each refusal quotes the measured
-  reason.
+  before anything is written — an NVFP4 draft without
+  `DRAFT_QUANTIZATION`, nvfp4 KV on a model with no calibrated MLA scales, a
+  decode width outside the CUDA-graph/Trellis window, or a pinned pool smaller
+  than `MAX_MODEL_LEN`. Each refusal quotes the measured reason.
 - **Rollback**: if the new configuration does not come up, *or comes up and
   fails the long-context probe*, the last known-good configuration is restored
   and restarted automatically. The failed config, its boot log and the diff are
@@ -255,10 +254,9 @@ Full design note: [docs/self-service-config.md](docs/self-service-config.md).
 - **Export / import**: download the saved config as JSON, paste it into the
   next instance.
 
-> **"Healthy" is not a short prompt.** Every silent-corruption configuration
-> measured on this stack — nvfp4 KV without calibrated scales, a lowered
-> `VLLM_EXL3_TRELLIS_MIN_M`, vision on the EXL3 target — answers `/health` and
-> short prompts *perfectly* and produces garbage past ~32K tokens. So the
+> **"Healthy" is not a short prompt.** Silent-corruption configurations such
+> as nvfp4 MLA KV without the checkpoint-calibrated outer scales answer
+> `/health` and short prompts *perfectly* and can still fail long retrieval. So the
 > post-restart check includes a **long-context needle probe**, and the page
 > reports **Correctness** separately from **Engine**. If the probe did not run,
 > it says "long context UNVERIFIED"; it never claims health it did not measure.
@@ -317,12 +315,14 @@ first. Full design note, provider matrix and cited sources:
 >    session data; the page says so in red, and the volume itself must be deleted
 >    from the dashboard.
 
-## GLM profile: vision (default ON)
+## GLM profile: vision (opt-in)
 
-Images work out of the box: the MoonViT-3d tower (Kimi-K2.6, frozen) plus
+Set `VISION=1` (or enable it in the configurator) to graft the MoonViT-3d
+tower (Kimi-K2.6, frozen) plus
 Baseten's trained 49.5M PatchMerger projector are grafted onto the EXL3 text
-backbone at first boot — **~890 MB**, no text weight touched. `VISION=0` serves
-pure text (fully reversible).
+backbone — **~890 MB**, no text weight touched. The default `VISION=0` text
+profile preserves the maximum context/performance envelope; the operation is
+fully reversible.
 
 Measured on 4x RTX PRO 6000 (full writeup:
 https://gist.github.com/malaiwah/c004c8b48bb177203f56cb29107f8540):
@@ -382,11 +382,11 @@ warn-and-proceed, and it degrades rather than fails —
 back is recomputed instead of erroring the request. Set
 `OFFLOAD_IGNORE_MEMLOCK=0` for conservative disable-instead behaviour.
 
-**KV headroom:** available KV memory goes 5.27 -> 8.92 GiB/GPU (**+69%**). This
-template pins the pool at 512K (`--num-gpu-blocks-override 2048`), so the
-headroom is unspent by default — at ~10.3 KiB/token it is worth roughly
-**+355K tokens of pool (~880K context)** if you lift the override, or the same
-512K with much more concurrency margin.
+**KV headroom:** available KV memory goes 5.27 -> 8.92 GiB/GPU (**+69%**).
+The v29 profile leaves `GPU_BLOCKS_OVERRIDE=0`, so this headroom becomes KV
+capacity automatically. The release stack reports roughly 1.0–1.1M tokens on
+four 96 GB cards depending on graph/runtime allocations—enough for one 524K
+solo session plus substantial concurrency headroom.
 
 **Speculation depth:** the cheaper draft also moves the optimum. Measured
 (GSM8K n=30, +-0.5% noise floor): MTP-2 42.9 tok/s, **MTP-3 51.5** (default),
@@ -399,47 +399,46 @@ if you want that last few percent (not yet the default — wants a larger run).
 Measured 2026-07-26 on owned hardware (4x RTX PRO 6000 Blackwell, **280 W cap**,
 TP4/DCP4-a2a, MTP-3, 512K context, DRAM KV offload on, clean single-stream):
 
-| stack (fp8 KV — what this template ships) | decode C1 | MAL / accept | KV/GPU | KV pool | 505K needle |
+| historical fp8-KV comparison (pre-v29) | decode C1 | MAL / accept | KV/GPU | KV pool | 505K needle |
 |---|---|---|---|---|---|
 | GLM-5.2 NVFP4-NF3 hybrid (previous prod, calibrated nvfp4 KV) | 119.2 tok/s | ~3.5 / 0.83 | 4.64 GiB | 537,600 tok | 7/7 |
 | **EXL3-TR3 3bpw + MTP78, fp8 KV** | 112.4 tok/s | 3.471 / 0.824 | **8.89 GiB** | **697,600 tok** | **6/6** |
 
-**The honest trade: ~6% slower decode for ~30% more KV pool, and vision.** The
+**The historical trade was ~6% slower decode for ~30% more KV pool, and
+vision.** The
 EXL3 weights are ~7 GiB/rank smaller than the hybrid's, which is what pays for
 the bigger pool even though fp8 KV costs ~1.7x the bytes per token that nvfp4
 would. Long-context retrieval is verified clean (6/6 at depths to 490K inside a
 505K request).
 
-> **What this table used to say, and why it was wrong.** An earlier revision
-> reported 127.4 tok/s and an 860,928-token pool for this stack — "faster *and*
-> bigger". Those numbers were measured with `--kv-cache-dtype nvfp4_ds_mla`,
-> which this template does not ship. That config fails the same needle test
-> **0/6 with degenerate output** (`".,, while.,, and and while,,,,"`) while
-> GSM8K, vision and structured output all still pass, so nothing short of a
-> long-context retrieval test catches it. nvfp4 KV needs *per-checkpoint
-> calibrated MLA outer scales*: the hybrid checkpoint has them, the EXL3
-> checkpoint does not, and borrowing the hybrid's would be meaningless.
-> If a quantization change ever looks like a free lunch on both axes at once,
-> measure retrieval before believing it.
+> **Why calibrated scales are non-negotiable.** Earlier uncalibrated
+> `nvfp4_ds_mla` experiments failed long needles with degenerate output while
+> short quality, vision, and structured-output checks still passed. The v29
+> runtime now ships the GLM-5.2-specific calibrated MLA outer-scale file and
+> the entrypoint preserves `VLLM_NVFP4_MLA_SCALES_FILE`; the configurator
+> refuses this KV dtype for model families without an equivalent calibration.
+> Release qualification still runs cold long-context needles—calibration is
+> not a reason to skip the causal test.
 
-With vision resident, fp8 sizes the usable ceiling at ~420K rather than 512K
-(vision costs ~1.31 GiB/GPU and ~13% of *text* decode). Set `MAX_MODEL_LEN`
-to 384K-420K for a vision deployment, or `VISION=0` to keep the full 512K.
+Vision consumes about 1.31 GiB/GPU and around 13% of text decode in the earlier
+profile. Treat it as a distinct opt-in profile: re-run the configurator's
+memory/needle gate after enabling it rather than assuming the text-only
+524K/concurrency envelope is unchanged.
 
 **MTP survives the graft** (MAL 3.528 with vision vs 3.533 without). Reports of
 *zero* draft acceptance on comparable hybrid grafts come from the speculator not
 seeing the nested `lm_head`; the plugin used here exposes it.
 
-Two knobs are load-bearing in the validated graft configuration:
+Two settings are load-bearing in the v29 graft configuration:
 
 - `ONLINE_QUANT=none` — serving presets that default to an mxfp8 online overlay
   make EXL3 refuse with `quantization_config is only supported when ...`. The
   entrypoint sets this explicitly.
-- `VLLM_EXL3_TRELLIS_MIN_M=4` — this is the validated lower bound for the
-  in-checkpoint graft. Do **not** lower it to 1 to make the separate EXL3 draft
-  override boot: that clears a CUDA-graph error by moving unvalidated m=1..3
-  shapes onto the trellis kernel and was measured to cause silent long-context
-  corruption.
+- `VLLM_EXL3_TRELLIS_MIN_M` is **unset**. v29 stamps the draft role at
+  construction: target layers retain m=4 while MTP draft layers advertise the
+  capturable m=1 floor they require. A global override defeats that
+  role-specific choice. Advanced A/B tests may still use
+  `TUNE_VLLM_EXL3_TRELLIS_MIN_M`.
 
 A trellis (or BF16) MTP draft also needs `moe_backend=triton` **separately from**
 the target's backend — a rank-3 trellis tensor is not a fused expert weight.
@@ -451,15 +450,14 @@ untouched and add one field:
 
 ```
 --speculative-config '{"method":"mtp","num_speculative_tokens":3,
-                       "moe_backend":"triton","draft_sample_method":"probabilistic",
+                       "moe_backend":"triton","draft_sample_method":"greedy",
                        "model":"/path/to/GLM-5.2-EXL3-TR3-MTP78/3bpw-keep0"}'
 ```
 
-This proves that the draft loads independently and recovers the expected KV
-memory, but it is **not a production-safe path on the current image**: its
-speculator captures at m=3, outside the validated `[4,32]` trellis window.
-Lowering the window to 1 produced silent retrieval corruption. The turnkey
-therefore defaults to the validated in-place graft.
+v29 supports this separately rank-sliced draft by stamping its role during
+construction. The turnkey still defaults to the in-place graft because it
+avoids a second draft directory and is the release configuration exercised by
+the automated boot verifier.
 
 ### Model quality (the target model, unrelated to the draft)
 
@@ -500,7 +498,7 @@ within sampling noise (~±3).
   Blackwell or RTX 5090 for Qwen.
 - **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
   applicable Hub rate limits), `OFFLOAD_FRACTION`
-  (GLM default 0.70; Qwen default 0), `MTP_TOKENS` (GLM default 3; Qwen
+  (default 0; opt in only after measuring prefix reuse), `MTP_TOKENS` (GLM default 3; Qwen
   default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 524288; Qwen 32768),
   `SERVED_MODEL_NAME`,
   `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 = stock BF16 draft),
@@ -536,10 +534,11 @@ config matrix (6 runs, 5 hosts, 4 driver families):
   https://gist.github.com/7d5d7e685f7498a356fa2dd12b876f14
 - fp8 clean to 440K on stock: same matrix gist; harness:
   https://gist.github.com/929d7d8e4ac94c43fe126c4b3f6a6ea6
-- 512K fp8 KV via `--num-gpu-blocks-override 2048` validated at util 0.93.
+- Historical fallback: 512K fp8 KV via `--num-gpu-blocks-override 2048` at
+  util 0.93. The v29 default instead uses calibrated NVFP4 KV and auto-sizing.
 
 Base runtime image:
-`verdictai/glm52-exl3-sparkinfer@sha256:2bb9e804a283d1da3b7e3425ff87375121285141d0d0a40d3dc09d41bf881a10`
+`verdictai/glm52-exl3-sparkinfer@sha256:2996b8ac37ff126a8aeebaa24df72e2154a2a1573df41f99eb48a4275e33eb41`
 (pinned). It contains the specialized GLM extensions, but also includes native
 vLLM support for `Qwen3_5ForConditionalGeneration`, ModelOpt/NVFP4, Qwen
 parsers, and MTP speculative decoding.
@@ -563,15 +562,16 @@ existing endpoint:
 | `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working |
 | `TENSOR_PARALLEL_SIZE` | 4 GLM / 1 Qwen | match a supported profile topology |
 | `MAX_MODEL_LEN` | 524288 GLM / 32768 Qwen | increase the Qwen development context only after measuring VRAM |
-| `MULTIMODAL` | 1 GLM / 0 Qwen | Qwen `1` loads its native vision encoder; GLM vision remains controlled by `VISION` |
+| `MULTIMODAL` | n/a GLM / 0 Qwen | Qwen `1` loads its native vision encoder; GLM vision remains controlled by `VISION` (default 0) |
 | `QUANTIZATION` | custom profile only | vLLM quantizer name such as `modelopt` |
 | `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |
 | `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
 | `ALLOW_UNSUPPORTED_GPU` | `0` | bypass the profile GPU-name check; the required visible GPU count still applies |
-| `GPU_BLOCKS_OVERRIDE` | 2048 GLM / 0 otherwise | `0` lets vLLM size KV normally |
-| `OFFLOAD_FRACTION` | 0.70 GLM / 0 otherwise | fraction of RAM for the DRAM KV tier |
+| `GPU_BLOCKS_OVERRIDE` | 0 | auto-profile the largest safe KV pool; set a positive block count to pin it |
+| `OFFLOAD_FRACTION` | 0 | opt-in fraction of instance RAM for the DRAM KV tier; the total is divided across TP workers |
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
-| `MTP78_MODE` | `graft` | `graft` is in-place surgery on layer 78 and the only mode with long-context evidence; `override` points `--speculative-config` at a separate draft dir but does not boot on the v20 base; `off` uses the stock BF16 draft. Prefer the `MTP_DRAFT` knob on the config page. |
+| `MTP78_MODE` | `graft` | `graft` is in-place surgery on layer 78; `override` points at a separate v29-compatible rank-sliced draft; `off` uses the stock BF16 draft. Prefer the `MTP_DRAFT` knob on the config page. |
+| `MTP_DRAFT_SAMPLE_METHOD` | `greedy` | v29-qualified draft proposal mode; `probabilistic` is available for controlled A/B tests |
 | `OPEN_BUTTON_TOKEN` | provider-specific | required to expose the `:1111` config editor; Vast supplies it and Runpod gets a persisted generated token when one is not set |
 | `VERIFY` | `1` | `0` disables the post-start correctness probe entirely (the page then reports "unverified" and nothing rolls back) |
 | `VERIFY_LONG_CONTEXT` | `1` | `0` keeps the short-prompt checks only — read the warning above before using it |
