@@ -44,6 +44,8 @@ jobs:
       # used to spend GPU rental time.
       - name: serving benchmark and needle harness
         run: python3 tests/test_serving_tools.py
+      - name: OpenAI feature qualification harness
+        run: python3 tests/test_feature_suite.py
       - name: checkpoint reconciliation
         run: python3 tests/test_checkpoint_reconcile.py
       - name: validate profile compatibility and Runpod templates
