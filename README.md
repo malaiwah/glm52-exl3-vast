@@ -197,6 +197,126 @@ the incident.** This template is that button: rented GPUs, your keys, your
 data path, ~30 minutes from click to a 512K-context GLM-5.2 endpoint that
 answers only to you.
 
+## Self-service profile switching
+
+The serve line is no longer GLM-only. A **family** supplies the architecture's
+engine flags, applicable knobs and validation rules; the config layer resolves
+`defaults < family < startup env < state file` inside it. The provider-facing
+`MODEL_PROFILE` names map to the editable families:
+
+| startup profile | self-service family / variant |
+|---|---|
+| `glm52-exl3` | `glm52` / `exl3-tr3` |
+| `qwen36-27b-nvfp4` | `qwen36` / `qwen36-nvfp4` |
+| `custom` | `custom` / `custom` plus `MODEL_ID` |
+
+Tensor parallelism follows the GPUs visible through `nvidia-smi`,
+`NVIDIA_VISIBLE_DEVICES`, and `CUDA_VISIBLE_DEVICES`; the provider's advertised
+count is corroboration only. GLM-specific MLA/DCP/EXL3 flags are absent from
+Qwen and custom launches. Inapplicable knobs are disabled in the UI and rejected
+if injected through a hand-edited state file. See
+[docs/model-families.md](docs/model-families.md).
+
+Check the resolved values and exact vLLM argv without renting or downloading:
+
+```bash
+docker run --rm -e CONFIG_SMOKE=1 -e MODEL_PROFILE=qwen36-27b-nvfp4 \
+  ghcr.io/malaiwah/glm52-exl3-vast:latest
+```
+
+## Self-service configuration (no rebuild, no re-rent)
+
+The image is locked in when you rent, but the *deployment* is not. The landing
+page on `:1111` has a **Configure** panel: every knob with its current value,
+where that value came from (built-in default / template env / your saved file),
+and a rationale explaining what it does and what it costs. Change what you
+want, hit apply, and **vLLM restarts — the container, the weights, the API key
+and the TLS cert are untouched.**
+
+Full design note: [docs/self-service-config.md](docs/self-service-config.md).
+
+- **Inheritance**: built-in defaults < startup environment < a JSON state file
+  on the volume. The file wins on purpose: template env cannot be edited after
+  launch, so the page has to be able to override it. The file stores only what
+  you actually changed.
+- **Pre-validation**: combinations that are known to be broken are refused
+  before anything is written — the rank-sliced EXL3 draft on the v20 base, an
+  NVFP4 draft without `DRAFT_QUANTIZATION`, nvfp4 KV on a checkpoint with no
+  calibrated MLA scales, a decode width outside the CUDA-graph/trellis window,
+  a pinned pool smaller than `MAX_MODEL_LEN`. Each refusal quotes the measured
+  reason.
+- **Rollback**: if the new configuration does not come up, *or comes up and
+  fails the long-context probe*, the last known-good configuration is restored
+  and restarted automatically. The failed config, its boot log and the diff are
+  kept under `.glm-config/failures/`.
+- **Self-analysis**: once the known-good config is serving again, the model
+  itself is handed the failed log, the working log and the diff, and writes a
+  plain-language explanation onto the page.
+- **Export / import**: download the saved config as JSON, paste it into the
+  next instance.
+
+> **"Healthy" is not a short prompt.** Every silent-corruption configuration
+> measured on this stack — nvfp4 KV without calibrated scales, a lowered
+> `VLLM_EXL3_TRELLIS_MIN_M`, vision on the EXL3 target — answers `/health` and
+> short prompts *perfectly* and produces garbage past ~32K tokens. So the
+> post-restart check includes a **long-context needle probe**, and the page
+> reports **Correctness** separately from **Engine**. If the probe did not run,
+> it says "long context UNVERIFIED"; it never claims health it did not measure.
+
+Requires `OPEN_BUTTON_TOKEN` in the template environment on Vast. Runpod
+generates and persists a token automatically when none is supplied. Without a
+token, the editor is not exposed.
+
+## Terminate + session erase (opt-in, off by default)
+
+When you are done, the landing page can **destroy the instance from inside it**
+— so billing stops the moment you stop working, and so an optional erase can run
+first. Full design note, provider matrix and cited sources:
+[docs/termination-and-erase.md](docs/termination-and-erase.md).
+
+- **Off by default.** Launch with `TERMINATE_ENABLED=1` to get the control at
+  all. Every provider dashboard can already terminate an instance, so the
+  in-container button is a convenience you opt into — not something a leaked
+  landing-page URL hands to a stranger.
+- **`TERMINATE_LOCKED=1`** is a hard lock: termination is refused no matter
+  what. Both switches are **startup environment only**. A state file that tries
+  to set either is rejected outright, and the landing page can only ever make
+  them *more* restrictive — a locked instance cannot be unlocked from the UI, by
+  any token, only by restarting the container with different env.
+- **vast.ai and RunPod**, auto-detected (`TERMINATE_PROVIDER` overrides). An
+  unrecognised provider says so and points at the dashboard instead of failing
+  obscurely. On RunPod the pod-scoped key RunPod injects is **verified to
+  terminate its own pod** — no extra credential needed; the page still checks it
+  before you commit, and `RUNPOD_TERMINATE_API_KEY` covers the cases the pod key
+  cannot.
+- **Typed confirmation**: you type the instance id, plus an explicit
+  acknowledgement checkbox. No single click can destroy anything.
+- **`TERMINATE_DRY_RUN=1`** runs the whole flow and shows the request it would
+  have sent, without sending it.
+- **Session erase** (a checkbox, unchecked): overwrites and unlinks the API key,
+  TLS private key, config state, every log this template writes (prompts
+  included), shell history, SSH material, provider/HF credentials, and anything
+  you added under the model dir. **The public model weights are deliberately not
+  erased** — the checkpoint is downloadable by anyone, so overwriting 332 GB
+  hides nothing. Optional RAM and VRAM zeroing. Read the limits in the design
+  note: on SSDs with wear levelling, on overlay filesystems and on network
+  volumes an overwrite does not guarantee the old bytes are unreachable, and the
+  instance console log in your dashboard is outside our reach entirely.
+
+> **RunPod, two things that bite by default:**
+> 1. **Expose the ports when you create the pod** —
+>    `--ports "22/tcp,1111/http,8000/http,8443/tcp"`.
+>    A pod created without them comes up with `ports: null`: the container runs,
+>    but the landing page, the API and even SSH are unreachable, and a running
+>    pod's ports cannot be changed. You would have to destroy it and re-download
+>    332 GB. (Measured.)
+> 2. **A network volume survives termination and keeps billing** — and RunPod's
+>    stock environment already points `HF_HOME` at it
+>    (`/runpod-volume/.cache/huggingface/`), so your HF token lands there by
+>    default. On such a pod the erase is the *only* thing that removes your
+>    session data; the page says so in red, and the volume itself must be deleted
+>    from the dashboard.
+
 ## GLM profile: vision (default ON)
 
 Images work out of the box: the MoonViT-3d tower (Kimi-K2.6, frozen) plus
@@ -387,8 +507,9 @@ within sampling noise (~±3).
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
   extra env: `OPEN_BUTTON_PORT=1111` — the dashboard **Open** button then hits
   the landing page: live boot status (weight-download progress, TLS, engine),
-  ready-to-paste client configs (oh-my-pi, opencode, Claude Code, Codex), and
-  a minimal streaming chat UI at `/chat`. Token-gated; with TLS configured the
+  ready-to-paste client configs (oh-my-pi, opencode, Claude Code, Codex),
+  a minimal streaming chat UI at `/chat`, and the **self-service config editor**
+  at `/config` (needs `OPEN_BUTTON_TOKEN`; see the section above). Token-gated; with TLS configured the
   page upgrades plain-HTTP hits to HTTPS and only then embeds the API key.
   On ready, the instance labels itself "`<model> READY <endpoint>`" in your dashboard.
 
@@ -450,7 +571,21 @@ existing endpoint:
 | `GPU_BLOCKS_OVERRIDE` | 2048 GLM / 0 otherwise | `0` lets vLLM size KV normally |
 | `OFFLOAD_FRACTION` | 0.70 GLM / 0 otherwise | fraction of RAM for the DRAM KV tier |
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
-| `MTP78_MODE` | `graft` | validated in-place trellis draft; `off` restores the stock BF16 draft; `override` is experimental and currently unsafe at long context |
+| `MTP78_MODE` | `graft` | `graft` is in-place surgery on layer 78 and the only mode with long-context evidence; `override` points `--speculative-config` at a separate draft dir but does not boot on the v20 base; `off` uses the stock BF16 draft. Prefer the `MTP_DRAFT` knob on the config page. |
+| `OPEN_BUTTON_TOKEN` | provider-specific | required to expose the `:1111` config editor; Vast supplies it and Runpod gets a persisted generated token when one is not set |
+| `VERIFY` | `1` | `0` disables the post-start correctness probe entirely (the page then reports "unverified" and nothing rolls back) |
+| `VERIFY_LONG_CONTEXT` | `1` | `0` keeps the short-prompt checks only — read the warning above before using it |
+| `VERIFY_NEEDLE_TOKENS` | `32768` | size of the long-context retrieval probe |
+| `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures and logs live |
+| `MODEL_FAMILY` / `MODEL_VARIANT` | selected by `MODEL_PROFILE` | `glm52`/`exl3-tr3`, `qwen36`/`qwen36-nvfp4`, or `custom`/`custom`; the config page can switch these without rebuilding |
+| `SSHD` | `auto` | `auto` starts the bundled key-only sshd when a provider injects a public key and nothing is already listening; `0` never starts it and `1` always tries |
+| `CONFIG_SMOKE` | `0` | `1` resolves the config, prints the argv and exits without downloading or touching a GPU |
+| `TERMINATE_ENABLED` | `0` | `1` exposes the terminate control on the landing page (startup env only) |
+| `TERMINATE_LOCKED` | `0` | `1` hard-locks termination for the life of the container (startup env only) |
+| `TERMINATE_PROVIDER` | (auto) | force `vastai` or `runpod` when detection fails |
+| `RUNPOD_TERMINATE_API_KEY` | (unset) | RunPod account API key. Not normally needed — the injected pod-scoped key is verified to terminate its own pod — but covers a missing/altered key or targeting another pod |
+| `TERMINATE_DRY_RUN` | `0` | `1` prepares the destroy request and does not send it |
+| `TERMINATE_PROBE` | `1` | `0` skips the read-only credential pre-check |
 
 ## Security
 

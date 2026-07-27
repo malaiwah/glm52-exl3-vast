@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vast.ai/Runpod landing page — dual-protocol (TLS + plain) on :1111.
+"""vast.ai "Open" button landing page — dual-protocol (TLS + plain) on :1111.
 
 Started first thing in entrypoint.sh so status is visible from the very first
 boot minute. Each connection's first byte is peeked: 0x16 = TLS handshake,
@@ -8,51 +8,56 @@ else plain HTTP. Once a cert exists (lazy-loaded mid-boot), plain hits are
 entrypoint rewrites at each milestone, plus live probes (download size,
 /health). The API key, filled-in client configs (oh-my-pi, opencode, Claude
 Code, Codex), live metrics dashboard and /chat render only over TLS with a
-validated OPEN_BUTTON_TOKEN — over a trusted HTTPS reverse proxy, or over
-plain HTTP if LANDING_ALLOW_INSECURE=1 (trusted-LAN/demo hosts without a
-cert). The dashboard scrapes vLLM's
+validated OPEN_BUTTON_TOKEN — or over plain HTTP if LANDING_ALLOW_INSECURE=1
+(trusted-LAN/demo hosts without a cert). The dashboard scrapes vLLM's
 /metrics from the browser (vLLM CORS is open) — no server-side proxying.
-Vast uses OPEN_BUTTON_PORT=1111 + '-p 1111:1111'; Runpod uses 1111/http.
+Requires OPEN_BUTTON_PORT=1111 env + '-p 1111:1111' in the template.
 """
 import html
 import json
 import os
 import socket
 import ssl
+import subprocess
+import sys
+import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from string import Template
 from urllib.parse import parse_qs, urlparse
 
+# The knob registry, the inheritance model and the validation matrix live in
+# scripts/glm_config.py so that the entrypoint and this page cannot disagree
+# about them. If it cannot be imported the page still serves — it just loses
+# the config editor rather than the whole landing page.
+SCRIPTS_DIR = os.environ.get("GLM_SCRIPTS_DIR", "/opt/scripts")
+sys.path.insert(0, SCRIPTS_DIR)
+try:
+    import glm_config as gc
+except Exception as _e:  # pragma: no cover - import guard
+    gc = None
+    _GC_ERR = str(_e)
+try:
+    import provider as prov
+    import terminate_worker
+except Exception:        # the terminate control simply does not appear
+    prov = None
+    terminate_worker = None
+
 TOKEN = os.environ.get("OPEN_BUTTON_TOKEN", "")
-MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/models/current")
-STATUS_FILE = os.environ.get("STATUS_FILE", "/tmp/model-turnkey-boot-status.json")
-MODEL_DISPLAY_NAME = os.environ.get("MODEL_DISPLAY_NAME", "Local model")
-MODEL_ID = os.environ.get("LANDING_MODEL_ID", MODEL_DISPLAY_NAME)
-MODEL_PROFILE = os.environ.get("MODEL_PROFILE", "custom")
-MODEL_CONTEXT_WINDOW = int(os.environ.get("MODEL_CONTEXT_WINDOW", "32768"))
-MODEL_OUTPUT_LIMIT = int(os.environ.get("MODEL_OUTPUT_LIMIT", "8192"))
-LANDING_FEATURES = os.environ.get(
-    "LANDING_FEATURES", "OpenAI-compatible · self-hosted"
-)
+MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
+STATUS_FILE = os.environ.get("STATUS_FILE", "/tmp/glm-boot-status.json")
 ALLOW_INSECURE = os.environ.get("LANDING_ALLOW_INSECURE", "0") == "1"
 TRUST_PROXY_HTTPS = os.environ.get("LANDING_TRUST_PROXY_HTTPS", "0") == "1"
 API_PORT = os.environ.get("LANDING_API_PORT", "8000")
-WEIGHTS_TOTAL_GIB = float(os.environ.get("MODEL_DOWNLOAD_GIB", "0"))
+
 
 _ssl_ctx = None
 
 
 def is_secure_connection(connection) -> bool:
-    """Whether secrets may be rendered on this request's transport."""
-    return (
-        isinstance(connection, ssl.SSLSocket)
-        # Runpod's documented HTTP endpoint is HTTPS-only, but its proxy
-        # header contract is not documented. Trust it only when the
-        # entrypoint explicitly selected the Runpod dashboard proxy.
-        or TRUST_PROXY_HTTPS
-        or ALLOW_INSECURE
-    )
+    """Runpod's managed proxy terminates TLS before forwarding to this port."""
+    return isinstance(connection, ssl.SSLSocket) or ALLOW_INSECURE or TRUST_PROXY_HTTPS
 
 
 def ssl_ctx():
@@ -76,7 +81,27 @@ def status() -> dict:
         return {}
 
 
+def js_literal(value) -> str:
+    """JSON string safe to embed inside an inline HTML script element."""
+    return (json.dumps(value)
+            .replace("<", "\\u003c")
+            .replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029"))
+
+
+def model_dir() -> str:
+    """The entrypoint publishes the live model dir in the status file; it can
+    move under the page's feet when the model-variant knob changes."""
+    return status().get("model_dir") or MODEL_DIR
+
+
 def weights_state() -> str:
+    """Progress against the SELECTED model's size. This used to compare against a
+    hardcoded 309 GiB — the GLM checkpoint — which made a 56 GiB Qwen download
+    look like a GLM one and cost a live debugging session."""
+    MODEL_DIR = model_dir()
     if os.path.isfile(os.path.join(MODEL_DIR, ".download-complete")):
         return "ready"
     done = 0
@@ -86,10 +111,16 @@ def weights_state() -> str:
                 done += os.path.getsize(os.path.join(root, f))
             except OSError:
                 pass
-    downloaded = done / 2**30
-    if WEIGHTS_TOTAL_GIB > 0:
-        return f"downloading — {downloaded:.0f} of ~{WEIGHTS_TOTAL_GIB:g} GiB"
-    return f"downloading — {downloaded:.0f} GiB"
+    total = ""
+    if gc is not None:
+        try:
+            eff, _s, _n = gc.resolve()
+            variant = gc.VARIANTS.get(eff.get("MODEL_VARIANT"), {})
+            if variant.get("download_gib"):
+                total = f" of ~{variant['download_gib']} GiB"
+        except Exception:
+            pass
+    return f"downloading — {done / 2**30:.0f}{total} GiB".replace(" GiB GiB", " GiB")
 
 
 def engine_state() -> str:
@@ -109,12 +140,12 @@ def engine_state() -> str:
 SNIPPETS = [
     ("oh-my-pi / pi", "~/.pi/agent/models.json", """{
   "providers": {
-    "turnkey": {
+    "glm-vast": {
       "baseUrl": "$ep/v1",
       "api": "openai-completions",
       "apiKey": "$key",
       "models": [
-        {"id": "$model", "name": "$display", "contextWindow": $context}
+        {"id": "$model", "name": "$model", "contextWindow": $ctx}
       ]
     }
   }
@@ -122,12 +153,12 @@ SNIPPETS = [
     ("opencode", "opencode.json (project or ~/.config/opencode/)", """{
   "$$schema": "https://opencode.ai/config.json",
   "provider": {
-    "turnkey": {
+    "glm-vast": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "$display",
+      "name": "$model",
       "options": {"baseURL": "$ep/v1", "apiKey": "$key"},
       "models": {
-        "$model": {"name": "$display", "limit": {"context": $context, "output": $output}}
+        "$model": {"name": "$model", "limit": {"context": $ctx, "output": $output}}
       }
     }
   }
@@ -137,193 +168,110 @@ export ANTHROPIC_AUTH_TOKEN="$key"
 export ANTHROPIC_MODEL="$model"
 claude"""),
     ("Codex", "~/.codex/config.toml", """model = "$model"
-model_provider = "turnkey"
+model_provider = "glm-vast"
 
-[model_providers.turnkey]
-name = "$display"
+[model_providers.glm-vast]
+name = "$model"
 base_url = "$ep/v1"
-env_key = "TURNKEY_API_KEY"
+env_key = "GLM_API_KEY"
 wire_api = "chat"
 
-# then:  export TURNKEY_API_KEY="$key" """),
+# then:  export GLM_API_KEY="$key" """),
 ]
 
 # Shared look. Literal CSS only (no stray $): safe inside plain strings.
 STYLE = """<style>
-:root{color-scheme:light;--bg:#f2f5fb;--bg2:#e9eef8;--card:rgba(255,255,255,.82);
---card-solid:#fff;--fg:#152033;--muted:#66728a;--faint:#8994aa;
---line:rgba(66,85,119,.16);--line-strong:rgba(66,85,119,.28);
---accent:#315efb;--accent2:#8b5cf6;--cyan:#06a8c7;--ok:#0c9b67;--busy:#d57a08;
---danger:#d44255;--shadow:0 18px 50px rgba(34,51,84,.10);
---shadow-sm:0 6px 18px rgba(34,51,84,.07);
---mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
-@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#080c14;--bg2:#0e1523;
---card:rgba(17,24,39,.82);--card-solid:#111827;--fg:#edf2ff;--muted:#9ba8c0;
---faint:#71809a;--line:rgba(148,163,184,.16);--line-strong:rgba(148,163,184,.30);
---accent:#6f8fff;--accent2:#ae7cff;--cyan:#33c5df;--ok:#35d399;--busy:#f5ad4f;
---danger:#fb7185;--shadow:0 22px 60px rgba(0,0,0,.34);
---shadow-sm:0 8px 22px rgba(0,0,0,.22)}}
+:root{--bg:#f5f6fa;--card:#ffffff;--fg:#1c1e26;--muted:#6b7280;--line:#e5e7eb;
+--accent:#4f7cff;--accent2:#9a6cff;--ok:#16a34a;--busy:#d97706;
+--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1013;--card:#171a20;--fg:#e7e9ee;
+--muted:#8b93a3;--line:#262b35;--accent:#6d95ff;--accent2:#ae8bff;--ok:#34d17b;--busy:#f0a24b}}
 *{box-sizing:border-box}
-html{min-height:100%}
-body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-background:
-radial-gradient(circle at 12% -5%,color-mix(in srgb,var(--accent) 19%,transparent),transparent 29rem),
-radial-gradient(circle at 92% 8%,color-mix(in srgb,var(--accent2) 15%,transparent),transparent 25rem),
-linear-gradient(155deg,var(--bg),var(--bg2));background-attachment:fixed;color:var(--fg);
-margin:0;line-height:1.5;min-height:100vh}
-body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.32;
-background-image:linear-gradient(var(--line) 1px,transparent 1px),
-linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:36px 36px;
-mask-image:linear-gradient(to bottom,black,transparent 68%)}
-.wrap{position:relative;max-width:68rem;margin:0 auto;padding:1.25rem 1rem 4rem}
-.layout{display:grid;gap:1.25rem;grid-template-columns:minmax(0,1fr)}
-main{min-width:0}
-header.hero{display:flex;align-items:center;gap:1rem;margin:.35rem 0 1.2rem;
-padding:1.15rem 1.25rem;border:1px solid var(--line);border-radius:20px;
-background:linear-gradient(135deg,var(--card),color-mix(in srgb,var(--card-solid) 62%,transparent));
-box-shadow:var(--shadow-sm);backdrop-filter:blur(18px)}
-.brandmark{position:relative;display:grid;place-items:center;flex:0 0 3rem;width:3rem;height:3rem;
-border-radius:14px;background:linear-gradient(145deg,var(--accent),var(--accent2));
-box-shadow:0 10px 24px color-mix(in srgb,var(--accent) 28%,transparent)}
-.brandmark:before{content:"";width:1.18rem;height:1.18rem;border:2px solid rgba(255,255,255,.92);
-border-radius:5px;box-shadow:inset 0 0 0 3px rgba(255,255,255,.16)}
-.brandmark:after{content:"";position:absolute;width:.34rem;height:.34rem;border-radius:50%;
-background:#fff;box-shadow:.52rem 0 rgba(255,255,255,.8),-.52rem 0 rgba(255,255,255,.8)}
-.hero-copy{min-width:0;flex:1}
-.eyebrow{font-size:.68rem;line-height:1.2;text-transform:uppercase;letter-spacing:.13em;
-font-weight:750;color:var(--accent)}
-header.hero h1{margin:.12rem 0 0;font-size:clamp(1.25rem,3vw,1.75rem);
-line-height:1.2;letter-spacing:-.035em;overflow-wrap:anywhere}
-header.hero h1 b{font-weight:760}
-.sub{color:var(--muted);font-size:.88rem}
-header.hero .sub{display:block;margin-top:.18rem}
-.hero-state{display:flex;align-items:center;gap:.45rem;white-space:nowrap;font-size:.77rem;
-font-weight:700;color:var(--muted);padding:.42rem .68rem;border:1px solid var(--line);
-border-radius:999px;background:color-mix(in srgb,var(--card-solid) 50%,transparent)}
-h2{font-size:1rem;margin:1.7rem 0 .65rem;letter-spacing:-.015em}
-.grid{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));margin:.75rem 0}
-.card{position:relative;background:var(--card);border:1px solid var(--line);border-radius:16px;
-padding:1rem 1.05rem;box-shadow:var(--shadow-sm);backdrop-filter:blur(16px)}
-.status-card{overflow:hidden;min-height:6.2rem;transition:transform .18s ease,border-color .18s ease}
-.status-card:hover{transform:translateY(-2px);border-color:var(--line-strong)}
-.status-card:after{content:"";position:absolute;right:-1.2rem;bottom:-1.8rem;width:4.5rem;height:4.5rem;
-border-radius:50%;background:color-mix(in srgb,var(--accent) 8%,transparent)}
-.card h3{margin:0 0 .45rem;font-size:.67rem;text-transform:uppercase;
-letter-spacing:.105em;color:var(--muted);font-weight:750}
-.card .v{font-size:.98rem;font-weight:680;letter-spacing:-.01em}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);
+margin:0;line-height:1.5}
+.wrap{max-width:62rem;margin:0 auto;padding:1.2rem 1rem 4rem}
+header.hero{display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap;
+padding:1.4rem 0 .6rem}
+header.hero h1{margin:0;font-size:1.55rem;letter-spacing:-.02em}
+header.hero h1 b{background:linear-gradient(90deg,var(--accent),var(--accent2));
+-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--muted);font-size:.92rem}
+.grid{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));margin:.8rem 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:.9rem 1rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.card h3{margin:0 0 .3rem;font-size:.78rem;text-transform:uppercase;
+letter-spacing:.06em;color:var(--muted);font-weight:600}
+.card .v{font-size:1.02rem;font-weight:600}
 .ok{color:var(--ok)}.busy{color:var(--busy)}
-.pill{display:inline-block;width:.58rem;height:.58rem;border-radius:50%;margin-right:.48rem}
-.pill.ok{background:var(--ok);box-shadow:0 0 0 4px color-mix(in srgb,var(--ok) 12%,transparent)}
-.pill.busy{background:var(--busy);box-shadow:0 0 0 4px color-mix(in srgb,var(--busy) 12%,transparent);
-animation:pulse 1.6s infinite}
-@keyframes pulse{50%{opacity:.42;box-shadow:0 0 0 7px transparent}}
-a{color:var(--accent);text-decoration:none}a:hover{text-decoration:none;color:var(--accent2)}
-code{font-family:var(--mono);font-size:.86em;background:color-mix(in srgb,var(--bg) 76%,transparent);
-border:1px solid var(--line);padding:.1rem .4rem;border-radius:7px}
-pre{font-family:var(--mono);font-size:.79rem;line-height:1.55;
-background:color-mix(in srgb,var(--bg) 80%,transparent);border:1px solid var(--line);
-padding:.9rem;border-radius:12px;overflow-x:auto;margin:.55rem 0}
-details{background:var(--card);border:1px solid var(--line);border-radius:14px;
-margin:.55rem 0;padding:.7rem 1rem;box-shadow:var(--shadow-sm);backdrop-filter:blur(16px)}
-summary{cursor:pointer;font-weight:680;font-size:.9rem;list-style:none}
-summary::-webkit-details-marker{display:none}
-details:not(.think)>summary:after{content:"+";float:right;color:var(--muted);font-size:1.15rem;line-height:1}
-details[open]:not(.think)>summary:after{content:"−"}
-button{font:inherit;font-size:.78rem;font-weight:680;background:var(--card-solid);color:var(--fg);
-border:1px solid var(--line-strong);border-radius:10px;padding:.42rem .72rem;cursor:pointer;
-transition:transform .15s ease,border-color .15s ease,background .15s ease}
-button:hover:not(:disabled){border-color:var(--accent);color:var(--accent);transform:translateY(-1px)}
-button:focus-visible,textarea:focus-visible,a:focus-visible,summary:focus-visible{
-outline:3px solid color-mix(in srgb,var(--accent) 32%,transparent);outline-offset:2px}
-button:disabled{opacity:.42;cursor:not-allowed}
-button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));
-border-color:transparent;color:#fff;box-shadow:0 7px 18px color-mix(in srgb,var(--accent) 22%,transparent)}
-button.primary:hover:not(:disabled){filter:brightness(1.08);color:#fff}
-.endpoint-card{display:flex;align-items:center;justify-content:space-between;gap:1rem;
-background:linear-gradient(120deg,var(--card),color-mix(in srgb,var(--accent) 7%,var(--card)))}
-.endpoint-card .v code{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;
-vertical-align:bottom;white-space:nowrap}
-.endpoint-actions{text-align:right;white-space:nowrap}
-.action-link{display:inline-flex;align-items:center;gap:.25rem;font-size:.82rem;font-weight:700;
-padding:.38rem .6rem;border-radius:9px;background:color-mix(in srgb,var(--accent) 9%,transparent)}
-canvas.chart{width:100%;height:100px;display:block}
-.chartv{font-family:var(--mono);font-size:.96rem;font-weight:750;float:right;color:var(--fg);
-letter-spacing:-.04em}
-.legend{font-size:.68rem;color:var(--muted)}
-.legend i{display:inline-block;width:.9em;height:3px;border-radius:2px;
-vertical-align:middle;margin:0 .3em 0 .8em}
-.wrap.wide{max-width:70rem}
+.pill{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.45rem}
+.pill.ok{background:var(--ok)}.pill.busy{background:var(--busy);animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.35}}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:var(--mono);font-size:.88em;background:var(--bg);
+border:1px solid var(--line);padding:.08rem .35rem;border-radius:6px}
+pre{font-family:var(--mono);font-size:.82rem;background:var(--bg);
+border:1px solid var(--line);padding:.8rem;border-radius:10px;overflow-x:auto;margin:.5rem 0}
+h2{font-size:1.05rem;margin:1.6rem 0 .5rem}
+details{background:var(--card);border:1px solid var(--line);border-radius:12px;
+margin:.5rem 0;padding:.55rem .9rem}
+summary{cursor:pointer;font-weight:600;font-size:.95rem}
+button{font:inherit;font-size:.82rem;background:var(--card);color:var(--fg);
+border:1px solid var(--line);border-radius:8px;padding:.3rem .8rem;cursor:pointer}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{filter:brightness(1.08);color:#fff}
+canvas.chart{width:100%;height:96px;display:block}
+.layout{display:grid;gap:1rem;grid-template-columns:minmax(0,1fr)}
 aside.chatpane{display:none}
+.wrap.wide{max-width:64rem}
 @media(min-width:75rem){
- .wrap.wide{max-width:100rem}
- .wrap.wide .layout{grid-template-columns:minmax(0,1fr) 27rem;align-items:start}
+ .wrap.wide{max-width:96rem}
+ .wrap.wide .layout{grid-template-columns:minmax(0,1fr) 26rem}
  .wrap.wide aside.chatpane{display:flex;flex-direction:column;position:sticky;top:1rem;
   height:calc(100vh - 2rem);background:var(--card);border:1px solid var(--line);
-  border-radius:20px;box-shadow:var(--shadow);backdrop-filter:blur(20px);overflow:hidden}
+  border-radius:14px;padding:.9rem;overflow:hidden}
 }
-.chathead{display:flex;align-items:center;justify-content:space-between;gap:.8rem;
-padding:1rem 1rem .8rem;border-bottom:1px solid var(--line)}
-.chathead-main{display:flex;align-items:center;gap:.65rem;min-width:0}
-.assistant-avatar{display:grid;place-items:center;width:2.15rem;height:2.15rem;border-radius:10px;
-background:linear-gradient(145deg,var(--accent),var(--accent2));color:#fff;font-size:.95rem;font-weight:800}
-.chathead strong{display:block;font-size:.9rem;line-height:1.15}
-.chathead small{display:flex;align-items:center;gap:.35rem;color:var(--muted);font-size:.69rem;margin-top:.2rem}
-.chathead small:before{content:"";display:block;width:.43rem;height:.43rem;border-radius:50%;
-background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 12%,transparent)}
-.expand-link{display:grid;place-items:center;width:2rem;height:2rem;border:1px solid var(--line);
-border-radius:9px;color:var(--muted)}
-.chatpane #log{flex:1;overflow-y:auto;min-height:0;padding:.8rem}
-#log{scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent}
-.chatempty{height:100%;min-height:12rem;display:grid;place-content:center;text-align:center;
-padding:1.5rem;color:var(--muted)}
-.chatempty-icon{display:grid;place-items:center;width:3rem;height:3rem;margin:0 auto .7rem;
-border-radius:15px;background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 14%,transparent),
-color-mix(in srgb,var(--accent2) 14%,transparent));color:var(--accent);font-size:1.25rem}
+aside.chatpane h2{margin:0 0 .5rem;font-size:.95rem}
+.chatpane #log{flex:1;overflow-y:auto;min-height:0}
+.msg{max-width:85%;padding:.6rem .9rem;border-radius:14px;margin:.35rem 0;
+white-space:pre-wrap;font-size:.92rem;width:fit-content}
+.msg.you{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#fff;
+margin-left:auto;border-bottom-right-radius:4px}
+.msg.bot{background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:4px}
+details.think{color:var(--muted);font-size:.8em;margin:.2rem 0;max-width:85%;
+background:none;border:none;padding:0 .3rem}
+.composer{display:flex;gap:.5rem;align-items:flex-end;padding-top:.5rem;
+border-top:1px solid var(--line)}
+#in{flex:1;font:inherit;background:var(--bg);color:var(--fg);
+border:1px solid var(--line);border-radius:12px;padding:.5rem .7rem;
+min-height:2.6rem;max-height:9rem;resize:vertical}
+.side{display:flex;flex-direction:column;gap:.35rem}
+label.thinkbox{font-size:.78rem;color:var(--muted);white-space:nowrap}
+.chartv{font-family:var(--mono);font-size:1.02rem;font-weight:700;float:right}
+.legend{font-size:.72rem;color:var(--muted)}
+.legend i{display:inline-block;width:.9em;height:3px;border-radius:2px;
+vertical-align:middle;margin:0 .3em 0 .8em}
+.chatempty{height:100%;min-height:10rem;display:grid;place-content:center;text-align:center;
+padding:1.25rem;color:var(--muted)}
+.chatempty-icon{font-size:1.4rem;color:var(--accent);margin-bottom:.45rem}
 .chatempty strong{display:block;color:var(--fg);font-size:.9rem;margin-bottom:.2rem}
-.chatempty span{font-size:.76rem;max-width:15rem}
-.msg{position:relative;max-width:88%;padding:.65rem .82rem;border-radius:15px;margin:.42rem 0;
-white-space:pre-wrap;overflow-wrap:anywhere;font-size:.87rem;width:fit-content;
-box-shadow:0 3px 10px rgba(0,0,0,.05)}
-.msg.you{background:linear-gradient(130deg,var(--accent),var(--accent2));color:#fff;
-margin-left:auto;border-bottom-right-radius:5px}
-.msg.bot{background:color-mix(in srgb,var(--card-solid) 72%,transparent);
-border:1px solid var(--line);border-bottom-left-radius:5px}
-.msg.bot:empty:after{content:"Thinking…";color:var(--muted);animation:softpulse 1.2s infinite}
-@keyframes softpulse{50%{opacity:.45}}
-details.think{color:var(--muted);font-size:.77em;margin:.3rem 0;max-width:88%;
-background:none;border:none;box-shadow:none;padding:0 .3rem;backdrop-filter:none}
-details.think summary{color:var(--accent);font-size:.78rem}
-details.think>div{margin-top:.35rem;padding:.6rem .7rem;border-left:2px solid var(--line-strong);
-white-space:pre-wrap;overflow-wrap:anywhere}
-.composer{padding:.72rem;border-top:1px solid var(--line);
-background:color-mix(in srgb,var(--card-solid) 55%,transparent)}
+.chatempty span{display:block;font-size:.76rem;max-width:15rem}
+.composer{display:block;padding:.65rem;border-top:1px solid var(--line)}
 .inputrow{display:flex;gap:.5rem;align-items:flex-end}
-#in{flex:1;font:inherit;font-size:.86rem;background:color-mix(in srgb,var(--bg) 72%,transparent);
-color:var(--fg);border:1px solid var(--line-strong);border-radius:13px;padding:.68rem .75rem;
-min-height:2.75rem;max-height:9rem;resize:none}
-#in::placeholder{color:var(--faint)}
-.composerbar{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.52rem}
-.chatprefs{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
-.composer-actions{display:flex;gap:.35rem}
-.turncount{align-self:center;color:var(--faint);font-size:.68rem;margin-right:.15rem}
-.thinkbox{position:relative;display:flex;align-items:center;gap:.42rem;color:var(--muted);
+.composerbar{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.5rem}
+.chatprefs,.composer-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+.turncount{color:var(--muted);font-size:.7rem}
+.thinkbox{position:relative;display:flex;align-items:center;gap:.35rem;color:var(--muted);
 font-size:.73rem;white-space:nowrap;cursor:pointer;user-select:none}
 .thinkbox input{position:absolute;opacity:0;pointer-events:none}
-.switch{position:relative;width:1.85rem;height:1.05rem;border-radius:99px;background:var(--line-strong);
-transition:background .18s ease}
-.switch:after{content:"";position:absolute;top:.15rem;left:.15rem;width:.75rem;height:.75rem;
-border-radius:50%;background:var(--card-solid);box-shadow:0 1px 4px rgba(0,0,0,.18);transition:transform .18s ease}
+.switch{position:relative;width:1.8rem;height:1rem;border-radius:99px;background:var(--line)}
+.switch:after{content:"";position:absolute;top:.13rem;left:.13rem;width:.74rem;height:.74rem;
+border-radius:50%;background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.2);
+transition:transform .18s ease}
 .thinkbox input:checked+.switch{background:var(--accent)}
 .thinkbox input:checked+.switch:after{transform:translateX(.8rem)}
-.thinkbox input:focus-visible+.switch{outline:3px solid color-mix(in srgb,var(--accent) 30%,transparent)}
-@media(max-width:38rem){
- .wrap{padding:.7rem .7rem 2rem}
- header.hero{border-radius:16px;padding:.9rem}.brandmark{width:2.6rem;height:2.6rem;flex-basis:2.6rem}
- .hero-state{display:none}.grid{grid-template-columns:1fr 1fr;gap:.55rem}
- .card{padding:.85rem}.endpoint-card{align-items:flex-start;flex-direction:column}
- .endpoint-actions{text-align:left}.composerbar{align-items:center;flex-wrap:wrap}
- .chatprefs,.composer-actions{width:100%}.composer-actions{justify-content:flex-end}
-}
+@media(max-width:38rem){.composerbar{align-items:flex-start;flex-direction:column}
+.composer-actions{width:100%;justify-content:flex-end}}
 </style>"""
 
 # Live dashboard: the browser scrapes $ep/metrics (Bearer $key unless placeholder).
@@ -345,7 +293,7 @@ METRICS_SECTION = Template("""
 </div>
 <script>
 (function(){
-var EP="$ep", KEY="$key";
+var EP=$ep_js, KEY=$key_js;
 var HDRS = KEY.charAt(0)==="<" ? {} : {"Authorization":"Bearer "+KEY};
 var N=100, S={gen:[],pro:[],run:[],wai:[],kv:[],hit:[]};
 var prev=null, prevT=0;
@@ -461,7 +409,7 @@ CHAT_WIDGET = """<div id=log aria-live=polite>
 </div>"""
 
 CHAT_JS = """<script>
-const EP="$ep", KEY="$key", msgs=[];
+const EP=$ep_js, KEY=$key_js, MODEL=$model_js, msgs=[];
 const log=document.getElementById("log"), inp=document.getElementById("in");
 let ctrl=null;
 function el(tag,cls,txt){
@@ -476,8 +424,6 @@ function wireMessages(){
   const keep=document.getElementById("preserve").checked;
   return msgs.map(m=>{
     const wire={role:m.role,content:m.content};
-    // Reasoning-only responses already use their reasoning as content. Adding
-    // it again under a reasoning field would duplicate context.
     if(keep&&m.role==="assistant"&&m.reasoning&&!m.reasoningOnly)
       wire[m.reasoningField||"reasoning_content"]=m.reasoning;
     return wire;
@@ -499,7 +445,7 @@ async function send(){
   try{
     const r=await fetch(EP+"/v1/chat/completions",{method:"POST",signal:ctrl.signal,
       headers:{"Authorization":"Bearer "+KEY,"Content-Type":"application/json"},
-      body:JSON.stringify({model:"$model",messages:wireMessages(),stream:true,max_tokens:$output,
+      body:JSON.stringify({model:MODEL,messages:wireMessages(),stream:true,max_tokens:$output,
         chat_template_kwargs:{enable_thinking:document.getElementById("think").checked}})});
     if(!r.ok){failed=true;out.textContent="HTTP "+r.status+": "+await r.text();return}
     const rd=r.body.getReader(), dec=new TextDecoder(); let buf="";
@@ -510,8 +456,6 @@ async function send(){
         const ch=packet.choices;
         if(!ch||!ch.length)continue; // final usage chunk has choices:[]
         const d=ch[0].delta||{};
-        // vLLM reasoning parsers do not all use the same delta field:
-        // GLM emits reasoning_content while Qwen emits reasoning.
         const thought=d.reasoning_content??d.reasoning;
         if(thought){
           reasoningField=d.reasoning_content!=null?"reasoning_content":"reasoning";
@@ -525,8 +469,6 @@ async function send(){
     const stopped=ctrl&&ctrl.signal.aborted,finalText=answer||reasoning;
     ctrl=null;document.getElementById("stop").disabled=true;
     document.getElementById("send").disabled=false;
-    // Some Qwen/vLLM combinations finish with the useful response in the
-    // reasoning stream and null content. Never leave an empty assistant turn.
     if(!answer&&reasoning){out.textContent=reasoning;think.remove()}
     else if(!reasoning)think.remove();
     else think.querySelector("summary").textContent="thinking ("+reasoning.length+" chars)";
@@ -550,24 +492,691 @@ inp.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter")send()});
 inp.addEventListener("input",()=>{inp.style.height="";inp.style.height=Math.min(inp.scrollHeight,144)+"px"});
 </script>"""
 
-CHAT_PAGE = Template("""<!doctype html><html><head><title>$display chat</title>
+CHAT_PAGE = Template("""<!doctype html><html><head><title>$model_html chat</title>
 <meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE + """<style>
-.wrap.chatpage{max-width:56rem;display:flex;flex-direction:column;height:100vh;height:100dvh;padding-bottom:1rem}
-.chatpage header.hero{flex:0 0 auto}
-.chatpage #log{flex:1;overflow-y:auto;padding:1rem;min-height:0;background:var(--card);
-border:1px solid var(--line);border-bottom:none;border-radius:20px 20px 0 0;box-shadow:var(--shadow)}
-.chatpage .composer{border:1px solid var(--line);border-radius:0 0 20px 20px;box-shadow:var(--shadow)}
-.chatpage .msg{max-width:78%}
-</style></head><body><div class="wrap chatpage">
-<header class=hero><div class=brandmark aria-hidden=true></div>
-<div class=hero-copy><div class=eyebrow>Quick chat</div><h1><b>$display</b></h1>
-<span class=sub><a href="/?token=$token">&larr; Back to status &amp; dashboard</a></span></div>
-<div class=hero-state><span class="pill ok"></span>Engine online</div></header>
+.wrap{max-width:52rem;display:flex;flex-direction:column;height:100vh;padding-bottom:1rem}
+#log{flex:1;overflow-y:auto;padding:.5rem 0}
+.msg.bot{background:var(--card)}
+</style></head><body><div class=wrap>
+<header class=hero><h1><b>$model_html</b> quick chat</h1>
+<span class=sub><a href="/?token=$token_html">&larr; status &amp; dashboard</a></span></header>
 """ + CHAT_WIDGET + CHAT_JS + """<script>inp.focus();</script></div></body></html>""")
 
-PAGE_HEAD = Template("""<!doctype html><html><head><title>$display model turnkey</title>
-<meta name=viewport content="width=device-width,initial-scale=1">""" + STYLE +
-                     """</head><body>""")
+def page_head(title="vLLM turnkey"):
+    return ("<!doctype html><html><head><title>" + html.escape(title) + "</title>"
+            '<meta name=viewport content="width=device-width,initial-scale=1">'
+            + STYLE + "</head><body>")
+
+# ==========================================================================
+# self-service configuration
+# ==========================================================================
+# Editing what the engine serves is at least as privileged as reading the API
+# key, so the editor is gated on the same OPEN_BUTTON_TOKEN as /chat. It does
+# NOT additionally require TLS: on a rental without a DNS provider there is no
+# cert, and refusing to work there would mean the feature exists only for the
+# minority who set up deSEC. The page says so instead of pretending.
+
+CONFIG_STYLE = """<style>
+table.cfg{width:100%;border-collapse:collapse;font-size:.9rem}
+table.cfg td{padding:.45rem .5rem;border-top:1px solid var(--line);vertical-align:top}
+table.cfg td.k{white-space:nowrap;font-family:var(--mono);font-size:.82rem}
+table.cfg td.v{width:14rem}
+table.cfg input,table.cfg select{font:inherit;font-size:.85rem;width:100%;
+background:var(--bg);color:var(--fg);border:1px solid var(--line);
+border-radius:8px;padding:.25rem .4rem}
+table.cfg input:disabled,table.cfg select:disabled{opacity:.6}
+.src{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;
+border:1px solid var(--line);border-radius:99px;padding:.05rem .45rem;color:var(--muted)}
+.src.file{border-color:var(--accent);color:var(--accent)}
+.src.env{border-color:var(--accent2);color:var(--accent2)}
+.why{color:var(--muted);font-size:.82rem;margin-top:.25rem}
+.finding{border-left:3px solid var(--busy);padding:.4rem .7rem;margin:.4rem 0;
+background:var(--card);border-radius:0 8px 8px 0;font-size:.87rem}
+.finding.error{border-left-color:#e5484d}
+.banner{padding:.7rem .9rem;border-radius:10px;margin:.6rem 0;font-size:.9rem;
+background:var(--card);border:1px solid var(--line)}
+.banner.bad{border-color:#e5484d}
+.banner.good{border-color:var(--ok)}
+textarea.imp{width:100%;min-height:7rem;font-family:var(--mono);font-size:.8rem;
+background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:.5rem}
+</style>"""
+
+
+def _val_ctx():
+    """What validate() needs from the host: GPU count and what the state file
+    actually persists."""
+    ctx = {"vision_available": os.path.exists(
+        os.path.join(model_dir(), "vision_tower.safetensors"))}
+    try:
+        ctx["gpu_count"] = int(os.environ["GLM_GPU_COUNT"])
+    except (KeyError, ValueError):
+        pass
+    try:
+        ctx["state_keys"] = list(gc.load_state_file())
+    except Exception:
+        ctx["state_keys"] = []
+    return ctx
+
+
+def boot_notes(limit=40):
+    """The entrypoint's own warnings. RunPod has no console view and no CLI log
+    command, so a boot warning that only reaches stdout is invisible exactly
+    when it matters most."""
+    if gc is None:
+        return []
+    try:
+        with open(os.path.join(gc.runtime_dir(), "boot-notes.log")) as f:
+            return [ln.rstrip() for ln in f][-limit:]
+    except OSError:
+        return []
+
+
+def deployment() -> dict:
+    """What is ACTUALLY configured, for every user-visible string.
+
+    The header used to advertise a fixed model name, context length, KV dtype,
+    speculation depth and GPU model regardless of what was actually running.
+    Under another family or another GPU count every clause of that is false, and
+    on a live pod it caused two correctly-honoured knobs to be reported as
+    ignored."""
+    st = status()
+    out = {"title": "vLLM turnkey", "model": "", "family": "", "chips": [],
+           "gpus": st.get("gpus", ""), "gpu_name": st.get("gpu_name", ""),
+           "provider": st.get("provider", "unknown"), "sshd": st.get("sshd", "")}
+    if gc is None:
+        return out
+    try:
+        eff, _src, _notes = gc.resolve()
+    except Exception:
+        return out
+    fam = gc.family(eff.get("MODEL_FAMILY"))
+    variant = gc.VARIANTS.get(eff.get("MODEL_VARIANT"), {})
+    served = str(eff.get("SERVED_MODEL_NAME", "")).split()[0] or "model"
+    out["model"] = served
+    out["family"] = fam["label"]
+    out["title"] = f"{served} turnkey"
+    out["context"] = int(eff.get("MAX_MODEL_LEN") or 0)
+    out["output"] = int(eff.get("MODEL_OUTPUT_LIMIT") or 8192)
+    out["served_names"] = str(eff.get("SERVED_MODEL_NAME", served)).split()
+    ctx = out["context"]
+    ctx_s = f"{ctx // 1024}K" if ctx >= 1024 else str(ctx)
+    chips = [f"{ctx_s} context", f"{eff.get('KV_CACHE_DTYPE')} KV"]
+    if eff.get("MTP_TOKENS"):
+        chips.append(f"MTP-{eff['MTP_TOKENS']}")
+    else:
+        chips.append("no speculation")
+    tp = eff.get("TENSOR_PARALLEL_SIZE")
+    gpus = out["gpus"] or tp
+    chips.append(f"TP={tp}" + (f" of {gpus} GPU" + ("s" if str(gpus) != "1" else "")
+                               if str(gpus) != str(tp) else
+                               f" x {out['gpu_name'] or 'GPU'}"))
+    out["chips"] = chips
+    out["repo"] = gc.derive(eff).get("MODEL_REPO", variant.get("repo", ""))
+    out["tested"] = fam.get("tested", True)
+    return out
+
+
+def config_enabled() -> bool:
+    return gc is not None and bool(TOKEN)
+
+
+def verify_last() -> dict:
+    return gc.read_json(gc.p_verify_last()) if gc else {}
+
+
+def correctness() -> tuple:
+    """-> (headline, ok_bool, detail). Never collapses 'answered a short prompt'
+    into 'healthy': the failure modes this appliance has actually seen all pass
+    short prompts and fail past ~32K tokens."""
+    v = verify_last()
+    if not v:
+        return ("not yet verified", False,
+                "the post-start probe has not reported yet")
+    if not v.get("health"):
+        return ("engine did not come up", False, v.get("reason", ""))
+    if not (v.get("short_prompt") or {}).get("ok"):
+        return ("short-prompt checks FAILED", False, v.get("reason", ""))
+    lc = v.get("long_context") or {}
+    if not lc.get("attempted"):
+        return ("short prompts only — long context UNVERIFIED", False,
+                lc.get("detail", "the long-context probe did not run"))
+    if lc.get("ok"):
+        return ("verified incl. long context (%s/%s codes at ~%s tok)"
+                % (lc.get("found"), lc.get("total"), lc.get("tokens")), True,
+                v.get("reason", ""))
+    return ("LONG-CONTEXT PROBE FAILED (%s/%s codes)"
+            % (lc.get("found", 0), lc.get("total", 0)), False, v.get("reason", ""))
+
+
+def _field(knob, value, source=""):
+    key = html.escape(knob["key"])
+    editable = knob.get("editable", True) and source != "n/a"
+    dis = "" if editable else " disabled"
+    if source == "n/a":
+        return ("<span class=sub>not applicable to this model family</span>"
+                f"<input type=hidden name='__na_{key}' value=1>")
+    if knob["type"] == "bool":
+        opts = "".join(
+            "<option value='%s'%s>%s</option>" % (
+                v, " selected" if bool(value) == (v == "1") else "", lbl)
+            for v, lbl in (("1", "on"), ("0", "off")))
+        return f"<select name='{key}'{dis}>{opts}</select>"
+    if knob["type"] == "choice":
+        labels = {}
+        if knob["key"] == "MODEL_FAMILY":
+            labels = {k: v["label"] for k, v in gc.FAMILIES.items()}
+        elif knob["key"] == "MODEL_VARIANT":
+            labels = {k: "%s [%s]" % (v["label"], v.get("family", "?"))
+                      for k, v in gc.VARIANTS.items()}
+        elif knob["key"] == "MTP_DRAFT":
+            labels = {k: v["label"] for k, v in gc.DRAFTS.items()}
+        opts = "".join(
+            "<option value='%s'%s>%s</option>" % (
+                html.escape(c), " selected" if str(value) == c else "",
+                html.escape(labels.get(c, c)))
+            for c in knob["choices"])
+        return f"<select name='{key}'{dis}>{opts}</select>"
+    if knob["type"] in ("int", "float"):
+        step = "1" if knob["type"] == "int" else "0.01"
+        lo = f" min='{knob['min']}'" if "min" in knob else ""
+        hi = f" max='{knob['max']}'" if "max" in knob else ""
+        return (f"<input type=number step='{step}'{lo}{hi} name='{key}' "
+                f"value='{html.escape(gc.to_text(knob, value))}'{dis}>")
+    return (f"<input type=text name='{key}' "
+            f"value='{html.escape(gc.to_text(knob, value))}'{dis}>")
+
+
+def _findings_html(findings):
+    out = []
+    for f in findings:
+        cls = "finding error" if f["level"] == "error" else "finding"
+        keys = ", ".join(f["keys"])
+        out.append(f"<div class='{cls}'><b>{html.escape(f['level'].upper())}</b> "
+                   f"<code>{html.escape(keys)}</code><br>{html.escape(f['message'])}</div>")
+    return "".join(out)
+
+
+def _failures_html():
+    root = gc.p_failures()
+    try:
+        dirs = sorted(os.listdir(root), reverse=True)[:5]
+    except OSError:
+        return ""
+    out = []
+    for d in dirs:
+        fdir = os.path.join(root, d)
+        meta = gc.read_json(os.path.join(fdir, "meta.json"))
+        try:
+            with open(os.path.join(fdir, "diff.txt")) as f:
+                diff = f.read()
+        except OSError:
+            diff = ""
+        analysis = ""
+        try:
+            with open(os.path.join(fdir, "analysis.md")) as f:
+                analysis = f.read()
+        except OSError:
+            analysis = ("_The running model has not produced an explanation yet "
+                        "(it is generated once the known-good config is serving)._")
+        sigs = "".join(f"<li>{html.escape(s)}</li>" for s in meta.get("signatures") or [])
+        out.append(
+            "<details><summary>%s &mdash; %s</summary>"
+            "<p class=sub>%s</p>%s"
+            "<h3 style='font-size:.9rem;margin:.6rem 0 .2rem'>What the model says</h3>"
+            "<pre>%s</pre>"
+            "<h3 style='font-size:.9rem;margin:.6rem 0 .2rem'>Config diff</h3><pre>%s</pre>"
+            "<p class=sub>Full log: <code>%s/error.log</code></p></details>" % (
+                html.escape(d), html.escape(meta.get("reason", "?")),
+                html.escape("known failure signatures matched:") if sigs else "",
+                f"<ul>{sigs}</ul>" if sigs else "",
+                html.escape(analysis), html.escape(diff or "(none)"),
+                html.escape(fdir)))
+    return "".join(out)
+
+
+def render_config(tok: str, secure: bool, banner=None, banner_cls="",
+                  extra_findings=None) -> bytes:
+    effective, sources, notes = gc.resolve()
+    findings = list(extra_findings or []) + gc.validate(effective, _val_ctx())
+    fam = gc.family(effective.get("MODEL_FAMILY"))
+    st = gc.apply_state()
+    head, ok, detail = correctness()
+    tok_q = html.escape(tok, quote=True)
+
+    dep = deployment()
+    parts = ["<!doctype html><html><head><title>"
+             + html.escape(dep["model"] or "vLLM") + " configuration</title>"
+             "<meta name=viewport content='width=device-width,initial-scale=1'>",
+             STYLE, CONFIG_STYLE, "</head><body><div class=wrap>",
+             "<header class=hero><h1><b>"
+             + html.escape(dep["model"] or "vLLM") + "</b> configuration</h1>"
+             f"<span class=sub><a href='/?token={tok_q}'>&larr; status &amp; dashboard</a>"
+             + (f" &middot; <a href='/terminate?token={tok_q}'>terminate</a>"
+                if terminate_available() else "")
+             + "</span></header>"]
+    if banner:
+        parts.append(f"<div class='banner {banner_cls}'>{banner}</div>")
+    if not secure:
+        parts.append("<div class=banner>This page is being served over plain HTTP. "
+                     "The token and everything you type here cross the network in the "
+                     "clear. Set <code>DESEC_TOKEN</code>+<code>DESEC_DOMAIN</code> "
+                     "(or <code>ACME_DOMAIN</code>) to get TLS.</div>")
+
+    cls = "ok" if ok else "busy"
+    parts.append(
+        "<div class=grid>"
+        "<div class=card><h3>Apply state</h3><div class=v>%s</div>"
+        "<div class=why>%s</div></div>"
+        "<div class=card><h3>Correctness</h3>"
+        "<div class=v><span class='pill %s'></span><span class='%s'>%s</span></div>"
+        "<div class=why>%s</div></div></div>" % (
+            html.escape(st.get("mode", "steady")),
+            html.escape(str(st.get("detail") or "")),
+            cls, cls, html.escape(head), html.escape(detail)))
+
+    if st.get("mode") == "rolled-back":
+        parts.append(
+            "<div class='banner bad'><b>The last configuration you applied was rolled "
+            "back.</b> The previous known-good configuration is what is running now. "
+            "The failed configuration, its boot log and a diff are kept below.</div>")
+
+    parts.append(
+        "<div class=card><h3>Model family</h3><div class=v>%s</div>"
+        "<div class=why>%s</div>%s</div>" % (
+            html.escape(fam["label"]), html.escape(fam["notes"]),
+            "" if fam.get("tested") else
+            "<div class=finding error><b>UNTESTED</b> — nobody has booted this image "
+            "with this family. Treat every default as a starting point.</div>"))
+    if notes:
+        parts.append("".join(f"<div class=finding>{html.escape(n)}</div>" for n in notes))
+    if findings:
+        parts.append("<h2>Pre-validation</h2>" + _findings_html(findings))
+
+    parts.append(f"<form method=post action='/config/apply?token={tok_q}'>"
+                 f"<input type=hidden name=token value='{tok_q}'>")
+    group = None
+    parts.append("<table class=cfg>")
+    for knob in gc.KNOBS:
+        if knob.get("group") != group:
+            group = knob.get("group")
+            parts.append(f"<tr><td colspan=3><h2>{html.escape(group)}</h2></td></tr>")
+        key = knob["key"]
+        src = sources[key]
+        locked = "" if knob.get("editable", True) else " <span class=src>locked</span>"
+        na = " <span class=src>n/a</span>" if src == "n/a" else ""
+        parts.append(
+            "<tr><td class=k>%s%s%s</td><td class=v>%s</td><td>"
+            "<b>%s</b> <span class='src %s'>%s</span><div class=why>%s</div></td></tr>" % (
+                html.escape(key), locked, na, _field(knob, effective[key], src),
+                html.escape(knob.get("label", key)), src, src,
+                html.escape(knob["rationale"])))
+    parts.append("</table>")
+    parts.append(
+        "<p><button class=primary type=submit>Apply &amp; restart vLLM</button> "
+        f"<a href='/config/export?token={tok_q}'><button type=button>Export JSON"
+        "</button></a></p>"
+        "<p class=sub>Apply writes the JSON state file on the volume and restarts the "
+        "engine only &mdash; the container, the weights and the API key are untouched. "
+        "A restart costs a few minutes of engine load; changing the model variant, the "
+        "draft type or vision can cost a download on top. If the new configuration does "
+        "not come up, or comes up and fails the long-context probe, it is rolled back "
+        "automatically.</p></form>")
+
+    parts.append(
+        f"<h2>Import</h2><form method=post action='/config/import?token={tok_q}'>"
+        f"<input type=hidden name=token value='{tok_q}'>"
+        "<textarea class=imp name=doc placeholder='Paste a previously exported "
+        "config JSON here'></textarea>"
+        "<p><button type=submit>Import, validate &amp; restart</button></p></form>")
+
+    parts.append(
+        f"<h2>Reset</h2><form method=post action='/config/reset?token={tok_q}'>"
+        f"<input type=hidden name=token value='{tok_q}'>"
+        "<p class=sub>Deletes the state file, returning to the template environment "
+        "and the built-in defaults.</p>"
+        "<p><button type=submit>Reset to defaults &amp; restart</button></p></form>")
+
+    fails = _failures_html()
+    if fails:
+        parts.append("<h2>Rejected configurations</h2>" + fails)
+
+    parts.append("</div></body></html>")
+    return "".join(parts).encode()
+
+
+def _form_values(form: dict):
+    """Coerce a submitted form into knob values, collecting per-field errors."""
+    values, errs = {}, []
+    for knob in gc.KNOBS:
+        if not knob.get("editable", True):
+            continue
+        raw = form.get(knob["key"], [None])[0]
+        if raw is None:
+            continue
+        try:
+            values[knob["key"]] = gc.coerce(knob, raw)
+        except gc.ConfigError as e:
+            errs.append({"id": "coerce", "level": "error", "keys": [knob["key"]],
+                         "message": str(e)})
+    return values, errs
+
+
+def apply_values(values: dict):
+    """Validate a candidate, persist it, and ask the supervisor for a restart.
+
+    -> (ok, findings, message). Nothing is written when validation finds an
+    error: the whole point is that the user never reaches a failed restart for
+    a reason that was knowable beforehand."""
+    try:
+        gc.check_forbidden(values)
+    except gc.ConfigError as e:
+        return False, [{"id": "forbidden-key", "level": "error",
+                        "keys": list(gc.FORBIDDEN_STATE_KEYS), "message": str(e)}], \
+            "Nothing was applied."
+    dropped = []
+    minimal = gc.minimize(values, dropped)
+    effective, _sources, notes = gc.resolve(state_values=minimal)
+    ctx = _val_ctx()
+    ctx["state_keys"] = list(minimal)
+    findings = gc.validate(effective, ctx)
+    if gc.errors(findings):
+        return False, findings, "Nothing was applied — fix the errors below."
+    # Report dropped knobs on EVERY path, including "no change" — otherwise a
+    # user who submits a GLM knob while on Qwen is told nothing happened, which
+    # is true but hides the more useful fact of WHY.
+    drop_msg = ""
+    if dropped:
+        drop_msg = ("<p><b>Not applicable to this model family, so not saved:</b> "
+                    + html.escape(", ".join(sorted(set(dropped)))) + "</p>")
+    good = gc.read_json(gc.p_known_good())
+    current, _s, _n = gc.resolve()
+    if not gc.diff(current, effective):
+        return True, findings, ("No change: the submitted configuration is the one "
+                                "running." + drop_msg)
+    gc.write_json_atomic(gc.p_state(), {
+        "values": minimal,
+        "written_at": gc.utcnow_iso()}, mode=0o600)
+    gc.set_apply_state("trial", since=gc.utcnow_iso(),
+                       detail="restarting into a candidate configuration",
+                       baseline=good.get("ts"))
+    os.makedirs(gc.runtime_dir(), exist_ok=True)
+    with open(gc.p_restart_flag(), "w") as f:
+        f.write("landing-page\n")
+    msg = ("Applied. vLLM is restarting with:<br><pre>"
+           + html.escape(gc.diff_text(current, effective)) + "</pre>")
+    # Not silently ignored: the user is told which knobs the selected family
+    # does not have and that they were not written.
+    return True, findings, msg + drop_msg
+
+
+# ==========================================================================
+# terminate the instance
+# ==========================================================================
+
+TERMINATE_STYLE = """<style>
+.danger{border:1px solid #e5484d;border-radius:12px;padding:1rem;margin:1rem 0;
+background:var(--card)}
+.danger h2{margin-top:0;color:#e5484d}
+.danger ul{margin:.3rem 0 .6rem 1.1rem;padding:0}
+.danger li{margin:.15rem 0}
+button.destroy{background:#e5484d;border-color:#e5484d;color:#fff;font-weight:600}
+button.destroy:hover{filter:brightness(1.1);color:#fff}
+button.destroy:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.lockbox{border:1px solid var(--line);border-radius:12px;padding:.8rem 1rem;
+margin:1rem 0;background:var(--card)}
+input.confirm{font-family:var(--mono);font-size:.95rem;width:100%;max-width:22rem;
+background:var(--bg);color:var(--fg);border:1px solid var(--line);
+border-radius:8px;padding:.4rem .6rem}
+.kv{font-size:.88rem}.kv b{font-family:var(--mono);font-weight:600}
+</style>"""
+
+
+def terminate_available() -> bool:
+    """The control only exists when the shared modules imported AND the page is
+    token-gated. Termination must never be reachable unauthenticated."""
+    return bool(gc is not None and prov is not None and terminate_worker is not None
+                and TOKEN)
+
+
+def _switch_html():
+    st = gc.read_switches()
+    allowed, why = gc.termination_allowed()
+    rows = [
+        ("Kill switch (TERMINATE_ENABLED)",
+         "on — the terminate control is available" if st["enabled"]
+         else "off — terminate from this page is disabled (this is the default)"),
+        ("Anti-kill switch (TERMINATE_LOCKED)",
+         "LOCKED — termination is refused no matter what" if st["locked"]
+         else "not locked"),
+    ]
+    body = "".join(f"<div class=kv><b>{html.escape(k)}</b>: {html.escape(v)}</div>"
+                   for k, v in rows)
+    return ("<div class=lockbox><h3 style='margin:.1rem 0 .5rem;font-size:.85rem;"
+            "text-transform:uppercase;letter-spacing:.06em;color:var(--muted)'>"
+            "Termination switches</h3>" + body +
+            f"<p class=sub style='margin:.5rem 0 0'>{html.escape(why)}</p></div>"), allowed
+
+
+def _progress_html():
+    doc = terminate_worker.read_progress()
+    if not doc:
+        return ""
+    cls = "banner"
+    if doc.get("done"):
+        cls = "banner good" if doc.get("ok") else "banner bad"
+    steps = "".join(
+        f"<li>{html.escape(s.get('phase', ''))}"
+        + (f" — {html.escape(s.get('detail', ''))}" if s.get("detail") else "")
+        + "</li>" for s in doc.get("steps", []))
+    extra = ""
+    if doc.get("dry_run"):
+        extra += ("<p><b>DRY RUN</b> — the destroy request is being prepared but NOT "
+                  "sent. The instance keeps running and keeps billing.</p>")
+    if doc.get("terminate", {}).get("attempts"):
+        rows = "".join(
+            "<li><code>%s %s</code> → HTTP %s</li>" % (
+                html.escape(str(a.get("method"))), html.escape(str(a.get("url"))),
+                html.escape(str(a.get("status"))))
+            for a in doc["terminate"]["attempts"])
+        extra += f"<p class=sub>Provider calls:</p><ul>{rows}</ul>"
+    er = doc.get("erase_result")
+    if er:
+        extra += ("<p class=sub>Erased %s file(s), %.1f MiB overwritten%s.</p>" % (
+            er.get("erased", 0), er.get("bytes", 0) / 2**20,
+            f", {len(er.get('failed', []))} failed" if er.get("failed") else ""))
+    if doc.get("unknown_large"):
+        extra += ("<p class=sub><b>Not erased:</b> %d large file(s) under the model dir "
+                  "could not be told apart from the public checkpoint. They are listed "
+                  "in the progress JSON.</p>" % len(doc["unknown_large"]))
+    head = ("Termination finished" if doc.get("done") else "Termination in progress")
+    return (f"<div class='{cls}'><b>{head}</b> — phase: "
+            f"<code>{html.escape(doc.get('phase', ''))}</code>"
+            f"<p>{html.escape(doc.get('detail', ''))}</p>{extra}"
+            f"<details><summary>steps</summary><ul>{steps}</ul></details></div>")
+
+
+_PROBE_CACHE = {"ts": 0, "state": "unknown", "detail": ""}
+
+
+def credential_probe(p):
+    """Ask the provider whether the credential is even valid, before the user
+    types an instance id. Uses an UNARMED transport: the check is a read, and
+    the page never needs the ability to destroy anything. Cached, because it is
+    a network round trip on a page that gets polled."""
+    if os.environ.get("TERMINATE_PROBE", "1") == "0":
+        return "unknown", "credential pre-check disabled (TERMINATE_PROBE=0)"
+    now = time.time()
+    if now - _PROBE_CACHE["ts"] < 60:
+        return _PROBE_CACHE["state"], _PROBE_CACHE["detail"]
+    try:
+        state, detail = p.probe(prov.HttpTransport(timeout=8))
+    except Exception as e:
+        state, detail = "unknown", f"the credential check could not run ({e})"
+    _PROBE_CACHE.update({"ts": now, "state": state, "detail": detail})
+    return state, detail
+
+
+def render_terminate(tok: str, secure: bool, banner=None, banner_cls="") -> bytes:
+    p = prov.get()
+    desc = p.describe()
+    switch_html, allowed = _switch_html()
+    tok_q = html.escape(tok, quote=True)
+    dry = gc.env_flag(os.environ, "TERMINATE_DRY_RUN", False)
+    expected = desc["instance_id"] or "TERMINATE"
+
+    parts = ["<!doctype html><html><head><title>Terminate this instance</title>"
+             "<meta name=viewport content='width=device-width,initial-scale=1'>",
+             STYLE, CONFIG_STYLE, TERMINATE_STYLE, "</head><body><div class=wrap>",
+             "<header class=hero><h1><b>Terminate</b> this instance</h1>"
+             f"<span class=sub><a href='/?token={tok_q}'>&larr; status</a> &middot; "
+             f"<a href='/config?token={tok_q}'>configuration</a></span></header>"]
+    if banner:
+        parts.append(f"<div class='banner {banner_cls}'>{banner}</div>")
+    progress = _progress_html()
+    if progress:
+        parts.append(progress)
+    parts.append(switch_html)
+
+    parts.append(
+        "<div class=grid>"
+        "<div class=card><h3>Provider</h3><div class=v>%s</div>"
+        "<div class=why>%s</div></div>"
+        "<div class=card><h3>Instance</h3><div class=v><code>%s</code></div>"
+        "<div class=why>%s</div></div></div>" % (
+            html.escape(desc["label"]),
+            html.escape(desc["reason"]),
+            html.escape(desc["instance_id"] or "(unknown)"),
+            html.escape(desc["key_source"] or "no credential found")))
+
+    if desc["supported"] and desc["ready"]:
+        pstate, pdetail = credential_probe(p)
+        cls = {"ok": "banner good", "rejected": "banner bad"}.get(pstate, "banner")
+        parts.append(f"<div class='{cls}'><b>Credential check:</b> "
+                     f"{html.escape(pdetail)}</div>")
+    for w in desc.get("warnings", []):
+        parts.append(f"<div class='banner bad'>{html.escape(w)}</div>")
+
+    if not desc["supported"]:
+        ev = prov.detection_evidence()
+        parts.append(
+            "<div class=danger><h2>Termination is not supported here</h2>"
+            "<p>This image could not identify the cloud provider it is running on, so "
+            "it will not try to destroy anything. <b>Terminate from your provider's "
+            "dashboard</b> — that is what actually stops the billing.</p>"
+            "<p class=sub>If you know the provider, relaunch with "
+            "<code>TERMINATE_PROVIDER=vastai</code> or <code>=runpod</code>.</p>"
+            "<details><summary>what the detector saw</summary><pre>%s</pre></details>"
+            "</div>" % html.escape(json.dumps(ev, indent=1)))
+        parts.append("</div></body></html>")
+        return "".join(parts).encode()
+
+    parts.append("<div class=danger><h2>This is irreversible</h2>"
+                 "<p>Destroying the instance <b>cannot be undone</b>. There is no "
+                 "trash, no grace period, and no support ticket that brings it back.</p>"
+                 "<p><b>Destroyed:</b></p><ul>"
+                 + "".join(f"<li>{html.escape(d)}</li>" for d in desc["destroys"])
+                 + "</ul><p><b>Survives:</b></p><ul>"
+                 + "".join(f"<li>{html.escape(s)}</li>" for s in desc["survives"])
+                 + f"</ul><p class=sub>{html.escape(desc['billing'])}</p></div>")
+
+    if dry:
+        parts.append("<div class=banner><b>TERMINATE_DRY_RUN=1</b> — the destroy "
+                     "request will be prepared and shown, but not sent.</div>")
+
+    if not allowed:
+        parts.append("<p class=sub>The form below is disabled while the switches "
+                     "above refuse termination.</p>")
+
+    dis = "" if allowed else " disabled"
+    parts.append(
+        f"<form method=post action='/terminate?token={tok_q}'>"
+        f"<input type=hidden name=token value='{tok_q}'>"
+        "<h2>Optional: erase this session first</h2>"
+        f"<p><label><input type=checkbox name=erase value=1{dis}> "
+        "<b>Securely erase session data before destroying</b> (default off)</label></p>"
+        "<p class=sub>Overwrites and unlinks the API key, TLS private key, config "
+        "state, every log this template writes (prompts included, where request "
+        "logging put them), shell history, SSH material, provider and Hugging Face "
+        "credentials, and anything you added under the model dir. "
+        "<b>The public model weights are deliberately NOT erased</b> — the checkpoint "
+        "is downloadable by anyone, so overwriting 332 GB hides nothing and would take "
+        "far longer than you have. "
+        "<b>Limits:</b> on SSDs with wear levelling, on overlay/copy-on-write "
+        "filesystems, and on network volumes, an overwrite does not guarantee the old "
+        "bytes are unreachable; provider snapshots and the instance console log in "
+        "your dashboard are outside our reach entirely.</p>"
+        f"<p><label><input type=checkbox name=ram value=1{dis}> also drop the page "
+        "cache and overwrite free RAM</label><br>"
+        f"<label><input type=checkbox name=vram value=1{dis}> also zero GPU memory "
+        "(after the engine stops)</label></p>"
+        "<h2>Confirm</h2>"
+        f"<p class=sub>Type <code>{html.escape(expected)}</code> exactly — the "
+        "instance id. This is deliberately not a one-click action.</p>"
+        f"<p><input class=confirm name=confirm autocomplete=off "
+        f"placeholder='{html.escape(expected, quote=True)}'{dis}></p>"
+        f"<p><label><input type=checkbox name=understand value=1{dis}> I understand "
+        "this destroys the instance and everything on its disks, permanently.</label></p>"
+        f"<p><button class=destroy type=submit{dis}>Destroy this instance</button></p>"
+        "</form>")
+
+    parts.append(
+        f"<div class=lockbox><h2 style='margin-top:.2rem'>Lock this instance instead</h2>"
+        "<p class=sub>Locking is one-way. It refuses termination from this page for the "
+        "life of this container, for anyone holding this token — including you. It "
+        "clears only by restarting the container with <code>TERMINATE_LOCKED</code> "
+        "unset, which needs provider-dashboard access.</p>"
+        f"<form method=post action='/terminate/lock?token={tok_q}'>"
+        f"<input type=hidden name=token value='{tok_q}'>"
+        "<p><label><input type=checkbox name=understand value=1> I understand this "
+        "cannot be undone from this page.</label></p>"
+        "<p><button type=submit name=action value=disable>Disable the terminate "
+        "control</button> <button type=submit name=action value=lock>Lock termination "
+        "(hard)</button></p></form></div>")
+
+    parts.append("</div></body></html>")
+    return "".join(parts).encode()
+
+
+def start_termination(form) -> tuple:
+    """Validate every gate, then hand off to a detached worker.
+
+    -> (started, message, css_class). Returns without acting on any failure."""
+    allowed, why = gc.termination_allowed()
+    if not allowed:
+        return False, html.escape(why), "bad"
+    if form.get("understand", [""])[0] != "1":
+        return False, ("Nothing was done: you did not tick the box confirming you "
+                       "understand this is permanent."), "bad"
+    p = prov.get()
+    ok, reason = p.ready()
+    if not ok:
+        return False, html.escape(reason), "bad"
+    expected = p.instance_id() or "TERMINATE"
+    typed = (form.get("confirm", [""])[0] or "").strip()
+    if typed != expected:
+        return False, ("Nothing was done: the confirmation text did not match. Type "
+                       f"<code>{html.escape(expected)}</code> exactly."), "bad"
+    doc = terminate_worker.read_progress()
+    if doc and not doc.get("done"):
+        return False, "A termination is already in progress.", ""
+    opts = ["--confirm", typed]
+    if form.get("erase", [""])[0] == "1":
+        opts.append("--erase")
+        if form.get("ram", [""])[0] == "1":
+            opts.append("--ram")
+        if form.get("vram", [""])[0] == "1":
+            opts.append("--vram")
+    try:
+        os.makedirs(gc.runtime_dir(), exist_ok=True)
+        logf = open(os.path.join(gc.runtime_dir(), "terminate.log"), "ab")
+        subprocess.Popen(
+            [sys.executable, os.path.join(SCRIPTS_DIR, "terminate_worker.py")] + opts,
+            stdout=logf, stderr=logf, start_new_session=True, close_fds=True)
+    except Exception as e:
+        return False, ("Could not start the termination worker: "
+                       + html.escape(str(e))), "bad"
+    return True, ("Termination started. This page now shows its progress; do not close "
+                  "it until the outcome is reported."), ""
 
 
 def render(secure: bool, tok: str = "") -> bytes:
@@ -581,24 +1190,28 @@ def render(secure: bool, tok: str = "") -> bytes:
 
     def card(label, value, ok):
         cls = "ok" if ok else "busy"
-        return (f"<div class='card status-card'><h3>{html.escape(label)}</h3>"
+        return (f"<div class=card><h3>{html.escape(label)}</h3>"
                 f"<div class=v><span class='pill {cls}'></span>"
                 f"<span class={cls}>{html.escape(value)}</span></div></div>")
 
     real0 = st.get("api_key", "")
+    dep = deployment()
     chat_ok = bool(secure and TOKEN and real0 and endpoint and serving)
     wrap_cls = "wrap wide" if chat_ok else "wrap"
-    display = html.escape(MODEL_DISPLAY_NAME)
-    features = html.escape(LANDING_FEATURES)
-    parts = [PAGE_HEAD.substitute(display=display),
+    subtitle = " &middot; ".join(html.escape(c) for c in dep["chips"])
+    parts = [page_head(dep["title"]),
              f'<div class="{wrap_cls}"><div class=layout><main>',
-             "<header class=hero><div class=brandmark aria-hidden=true></div>"
-             f"<div class=hero-copy><div class=eyebrow>Turnkey inference appliance</div>"
-             f"<h1><b>{display}</b></h1><span class=sub>{features}</span></div>"
-             f"<div class=hero-state><span class='pill {'ok' if serving else 'busy'}'></span>"
-             f"{'Engine online' if serving else 'Starting up'}</div></header>",
+             f"<header class=hero><h1><b>{html.escape(dep['model'] or 'vLLM')}</b> "
+             f"turnkey</h1><span class=sub>{subtitle}</span></header>",]
+    if not dep.get("tested", True):
+        parts.append("<div class=card style='border-color:#e5484d'><h3>Residual "
+                     "qualification</h3><div class=v>" + html.escape(dep["family"]) +
+                     "</div><div class=sub>This exact full-size checkpoint/profile "
+                     "has not completed the production-scale matrix. Treat a clean "
+                     "boot as the start of model-specific validation.</div>"
+                     "</div>")
+    parts += [
              "<div class=grid>",
-             card("Profile", MODEL_PROFILE, True),
              card("Weights", weights, weights == "ready"),
              card("TLS / DNS", st.get("tls", "not configured"),
                   st.get("tls", "").startswith("https")),
@@ -606,34 +1219,78 @@ def render(secure: bool, tok: str = "") -> bytes:
              card("DRAM KV offload", st.get("offload", "off"),
                   st.get("offload", "off") != "off"),
              "</div>"]
+    parts.append(
+        "<div class=card><h3>Deployment</h3>"
+        "<div class=v>%s</div>"
+        "<div class=sub style='margin-top:.3rem'>%s%s%s</div></div>" % (
+            html.escape(dep["family"] or "unknown family"),
+            ("repo <code>%s</code>" % html.escape(dep.get("repo", "")))
+            if dep.get("repo") else "",
+            (" &middot; %s GPU(s)%s" % (html.escape(str(dep["gpus"])),
+                                        (" " + html.escape(dep["gpu_name"]))
+                                        if dep["gpu_name"] else ""))
+            if dep.get("gpus") else "",
+            (" &middot; provider %s" % html.escape(dep["provider"]))
+            if dep.get("provider") and dep["provider"] != "unknown" else ""))
+    if gc is not None:
+        # "Engine: serving" above is a LIVENESS statement. Correctness is a
+        # separate card on purpose — every silent-corruption configuration this
+        # appliance has met answered /health and short prompts perfectly.
+        head, ok, detail = correctness()
+        parts.append("<div class=grid>" + card("Correctness", head, ok) + "</div>"
+                     f"<p class=sub>{html.escape(detail)}</p>")
+        if config_enabled():
+            mode = gc.apply_state().get("mode", "steady")
+            note = ("<b>The last change you applied was rolled back</b> — the previous "
+                    "known-good configuration is running. " if mode == "rolled-back" else "")
+            parts.append(
+                f'<div class=card><h3>Configuration</h3><div class=v>{note}'
+                f'<a href="/config?token={html.escape(tok, quote=True)}">'
+                "Change model, draft, context, concurrency &rarr;</a></div>"
+                "<div class=sub style='margin-top:.3rem'>Edits are written to a JSON "
+                "state file on the volume and applied by restarting vLLM only.</div>"
+                "</div>")
+        else:
+            parts.append("<p class=sub>Set <code>OPEN_BUTTON_TOKEN</code> in the template "
+                         "environment to unlock the self-service configuration editor.</p>")
     if endpoint:
         ep = html.escape(endpoint, quote=True)
         real = st.get("api_key", "")  # from the root-only status file
         key = real if (secure and TOKEN and real) else "<paste API key from instance logs>"
         tok_esc = html.escape(tok, quote=True)
-        parts.append(f'<div class="card endpoint-card"><div><h3>OpenAI-compatible endpoint</h3>'
+        parts.append(f'<div class=card><h3>OpenAI-compatible endpoint</h3>'
                      f'<div class=v><a href="{ep}/v1/models"><code>{ep}/v1</code></a></div>'
                      f'<div class=sub style="margin-top:.4rem">'
-                     f'<a href="{ep}/metrics">Prometheus /metrics</a></div></div>'
-                     '<div class=endpoint-actions>')
+                     f'<a href="{ep}/metrics">Prometheus /metrics</a>')
         if not key.startswith("<"):
-            parts.append(f'<a class=action-link href="/chat?token={tok_esc}">Quick chat &rarr;</a>')
+            parts.append(f' &middot; <a href="/chat?token={tok_esc}"><b>Quick chat &rarr;</b></a>')
+        if config_enabled():
+            parts.append(f' &middot; <a href="/config?token={tok_esc}">'
+                         '<b>Configure &rarr;</b></a>')
+        if terminate_available():
+            parts.append(f' &middot; <a href="/terminate?token={tok_esc}">'
+                         'Terminate instance</a>')
         parts.append('</div></div>')
         if key.startswith("<"):
-            parts.append("<p class=sub>The API key is printed in the instance logs "
-                         "(open Pod/instance logs and look for <code>API KEY</code>).</p>")
+            where = {
+                "vastai": "the instance logs (vast console &rarr; Logs, look for "
+                          "<code>API KEY</code>)",
+                "runpod": "the pod's container logs. <b>RunPod exposes no console log "
+                          "view and no CLI log command</b>, so if you cannot see them, "
+                          "open this page with the token from the pod environment "
+                          "(<code>OPEN_BUTTON_TOKEN</code>) &mdash; it is shown here "
+                          "once the token check passes",
+            }.get(dep.get("provider"), "the container logs, or set "
+                                       "<code>VLLM_API_KEY</code> yourself")
+            parts.append(f"<p class=sub>The API key is printed in {where}.</p>")
         if serving:
-            parts.append(METRICS_SECTION.substitute(ep=endpoint, key=key))
+            parts.append(METRICS_SECTION.substitute(
+                ep_js=js_literal(endpoint), key_js=js_literal(key)))
         parts.append("<h2>Client configs</h2>")
         for name, where, body in SNIPPETS:
             filled = Template(body).substitute(
-                ep=endpoint,
-                key=key,
-                model=MODEL_ID,
-                display=MODEL_DISPLAY_NAME,
-                context=MODEL_CONTEXT_WINDOW,
-                output=MODEL_OUTPUT_LIMIT,
-            )
+                ep=endpoint, key=key, model=dep["model"] or "model",
+                ctx=dep.get("context") or 32768, output=dep.get("output") or 8192)
             parts.append(f"<details><summary>{html.escape(name)}</summary>"
                          f"<p class=sub><code>{html.escape(where)}</code></p>"
                          f"<pre>{html.escape(filled)}</pre></details>")
@@ -649,23 +1306,25 @@ def render(secure: bool, tok: str = "") -> bytes:
             parts.append('<h2>Model</h2><div class=card>'
                          '<pre id=modeljson style="max-height:16rem;margin:0;border:none">'
                          'loading /v1/models&hellip;</pre></div>')
+    notes = boot_notes()
+    if notes:
+        parts.append(
+            "<h2>Boot log highlights</h2><div class=card><pre style='margin:0;"
+            "border:none;max-height:14rem'>" + html.escape("\n".join(notes)) +
+            "</pre></div><p class=sub>Warnings the entrypoint emitted before the "
+            "engine came up. This page carries them because some providers expose "
+            "no container console at all.</p>")
     if not serving:
         # keep boot status fresh; once serving, the dashboard polls instead
         parts.append("<script>setTimeout(function(){location.reload()},20000)</script>"
                      "<p class=sub>Auto-refreshing every 20 s while booting.</p>")
     parts.append("</main>")
     if chat_ok:
-        parts.append("<aside class=chatpane><div class=chathead>"
-                     "<div class=chathead-main><div class=assistant-avatar aria-hidden=true>✦</div>"
-                     "<div><strong>Quick chat</strong><small>Multi-turn session</small></div></div>"
-                     f'<a class=expand-link href="/chat?token={tok_esc}" title="Open full chat" '
-                     'aria-label="Open full chat">↗</a></div>' + CHAT_WIDGET +
+        parts.append("<aside class=chatpane><h2>Quick chat</h2>" + CHAT_WIDGET +
                      "</aside>" + Template(CHAT_JS).substitute(
-                         ep=endpoint,
-                         key=real0,
-                         model=MODEL_ID,
-                         output=MODEL_OUTPUT_LIMIT,
-                     ))
+                         ep_js=js_literal(endpoint), key_js=js_literal(real0),
+                         model_js=js_literal(dep["model"] or "model"),
+                         output=dep.get("output") or 8192))
     parts.append("</div></div></body></html>")
     return "".join(parts).encode()
 
@@ -689,18 +1348,157 @@ class DualProtocolServer(ThreadingHTTPServer):
         return sock, addr
 
 
+GET_PATHS = ("/", "/chat", "/config", "/config/export", "/config/status",
+             "/terminate", "/terminate/status")
+POST_PATHS = ("/config/apply", "/config/import", "/config/reset", "/config/restart",
+              "/terminate", "/terminate/lock")
+
+
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, *args):  # keep provider logs quiet
+    def log_message(self, *args):  # keep the vast console log quiet
         pass
+
+    def end_headers(self):
+        # Pages contain bearer credentials and capability tokens. Keep them out
+        # of browser/proxy caches, referrers, MIME sniffing and framing contexts.
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        super().end_headers()
+
+    # -- helpers ---------------------------------------------------------
+    def _send(self, body: bytes, ctype="text/html; charset=utf-8", code=200, extra=()):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in extra:
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _config_guard(self, tok):
+        """The editor changes what the box serves; it needs the same token the
+        Open button carries, and it needs the shared registry to be importable."""
+        if gc is None:
+            self.send_error(503, "config editor unavailable (glm_config import failed)")
+            return False
+        if not TOKEN or tok != TOKEN:
+            self.send_error(403, "the config editor requires OPEN_BUTTON_TOKEN")
+            return False
+        return True
+
+    def _terminate_guard(self, tok):
+        """Termination is never reachable unauthenticated, and never reachable
+        at all unless the shared modules are importable."""
+        if not self._config_guard(tok):
+            return False
+        if not terminate_available():
+            self.send_error(503, "termination support is unavailable in this image")
+            return False
+        return True
+
+    def _read_form(self):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 1 << 20:
+            return {}
+        return parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+
+    def _redirect(self, path):
+        self.send_response(303)
+        self.send_header("Location", path)
+        self.end_headers()
+
+    # -- POST: apply / import / reset / restart --------------------------
+    def do_POST(self):
+        url = urlparse(self.path)
+        if url.path not in POST_PATHS:
+            self.send_error(404)
+            return
+        form = self._read_form()
+        tok = form.get("token", [""])[0] or parse_qs(url.query).get("token", [""])[0]
+        if not self._config_guard(tok):
+            return
+        secure = is_secure_connection(self.connection)
+        try:
+            if url.path == "/config/apply":
+                values, errs = _form_values(form)
+                if errs:
+                    body = render_config(tok, secure, "Nothing was applied.", "bad", errs)
+                else:
+                    ok, findings, msg = apply_values(values)
+                    body = render_config(tok, secure, msg, "good" if ok else "bad",
+                                         [] if ok else findings)
+            elif url.path == "/config/import":
+                doc = form.get("doc", [""])[0]
+                try:
+                    parsed = json.loads(doc)
+                    values = parsed.get("values", parsed) if isinstance(parsed, dict) else None
+                    if not isinstance(values, dict):
+                        raise ValueError("expected a JSON object of knob values")
+                except ValueError as e:
+                    body = render_config(tok, secure, f"Import failed: {html.escape(str(e))}",
+                                         "bad")
+                else:
+                    ok, findings, msg = apply_values(values)
+                    body = render_config(tok, secure, msg, "good" if ok else "bad",
+                                         [] if ok else findings)
+            elif url.path == "/config/reset":
+                try:
+                    os.remove(gc.p_state())
+                except OSError:
+                    pass
+                gc.set_apply_state("trial", detail="reset to template env + defaults")
+                os.makedirs(gc.runtime_dir(), exist_ok=True)
+                with open(gc.p_restart_flag(), "w") as f:
+                    f.write("reset\n")
+                body = render_config(tok, secure,
+                                     "State file removed; restarting on the template "
+                                     "environment and the built-in defaults.", "good")
+            elif url.path == "/config/restart":
+                os.makedirs(gc.runtime_dir(), exist_ok=True)
+                with open(gc.p_restart_flag(), "w") as f:
+                    f.write("manual\n")
+                body = render_config(tok, secure, "Restart requested.", "good")
+            elif url.path == "/terminate":
+                if not self._terminate_guard(tok):
+                    return
+                started, msg, cls = start_termination(form)
+                body = render_terminate(tok, secure, msg, cls if cls else
+                                        ("good" if started else "bad"))
+            else:  # /terminate/lock — the runtime ratchet, tighten-only
+                if not self._terminate_guard(tok):
+                    return
+                if form.get("understand", [""])[0] != "1":
+                    body = render_terminate(tok, secure, "Nothing changed: tick the "
+                                            "box first.", "bad")
+                else:
+                    action = form.get("action", [""])[0]
+                    if action == "lock":
+                        gc.tighten(locked=True, reason="locked from the landing page")
+                        msg = ("Termination is now LOCKED for the life of this "
+                               "container. This page cannot unlock it.")
+                    else:
+                        gc.tighten(enabled=False, reason="disabled from the landing page")
+                        msg = ("The terminate control is now disabled. It cannot be "
+                               "re-enabled from this page.")
+                    body = render_terminate(tok, secure, msg, "good")
+        except Exception as e:  # never take the landing page down on a bad form
+            body = render_config(tok, secure,
+                                 "Internal error: " + html.escape(str(e)), "bad")
+        self._send(body)
 
     def do_GET(self):
         url = urlparse(self.path)
-        if url.path not in ("/", "/chat"):
+        if url.path not in GET_PATHS:
             self.send_error(404)
             return
         tok = parse_qs(url.query).get("token", [""])[0]
         if TOKEN and tok != TOKEN:
-            self.send_error(403, "bad token (use the dashboard URL printed in the Pod/instance logs)")
+            self.send_error(403, "bad token (use the vast console Open button)")
             return
         secure = is_secure_connection(self.connection)
         hostport = status().get("https_hostport", "")
@@ -718,22 +1516,70 @@ class Handler(BaseHTTPRequestHandler):
             if not (secure and TOKEN and key and st.get("endpoint")):
                 self.send_error(403, "chat needs TLS + token gate + a running endpoint")
                 return
+            dep = deployment()
             body = CHAT_PAGE.substitute(
-                ep=st["endpoint"],
-                key=key,
-                token=html.escape(tok, quote=True),
-                display=html.escape(MODEL_DISPLAY_NAME),
-                model=MODEL_ID,
-                output=MODEL_OUTPUT_LIMIT,
-            ).encode()
+                                        ep_js=js_literal(st["endpoint"]),
+                                        key_js=js_literal(key),
+                                        model_js=js_literal(dep["model"] or "model"),
+                                        model_html=html.escape(dep["model"] or "model"),
+                                        output=dep.get("output") or 8192,
+                                        token_html=html.escape(tok, quote=True)).encode()
+        elif url.path == "/config":
+            if not self._config_guard(tok):
+                return
+            self._send(render_config(tok, secure))
+            return
+        elif url.path == "/config/export":
+            if not self._config_guard(tok):
+                return
+            effective, sources, _notes = gc.resolve()
+            try:
+                values = gc.load_state_file()
+            except Exception:
+                values = {}
+            doc = json.dumps({
+                "exported_at": gc.utcnow_iso(),
+                "note": ("'values' is what an import applies: only the knobs that "
+                         "override the defaults and the template environment. "
+                         "'effective' and 'sources' are informational."),
+                "values": values, "effective": effective, "sources": sources,
+            }, indent=1).encode()
+            self._send(doc, "application/json",
+                       extra=(("Content-Disposition",
+                               "attachment; filename=glm52-config.json"),))
+            return
+        elif url.path == "/terminate":
+            if not self._terminate_guard(tok):
+                return
+            self._send(render_terminate(tok, secure))
+            return
+        elif url.path == "/terminate/status":
+            if not self._terminate_guard(tok):
+                return
+            allowed, why = gc.termination_allowed()
+            self._send(json.dumps({
+                "switches": gc.read_switches(), "allowed": allowed, "reason": why,
+                "provider": prov.get().describe(),
+                "progress": terminate_worker.read_progress(),
+            }, indent=1).encode(), "application/json")
+            return
+        elif url.path == "/config/status":
+            if not self._config_guard(tok):
+                return
+            head, ok, detail = correctness()
+            self._send(json.dumps({
+                "apply_state": gc.apply_state(), "verify": verify_last(),
+                "correctness": {"headline": head, "ok": ok, "detail": detail},
+                "phase": status().get("phase", ""),
+            }, indent=1).encode(), "application/json")
+            return
         else:
             body = render(secure, tok)
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self._send(body)
 
 
 if __name__ == "__main__":
-    DualProtocolServer(("0.0.0.0", 1111), Handler).serve_forever()
+    # 1111 is the port the vast template maps and the Open button hits;
+    # LANDING_PORT exists so the page can be exercised somewhere else.
+    DualProtocolServer(("0.0.0.0", int(os.environ.get("LANDING_PORT", "1111"))),
+                       Handler).serve_forever()
