@@ -143,6 +143,33 @@ The final Pod was deleted, its A record returned API 404, the ACME TXT count
 was zero, authoritative DNS no longer answered, and Runpod inventory returned
 zero Pods.
 
+### Authenticated Hugging Face Xet throughput follow-up
+
+A fresh 80 GB Runpod volume on the same Secure RTX 5090 host exercised the
+production `qwen36-27b-nvfp4` download with a process-local Hugging Face token:
+
+- The token and the `nvidia/Qwen3.6-27B-NVFP4` model API both returned HTTP
+  200. No credential material was written to the repository or retained after
+  the test.
+- The immutable runtime image supplied `huggingface_hub 1.24.0` and
+  `hf-xet 1.5.2`; the downloader set `HF_XET_HIGH_PERFORMANCE=1` before import
+  and used its default `MODEL_DOWNLOAD_WORKERS=16`.
+- The cold model directory grew from about 20 MB of metadata to
+  21,941,628,570 bytes (20.435 GiB). All three safetensor shards were present,
+  their index declared 21,921,428,072 weight bytes, and Xet logged zero ERROR
+  entries.
+- The appliance's `.download-model` to `.download-complete` markers measured
+  1,094 seconds (18 minutes 14 seconds): 20.056 MB/s, or 160.451 Mbit/s,
+  averaged across metadata and payload.
+- Xet adaptive concurrency reduced the transfer to four concurrent ranges
+  because it classified the route as struggling. Authentication and the
+  high-performance transport therefore worked, but the host-to-CAS path did
+  not approach the host's advertised multi-gigabit bandwidth.
+
+The follow-up cost about `$0.30` at `$0.99/hour`. The Pod was deleted
+immediately after the completion marker, its ephemeral volume was discarded,
+and final Runpod inventory returned zero Pods.
+
 ## Coverage summary
 
 | Area | Result |
@@ -154,6 +181,7 @@ zero Pods.
 | UI reasoning compatibility and multi-turn behavior | Fixed and browser-tested |
 | Runpod template/API schema and placement handling | Passed |
 | Runpod hybrid proxy/direct-TLS runtime compatibility | Passed on Secure RTX 5090 |
+| Authenticated HF Xet cold download (Qwen 27B) | Passed; 20.435 GiB in 18m14s |
 | Small-model vision and `qwen3_next_mtp` | Not reached |
 | GLM TP4/DCP4, EXL3/MTP78, 512K, production vision/offload | Explicit release qualification gap |
 | Final provider resources | Vast: 0; Runpod: 0 |
@@ -162,6 +190,8 @@ zero Pods.
 
 Prefer a Runpod Secure Blackwell machine known to cache the pinned image; the
 validated host took roughly nine minutes merely to expose mappings despite
-advertising multi-gigabit networking. Reuse the 0.8B profile and execute only
-the still-uncovered restart-persistence, vision, MTP, and full-profile
-qualification rows from `TEST_PLAN.md`.
+advertising multi-gigabit networking. The authenticated Qwen download also
+showed that provider bandwidth does not predict the host-to-Hugging-Face CAS
+route. Reuse the 0.8B profile and execute only the still-uncovered
+restart-persistence, vision, MTP, and full-profile qualification rows from
+`TEST_PLAN.md`.

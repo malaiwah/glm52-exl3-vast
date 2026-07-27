@@ -377,7 +377,8 @@ within sampling noise (~±3).
 - **Disk**: >=450 GB for GLM; >=80 GB for Qwen.
 - **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB) for GLM; one RTX PRO 6000
   Blackwell or RTX 5090 for Qwen.
-- **Env (all optional)**: `HF_TOKEN` (faster download), `OFFLOAD_FRACTION`
+- **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
+  applicable Hub rate limits), `OFFLOAD_FRACTION`
   (GLM default 0.70; Qwen default 0), `MTP_TOKENS` (GLM default 3; Qwen
   default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 524288; Qwen 32768),
   `SERVED_MODEL_NAME`,
@@ -393,6 +394,16 @@ within sampling noise (~±3).
 Endpoint: `http://<public-ip>:<mapped-8000-port>/v1` once the console shows
 `Application startup complete` (first boot: download + JIT, plan ~30-60 min;
 later boots only pay JIT).
+
+Checkpoint downloads use `huggingface_hub.snapshot_download` with the bundled
+`hf-xet` transport and `HF_XET_HIGH_PERFORMANCE=1`. `MODEL_DOWNLOAD_WORKERS`
+defaults to 16 concurrent files. Hugging Face's adaptive Xet concurrency remains
+the default for each file; advanced deployments can pass through
+`HF_XET_FIXED_DOWNLOAD_CONCURRENCY` after measuring their route. An `HF_TOKEN`
+authenticates the request and can avoid anonymous rate limits, but does not by
+itself guarantee that a particular host-to-CAS route will be fast. See Hugging
+Face's [model-download guidance](https://huggingface.co/docs/hub/models-downloading)
+and [Hub environment variables](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables).
 
 ## Evidence / why these defaults
 Root-cause investigation of the long-context corruption and the validated
