@@ -88,7 +88,15 @@ def visible(devices, env=None):
     sel = list(devices)
 
     nvd = env.get("NVIDIA_VISIBLE_DEVICES")
-    if nvd is not None and nvd.strip() not in ("", "all"):
+    # Vast's generated SSH wrapper currently exports `void` even though it
+    # launches the child container with all requested GPU devices mounted.
+    # nvidia-smi is our primary observation; interpreting that wrapper sentinel
+    # as a UUID list turns four observed GPUs into zero and strands the rental.
+    if nvd is not None and nvd.strip() == "void":
+        notes.append(
+            "NVIDIA_VISIBLE_DEVICES=void ignored because nvidia-smi observed "
+            f"{len(sel)} mounted GPU(s)")
+    elif nvd is not None and nvd.strip() not in ("", "all"):
         if nvd.strip() == "none":
             notes.append("NVIDIA_VISIBLE_DEVICES=none: the runtime exposed no GPUs")
             return [], notes

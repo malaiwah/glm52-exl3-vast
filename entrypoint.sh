@@ -160,7 +160,11 @@ CONFIG_ENV="$GLM_RUNTIME_DIR/config.env"
 TERMINATE_FLAG="$GLM_RUNTIME_DIR/terminate-in-progress"
 ENGINE_STOPPED="$GLM_RUNTIME_DIR/engine-stopped"
 BOOT_NOTES="$GLM_RUNTIME_DIR/boot-notes.log"
-mkdir -p "$GLM_STATE_DIR" "$GLM_RUNTIME_DIR" "$GLM_LOG_DIR" "$GLM_STATE_DIR/failures"
+SOUL_STATE_DIR="$GLM_STATE_DIR/soul"
+SOUL_RUNTIME_DIR="$GLM_RUNTIME_DIR/soul"
+SOUL_LOG="$SOUL_STATE_DIR/logs/controller.log"
+mkdir -p "$GLM_STATE_DIR" "$GLM_RUNTIME_DIR" "$GLM_LOG_DIR" "$GLM_STATE_DIR/failures" \
+  "$SOUL_STATE_DIR" "$SOUL_RUNTIME_DIR" "$SOUL_STATE_DIR/logs"
 : > "$BOOT_NOTES"
 # Everything important that happens before the engine is up goes BOTH to stdout
 # and to a file the landing page renders. On RunPod stdout is unreachable —
@@ -383,10 +387,16 @@ if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" != "1" ]; then
   TLS_STATE="https:// managed by Runpod proxy"
 fi
 status_update() {
-  printf '{"phase":"%s","endpoint":"%s","tls":"%s","https_hostport":"%s","cert":"%s","keyfile":"%s","offload":"%s","api_key":"%s","model_dir":"%s","gpus":"%s","gpu_name":"%s","sshd":"%s","provider":"%s"}\n' \
+  printf '{"phase":"%s","endpoint":"%s","tls":"%s","https_hostport":"%s","cert":"%s","keyfile":"%s","offload":"%s","api_key":"%s","model_dir":"%s","served_model":"%s","model_family":"%s","auth":"%s","port":"%s","gpus":"%s","gpu_name":"%s","sshd":"%s","provider":"%s"}\n' \
     "$1" "$EP_URL" "$TLS_STATE" "$HTTPS_HOSTPORT" "$CERT_PATH" "$KEY_PATH" "$OFFLOAD_STATE" "${VLLM_API_KEY:-}" "$MODEL_DIR" \
+    "${SERVED_MODEL_NAME:-model}" "${MODEL_FAMILY:-unknown}" "${AUTH:-key}" "${PORT:-8000}" \
     "${GLM_GPU_COUNT:-?}" "${GPU_NAME:-}" "${SSHD_STATE:-not started}" "${GLM_PROVIDER:-unknown}" > "$STATUS_FILE"
-  chmod 600 "$STATUS_FILE" 2>/dev/null || true
+  if id soul >/dev/null 2>&1; then
+    chgrp soul "$STATUS_FILE" 2>/dev/null || true
+    chmod 640 "$STATUS_FILE" 2>/dev/null || true
+  else
+    chmod 600 "$STATUS_FILE" 2>/dev/null || true
+  fi
 }
 
 # Landing page (:1111, dual-protocol TLS+plain or behind Runpod's HTTPS proxy).
@@ -422,6 +432,179 @@ if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
     echo ">>> Runpod dashboard: https://${RUNPOD_POD_ID}-1111.proxy.runpod.net/?token=${OPEN_BUTTON_TOKEN}"
   fi
 fi
+
+# ---- embedded SOUL supervision ---------------------------------------------
+# SOUL is intentionally a sibling of the vLLM supervisor: a failed diagnostic
+# controller must never spend the engine's restart budget or change endpoint
+# state. It starts early, observes boot state, and waits for phase=serving before
+# asking the local model to do any work.
+SOUL_PID=""
+SOUL_FAILURES=0
+SOUL_NEXT_START=0
+SOUL_STARTED_AT=0
+SOUL_PERMISSIONS_PREPARED=0
+SOUL_PERMISSIONS_LAST=0
+SOUL_SUPERVISOR_PID=""
+
+soul_level() {
+  python3 "$SCRIPTS_DIR/soul_config.py" level 2>/dev/null || printf '0\n'
+}
+
+soul_prepare_permissions() {
+  # The dedicated user owns only its persistent subtree. Rollback evidence is
+  # root-owned and world-readable; SOUL records its analysis under its own
+  # incidents directory, so it never needs write access elsewhere.
+  if id soul >/dev/null 2>&1; then
+    local _soul_permissions_now
+    _soul_permissions_now=$(date +%s)
+    mkdir -p "$SOUL_STATE_DIR" "$SOUL_RUNTIME_DIR" "$SOUL_STATE_DIR/logs"
+    chown soul:soul "$SOUL_STATE_DIR" "$SOUL_RUNTIME_DIR" "$SOUL_STATE_DIR/logs" \
+      2>/dev/null || true
+    if [ "$SOUL_PERMISSIONS_PREPARED" = "0" ]; then
+      chown -R soul:soul "$SOUL_STATE_DIR" "$SOUL_RUNTIME_DIR" 2>/dev/null || true
+      SOUL_PERMISSIONS_PREPARED=1
+    fi
+    if [ $((_soul_permissions_now - SOUL_PERMISSIONS_LAST)) -lt 60 ]; then
+      return 0
+    fi
+    SOUL_PERMISSIONS_LAST="$_soul_permissions_now"
+    for _soul_read in config.json known-good.json apply-state.json verify-last.json \
+      checkpoint-baseline.json; do
+      if [ -f "$GLM_STATE_DIR/$_soul_read" ]; then
+        chgrp soul "$GLM_STATE_DIR/$_soul_read" 2>/dev/null || true
+        chmod g+r "$GLM_STATE_DIR/$_soul_read" 2>/dev/null || true
+      fi
+    done
+    for _soul_tree in "$GLM_STATE_DIR/failures" "$GLM_STATE_DIR/logs"; do
+      [ -d "$_soul_tree" ] || continue
+      find "$_soul_tree" -type d -exec chmod g+rx {} + 2>/dev/null || true
+      find "$_soul_tree" -type f -exec chgrp soul {} + 2>/dev/null || true
+      find "$_soul_tree" -type f -exec chmod g+r {} + 2>/dev/null || true
+    done
+    for _soul_runtime_read in startup-env.json config.env verify.json; do
+      if [ -f "$GLM_RUNTIME_DIR/$_soul_runtime_read" ]; then
+        chgrp soul "$GLM_RUNTIME_DIR/$_soul_runtime_read" 2>/dev/null || true
+        chmod g+r "$GLM_RUNTIME_DIR/$_soul_runtime_read" 2>/dev/null || true
+      fi
+    done
+  fi
+}
+
+start_soul() {
+  [ "${CONFIG_SMOKE:-0}" != "1" ] || return 0
+  [ "$(soul_level)" -gt 0 ] 2>/dev/null || return 0
+  [ -x /opt/nanobot-venv/bin/python ] || {
+    boot_note "!!! SOUL: isolated Nanobot runtime is missing; controller not started"
+    return 0
+  }
+  soul_prepare_permissions
+  echo ">>> SOUL: starting embedded controller at autonomy level $(soul_level)"
+  nice -n 10 ionice -c 3 runuser -u soul -- env -i \
+    HOME="$SOUL_STATE_DIR/workspace" \
+    PATH="/opt/nanobot-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    LANG="C.UTF-8" TERM="dumb" USER="soul" PYTHONUNBUFFERED="1" \
+    GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
+    STATUS_FILE="$STATUS_FILE" PORT="${PORT:-8000}" \
+    VLLM_API_KEY="${VLLM_API_KEY:-}" SOUL_PROMPT="/opt/soul/SOUL.md" \
+    SOUL_AUTONOMY_LEVEL="${SOUL_AUTONOMY_LEVEL:-0}" \
+    SOUL_AUTONOMY_MAX_LEVEL="${SOUL_AUTONOMY_MAX_LEVEL:-3}" \
+    SOUL_HEARTBEAT_INTERVAL_S="${SOUL_HEARTBEAT_INTERVAL_S:-300}" \
+    SOUL_JOURNAL_INTERVAL_S="${SOUL_JOURNAL_INTERVAL_S:-3600}" \
+    SOUL_JOURNAL_RETENTION_DAYS="${SOUL_JOURNAL_RETENTION_DAYS:-90}" \
+    SOUL_EVIDENCE_RETENTION_DAYS="${SOUL_EVIDENCE_RETENTION_DAYS:-7}" \
+    SOUL_MAX_STATE_MB="${SOUL_MAX_STATE_MB:-256}" \
+    SOUL_TIMEZONE="${SOUL_TIMEZONE:-UTC}" \
+    VERIFY_NEEDLE_TOKENS="${VERIFY_NEEDLE_TOKENS:-32768}" \
+    NVIDIA_VISIBLE_DEVICES="${NVIDIA_VISIBLE_DEVICES:-all}" \
+    CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}" \
+    /opt/nanobot-venv/bin/python "$SCRIPTS_DIR/soul_controller.py" \
+      --status-file "$STATUS_FILE" --port "${PORT:-8000}" \
+      >> "$SOUL_LOG" 2>&1 &
+  SOUL_PID=$!
+  SOUL_STARTED_AT=$(date +%s)
+  SOUL_NEXT_START=0
+}
+
+stop_soul() {
+  if [ -n "${SOUL_PID:-}" ] && kill -0 "$SOUL_PID" 2>/dev/null; then
+    echo ">>> SOUL: stopping embedded controller"
+    kill "$SOUL_PID" 2>/dev/null || true
+    for _soul_wait in $(seq 1 20); do
+      kill -0 "$SOUL_PID" 2>/dev/null || break
+      sleep 0.25
+    done
+    kill -9 "$SOUL_PID" 2>/dev/null || true
+    wait "$SOUL_PID" 2>/dev/null || true
+  fi
+  SOUL_PID=""
+}
+
+reconcile_soul() {
+  local level now delay_index
+  now=$(date +%s)
+  level=$(soul_level)
+  rm -f "$SOUL_RUNTIME_DIR/reconcile" 2>/dev/null || true
+  if [ "${level:-0}" -le 0 ] 2>/dev/null; then
+    stop_soul
+    return 0
+  fi
+  soul_prepare_permissions
+  if [ -n "${SOUL_PID:-}" ] && kill -0 "$SOUL_PID" 2>/dev/null; then
+    if [ "${SOUL_STARTED_AT:-0}" -gt 0 ] &&
+       [ $((now - SOUL_STARTED_AT)) -ge 600 ]; then
+      SOUL_FAILURES=0
+    fi
+    return 0
+  fi
+  if [ -n "${SOUL_PID:-}" ]; then
+    wait "$SOUL_PID" 2>/dev/null || true
+    SOUL_PID=""
+    SOUL_FAILURES=$((SOUL_FAILURES + 1))
+    delay_index="$SOUL_FAILURES"
+    case "$delay_index" in
+      1) SOUL_NEXT_START=$((now + 5)) ;;
+      2) SOUL_NEXT_START=$((now + 15)) ;;
+      3) SOUL_NEXT_START=$((now + 60)) ;;
+      *) SOUL_NEXT_START=$((now + 300)) ;;
+    esac
+    echo "!!! SOUL: controller exited; independent restart is scheduled" >&2
+  fi
+  if [ "${SOUL_NEXT_START:-0}" -le "$now" ]; then
+    start_soul
+  fi
+}
+
+start_soul_supervisor() {
+  [ "${CONFIG_SMOKE:-0}" != "1" ] || return 0
+  if [ -n "${SOUL_SUPERVISOR_PID:-}" ] &&
+     kill -0 "$SOUL_SUPERVISOR_PID" 2>/dev/null; then
+    return 0
+  fi
+  (
+    trap 'stop_soul; exit 0' TERM INT
+    trap 'stop_soul' EXIT
+    while :; do
+      reconcile_soul
+      sleep 5
+    done
+  ) &
+  SOUL_SUPERVISOR_PID=$!
+}
+
+stop_soul_supervisor() {
+  if [ -n "${SOUL_SUPERVISOR_PID:-}" ] &&
+     kill -0 "$SOUL_SUPERVISOR_PID" 2>/dev/null; then
+    kill "$SOUL_SUPERVISOR_PID" 2>/dev/null || true
+    wait "$SOUL_SUPERVISOR_PID" 2>/dev/null || true
+  fi
+  SOUL_SUPERVISOR_PID=""
+}
+
+# A UI config write sends SIGUSR1 only as a wake-up hint. The normal five-second
+# reconcile remains authoritative, and this trap prevents the signal from
+# terminating PID 1 on minimal shells.
+trap ':' USR1
+trap 'stop_soul_supervisor; if [ -n "${SRV_PID:-}" ]; then kill -9 -- "-$SRV_PID" 2>/dev/null || true; fi' EXIT
 
 fetch_weights() {
   # Which repo do the bytes in this directory actually belong to? A model dir is
@@ -475,30 +658,15 @@ snapshot_download('${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}', local_d
 # while freeing ~3.8 GB/GPU for KV cache.
 #
 # MTP78_MODE=graft (default) does in-place surgery on layer 78 of the target.
-# It is the default because it is the ONLY mode with long-context correctness
-# evidence behind it: rental needle 6/6 on fp8, and benchmarks/vast-45582113-matrix
-# armC 3/3 at 150K/190K/250K. Both ran VLLM_EXL3_TRELLIS_MIN_M=4.
+# It avoids a second draft directory and has the longest appliance evidence.
 #
 #   MTP78_MODE=override  SEPARATE draft dir via --speculative-config. Leaves the
 #     target byte-identical and measured slightly better on acceptance (MAL 3.548 /
-#     84.9% vs 3.517 / 83.9%), but see the warning below -- it does not currently
-#     boot on this image with a correct trellis window.
+#     84.9% vs 3.517 / 83.9%). v29 stamps it as a draft at construction and
+#     gives its m=1..3 graph shapes the capturable Trellis plan they require.
 #   MTP78_MODE=off       stock BF16 draft
 # MTP78_TRELLIS=0 is still honoured as a synonym for off (it is folded into the
 # MTP_DRAFT knob by the config resolver, which also accepts MTP78_MODE directly).
-#
-# WARNING, measured 2026-07-26 on AIBeast. In override mode the rank-sliced draft is
-# CUDA-graph captured at m=3 and dies with
-#   "EXL3 eager parity path entered during CUDA graph capture (m=3)"
-# m=3 is invariant: it does NOT follow num_speculative_tokens (MTP_TOKENS=4 still
-# reported m=3) and does NOT follow cudagraph_capture_sizes (a list starting at 8
-# still reported m=3). Do NOT make that crash go away by lowering
-# VLLM_EXL3_TRELLIS_MIN_M to 1. That was tried and it converts a loud boot failure
-# into SILENT CORRUPTION -- m=1..3 move off the eager PARITY path onto a trellis
-# kernel nothing has verified there. Result: 32K needle 0/2 and 370K needle 0/5,
-# output pure garbage, while a short-prompt quality gate still passed 6/6.
-# Until the draft's capture size is controllable, graft is the mode to use.
-# The config layer refuses MTP_DRAFT=tr3-override on the v20 base for this reason.
 MTP78_DRAFT_DIR=""
 
 fetch_mtp78_overlay() {
@@ -516,8 +684,7 @@ prepare_mtp78() {
   # MTP78_MODE. This is how a non-EXL3 draft (e.g. the NVFP4 MTP draft from
   # lukealonso/GLM-5.2-NVFP4, model-mtp.safetensors, 5.6 GiB) is used: it recovers
   # most of the KV that the BF16 fallback draft gives up, while still avoiding
-  # _apply_rank_sliced -- so it does not hit the v20 speculator capture bug that
-  # makes an EXL3 rank-sliced draft unbootable (see the warning above).
+  # _apply_rank_sliced, which is useful for comparing quantization formats.
   if [ -n "${DRAFT_MODEL:-}" ]; then
     echo ">>> Draft: external checkpoint $DRAFT_MODEL (MTP78_MODE=$MTP78_MODE ignored for draft selection)"
     MTP78_MODE=off
@@ -566,7 +733,7 @@ prepare_mtp78() {
   return 0
 }
 
-# Vision (default ON): MoonViT-3d tower (Kimi-K2.6, frozen) + Baseten's trained
+# Vision (opt-in): MoonViT-3d tower (Kimi-K2.6, frozen) + Baseten's trained
 # 49.5M-param PatchMerger projector, bolted onto our EXL3 text backbone. Both
 # vision parts are BF16 and checkpoint-agnostic — only ~1 GB, no text weight is
 # touched. VISION=0 serves pure text.
@@ -579,7 +746,7 @@ prepare_mtp78() {
 # post-restart probe fails it by design.
 prepare_vision() {
   VISION_REPO="${VISION_REPO:-chronarion/GLM-5.2-Vision-MXFP8-NVFP4-NF3-Hybrid}"
-  if [ "${VISION:-1}" = "1" ]; then
+  if [ "${VISION:-0}" = "1" ]; then
     # Gate on what config.json ACTUALLY says, not just the marker file. An MTP78 graft
     # REVERT rewrites config.json back to its pre-vision form, which silently strips the
     # Glm5v wrapper while leaving .vision-enabled in place -- the installer then reported
@@ -683,7 +850,7 @@ prepare_checkpoint() {
   if [ "${MODEL_FAMILY:-glm52}" = "glm52" ]; then
     prepare_mtp78
     prepare_vision
-    python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-1}" || \
+    python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-0}" || \
       echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
   elif [ "${MODEL_FAMILY:-}" = "qwen36" ]; then
     MODEL_DIR="$MODEL_DIR" MTP_TOKENS="${MTP_TOKENS:-0}" python3 - <<'PY'
@@ -727,14 +894,14 @@ PY
   return 0
 }
 
-# DRAM KV offload: OFFLOAD_FRACTION of the instance's RAM allocation (default
-# 0.70); OFFLOAD_FRACTION=0 disables. Sized from min(cgroup limit, MemTotal) —
+# DRAM KV offload: OFFLOAD_FRACTION of the instance's RAM allocation;
+# OFFLOAD_FRACTION=0 (the default) disables. Sized from min(cgroup limit, MemTotal) —
 # inside a container /proc/meminfo shows the whole host's RAM, but a partial
 # rental (e.g. 4 of 8 GPUs) only gets a slice of it.
 KVT_ARGS=()
 compute_offload() {
   KVT_ARGS=()
-  local off_fraction="${OFFLOAD_FRACTION:-0.70}"
+  local off_fraction="${OFFLOAD_FRACTION:-0}"
   if [ "$off_fraction" != "0" ] && [ ! -r /proc/meminfo ]; then
     echo ">>> DRAM KV offload sizing skipped: /proc/meminfo is unavailable on this smoke host"
     off_fraction=0
@@ -745,7 +912,14 @@ compute_offload() {
     if [ "$CG_LIMIT" != "max" ] && [ "$CG_LIMIT" -lt "$MEM_BYTES" ] 2>/dev/null; then
       MEM_BYTES=$CG_LIMIT
     fi
-    OFF_BYTES=$(python3 -c "print(int($MEM_BYTES*$off_fraction))")
+    # The connector is constructed once per tensor-parallel worker, and
+    # cpu_bytes_to_use is therefore a PER-WORKER value. Passing the entire
+    # instance allocation to every rank multiplies the requested RAM by TP
+    # (measured live: 4 x 385 GB allocations on a 550 GB rental).
+    OFF_TOTAL_BYTES=$(python3 -c "print(int($MEM_BYTES*$off_fraction))")
+    OFFLOAD_RANKS="${TENSOR_PARALLEL_SIZE:-1}"
+    [ "$OFFLOAD_RANKS" -gt 0 ] 2>/dev/null || OFFLOAD_RANKS=1
+    OFF_BYTES=$((OFF_TOTAL_BYTES / OFFLOAD_RANKS))
     MEMLOCK_KB=$(ulimit -l)
     if [ "$MEMLOCK_KB" != "unlimited" ] && [ "$MEMLOCK_KB" -lt "$((OFF_BYTES / 1024))" ] 2>/dev/null; then
       echo "!!! WARNING: memlock ulimit (${MEMLOCK_KB} KB) is below the $((OFF_BYTES/1073741824)) GiB KV pool to pin."
@@ -770,8 +944,9 @@ compute_offload() {
     fi
   fi
   if [ "$off_fraction" != "0" ]; then
-    OFFLOAD_STATE="$((OFF_BYTES/1073741824)) GiB pinned DRAM"
-    echo ">>> DRAM KV offload: $((OFF_BYTES/1073741824)) GiB (${off_fraction} of instance RAM allocation)"
+    OFFLOAD_STATE="$((OFF_TOTAL_BYTES/1073741824)) GiB pinned DRAM total"
+    echo ">>> DRAM KV offload: $((OFF_TOTAL_BYTES/1073741824)) GiB total (${off_fraction} of instance RAM allocation),"
+    echo ">>>                    $((OFF_BYTES/1073741824)) GiB per rank x ${OFFLOAD_RANKS} TP workers"
     # kv_load_failure_policy=recompute: a KV block that cannot be fetched back from
     # the DRAM tier is recomputed instead of failing the request. The vLLM default
     # is "fail", which would turn any offload hiccup into a terminal error — not an
@@ -791,7 +966,7 @@ compute_offload() {
 VISION_ARGS=()
 compute_vision_args() {
   VISION_ARGS=()
-  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] && [ "${VISION:-1}" = "1" ] \
+  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] && [ "${VISION:-0}" = "1" ] \
      && [ -f "$MODEL_DIR/.vision-enabled" ]; then
     VISION_ARGS=(--limit-mm-per-prompt "{\"vision_chunk\":${VISION_CHUNKS:-8}}" --trust-remote-code)
   fi
@@ -815,6 +990,7 @@ export VLLM_ENGINE_READY_TIMEOUT_S=2400
 export VLLM_USE_FLASHINFER_SAMPLER=1
 unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE
 
+refresh_family_runtime_env() {
 if [ "${FAMILY_ENV_BLOCK:-glm52}" = "glm52" ]; then
 export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_SPARSE_INDEXER=1
 export VLLM_USE_B12X_MOE=1 VLLM_USE_V2_MODEL_RUNNER=1
@@ -822,17 +998,82 @@ export VLLM_ENABLE_PCIE_ALLREDUCE=1 VLLM_PCIE_ALLREDUCE_BACKEND=b12x
 export VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE=64KB VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
 export VLLM_CPP_AR_1STAGE_NCCL_CUTOFF=56KB VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS=0
 export VLLM_RTX6K_FUSED_ALLREDUCE_ADD=0 VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER=0
-export VLLM_USE_AOT_COMPILE=1 VLLM_USE_BREAKABLE_CUDAGRAPH=0 VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
+export VLLM_USE_AOT_COMPILE=1 VLLM_USE_MEGA_AOT_ARTIFACT=1
+export VLLM_USE_BREAKABLE_CUDAGRAPH=0 VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
 export VLLM_USE_B12X_MHC=1 B12X_MHC_MAX_TOKENS=16384 VLLM_USE_B12X_WO_PROJECTION=1
-export B12X_MLA_SM120_UNIFIED=1 B12X_DENSE_SPLITK_TURBO=1 B12X_W4A16_TC_DECODE=1 B12X_MOE_FORCE_A16=1
+export B12X_MLA_SM120_UNIFIED=1 B12X_DENSE_SPLITK_TURBO=1
+export B12X_W4A16_TC_DECODE=1 B12X_W4A8_TINY_DECODE=1 B12X_MOE_FORCE_A16=1
 export VLLM_DISABLE_SHARED_EXPERTS_STREAM=1 VLLM_DISABLED_KERNELS=MarlinFP8ScaledMMLinearKernel
 export VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE=0 VLLM_B12X_MLA_SPEC_DECODE_MAX_Q=8
 export VLLM_USE_B12X_DCP_A2A=1 VLLM_DCP_A2A_MAX_TOKENS=16 VLLM_DCP_A2A_LARGE_BACKEND=ag_rs
-export VLLM_DCP_GLOBAL_TOPK=1 VLLM_DCP_SHARD_DRAFT=1 VLLM_DCP_QUERY_SPLIT=0
+export VLLM_DCP_GLOBAL_TOPK=1 VLLM_DCP_SHARD_DRAFT=1 VLLM_DCP_QUERY_SPLIT=1
+export VLLM_DCP_TOPK_OWNER_MERGE=1 VLLM_DCP_INDEXER_SHARDS=0
 export VLLM_B12X_MLA_CKV_GATHER=1 VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS=512 VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS=16384
-export VLLM_EXL3_TRELLIS_MIN_M=4 VLLM_EXL3_TRELLIS_MAX_M=32 VLLM_EXL3_TRELLIS_BLOCK_M=8 VLLM_EXL3_PREFILL_CHUNK=128
+export VLLM_B12X_MLA_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-auto}"
+export VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}"
+export VLLM_DCP_PROJECT_BEFORE_MERGE=1 VLLM_DCP_PROJECT_BEFORE_MERGE_MIN_PREFILL_TOKENS=1024
+export VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1
+export VLLM_USE_B12X_PCIE_DMA="${B12X_PCIE_DMA:-1}"
+export VLLM_PCIE_DMA_FP8="${F8_DMA:-0}"
+export B12X_PCIE_DMA_FP8="${F8_DMA:-0}"
+export SPARKINFER_PCIE_DMA_FP8="${F8_DMA:-0}"
+if [ "${MODEL_VARIANT:-exl3-tr3}" = "madeby561-hybrid" ]; then
+  export VLLM_B12X_ABSORB_BMM=1 VLLM_NF3_GRID188_DECODE=1
+else
+  unset VLLM_B12X_ABSORB_BMM VLLM_NF3_GRID188_DECODE
+fi
+# With MTP active, v29 classifies target and draft independently: the target
+# keeps m=4 while the draft declares MIN_CAPTURABLE_TRELLIS_M=1. A global
+# value would override both roles, so auto is represented by a genuinely
+# absent variable. Without a draft, however, vLLM's memory profiler captures a
+# target-only m=3 graph; the target's automatic minimum of 4 rejects that
+# otherwise valid MTP-off boot. Use the parity-capable minimum only in that
+# target-only mode.
+if [ "${MTP_TOKENS:-3}" = "0" ]; then
+  export VLLM_EXL3_TRELLIS_MIN_M=1
+else
+  unset VLLM_EXL3_TRELLIS_MIN_M
+fi
+export VLLM_EXL3_TRELLIS_MAX_M=32 VLLM_EXL3_TRELLIS_BLOCK_M=8 VLLM_EXL3_PREFILL_CHUNK=128
 export VLLM_MEMORY_PROFILE_INCLUDE_ATTN=1 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
 unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
+
+  # v20's calibrator measures the lossless DMA crossover, DCP query split and
+  # CKV prefetch overlap before model load, then caches the result by topology.
+  # Compressed wire modes remain explicit experiments and the image launcher
+  # deliberately skips BF16 calibration for them.
+  if [ "${CONFIG_SMOKE:-0}" != "1" ] &&
+     [ -x /usr/local/bin/serve-glm52-v19.sh ]; then
+    _cal_gpus="$(seq -s, 0 $((TENSOR_PARALLEL_SIZE - 1)))"
+    if _cal_env="$(
+      env TP="${TENSOR_PARALLEL_SIZE:-4}" DCP="${DCP:-4}" GPUS="$_cal_gpus" \
+        DCP_QUERY_SPLIT=auto \
+        DCP_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-auto}" \
+        DCP_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}" \
+        B12X_PCIE_DMA="${B12X_PCIE_DMA:-1}" F8_DMA="${F8_DMA:-0}" \
+        PCIE_CALIBRATION="${PCIE_CALIBRATION:-auto}" PCIE_CALIBRATION_ONLY=1 \
+        PCIE_CALIBRATION_CACHE_DIR="$GLM_STATE_DIR/pcie-calibration" \
+        /usr/local/bin/serve-glm52-v19.sh
+    )"; then
+      while IFS= read -r _cal_line; do
+        case "$_cal_line" in
+          VLLM_DCP_QUERY_SPLIT=*|VLLM_DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS=*|\
+          VLLM_B12X_MLA_CKV_GATHER=*|VLLM_DCP_TOPK_OWNER_MERGE=*|\
+          VLLM_DCP_INDEXER_SHARDS=*|VLLM_B12X_MLA_CKV_PREFETCH_DEPTH=*|\
+          VLLM_PCIE_DMA_MIN_BYTES=*|PCIE_CALIBRATION_STATUS=*|\
+          PCIE_CALIBRATION_CACHE=*)
+            eval "export $_cal_line"
+            ;;
+        esac
+      done <<< "$_cal_env"
+      echo ">>> PCIe calibration: ${PCIE_CALIBRATION_STATUS:-unknown}; DMA minimum ${VLLM_PCIE_DMA_MIN_BYTES:-unknown}; CKV prefetch ${VLLM_B12X_MLA_CKV_PREFETCH_DEPTH:-unknown}"
+    else
+      echo "!!! PCIe calibration launcher failed; retaining conservative runtime values."
+    fi
+    unset _cal_gpus _cal_env _cal_line
+  elif [ "${DCP_CKV_PREFETCH_DEPTH:-auto}" = "auto" ]; then
+    export VLLM_B12X_MLA_CKV_PREFETCH_DEPTH=0
+  fi
 else
   echo ">>> ${MODEL_FAMILY:-?}: skipping the GLM-5.2 engine environment (b12x kernels,"
   echo ">>> MLA/DCP path, EXL3 trellis). Only the common block above is exported."
@@ -844,8 +1085,12 @@ else
   unset VLLM_CPP_AR_1STAGE_NCCL_CUTOFF VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS
   unset VLLM_RTX6K_FUSED_ALLREDUCE_ADD VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER
   unset VLLM_DISABLE_SHARED_EXPERTS_STREAM VLLM_DISABLED_KERNELS
+  unset VLLM_USE_B12X_PCIE_DMA VLLM_PCIE_DMA_FP8 B12X_PCIE_DMA_FP8
+  unset SPARKINFER_PCIE_DMA_FP8 VLLM_PCIE_DMA_MIN_BYTES
+  unset VLLM_B12X_ABSORB_BMM VLLM_NF3_GRID188_DECODE
   unset NCCL_LOCAL_INFERENCE_PATH NCCL_PR2127_PATH VLLM_NCCL_SO_PATH LD_PRELOAD
 fi
+}
 
 # ---- tuning overrides -------------------------------------------------------
 # TUNE_<NAME>=<value> exports <NAME>=<value> here, i.e. AFTER the authoritative
@@ -863,9 +1108,10 @@ fi
 # configuration that produced it, e.g.
 #     podman run -e TUNE_VLLM_EXL3_PREFILL_CHUNK=256 ...
 #
-# NB: the two trellis-window variables above are ALSO self-service knobs. The
-# authoritative block runs once, at boot; apply_config re-exports the resolved
-# values before every vLLM start, so a state-file change wins over both.
+# VLLM_EXL3_TRELLIS_MIN_M deliberately is not a self-service knob on v29:
+# leaving it absent is the role-aware safe setting. Advanced experiments can
+# still set TUNE_VLLM_EXL3_TRELLIS_MIN_M explicitly.
+apply_tuning_overrides() {
 while IFS='=' read -r _k _v; do
   case "$_k" in
     TUNE_*)
@@ -877,6 +1123,7 @@ while IFS='=' read -r _k _v; do
   esac
 done < <(env)
 unset _k _v _n
+}
 
 # API key: VLLM_API_KEY env > persisted key on the volume > freshly generated.
 # Persisting matters: a restart (supervisor, reboot, manual) that minted a NEW
@@ -914,6 +1161,7 @@ if [ "$AUTH" != "none" ] && [ -z "${VLLM_API_KEY:-}" ]; then
 fi
 export VLLM_API_KEY
 status_update configuring
+start_soul_supervisor
 
 # TLS via Let's Encrypt DNS-01 (optional): set ACME_DOMAIN + ACME_DNS_PROVIDER
 # (lego provider name, e.g. cloudflare, duckdns) + the provider's cred envs
@@ -1035,35 +1283,33 @@ elif [ "$PLATFORM" = "runpod" ]; then
 fi
 
 # Egress hygiene: no telemetry; offline mode once weights are local
-# Keep the torch.compile / AOT cache on the persistent volume. It defaults to
-# /root/.cache/vllm inside the container, so a replaced container recompiles the
+# Keep torch.compile, Triton and extension caches on the persistent volume.
+# The upstream image exports /cache/jit paths, but /cache is not a mounted
+# volume on Vast or Runpod, so a replaced container recompiles the
 # backbone and the eagle head from scratch — ~100 s of every boot, for ~1.6 GB of
 # artifacts. VLLM_DISABLE_COMPILE_CACHE is NOT set here (that guard belongs to the
 # gilded-gnosis fork's cache bug); verify decode tok/s after enabling this.
-export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-$MODEL_DIR/.vllm-cache}"
-mkdir -p "$VLLM_CACHE_ROOT" 2>/dev/null || true
+unset VLLM_CACHE_DIR
+case "${VLLM_CACHE_ROOT:-}" in
+  ""|/cache/jit*) export VLLM_CACHE_ROOT="$MODEL_DIR/.vllm-cache" ;;
+esac
+case "${TRITON_CACHE_DIR:-}" in
+  ""|/cache/jit*) export TRITON_CACHE_DIR="$MODEL_DIR/.vllm-cache/triton" ;;
+esac
+case "${TORCH_EXTENSIONS_DIR:-}" in
+  ""|/cache/jit*) export TORCH_EXTENSIONS_DIR="$MODEL_DIR/.vllm-cache/torch_extensions" ;;
+esac
+case "${TORCHINDUCTOR_CACHE_DIR:-}" in
+  ""|/cache/jit*) export TORCHINDUCTOR_CACHE_DIR="$MODEL_DIR/.vllm-cache/torchinductor" ;;
+esac
+mkdir -p "$VLLM_CACHE_ROOT" "$TRITON_CACHE_DIR" "$TORCH_EXTENSIONS_DIR" \
+  "$TORCHINDUCTOR_CACHE_DIR" 2>/dev/null || true
 
 export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
 export HF_HUB_OFFLINE=1
 echo ">>> Listening sockets at boot (expect only vllm on ${PORT:-8000} + vast ssh):"
 (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | head -8 || true
 
-# EXL3 trellis window vs speculative capture. The MTP draft is CUDA-graph captured
-# at m=MTP_TOKENS. If that falls below VLLM_EXL3_TRELLIS_MIN_M the EXL3 kernel
-# hands off to its eager parity path, which cannot be captured, and the engine dies:
-#   RuntimeError: EXL3 eager parity path entered during CUDA graph capture (m=3);
-#                 capture sizes must lie inside the Trellis window [4, 32]
-# The default MIN_M=4 is therefore only safe by coincidence -- it happens to equal
-# the 1+3 the TARGET captures at. With a separate draft (MTP78_MODE=override) the
-# draft captures at m=3 and the boot fails.
-# There is deliberately NO auto-lower of VLLM_EXL3_TRELLIS_MIN_M here. An earlier
-# revision lowered it to 1 whenever MTP_TOKENS < MIN_M, to clear the override-mode
-# capture crash. That was wrong twice over: the stated mechanism was false (m does
-# not track MTP_TOKENS), and lowering the window silently corrupts output instead of
-# failing loudly. It also fired in GRAFT mode, where MIN_M=4 is correct and required,
-# so it would have poisoned the one configuration that works. Leave MIN_M at 4 —
-# the config layer marks it non-editable and rejects any state file that moves it.
-#
 # Concurrency vs the trellis/capture window. At decode the engine runs
 #   m = MAX_NUM_SEQS * (1 + MTP_TOKENS)
 # query tokens per step. m must stay inside BOTH the CUDA-graph capture window
@@ -1128,9 +1374,9 @@ build_spec_args() {
     echo ">>> Draft quantization: ${DRAFT_QUANTIZATION} (overrides the target's --quantization)"
   fi
   if [ -n "${DRAFT_MODEL:-}" ]; then
-    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"${_SPEC_QUANT}}")
+    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"${MTP_DRAFT_SAMPLE_METHOD:-greedy}\"${_SPEC_QUANT}}")
   else
-    SPEC_ARGS=(--speculative-config "{\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"probabilistic\"}")
+    SPEC_ARGS=(--speculative-config "{\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"${MTP_DRAFT_SAMPLE_METHOD:-greedy}\"}")
   fi
   return 0
 }
@@ -1164,12 +1410,12 @@ AUTH_ARGS=()
 if [ "${AUTH:-key}" != "none" ]; then
   AUTH_ARGS=(--api-key "$VLLM_API_KEY")
 fi
-# Pool sizing: the override pins the pool at 512K so the KV headroom the trellis
-# draft frees is predictable rather than absorbed. Set GPU_BLOCKS_OVERRIDE=0 to
-# drop the flag and let vLLM use all available KV (bigger pool, more concurrency).
+# Pool sizing: auto-profile by default. On the v29 EXL3/MTP3 release this is
+# about 1.1M tokens on four 96 GB cards, enough for two full 524K requests.
+# A positive override remains available for reproducible smaller pools.
 BLOCKS_ARGS=()
-if [ "${GPU_BLOCKS_OVERRIDE:-2048}" != "0" ]; then
-  BLOCKS_ARGS=(--num-gpu-blocks-override "${GPU_BLOCKS_OVERRIDE:-2048}")
+if [ "${GPU_BLOCKS_OVERRIDE:-0}" != "0" ]; then
+  BLOCKS_ARGS=(--num-gpu-blocks-override "${GPU_BLOCKS_OVERRIDE:-0}")
 fi
 # stdout still goes to the vast console; the tee copy is what a rollback
 # preserves as the failed boot's error log. Process substitution (not a pipe) so
@@ -1185,8 +1431,8 @@ _SERVE_CMD=(vllm serve "$MODEL_DIR" \
   --served-model-name "${SERVED_NAMES[@]}" \
   --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
   --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-4}" \
-  --kv-cache-dtype "${KV_CACHE_DTYPE:-fp8}" \
-  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.93}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE:-nvfp4_ds_mla}" \
+  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.96}" \
   --max-model-len "${MAX_MODEL_LEN:-524288}" \
   --max-num-seqs "${MAX_NUM_SEQS:-8}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS:-3072}" \
@@ -1209,6 +1455,8 @@ fi
 }
 
 if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  refresh_family_runtime_env
+  apply_tuning_overrides
   compute_offload
   compute_vision_args
   warn_capture_window
@@ -1220,6 +1468,8 @@ if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
 fi
 
 if [ "${SUPERVISOR:-1}" = "0" ]; then
+  refresh_family_runtime_env
+  apply_tuning_overrides
   prepare_checkpoint
   compute_offload
   compute_vision_args
@@ -1256,10 +1506,10 @@ kill_server_tree() {
 }
 
 # ---- correctness verification ------------------------------------------------
-# A short-prompt health check is NOT evidence of correctness: nvfp4 KV without
-# calibrated scales, a lowered trellis MIN_M and vision on the EXL3 target all
-# pass /health and a two-line completion while producing garbage past ~32K
-# tokens. So every start is followed by a probe that includes a long-context
+# A short-prompt health check is NOT evidence of correctness: earlier
+# uncalibrated NVFP4 KV and vision experiments passed /health and a two-line
+# completion while failing long retrieval. So every start is followed by a
+# probe that includes a long-context
 # needle retrieval, and the landing page reports the two results separately.
 # VERIFY=0 turns the probe off entirely (the UI then says so, it does not claim
 # health); VERIFY_LONG_CONTEXT=0 keeps the short checks only, with the same
@@ -1320,6 +1570,11 @@ maybe_self_analyze() {
   if [ -z "$fdir" ]; then
     return 0
   fi
+  if [ "$(soul_level)" -gt 0 ] 2>/dev/null; then
+    soul_prepare_permissions
+    echo ">>> SOUL: queued rollback evidence from $fdir for incident analysis"
+    return 0
+  fi
   read -r -a _names <<< "${SERVED_MODEL_NAME:-model}"
   echo ">>> Self-analysis: asking the running model why $fdir failed"
   python3 "$SCRIPTS_DIR/analyze_failure.py" --dir "$fdir" \
@@ -1350,12 +1605,36 @@ while :; do
   # Re-resolve the config on EVERY start: this is what makes an apply from the
   # landing page take effect without replacing the container.
   apply_config
+  # Family-specific environment and topology calibration must be refreshed too:
+  # a self-service apply can change family, DMA mode, DCP or prefetch policy
+  # without replacing PID 1.
+  refresh_family_runtime_env
+  apply_tuning_overrides
   prepare_checkpoint
   compute_offload
   compute_vision_args
   warn_capture_window
   build_spec_args
   rm -f "$VERIFY_FILE"
+  # A failed engine used to be followed immediately by `: > serve-current.log`
+  # on the next supervisor attempt. That erased the only traceback before an
+  # operator could inspect it (and made a costly rental look like an unexplained
+  # restart). Crash restarts are the attempts with a non-zero counter; preserve
+  # a bounded set before truncating the live log. Config-request restarts keep
+  # attempt=0 and already preserve verified boots in last-good.log.
+  if [ "$attempt" -gt 0 ] && [ -s "$SERVE_LOG" ]; then
+    _failed_log="$GLM_LOG_DIR/serve-failed-attempt-${attempt}-$(date -u +%Y%m%dT%H%M%SZ).log"
+    cp -- "$SERVE_LOG" "$_failed_log" 2>/dev/null || true
+    # Keep the five newest failures. Paths are internal, fixed-prefix files;
+    # avoid an unbounded log leak across a persistent rental volume.
+    mapfile -t _old_failed_logs < <(
+      find "$GLM_LOG_DIR" -maxdepth 1 -type f -name 'serve-failed-attempt-*.log' \
+        -printf '%T@ %p\n' 2>/dev/null | sort -rn | tail -n +6 | cut -d' ' -f2-
+    )
+    if [ "${#_old_failed_logs[@]}" -gt 0 ]; then
+      rm -f -- "${_old_failed_logs[@]}"
+    fi
+  fi
   : > "$SERVE_LOG"
 
   status_update starting-engine
@@ -1438,6 +1717,7 @@ gc.set_apply_state('degraded', detail='verification failed and there is no known
       # the container mid-erase, which on some providers just restarts it.
       echo ">>> TERMINATION REQUESTED — stopping vLLM and standing down." >&2
       status_update terminating
+      stop_soul_supervisor
       kill_server_tree
       : > "$ENGINE_STOPPED"
       while [ -f "$TERMINATE_FLAG" ]; do
@@ -1445,6 +1725,7 @@ gc.set_apply_state('degraded', detail='verification failed and there is no known
       done
       echo ">>> Termination was cancelled (flag cleared) — resuming." >&2
       rm -f "$ENGINE_STOPPED"
+      start_soul_supervisor
       attempt=0
       continue
       ;;

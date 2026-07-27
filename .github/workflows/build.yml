@@ -2,9 +2,9 @@ name: build-and-push
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, entrypoint.sh, landing.py, "runpod-template*.json", sshd_config, "scripts/**", "tests/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "scripts/**", "soul/**", "tests/**", .github/workflows/build.yml]
   pull_request:
-    paths: [Dockerfile, entrypoint.sh, landing.py, "runpod-template*.json", sshd_config, "scripts/**", "tests/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "scripts/**", "soul/**", "tests/**", .github/workflows/build.yml]
   workflow_dispatch:
 permissions:
   contents: read
@@ -40,6 +40,16 @@ jobs:
         run: python3 tests/test_knob_wiring.py
       - name: gpu detection
         run: python3 tests/test_gpu_detect.py
+      # Keeps the live qualification instruments trustworthy before they are
+      # used to spend GPU rental time.
+      - name: serving benchmark and needle harness
+        run: python3 tests/test_serving_tools.py
+      - name: OpenAI feature qualification harness
+        run: python3 tests/test_feature_suite.py
+      - name: checkpoint reconciliation
+        run: python3 tests/test_checkpoint_reconcile.py
+      - name: embedded SOUL controller
+        run: python3 tests/test_soul.py
       - name: validate profile compatibility and Runpod templates
         run: |
           CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm52-exl3 bash entrypoint.sh | grep -q 'brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw'

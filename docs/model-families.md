@@ -15,9 +15,9 @@ mean anything, and which of the measured failure rules apply.
 | `scripts/glm_config.py` | `FAMILIES` registry, family-aware resolver, family-scoped validation |
 | `entrypoint.sh` | family-guarded env block, generic serve line + `FAMILY_SERVE_ARGS` |
 | `scripts/gpu_detect.py` | what the container can actually use, from nvidia-smi ∩ the visibility variables |
-| `tests/test_families.py` | 126 assertions: GLM unchanged, Qwen/custom coherent, rules scoped |
-| `tests/test_gpu_detect.py` | 20 assertions against injected device lists |
-| `tests/test_knob_wiring.py` | 51 assertions: every knob has a consumer; the UI hardcodes nothing |
+| `tests/test_families.py` | release defaults, Qwen/custom coherence, and rule scoping |
+| `tests/test_gpu_detect.py` | injected visibility/device-list behavior |
+| `tests/test_knob_wiring.py` | every knob has a consumer; the UI hardcodes nothing |
 
 ---
 
@@ -72,13 +72,15 @@ its default; what is GLM-only is the MTP78 draft machinery —
 ## 2. The inheritance model gains a layer
 
 ```
-built-in defaults  <  FAMILY defaults  <  startup environment  <  JSON state file
+built-in defaults  <  FAMILY defaults  <  VARIANT defaults  <  startup environment  <  JSON state file
 ```
 
-The family layer is what "GLM-5.2 wants TP=4 and Qwen3.6 wants TP=1" means. It
-sits below the environment so an operator can still override it from the
-template, and below the state file so the landing page can. `/config` shows the
-source of every value, and `family` is now one of them.
+The family layer is what "GLM-5.2 wants TP=4 and Qwen3.6 wants TP=1" means.
+The variant layer is what "this GLM checkpoint needs the stock BF16 draft and
+an explicitly bounded 512K memory shape" means. Both sit below the environment
+so an operator can still override them from the template, and below the state
+file so the landing page can. `/config` shows the source of every value;
+`family` and `variant` are both possible sources.
 
 `minimize()` — the function that decides what actually gets written — compares
 each knob against **the selected family's** baseline, so a value left at that
@@ -104,9 +106,9 @@ A knob scoped to a family it is not in resolves with source `n/a`:
 * A hand-edited state file that carries one is an **error**, naming the key —
   the same treatment the termination switches get.
 
-GLM-only: `MTP_DRAFT`, `DRAFT_MODEL`, `DRAFT_QUANTIZATION`, `DCP`,
-`VLLM_EXL3_TRELLIS_MAX_M`, `VLLM_EXL3_TRELLIS_MIN_M`, `VISION`,
-`VISION_CHUNKS`, `BASE_GENERATION`.
+GLM-only: `MTP_DRAFT`, `MTP_DRAFT_SAMPLE_METHOD`, `DRAFT_MODEL`,
+`DRAFT_QUANTIZATION`, `DCP`, `VLLM_EXL3_TRELLIS_MAX_M`, `VISION`, and
+`VISION_CHUNKS`.
 
 This is the point of the exercise: nobody should be able to assemble a
 configuration that hits the `m=3` capture class of bug on a model where the
@@ -114,8 +116,7 @@ trellis does not exist in the first place.
 
 ### The measured rules are scoped too
 
-`concurrency-window`, `trellis-min-m`, `capture-below-trellis-min`,
-`tr3-draft-on-v20`, `tr3-draft-needs-exl3`, `draft-quant-inherit`,
+`concurrency-window`, `tr3-draft-needs-exl3`, `draft-quant-inherit`,
 `kv-nvfp4-uncalibrated`, `vision-long-context`, `vision-kv-pressure`,
 `dcp-divides-tp` and `dcp-reduces-pool` now fire **only** for `glm52`. They
 describe EXL3 kernels, an MLA KV layout and a GLM vision wrapper; letting them
@@ -138,7 +139,36 @@ NVFP4 profile). A family cannot opt out of being verified.
 
 ---
 
-## 4. The Qwen3.6-27B NVFP4 preset
+## 4. The MadeBy561 GLM-5.2 hybrid variant
+
+`madeby561-hybrid` is a checkpoint variant inside the measured `glm52` family,
+not a custom model. It therefore keeps GLM's sparse MLA, DCP, calibrated NVFP4
+KV, parsers and tool surface while replacing the target quantizer and draft:
+
+| knob | variant default |
+|---|---|
+| repository | `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid`, revision `68babde…` |
+| quantization | `nvfp4_nf3_hybrid` with the checkpoint's MXFP8 dense/shared-expert overlay |
+| MTP | 3 tokens, in-checkpoint BF16 draft, probabilistic proposals |
+| max context / pool | 524,288 / 2,048 blocks (exactly one maximum-length logical pool) |
+| batch / DCP workspace | 2,048 / 512 MiB |
+| utilization | 0.98, safe only because the pool is explicitly pinned |
+
+These values are atomic defaults but not locks. An explicit template or saved
+value still wins. That distinction matters: v20 auto-sized 551,680 logical KV
+tokens and passed startup admission, then OOMed in the first 32K MTP proposal.
+A 3,072-token batch passed repeated 32K and C1–C8 but OOMed immediately at
+520K. The variant default keeps the request limit while reducing transient
+activation pressure.
+
+The known-good v19 control on an all-NODE 4x96 GB host uses the same checkpoint
+and MTP depth, with a 537,600-token pool, and measures 2,299 tok/s at 8K,
+2,192 tok/s at 64K and 119.2 tok/s C1. The mixed-topology Vast host is a
+correctness and relative-tuning platform, not an absolute-performance proxy.
+
+---
+
+## 5. The Qwen3.6-27B NVFP4 preset
 
 Facts below are from the [model card](https://huggingface.co/Qwen/Qwen3.6-27B);
 quantization details come from the
@@ -179,7 +209,7 @@ the explicit remaining residual.
 
 ---
 
-## 5. Tensor parallelism follows the hardware
+## 6. Tensor parallelism follows the hardware
 
 `--tensor-parallel-size 4` was a literal; then it was a knob defaulting to 4.
 Both are wrong for an image people rent on arbitrary hardware — a 1-, 2- or
@@ -216,7 +246,7 @@ from one 4× RTX PRO 6000 box:
 | setting | moves with TP? |
 |---|---|
 | `DCP` | **yes** — it is a KV shard count, one per rank; defaults to TP |
-| `GPU_BLOCKS_OVERRIDE` (the 512K pool pin) | **yes, and it is not automatic**. 2048 blocks was chosen to mean exactly 512K tokens at TP=4/DCP=4. At another rank count that arithmetic no longer holds, so a warning fires and points at `GPU_BLOCKS_OVERRIDE=0` |
+| `GPU_BLOCKS_OVERRIDE` | **yes** when explicitly pinned. The release default is 0, so vLLM profiles the pool for the actual per-rank memory envelope. |
 | the memory profile / KV headroom | **yes** — per-rank weights change, so the pool that fits changes |
 | `MAX_NUM_SEQS × (1 + MTP_TOKENS) ≤ 32` | **NO.** This is a per-kernel batch width — the CUDA-graph capture window and the EXL3 trellis window — and has nothing to do with how many ranks exist. The rule applies unchanged at any TP, and the warning says so explicitly so nobody "fixes" it by scaling with GPUs |
 | `dcp-kv-cache-interleave-size 64` | independent of rank count (it is an interleave granularity); left alone |
@@ -238,7 +268,7 @@ is enough. TP comes from detection, so nothing else needs setting.
 
 ---
 
-## 6. Checking a configuration without renting anything
+## 7. Checking a configuration without renting anything
 
 ```
 docker run --rm -e CONFIG_SMOKE=1 -e MODEL_FAMILY=qwen36 <image>
@@ -256,22 +286,11 @@ have answered all three in seconds. It is the first thing to run after changing
 anything in the config layer, and the first thing to ask for when someone
 reports that a setting had no effect.
 
-## 7. Untested
+## 8. Remaining qualification
 
-- **The Qwen preset has never been booted**, by anyone, with this image. Every
-  value above is either quoted from the model card or reasoned from it. A live
-  RunPod pod did get as far as resolving it correctly and starting the download
-  (verified: repo, directory, TP and argv are all Qwen), but no engine has run.
-- **GPU detection has never seen a real multi-GPU narrowing.** The logic is
-  tested against injected device lists — the development host's 4 GPUs are busy
-  serving production traffic and were not touched. `CUDA_VISIBLE_DEVICES`
-  semantics in particular are implemented from documentation, not observed.
-- The family-guarded env block: the GLM branch is byte-identical to what shipped
-  and is exercised daily, but the `generic` branch (what a non-GLM family gets)
-  has never run an engine.
-- `FAMILY_SERVE_ARGS` as a bash array: the quoting is exercised by
-  `tests/test_families.py` against the exact argv, and `bash -n` + shellcheck
-  pass, but no vLLM has consumed it.
-- The 1-GPU path end to end. The gate arithmetic is tested; the engine is not.
-- `MODEL_FAMILY` switching on a live instance (it triggers a fresh download and
-  a full restart, both of which are implemented but unexercised for Qwen).
+The generic one-GPU path, profile switching, parsers, tools, multimodal input,
+MTP, provider proxying, and GPU visibility handling were exercised live with a
+small Qwen3.5 checkpoint. The exact Qwen3.6-27B NVFP4 checkpoint has completed
+cold download and metadata inspection but still needs a full serving
+performance run. GLM-5.2 is the flagship hardware-qualified profile; custom
+checkpoints remain compatibility-by-vLLM rather than a blanket support claim.

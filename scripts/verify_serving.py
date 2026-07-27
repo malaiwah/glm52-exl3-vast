@@ -8,7 +8,7 @@ every short-prompt check — including vision smoke tests — while producing pu
 garbage past ~32K tokens:
 
   * nvfp4 KV without calibrated MLA outer scales : needle 0/6 at 505K, GSM8K fine
-  * VLLM_EXL3_TRELLIS_MIN_M lowered to 1         : needle 0/2 at 32K, 6/6 short
+  * uncalibrated nvfp4 MLA KV on earlier runtimes : long retrieval failed, short passed
   * vision on the EXL3-TR3 target                : needle 0/2 at 32K, 6/6 short
 
 So nothing here reports "healthy" on the strength of /health or a two-line
@@ -139,7 +139,11 @@ def build_haystack(target_tokens, depths, seed=20260726):
         needles.append((city, code, d))
     # ~18 tokens per filler line is a starting guess; the caller re-measures.
     nlines = max(64, int(target_tokens / 18))
-    lines = [FILLER[i % len(FILLER)].format(i=i) for i in range(nlines)]
+    # Keep a per-run marker in the first cache block. Otherwise a matrix of
+    # related probes can accidentally measure prefix-cache reuse instead of a
+    # fresh long prefill.
+    lines = [f"Independent retrieval trial {seed}; do not use another trial's codes."]
+    lines.extend(FILLER[i % len(FILLER)].format(i=i) for i in range(1, nlines))
     for city, code, d in needles:
         pos = min(nlines - 1, max(1, int(nlines * d)))
         lines[pos] = f"IMPORTANT: the access code for {city} is {code}."
@@ -147,15 +151,18 @@ def build_haystack(target_tokens, depths, seed=20260726):
     return body, [(c, k) for c, k, _ in needles]
 
 
-def needle_probe(base, key, model, target_tokens, depths, timeout=600):
+def needle_probe(base, key, model, target_tokens, depths, timeout=600,
+                 seed=20260726):
     """One prefill, all depths — the harness shape that found the 490K result."""
-    text, needles = build_haystack(target_tokens, depths)
+    started = time.perf_counter()
+    text, needles = build_haystack(target_tokens, depths, seed)
     actual, exact = count_tokens(base, key, model, text)
     # one correction pass: scale the line count by the measured tokens/line
     if actual and abs(actual - target_tokens) / target_tokens > 0.12:
         lines = text.count("\n") + 1
         per_line = actual / max(lines, 1)
-        text, needles = build_haystack(int(target_tokens * 18 / max(per_line, 1e-6)), depths)
+        text, needles = build_haystack(
+            int(target_tokens * 18 / max(per_line, 1e-6)), depths, seed)
         actual, exact = count_tokens(base, key, model, text)
     asked = ", ".join(c for c, _ in needles)
     prompt = (text + "\n\n---\nThe document above contains access codes. "
@@ -165,6 +172,8 @@ def needle_probe(base, key, model, target_tokens, depths, timeout=600):
     found = [code for _city, code in needles if code in answer]
     return {
         "attempted": True,
+        "seed": seed,
+        "target_tokens": target_tokens,
         "tokens": actual,
         "tokens_exact": exact,
         "depths": depths,
@@ -173,6 +182,7 @@ def needle_probe(base, key, model, target_tokens, depths, timeout=600):
         "degenerate": degenerate(answer),
         "answer_head": answer[:400],
         "ok": len(found) == len(needles) and not degenerate(answer),
+        "duration_s": round(time.perf_counter() - started, 3),
     }
 
 
@@ -202,6 +212,8 @@ def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--api-key", default="")
+    ap.add_argument("--api-key-env", default="",
+                    help="read the API key from this environment variable")
     ap.add_argument("--model", default="model")
     ap.add_argument("--out", default="")
     ap.add_argument("--max-model-len", type=int, default=524288)
@@ -211,6 +223,8 @@ def main(argv):
     ap.add_argument("--pid", default="")
     ap.add_argument("--skip-long-context", action="store_true")
     args = ap.parse_args(argv)
+    if args.api_key_env:
+        args.api_key = os.environ.get(args.api_key_env, "")
 
     base = args.base_url.rstrip("/")
     started = time.time()
@@ -263,8 +277,8 @@ def main(argv):
         verdict["reason"] = (
             "LONG-CONTEXT PROBE FAILED: retrieved {f}/{t} codes from a ~{n} token "
             "context{d}. Short prompts passed, which is exactly the signature of the "
-            "known silent-corruption configurations (nvfp4 KV without calibrated "
-            "scales, trellis MIN_M lowered, vision on the EXL3 target)."
+            "known silent-corruption class (for example NVFP4 MLA KV without "
+            "model-calibrated scales, or an unqualified vision/runtime combination)."
         ).format(f=lc.get("found", 0), t=lc.get("total", 0), n=lc.get("tokens", 0),
                  d=" — " + lc["degenerate"] if lc.get("degenerate") else "")
     else:
@@ -276,7 +290,9 @@ def _finish(verdict, args, started):
     verdict["duration_s"] = round(time.time() - started, 1)
     blob = json.dumps(verdict, indent=1) + "\n"
     if args.out:
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        parent = os.path.dirname(args.out)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         tmp = args.out + ".tmp"
         with open(tmp, "w") as f:
             f.write(blob)

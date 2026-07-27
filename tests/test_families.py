@@ -52,8 +52,8 @@ def errs(findings):
 
 # --------------------------------------------------------------------------
 
-def test_glm_unchanged():
-    section("the GLM path is exactly what it was")
+def test_glm_release_defaults():
+    section("the GLM v29 release defaults")
     eff, src, _ = resolved(gpus=4)
     check("family defaults to glm52", eff["MODEL_FAMILY"] == "glm52")
     check("TP is 4 on a 4-GPU box, and it is DETECTED not assumed",
@@ -62,10 +62,17 @@ def test_glm_unchanged():
     check("DCP follows TP", eff["DCP"] == "4" and src["DCP"] == "detected")
     check("context is 512K", eff["MAX_MODEL_LEN"] == 524288)
     check("MTP-3", eff["MTP_TOKENS"] == 3)
-    check("fp8 KV", eff["KV_CACHE_DTYPE"] == "fp8")
-    check("pool pinned at 2048 blocks", eff["GPU_BLOCKS_OVERRIDE"] == 2048)
-    check("util 0.93", eff["GPU_MEMORY_UTILIZATION"] == 0.93)
-    check("vision on", eff["VISION"] is True)
+    check("calibrated NVFP4 MLA KV", eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla")
+    check("KV pool is auto-profiled", eff["GPU_BLOCKS_OVERRIDE"] == 0)
+    check("util 0.96", eff["GPU_MEMORY_UTILIZATION"] == 0.96)
+    check("DRAM offload is opt-in", eff["OFFLOAD_FRACTION"] == 0)
+    check("vision is an opt-in feature profile", eff["VISION"] is False)
+    check("the v29-qualified draft method is greedy",
+          eff["MTP_DRAFT_SAMPLE_METHOD"] == "greedy")
+    check("lossless B12X PCIe DMA is on and topology-calibrated",
+          eff["B12X_PCIE_DMA"] is True and eff["F8_DMA"] == "0"
+          and eff["PCIE_CALIBRATION"] == "auto"
+          and eff["DCP_CKV_PREFETCH_DEPTH"] == "auto")
     check("served name GLM-5.2", eff["SERVED_MODEL_NAME"] == "GLM-5.2")
 
     args = gc.family_serve_args(eff)
@@ -93,6 +100,93 @@ def test_glm_unchanged():
     check("spec method is mtp", d["SPEC_METHOD"] == "mtp")
     check("the MTP78 graft is still the default draft", d["MTP78_MODE"] == "graft")
     check("repo unchanged", d["MODEL_REPO"] == "brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw")
+
+
+def test_glm_release_integration():
+    section("the v29 runtime integration matches the measured launch contract")
+    entry = open(os.path.join(REPO, "entrypoint.sh")).read()
+    dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
+    config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
+    runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
+    check("the base image is the pinned v29 manifest",
+          "sha256:2996b8ac37ff126a8aeebaa24df72e2154a2a1573df41f99eb48a4275e33eb41"
+          in dockerfile)
+    check("the target/draft trellis minimum is role-aware",
+          'if [ "${MTP_TOKENS:-3}" = "0" ]; then' in entry and
+          "export VLLM_EXL3_TRELLIS_MIN_M=1" in entry and
+          "unset VLLM_EXL3_TRELLIS_MIN_M" in entry)
+    for setting in (
+            "VLLM_DCP_QUERY_SPLIT=1",
+            "VLLM_DCP_TOPK_OWNER_MERGE=1",
+            'VLLM_B12X_MLA_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-auto}"',
+            "VLLM_DCP_PROJECT_BEFORE_MERGE=1",
+            "VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1"):
+        check(f"prefill policy includes {setting}", setting in entry)
+    check("the DCP prefill workspace is self-service",
+          'VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}"'
+          in entry)
+    check("the stable loader is the GLM default",
+          gc.family("glm52")["defaults"]["LOAD_FORMAT"] == "safetensors")
+    check("InstantTensor is an explicit opt-in",
+          gc.KNOB_BY_KEY["LOAD_FORMAT"]["choices"] == ["safetensors", "instanttensor"])
+    check("the CLI explains the variant inheritance layer",
+          "default < family < variant < env < state file" in config_cli)
+    check("offload is divided across TP workers",
+          "OFF_BYTES=$((OFF_TOTAL_BYTES / OFFLOAD_RANKS))" in entry)
+    check("the Runpod GLM template does not override safe defaults",
+          runpod["env"]["OFFLOAD_FRACTION"] == "0" and
+          runpod["env"]["VISION"] == "0" and
+          runpod["env"]["MTP_DRAFT_SAMPLE_METHOD"] == "greedy")
+    for setting in ("VLLM_USE_B12X_PCIE_DMA", "VLLM_PCIE_DMA_FP8",
+                    "SPARKINFER_PCIE_DMA_FP8", "PCIE_CALIBRATION_ONLY=1",
+                    "VLLM_USE_MEGA_AOT_ARTIFACT=1"):
+        check(f"the v20 transport path includes {setting}", setting in entry)
+
+
+def test_madeby561_hybrid():
+    section("the MadeBy561 v19 daily-driver control")
+    eff, src, _ = resolved(gpus=4, MODEL_VARIANT="madeby561-hybrid")
+    check("the variant selects the published hybrid checkpoint",
+          gc.derive(eff)["MODEL_REPO"]
+          == "madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid")
+    check("the variant chooses the stock BF16 MTP draft by default",
+          eff["MTP_DRAFT"] == "bf16" and src["MTP_DRAFT"] == "variant",
+          f"{eff['MTP_DRAFT']} / {src['MTP_DRAFT']}")
+    for key, expected in (
+            ("MAX_NUM_BATCHED_TOKENS", 2048),
+            ("DCP_PREFILL_WORKSPACE_MIB", 512),
+            ("GPU_MEMORY_UTILIZATION", 0.98),
+            ("GPU_BLOCKS_OVERRIDE", 2048),
+            ("MTP_DRAFT_SAMPLE_METHOD", "probabilistic")):
+        check(f"the measured hybrid memory shape sets {key}",
+              eff[key] == expected and src[key] == "variant",
+              f"{eff[key]} / {src[key]}")
+    check("MTP3 remains enabled", eff["MTP_TOKENS"] == 3)
+    line = " ".join(gc.family_serve_args(eff))
+    check("the native hybrid quantizer is selected",
+          "--quantization nvfp4_nf3_hybrid" in line, line[:300])
+    check("the published MXFP8 dense/shared-expert overlay is selected",
+          "--quantization-config" in line
+          and '"shared_experts":{"weight":"mxfp8"}' in line, line[-500:])
+    check("the stock draft needs no graft or external quantizer",
+          gc.derive(eff)["MTP78_MODE"] == "off"
+          and gc.derive(eff)["DRAFT_QUANTIZATION"] == "")
+    explicit, explicit_src, _ = resolved(
+        gpus=4, MODEL_VARIANT="madeby561-hybrid", MTP_DRAFT="off")
+    check("an explicit draft choice still wins",
+          explicit["MTP_DRAFT"] == "off"
+          and explicit_src["MTP_DRAFT"] == "file")
+    overridden, overridden_src, _ = resolved(
+        gpus=4, MODEL_VARIANT="madeby561-hybrid",
+        MAX_NUM_BATCHED_TOKENS=2048, GPU_MEMORY_UTILIZATION=0.97,
+        GPU_BLOCKS_OVERRIDE=2304)
+    check("explicit memory choices still win over the variant profile",
+          overridden["MAX_NUM_BATCHED_TOKENS"] == 2048
+          and overridden["GPU_MEMORY_UTILIZATION"] == 0.97
+          and overridden["GPU_BLOCKS_OVERRIDE"] == 2304
+          and all(overridden_src[k] == "file" for k in (
+              "MAX_NUM_BATCHED_TOKENS", "GPU_MEMORY_UTILIZATION",
+              "GPU_BLOCKS_OVERRIDE")))
 
 
 def test_qwen_preset():
@@ -166,8 +260,8 @@ def test_inapplicable_knobs():
     section("knobs that cannot apply are refused, not ignored")
     eff, src, _ = resolved("qwen36")
     for key in ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
-                "VLLM_EXL3_TRELLIS_MAX_M", "VLLM_EXL3_TRELLIS_MIN_M",
-                "VISION", "VISION_CHUNKS", "BASE_GENERATION"):
+                "MTP_DRAFT_SAMPLE_METHOD", "VLLM_EXL3_TRELLIS_MAX_M",
+                "VISION", "VISION_CHUNKS"):
         check(f"{key} is marked n/a on qwen36", src[key] == "n/a", src[key])
         check(f"{key} is applicable on glm52",
               gc.applies_to(gc.KNOB_BY_KEY[key], "glm52"))
@@ -214,8 +308,6 @@ def test_rules_are_family_scoped():
     f = gc.validate(eff)
     check("the trellis concurrency rule does not apply to a dense model",
           "concurrency-window" not in ids(f), str(ids(f)))
-    check("nor does the trellis minimum rule", "trellis-min-m" not in ids(f))
-    check("nor the EXL3 draft/base rule", "tr3-draft-on-v20" not in ids(f))
     check("nor the vision long-context rule", "vision-long-context" not in ids(f))
     check("nor the DCP rules",
           not {"dcp-divides-tp", "dcp-reduces-pool"} & ids(f), str(ids(f)))
@@ -225,21 +317,9 @@ def test_rules_are_family_scoped():
     f = gc.validate(eff)
     check("the concurrency rule still fires on GLM",
           "concurrency-window" in errs(f), str(errs(f)))
-    # The trellis minimum is doubly protected: the knob is non-editable AND
-    # range-locked to 4, so a state file cannot even get a 1 into the resolver.
-    eff, _, _ = resolved(VLLM_EXL3_TRELLIS_MIN_M=1)
-    check("a state file cannot lower the trellis minimum at all",
-          eff["VLLM_EXL3_TRELLIS_MIN_M"] == 4, str(eff["VLLM_EXL3_TRELLIS_MIN_M"]))
-    # ... and if something ever did, the rule still catches it on GLM only.
-    forced = dict(eff, VLLM_EXL3_TRELLIS_MIN_M=1)
-    check("the rule still fires on GLM when the value is forced",
-          "trellis-min-m" in errs(gc.validate(forced)))
-    forced_q = dict(resolved("qwen36")[0], VLLM_EXL3_TRELLIS_MIN_M=1)
-    check("but not on a family without a trellis",
-          "trellis-min-m" not in ids(gc.validate(forced_q)))
     eff, _, _ = resolved(MTP_DRAFT="tr3-override")
-    check("the v20 rank-sliced draft rule still fires on GLM",
-          "tr3-draft-on-v20" in errs(gc.validate(eff)))
+    check("v29 accepts the separately rank-sliced EXL3 draft",
+          "tr3-draft-on-v20" not in ids(gc.validate(eff)))
 
 
 def test_family_coherence_rules():
@@ -305,7 +385,7 @@ def test_long_context_gate_is_family_independent():
 
 
 def test_env_layer_still_wins_over_family():
-    section("layering: default < family < env < file")
+    section("layering: default < family < variant < env < file")
     env = {"TENSOR_PARALLEL_SIZE": 2, "GLM_GPU_COUNT": "8"}
     eff, src, _ = gc.resolve(state_values={"MODEL_FAMILY": "qwen36"}, env_values=env)
     check("the template env overrides detection",
@@ -335,7 +415,9 @@ def main():
     os.makedirs(os.environ["GLM_STATE_DIR"], exist_ok=True)
     os.makedirs(os.environ["GLM_RUNTIME_DIR"], exist_ok=True)
     try:
-        test_glm_unchanged()
+        test_glm_release_defaults()
+        test_glm_release_integration()
+        test_madeby561_hybrid()
         test_qwen_preset()
         test_custom_profile()
         test_inapplicable_knobs()

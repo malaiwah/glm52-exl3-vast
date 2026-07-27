@@ -92,13 +92,24 @@ FAMILIES = {
         "spec_method": "mtp",
         # knobs that only make sense here; everything else is generic
         "own_knobs": ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
-                      "VLLM_EXL3_TRELLIS_MAX_M", "VLLM_EXL3_TRELLIS_MIN_M",
-                      "VISION", "VISION_CHUNKS", "BASE_GENERATION"),
+                      "MTP_DRAFT_SAMPLE_METHOD", "VLLM_EXL3_TRELLIS_MAX_M",
+                      "DCP_PREFILL_WORKSPACE_MIB", "DCP_CKV_PREFETCH_DEPTH",
+                      "B12X_PCIE_DMA", "F8_DMA", "PCIE_CALIBRATION",
+                      "VISION", "VISION_CHUNKS"),
         "defaults": {
             "MAX_MODEL_LEN": 524288, "MODEL_OUTPUT_LIMIT": 131072, "MTP_TOKENS": 3,
             "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
-            "GPU_MEMORY_UTILIZATION": 0.93, "GPU_BLOCKS_OVERRIDE": 2048,
-            "KV_CACHE_DTYPE": "fp8", "SERVED_MODEL_NAME": "GLM-5.2",
+            "DCP_PREFILL_WORKSPACE_MIB": 1024,
+            "DCP_CKV_PREFETCH_DEPTH": "auto",
+            "B12X_PCIE_DMA": True,
+            "F8_DMA": "0",
+            "PCIE_CALIBRATION": "auto",
+            "GPU_MEMORY_UTILIZATION": 0.96, "GPU_BLOCKS_OVERRIDE": 0,
+            "OFFLOAD_FRACTION": 0, "VISION": False,
+            "KV_CACHE_DTYPE": "nvfp4_ds_mla",
+            "LOAD_FORMAT": "safetensors",
+            "MTP_DRAFT_SAMPLE_METHOD": "greedy",
+            "SERVED_MODEL_NAME": "GLM-5.2",
         },
         # %(...)s are substituted from the resolved knobs
         "serve_args": [
@@ -107,7 +118,7 @@ FAMILIES = {
             "--dcp-kv-cache-interleave-size", "64",
             "--attention-backend", "B12X_MLA_SPARSE",
             "--moe-backend", "b12x",
-            "--load-format", "safetensors",
+            "--load-format", "%(LOAD_FORMAT)s",
             "--enable-auto-tool-choice",
             "--tool-call-parser", "glm47",
             "--reasoning-parser", "glm45",
@@ -144,11 +155,12 @@ FAMILIES = {
             "GPU_BLOCKS_OVERRIDE": 0,
             "OFFLOAD_FRACTION": 0,
             "KV_CACHE_DTYPE": "auto",
+            "LOAD_FORMAT": "safetensors",
             "SERVED_MODEL_NAME": "Qwen3.6-27B",
             "MULTIMODAL": False,
         },
         "serve_args": [
-            "--load-format", "safetensors",
+            "--load-format", "%(LOAD_FORMAT)s",
             "--enable-auto-tool-choice",
             "--tool-call-parser", "qwen3_coder",
             "--reasoning-parser", "qwen3",
@@ -181,6 +193,7 @@ FAMILIES = {
             "GPU_BLOCKS_OVERRIDE": 0,
             "OFFLOAD_FRACTION": 0,
             "KV_CACHE_DTYPE": "auto",
+            "LOAD_FORMAT": "safetensors",
             "SERVED_MODEL_NAME": "Local-model",
             "MODEL_ID": "",
             "QUANTIZATION": "",
@@ -215,7 +228,10 @@ VARIANTS = {
         "repo": "brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw",
         "dirname": "GLM-5.2-EXL3-TR3-3.0bpw",
         "quantization": "exl3",
-        "kv_scales_calibrated": False,
+        # v29 carries the checkpoint-calibrated GLM-5.2 MLA outer scales at
+        # VLLM_NVFP4_MLA_SCALES_FILE. The scales are model-wide, not tied to
+        # the target weight quantization.
+        "kv_scales_calibrated": True,
         "download_gib": 309,
         "tested": True,
     },
@@ -227,6 +243,40 @@ VARIANTS = {
         "quantization": "modelopt_fp4",
         "kv_scales_calibrated": True,
         "download_gib": 400,
+        "tested": False,
+    },
+    "madeby561-hybrid": {
+        "family": "glm52",
+        "label": "MadeBy561 MXFP8/NVFP4/NF3 hybrid (512K MTP3 profile)",
+        "repo": "madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid",
+        "revision": "68babde27a97a4c980c2494e830dd424975cd5a3",
+        "dirname": "GLM-5.2-MXFP8-NVFP4-NF3-Hybrid",
+        "quantization": "nvfp4_nf3_hybrid",
+        "quantization_config": (
+            '{"linear":{"weight":"mxfp8"},'
+            '"shared_experts":{"weight":"mxfp8"},'
+            '"ignore":["re:^model\\\\.layers\\\\.0\\\\.",'
+            '"re:.*\\\\.self_attn\\\\.indexer\\\\.",'
+            '"re:.*\\\\.mlp\\\\.gate$",'
+            '"model.layers.78.eh_proj","lm_head"]}'
+        ),
+        "default_draft": "bf16",
+        # v20's automatic pool sizing consumed the memory that the hybrid MTP
+        # proposal needs on its first real request. Pinning exactly one 512K
+        # request preserves runtime headroom. A 3072-token chunk with a 512 MiB
+        # workspace passed three uncached 32K prefills plus C1/C2/C4/C8, but
+        # OOMed immediately at 520K. Keep the v20 NF3 default chunk at 2048;
+        # the smaller borrowed DCP workspace retains additional room for the
+        # maximum-context runtime path.
+        "defaults": {
+            "MAX_NUM_BATCHED_TOKENS": 2048,
+            "DCP_PREFILL_WORKSPACE_MIB": 512,
+            "GPU_MEMORY_UTILIZATION": 0.98,
+            "GPU_BLOCKS_OVERRIDE": 2048,
+            "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
+        },
+        "kv_scales_calibrated": True,
+        "download_gib": 341,
         "tested": False,
     },
     "qwen36-nvfp4": {
@@ -264,11 +314,6 @@ DRAFTS = {
     "nvfp4":         {"label": "External NVFP4 draft dir", "mtp78_mode": "off",
                       "draft_quantization": "modelopt_fp4"},
 }
-
-# Base image generations. The v20 speculator cannot CUDA-graph-capture a
-# rank-sliced EXL3 draft (rule tr3-on-v20).
-BASE_GENERATIONS = ("v20", "pre-v20")
-
 
 # --------------------------------------------------------------------------
 # knob registry
@@ -357,29 +402,27 @@ KNOBS = [
              "must be able to fit in KV before it will start at all. Lowering it is "
              "the standard remedy when boot fails with 'To serve at least one request "
              "with the model's max seq len ... larger than the available KV cache "
-             "memory' — it is a startup gate, not a throughput knob. With vision "
-             "resident, fp8 KV sizes the usable ceiling nearer 384-420K than 512K.")),
+             "memory' — it is a startup gate, not a throughput knob. Vision has its "
+             "own memory profile and must re-pass the startup/needle gate.")),
 
-    dict(key="GPU_BLOCKS_OVERRIDE", type="int", default=2048, min=0, max=65536,
+    dict(key="GPU_BLOCKS_OVERRIDE", type="int", default=0, min=0, max=65536,
          group="Model", scope="engine", label="KV pool pin (--num-gpu-blocks-override)",
          rationale=(
-             "Pins the KV pool at exactly 512K tokens (2048 blocks x 256) so the "
-             "headroom the trellis draft frees stays predictable instead of being "
-             "absorbed. Set 0 to drop the pin and let vLLM take all available KV — "
-             "measured ~697K tokens of pool on the EXL3+MTP78 stack, i.e. much more "
-             "concurrency margin, at the cost of a pool size that moves whenever "
-             "anything else about memory changes.")),
+             "0 lets vLLM profile all available KV and is the GLM release default "
+             "(roughly 1.0-1.1M tokens on the v29 4x96 GB profile). A positive value "
+             "pins a reproducible smaller pool; 2048 blocks means 524,288 logical "
+             "tokens at TP4/DCP4. A pin must still fit MAX_MODEL_LEN.")),
 
     dict(key="KV_CACHE_DTYPE", type="choice", default="fp8",
          choices=["auto", "fp8", "nvfp4_ds_mla"], group="Model", scope="engine",
          label="KV cache dtype",
          rationale=(
-             "fp8 is the safe default and costs ~1.7x the bytes per token that nvfp4 "
-             "would. nvfp4 KV requires per-checkpoint calibrated MLA outer scales; "
-             "the EXL3 checkpoint has none, and without them long context silently "
-             "degenerates — measured needle 0/6 at 505K with degenerate text while "
-             "GSM8K, vision and structured output all still passed. Nothing short of "
-             "a long-context retrieval test catches it.")),
+             "nvfp4 KV costs substantially fewer bytes/token than fp8 but requires "
+             "model-calibrated MLA outer scales. v29 ships those scales for GLM-5.2, "
+             "so the EXL3 profile may use it; variants without declared calibration "
+             "are refused. Earlier uncalibrated runs silently degenerated while short "
+             "checks passed, so release qualification still requires cold long-context "
+             "retrieval.")),
 
     dict(key="MTP_DRAFT", families=("glm52",), type="choice", default="tr3-graft", choices=list(DRAFTS),
          group="Speculative decoding", scope="checkpoint", label="MTP draft type",
@@ -389,10 +432,10 @@ KNOBS = [
              "accept near-identically (MAL ~3.52, ~84%); what differs is VRAM and "
              "whether they boot. 'tr3-graft' (default) swaps layer 78 of the target "
              "for a 3.0bpw EXL3 trellis version in place: 19.3 GB -> 3.7 GB, ~3.8 "
-             "GB/GPU straight into KV, and it is the only draft with long-context "
-             "evidence behind it. 'tr3-override' keeps the target byte-identical and "
-             "measured slightly better on acceptance, but a rank-sliced EXL3 draft "
-             "cannot be CUDA-graph captured on the v20 base. 'nvfp4' is an external "
+             "GB/GPU straight into KV, and it has the longest appliance evidence. "
+             "'tr3-override' keeps the target byte-identical and measured slightly "
+             "better on acceptance; v29 supports its separately rank-sliced draft "
+             "graphs. 'nvfp4' is an external "
              "draft dir that avoids the rank-sliced path entirely (and must declare "
              "its own quantization). 'bf16' is the stock in-checkpoint draft: always "
              "works, costs 19.3 GB. 'off' disables speculation (~30% slower decode).")),
@@ -406,6 +449,16 @@ KNOBS = [
              "MTP-2 42.9, MTP-3 51.5, MTP-5 53.4 tok/s). Raising it also raises the "
              "decode query width m = MAX_NUM_SEQS x (1 + MTP_TOKENS), which has to "
              "stay inside the capture/trellis window. 0 disables speculation.")),
+
+    dict(key="MTP_DRAFT_SAMPLE_METHOD", families=("glm52",), type="choice",
+         default="greedy", choices=["greedy", "probabilistic"],
+         group="Speculative decoding", scope="engine",
+         label="Draft sampling method",
+         rationale=(
+             "How the MTP draft proposes candidates. The v29 EXL3 release and its "
+             "long-context qualification use greedy drafting, which is the turnkey "
+             "default. Probabilistic drafting remains available for controlled "
+             "quality/acceptance experiments.")),
 
     dict(key="DRAFT_MODEL", families=("glm52",), type="str", default="", group="Speculative decoding",
          scope="checkpoint", label="External draft dir (advanced)",
@@ -458,6 +511,58 @@ KNOBS = [
              "chunk waits for it). 3072 is the shipped balance for a 512K-context "
              "single-stream workload.")),
 
+    dict(key="DCP_PREFILL_WORKSPACE_MIB", families=("glm52",), type="int",
+         default=1024, min=256, max=16384,
+         group="Memory", scope="engine", label="DCP full-CKV workspace (MiB/GPU)",
+         rationale=(
+             "Scratch space per GPU for the fast transient full-CKV prefill path. "
+             "In the current v29 runtime, 1,024 MiB covers 16,384 logical context "
+             "tokens; longer prompts fall back to the lower-memory borrowed-workspace "
+             "path. Raising this may improve long-prefill speed, especially across "
+             "weak PCIe topologies, but every added MiB comes directly out of the KV "
+             "pool. Keep enough KV for one MAX_MODEL_LEN request and confirm with the "
+             "long-context gate. This is an empirical A/B control, not a promise that "
+             "the largest value is fastest.")),
+
+    dict(key="DCP_CKV_PREFETCH_DEPTH", families=("glm52",), type="choice",
+         default="auto", choices=["auto", "0", "1"],
+         group="Performance", scope="engine", label="DCP CKV prefetch overlap",
+         rationale=(
+             "auto asks the base image's PCIe calibrator whether overlapping the "
+             "next CKV gather helps on this exact GPU/NUMA topology. A value of 1 "
+             "can win on a single-root NODE layout and lose badly when one rank "
+             "crosses CPU sockets; 0 disables the overlap without disabling the "
+             "full-CKV path. The calibrated decision is cached on the model volume.")),
+
+    dict(key="B12X_PCIE_DMA", families=("glm52",), type="bool", default=True,
+         group="Performance", scope="engine", label="B12X PCIe DMA transport",
+         rationale=(
+             "Enables SparkInfer/B12X's PCIe DMA path for collective payloads. "
+             "The v20 image calibrates the lossless BF16 crossover before loading "
+             "the model and retains NCCL below that size. Disable only for an A/B "
+             "control or when diagnosing a platform-specific transport failure.")),
+
+    dict(key="F8_DMA", families=("glm52",), type="choice", default="0",
+         choices=["0", "ag", "ring", "a2a", "i8", "i8_ring", "i8_a2a",
+                  "mx", "mx_ring", "mx_a2a"],
+         group="Performance", scope="engine", label="Compressed DMA wire mode",
+         rationale=(
+             "0 is the lossless release default and is eligible for automatic PCIe "
+             "crossover calibration. ag/ring/a2a and the i8/mx variants compress "
+             "collective traffic and can materially improve a constrained PCIe "
+             "topology, but they are explicit quality/performance experiments. "
+             "Any nonzero mode must re-pass maximum-context needles and degeneration "
+             "checks before it should be used as a local profile default.")),
+
+    dict(key="PCIE_CALIBRATION", families=("glm52",), type="choice",
+         default="auto", choices=["auto", "off", "force"],
+         group="Performance", scope="engine", label="Topology calibration",
+         rationale=(
+             "auto reuses a cached v20 PCIe microbenchmark for this GPU topology; "
+             "force measures again, and off uses conservative fixed fallbacks. It "
+             "selects the lossless DMA size crossover, query-split crossover, and "
+             "whether CKV prefetch overlap is beneficial before model weights load.")),
+
     dict(key="MAX_CUDAGRAPH_CAPTURE_SIZE", type="int", default=32, min=1, max=512,
          group="Concurrency", scope="engine", label="Max CUDA-graph capture size",
          rationale=(
@@ -485,24 +590,27 @@ KNOBS = [
              "together with MAX_CUDAGRAPH_CAPTURE_SIZE and CUDAGRAPH_CAPTURE_SIZES — "
              "raising one alone just moves which of the two ceilings you hit.")),
 
-    dict(key="VLLM_EXL3_TRELLIS_MIN_M", families=("glm52",), type="int", default=4, min=4, max=4,
-         editable=False, group="Concurrency", scope="engine",
-         label="EXL3 trellis window min (m) — LOCKED",
-         rationale=(
-             "LOCKED AT 4. Lowering it to 1 makes an EXL3 capture crash disappear and "
-             "SILENTLY CORRUPTS OUTPUT: measured 32K needle 0/2 and 370K needle 0/5, "
-             "pure garbage, while a short-prompt quality gate still passed 6/6. m=1..3 "
-             "move off the eager parity path onto a trellis kernel nothing has verified "
-             "there. There is deliberately no control here that lowers it.")),
-
-    dict(key="GPU_MEMORY_UTILIZATION", type="float", default=0.93, min=0.50, max=0.99,
+    dict(key="GPU_MEMORY_UTILIZATION", type="float", default=0.90, min=0.50, max=0.99,
          group="Memory", scope="engine", label="GPU memory utilization",
          rationale=(
              "Fraction of each card vLLM may claim. Higher means more KV; too high and "
              "the memory profile OOMs during capture or KV validation fails outright. "
-             "0.93 is the value the 512K fp8 pool was validated at on 96 GB cards. "
+             "The GLM v29 profile uses 0.96 with calibrated NVFP4 KV and an auto-sized "
+             "pool; other families provide their own conservative default. "
              "Memory-profile draws vary by a few hundred MiB run to run, so a value "
              "that boots 2 times in 3 is not a value that boots.")),
+
+    dict(key="LOAD_FORMAT", type="choice", default="safetensors",
+         choices=["safetensors", "instanttensor"],
+         group="Memory", scope="engine", label="Weight loader",
+         rationale=(
+             "safetensors is the conservative, repeatable default. instanttensor uses "
+             "the base image's distributed BUFFERED loader and can reduce model-load "
+             "time on a suitable filesystem, but it has shown intermittent startup "
+             "behavior in rental environments. Treat it as experimental until the "
+             "same host passes several cold starts plus short and long correctness "
+             "gates; the appliance never enables it merely because the package is "
+             "installed.")),
 
     dict(key="MODEL_OUTPUT_LIMIT", type="int", default=131072, min=256, max=262144,
          group="Serving", scope="engine", label="Client output limit",
@@ -511,17 +619,19 @@ KNOBS = [
              "snippets and used by quick chat. This does not enlarge the model's "
              "context window; prompt plus output must still fit MAX_MODEL_LEN.")),
 
-    dict(key="OFFLOAD_FRACTION", type="float", default=0.70, min=0.0, max=0.95,
+    dict(key="OFFLOAD_FRACTION", type="float", default=0.0, min=0.0, max=0.95,
          group="Memory", scope="engine", label="DRAM KV offload fraction",
          rationale=(
              "Fraction of the instance's RAM allocation used as a pinned CPU KV tier "
-             "(0 disables). Sized from min(cgroup limit, MemTotal), so a partial rental "
-             "does not oversize it. It is a pure cache tier: kv_load_failure_policy="
+             "(0 disables and is the production default). The total is divided across "
+             "TP workers; vLLM interprets cpu_bytes_to_use per worker. Sized from "
+             "min(cgroup limit, MemTotal), so a partial rental does not oversize it. "
+             "It is a pure cache tier: kv_load_failure_policy="
              "recompute means a block that cannot be fetched back is recomputed rather "
              "than failing the request. Costs host RAM and nothing else; the win is on "
              "prefix-cache hits across requests.")),
 
-    dict(key="VISION", families=("glm52",), type="bool", default=True, group="Multimodal", scope="checkpoint",
+    dict(key="VISION", families=("glm52",), type="bool", default=False, group="Multimodal", scope="checkpoint",
          label="Vision (image input) — EXPERIMENTAL on EXL3",
          rationale=(
              "Bolts the MoonViT-3d tower + PatchMerger projector (~890 MB, BF16, no "
@@ -547,15 +657,6 @@ KNOBS = [
              "existing clients already use (e.g. 'GLM-5.2 local-primary') and they need "
              "no reconfiguration to point at this instance.")),
 
-    dict(key="BASE_GENERATION", families=("glm52",), type="choice", default="v20", choices=list(BASE_GENERATIONS),
-         editable=False, group="Serving", scope="engine",
-         label="Base image generation (read-only)",
-         rationale=(
-             "Which fork generation the image was built from. It is baked into the "
-             "image, not chosen at runtime, and it decides whether a rank-sliced EXL3 "
-             "draft can be captured at all: on v20 the SpeculatorCudaGraphManager "
-             "captures it at m=3, outside the trellis window [4,32], and the engine "
-             "dies. Shown here because the draft type must be validated against it.")),
 ]
 
 KNOB_BY_KEY = {k["key"]: k for k in KNOBS}
@@ -899,9 +1000,9 @@ def applies_to(knob, family_name) -> bool:
 
     A knob scoped to a family it is not in is INAPPLICABLE — not "ignored". DCP,
     the EXL3 trellis window and the vision wrapper describe MLA/GLM machinery
-    that does not exist in a dense Qwen; offering them would invite exactly the
-    class of unbootable configuration (the m=3 capture crash) that this whole
-    validation layer exists to prevent."""
+    that does not exist in a dense Qwen; offering them would invite invalid
+    architecture-specific combinations that this validation layer exists to
+    prevent."""
     fams = knob.get("families")
     return not fams or (family_name or "glm52") in fams
 
@@ -1002,6 +1103,25 @@ def resolve(state_values=None, env_values=None):
     unknown = [k for k in state_values if k not in KNOB_BY_KEY]
     if unknown:
         notes.append("state file has unknown keys, ignored: " + ", ".join(sorted(unknown)))
+    # A checkpoint variant may need a coherent measured memory shape, not just
+    # a different repository. Apply that layer above family defaults but below
+    # explicit template/state choices so selecting a variant is safe while
+    # every individual knob remains overridable.
+    variant = VARIANTS.get(effective.get("MODEL_VARIANT"), {})
+    for key, raw in variant.get("defaults", {}).items():
+        if key not in KNOB_BY_KEY or sources.get(key) not in ("default", "family"):
+            continue
+        try:
+            effective[key] = coerce(KNOB_BY_KEY[key], raw)
+            sources[key] = "variant"
+        except ConfigError as e:
+            notes.append(f"variant default {e}")
+    # A variant may also carry a stock draft with a different representation
+    # from the family's default.
+    if (fam_name == "glm52" and variant.get("default_draft")
+            and sources.get("MTP_DRAFT") in ("default", "family")):
+        effective["MTP_DRAFT"] = variant["default_draft"]
+        sources["MTP_DRAFT"] = "variant"
     return effective, sources, notes
 
 
@@ -1066,6 +1186,8 @@ def family_serve_args(cfg: dict):
     variant = VARIANTS.get(cfg.get("MODEL_VARIANT"), {})
     if variant.get("quantization"):
         args = ["--quantization", variant["quantization"]] + args
+    if variant.get("quantization_config"):
+        args += ["--quantization-config", variant["quantization_config"]]
     if cfg.get("MODEL_FAMILY") in ("qwen36", "custom") and not cfg.get("MULTIMODAL"):
         args += ["--language-model-only"]
     if cfg.get("MODEL_FAMILY") == "custom":
@@ -1222,39 +1344,17 @@ def validate(cfg: dict, context=None):
                  f"the largest captured size ({max(sizes)}) does not equal "
                  f"MAX_CUDAGRAPH_CAPTURE_SIZE ({cap_max}); decode above {max(sizes)} runs "
                  "eager whatever the max says.")
-        if is_glm and min(sizes) < cfg["VLLM_EXL3_TRELLIS_MIN_M"]:
-            err("capture-below-trellis-min", ["CUDAGRAPH_CAPTURE_SIZES"],
-                f"a capture size of {min(sizes)} is below the EXL3 trellis window minimum "
-                f"({cfg['VLLM_EXL3_TRELLIS_MIN_M']}). Capture then falls into the eager "
-                "parity path and the worker dies with 'EXL3 eager parity path entered "
-                f"during CUDA graph capture (m={min(sizes)})'. The fix is to raise the "
-                "capture size, never to lower the trellis minimum.")
-
-    # 2. the locked trellis minimum -----------------------------------------
-    if is_glm and cfg["VLLM_EXL3_TRELLIS_MIN_M"] != 4:
-        err("trellis-min-m", ["VLLM_EXL3_TRELLIS_MIN_M"],
-            "VLLM_EXL3_TRELLIS_MIN_M must stay 4. Lowering it to 1 makes an EXL3 capture "
-            "crash disappear but SILENTLY CORRUPTS OUTPUT: measured 32K needle 0/2 and "
-            "370K needle 0/5, pure garbage, while short-prompt checks still passed 6/6.")
-
-    # 3. rank-sliced EXL3 draft vs the base generation -----------------------
-    if is_glm and draft == "tr3-override" and cfg["BASE_GENERATION"] == "v20":
-        err("tr3-draft-on-v20", ["MTP_DRAFT"],
-            "an EXL3 rank-sliced MTP draft (TR3-trellis, separate draft dir) cannot be "
-            "CUDA-graph captured on the GG v20 base: SpeculatorCudaGraphManager captures "
-            "at m outside the trellis window [4,32] and the engine dies with 'EXL3 eager "
-            "parity path entered during CUDA graph capture (m=3)'. m=3 is invariant — it "
-            "follows neither MTP_TOKENS nor cudagraph_capture_sizes. Use 'tr3-graft' "
-            "(same weights, grafted into the target, and the only draft with long-context "
-            "evidence) or a bf16/nvfp4 draft.")
-
+    # 2. rank-sliced EXL3 draft compatibility --------------------------------
+    # v29 stamps the draft role at construction and gives draft layers a
+    # capturable m=1 floor while target layers keep m=4. The former v20 blanket
+    # rejection and global MIN_M workaround are both obsolete.
     if is_glm and draft.startswith("tr3-") and cfg["MODEL_VARIANT"] != "exl3-tr3":
         err("tr3-draft-needs-exl3", ["MTP_DRAFT", "MODEL_VARIANT"],
             "the TR3 trellis drafts are layer-78 overlays built for the EXL3-TR3 "
             f"checkpoint; they have no meaning on the {variant['label']} target. Use the "
             "bf16 in-checkpoint draft or an external nvfp4 draft dir.")
 
-    # 4. a draft inherits the target's quantization --------------------------
+    # 3. a draft inherits the target's quantization --------------------------
     if is_glm and draft == "nvfp4" and cfg.get("DRAFT_QUANTIZATION") != "modelopt_fp4":
         err("draft-quant-inherit", ["DRAFT_QUANTIZATION", "MTP_DRAFT"],
             "a draft inherits the target's --quantization unless its speculative config "
@@ -1272,10 +1372,10 @@ def validate(cfg: dict, context=None):
             and not variant["kv_scales_calibrated"]:
         err("kv-nvfp4-uncalibrated", ["KV_CACHE_DTYPE", "MODEL_VARIANT"],
             f"KV dtype {cfg['KV_CACHE_DTYPE']} requires per-checkpoint calibrated MLA "
-            f"outer scales and the {variant['label']} checkpoint has none. With nvfp4 KV "
-            "long context silently degenerates — measured needle 0/6 at 505K with "
-            "degenerate output — while GSM8K, vision and structured output all pass. fp8 "
-            "is the safe default; it costs ~1.7x the KV bytes per token.")
+            f"outer scales and the {variant['label']} profile declares none. Earlier "
+            "uncalibrated NVFP4 runs silently degenerated at long context while short "
+            "quality and feature checks passed. Use fp8 for this variant, or provide "
+            "and qualify model-specific calibrated scales.")
 
     # 6. vision on an EXL3 target -------------------------------------------
     if is_glm and cfg["VISION"] and cfg["MODEL_VARIANT"] == "exl3-tr3":
@@ -1298,12 +1398,22 @@ def validate(cfg: dict, context=None):
              "download during the restart.")
 
     # 7. memory / pool sanity ------------------------------------------------
-    if cfg["GPU_MEMORY_UTILIZATION"] > 0.95:
+    if cfg["GPU_MEMORY_UTILIZATION"] > 0.95 and not cfg["GPU_BLOCKS_OVERRIDE"]:
         warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
              f"{cfg['GPU_MEMORY_UTILIZATION']} leaves very little headroom. The memory "
              "profile varies by a few hundred MiB between boots, so a value that boots "
              "two times in three is not a value that boots — it is a rollback waiting to "
              "happen.")
+    if (is_glm and cfg["MODEL_VARIANT"] == "madeby561-hybrid"
+            and cfg["MAX_MODEL_LEN"] >= 524288
+            and not cfg["GPU_BLOCKS_OVERRIDE"]):
+        warn("hybrid-512k-needs-pool-pin",
+             ["MODEL_VARIANT", "MAX_MODEL_LEN", "GPU_BLOCKS_OVERRIDE"],
+             "the v20 hybrid target can pass startup admission with an automatically "
+             "sized pool and still OOM in the first MTP proposal: the pool consumes "
+             "the proposal's transient allocation. The measured 512K profile pins "
+             "2048 blocks. Keep that pin, or re-run the 32K and near-maximum needle "
+             "gates before trusting this configuration.")
     if cfg["GPU_BLOCKS_OVERRIDE"] and cfg["GPU_BLOCKS_OVERRIDE"] * 256 < cfg["MAX_MODEL_LEN"]:
         err("pool-smaller-than-context", ["GPU_BLOCKS_OVERRIDE", "MAX_MODEL_LEN"],
             f"the pinned KV pool is {cfg['GPU_BLOCKS_OVERRIDE']} blocks = "
@@ -1370,11 +1480,10 @@ SIGNATURES = [
      "also free KV."),
     (r"eager parity path entered during CUDA graph capture",
      "An EXL3 kernel was asked to capture a CUDA graph at a batch width outside the "
-     "trellis window [4,32]. On the v20 base this is what a rank-sliced EXL3 draft "
-     "(MTP draft type 'tr3-override') always does, and it is also what a non-EXL3 draft "
-     "does when it inherits the target's --quantization (set DRAFT_QUANTIZATION). Do NOT "
-     "widen the window downwards: lowering VLLM_EXL3_TRELLIS_MIN_M silently corrupts "
-     "output."),
+     "Trellis window. v29 normally classifies target and draft roles independently; "
+     "a global VLLM_EXL3_TRELLIS_MIN_M override can defeat that. A non-EXL3 draft can "
+     "also reach this path when it inherits the target's --quantization; set "
+     "DRAFT_QUANTIZATION for such drafts."),
     (r"CUDA out of memory|torch\.OutOfMemoryError",
      "Out of VRAM. Lower GPU_MEMORY_UTILIZATION, MAX_MODEL_LEN, MAX_NUM_SEQS or "
      "MAX_NUM_BATCHED_TOKENS, or use a smaller draft."),

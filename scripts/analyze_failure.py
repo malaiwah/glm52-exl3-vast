@@ -62,7 +62,8 @@ Write at most 250 words, in this shape:
 1. One sentence: what happened.
 2. Which setting is responsible, and the mechanism.
 3. What to try instead (concrete values).
-Do not invent log lines. Do not recommend lowering VLLM_EXL3_TRELLIS_MIN_M.
+Do not invent log lines. On v29, do not recommend globally setting
+VLLM_EXL3_TRELLIS_MIN_M: role-aware target/draft defaults require it unset.
 """
 
 

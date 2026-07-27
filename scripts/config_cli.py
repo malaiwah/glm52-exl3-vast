@@ -125,7 +125,8 @@ def cmd_show(_args):
     fam = gc.family(effective.get("MODEL_FAMILY"))
     print(">>> model family: %s%s" % (fam["label"],
                                       "" if fam.get("tested") else "  [UNTESTED PRESET]"))
-    print(">>> effective configuration (default < family < env < state file):")
+    print(">>> effective configuration "
+          "(default < family < variant < env < state file):")
     for knob in gc.KNOBS:
         key = knob["key"]
         if sources[key] == "n/a":
@@ -272,7 +273,11 @@ def cmd_pending_analysis(_args):
         return 3
     for d in reversed(dirs):
         fdir = os.path.join(root, d)
-        if os.path.isdir(fdir) and not os.path.exists(os.path.join(fdir, "analysis.md")):
+        soul_marker = os.path.join(gc.state_dir(), "soul", "incidents",
+                                   "rollback-" + d + ".json")
+        if (os.path.isdir(fdir)
+                and not os.path.exists(os.path.join(fdir, "analysis.md"))
+                and not os.path.exists(soul_marker)):
             print(fdir)
             return 0
     return 3
