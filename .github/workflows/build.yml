@@ -40,6 +40,12 @@ jobs:
         run: python3 tests/test_knob_wiring.py
       - name: gpu detection
         run: python3 tests/test_gpu_detect.py
+      # Keeps the live qualification instruments trustworthy before they are
+      # used to spend GPU rental time.
+      - name: serving benchmark and needle harness
+        run: python3 tests/test_serving_tools.py
+      - name: checkpoint reconciliation
+        run: python3 tests/test_checkpoint_reconcile.py
       - name: validate profile compatibility and Runpod templates
         run: |
           CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm52-exl3 bash entrypoint.sh | grep -q 'brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw'

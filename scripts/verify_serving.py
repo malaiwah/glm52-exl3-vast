@@ -139,7 +139,11 @@ def build_haystack(target_tokens, depths, seed=20260726):
         needles.append((city, code, d))
     # ~18 tokens per filler line is a starting guess; the caller re-measures.
     nlines = max(64, int(target_tokens / 18))
-    lines = [FILLER[i % len(FILLER)].format(i=i) for i in range(nlines)]
+    # Keep a per-run marker in the first cache block. Otherwise a matrix of
+    # related probes can accidentally measure prefix-cache reuse instead of a
+    # fresh long prefill.
+    lines = [f"Independent retrieval trial {seed}; do not use another trial's codes."]
+    lines.extend(FILLER[i % len(FILLER)].format(i=i) for i in range(1, nlines))
     for city, code, d in needles:
         pos = min(nlines - 1, max(1, int(nlines * d)))
         lines[pos] = f"IMPORTANT: the access code for {city} is {code}."
@@ -147,15 +151,18 @@ def build_haystack(target_tokens, depths, seed=20260726):
     return body, [(c, k) for c, k, _ in needles]
 
 
-def needle_probe(base, key, model, target_tokens, depths, timeout=600):
+def needle_probe(base, key, model, target_tokens, depths, timeout=600,
+                 seed=20260726):
     """One prefill, all depths — the harness shape that found the 490K result."""
-    text, needles = build_haystack(target_tokens, depths)
+    started = time.perf_counter()
+    text, needles = build_haystack(target_tokens, depths, seed)
     actual, exact = count_tokens(base, key, model, text)
     # one correction pass: scale the line count by the measured tokens/line
     if actual and abs(actual - target_tokens) / target_tokens > 0.12:
         lines = text.count("\n") + 1
         per_line = actual / max(lines, 1)
-        text, needles = build_haystack(int(target_tokens * 18 / max(per_line, 1e-6)), depths)
+        text, needles = build_haystack(
+            int(target_tokens * 18 / max(per_line, 1e-6)), depths, seed)
         actual, exact = count_tokens(base, key, model, text)
     asked = ", ".join(c for c, _ in needles)
     prompt = (text + "\n\n---\nThe document above contains access codes. "
@@ -165,6 +172,8 @@ def needle_probe(base, key, model, target_tokens, depths, timeout=600):
     found = [code for _city, code in needles if code in answer]
     return {
         "attempted": True,
+        "seed": seed,
+        "target_tokens": target_tokens,
         "tokens": actual,
         "tokens_exact": exact,
         "depths": depths,
@@ -173,6 +182,7 @@ def needle_probe(base, key, model, target_tokens, depths, timeout=600):
         "degenerate": degenerate(answer),
         "answer_head": answer[:400],
         "ok": len(found) == len(needles) and not degenerate(answer),
+        "duration_s": round(time.perf_counter() - started, 3),
     }
 
 
@@ -276,7 +286,9 @@ def _finish(verdict, args, started):
     verdict["duration_s"] = round(time.time() - started, 1)
     blob = json.dumps(verdict, indent=1) + "\n"
     if args.out:
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        parent = os.path.dirname(args.out)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         tmp = args.out + ".tmp"
         with open(tmp, "w") as f:
             f.write(blob)
