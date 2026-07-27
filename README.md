@@ -1,6 +1,11 @@
-# GLM-5.2 EXL3 turnkey for vast.ai — 4x RTX PRO 6000 (96GB)
+# Model turnkey for Vast.ai and Runpod
 
-One-click 512K-context GLM-5.2 OpenAI-compatible endpoint on rented GPUs:
+One image, coherent profiles for **GLM-5.2**, **Qwen3.6-27B**, and compatible
+vLLM checkpoints. It supplies an authenticated OpenAI-compatible endpoint,
+persistent model downloads and compile caches, a live dashboard, key-only SSH,
+provider-aware URLs, optional TLS, and crash supervision.
+
+The default `glm52-exl3` profile remains the validated production stack:
 EXL3 trellis weights (~77 GiB/rank — fits commodity 95.01-GiB cards),
 **fp8 KV cache** (correct on stock drivers — the nvfp4 default silently
 corrupts >~150K context without a host driver P2P override; see Evidence),
@@ -9,13 +14,168 @@ and DRAM KV offload auto-sized to 70% of the instance's RAM allocation
 (cgroup-aware — partial rentals don't oversize it). Weights auto-download on
 first boot (~332 GB — pick a fast-net host).
 
-## One-click launch
+## Model profiles
+
+A profile is a complete set of compatible defaults, not just a model name.
+Changing only `MODEL_DIR` is unsafe because quantization, topology, attention
+backend, parsers, speculation, vision handling, and KV sizing also differ.
+
+| `MODEL_PROFILE` | intended use | default hardware | download / context |
+|---|---|---|---|
+| `glm52-exl3` | validated GLM-5.2 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 512K |
+| `qwen36-27b-nvfp4` | lower-cost feature development | 1x RTX PRO 6000 Blackwell or RTX 5090 | ~21 GiB / 32K |
+| `custom` | another conventional vLLM checkpoint | configurable | conservative 32K defaults |
+
+The Qwen profile serves
+[`nvidia/Qwen3.6-27B-NVFP4`](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4)
+with `--quantization modelopt`, the `qwen3` reasoning parser and
+`qwen3_coder` tool parser. It defaults to text-only mode to preserve VRAM,
+one GPU, no DRAM KV offload, and no speculative decoding until this particular
+image/profile combination is benchmarked. Qwen's native context is 262,144;
+raise `MAX_MODEL_LEN` after measuring headroom. Set `MULTIMODAL=1` to load its
+native vision encoder, or opt into its included MTP module with
+`MTP_TOKENS=2`.
+
+The [Qwen3.6-27B model card](https://huggingface.co/Qwen/Qwen3.6-27B)
+documents the architecture, native context, text-only switch, Qwen parsers,
+and its MTP module. The pinned vLLM runtime uses the current speculative method
+name `mtp` (the older `qwen3_next_mtp` alias is deprecated). The
+[NVIDIA NVFP4 checkpoint card](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4)
+specifies the ModelOpt loader and 262K serving command. This image's
+[pinned vLLM source](https://github.com/voipmonitor/vllm/tree/551719766029e78824a30d97ae6ac63917405b5f)
+contains the required Qwen3.5 architecture, parser, speculative method, and
+mixed-precision ModelOpt implementation. The 32K, text-only, single-GPU
+settings here are deliberately conservative development defaults; they have
+not yet been GPU-benchmarked as a profile.
+
+For another checkpoint:
+
+```bash
+MODEL_PROFILE=custom \
+MODEL_ID=org/model \
+QUANTIZATION=modelopt \
+REASONING_PARSER=qwen3 \
+TOOL_CALL_PARSER=qwen3_coder
+```
+
+The custom profile deliberately omits GLM backends, grafts and fixed KV block
+counts. Compatibility still depends on the vLLM build in the base image; add a
+named profile when a model needs more than conventional vLLM flags.
+
+## Launch GLM-5.2 on Vast.ai
 
 **[▶ Launch on vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=ccab1ea5b390cec1bb615a79840baa40)** —
 public template with the image, ports, launch mode, disk, and host filters
-(4x RTX PRO 6000, >=400GB disk, >=1Gbps net) pre-configured. Rent, wait for
+(4x RTX PRO 6000, >=1Gbps net) pre-configured. Before renting, verify the
+offer allocates **at least 450 GB of disk**. Then rent, wait for
 "Application startup complete" in the instance logs, grab the API key from the
 same logs, done.
+
+For lower-cost Qwen testing, clone/create a private Vast template using the
+same image, select one compatible Blackwell GPU, allocate at least 80 GB of
+disk, and add:
+
+```text
+MODEL_PROFILE=qwen36-27b-nvfp4
+```
+
+## Launch on Runpod
+
+This image is a **Runpod Pod** template, not a Serverless worker or Hub
+application. It runs a persistent OpenAI-compatible service and does not
+implement Runpod's Serverless handler contract.
+
+> **Blackwell is required.** The pinned CUDA/vLLM image and its custom kernels
+> are built for `sm120+`. Use an RTX 5090 or RTX PRO 6000 Blackwell; an RTX
+> 4090 is Ada-generation (`sm89`) and is not a supported appliance target even
+> when the selected model would otherwise fit its VRAM.
+
+The checked-in manifests follow Runpod's current
+[Pod template REST schema](https://docs.runpod.io/pods/templates/manage-templates):
+
+- [`runpod-template.json`](runpod-template.json): GLM profile, 450 GB volume.
+- [`runpod-template-qwen36.json`](runpod-template-qwen36.json): lower-cost Qwen
+  profile, 80 GB volume.
+
+Create either private template with:
+
+```bash
+curl --request POST \
+  --url https://rest.runpod.io/v1/templates \
+  --header "Authorization: Bearer $RUNPOD_API_KEY" \
+  --header "Content-Type: application/json" \
+  --data @runpod-template-qwen36.json
+```
+
+You can instead create it in **Runpod Console → Templates → New Template** with
+the same values:
+
+- **Image:** `ghcr.io/malaiwah/glm52-exl3-vast:latest`; leave Container Start
+  Command blank so the image's `ENTRYPOINT` runs.
+- **Compute:** select exactly 4x RTX PRO 6000 Blackwell for the GLM manifest,
+  or one RTX PRO 6000 Blackwell/RTX 5090 for the Qwen manifest. GPU type/count
+  are selected at Pod deployment and are not fields in the reusable template
+  schema. Do not select RTX 4090 or another pre-Blackwell GPU.
+- **Storage:** use a 50 GB container disk; mount at least 450 GB for GLM or
+  80 GB for Qwen at `/workspace`. A volume disk survives stops/restarts but is
+  deleted with the Pod; use a network volume if weights must survive deletion. See
+  [Runpod storage options](https://docs.runpod.io/pods/storage/types).
+- **Ports:** `8000/http`, `8443/tcp`, `1111/http`, `22/tcp`. The dashboard and
+  fallback API stay behind Runpod's managed HTTPS proxy. When DNS credentials
+  are available, inference also gets a direct-TCP appliance-TLS route so large
+  prefills and long generations are not subject to the proxy timeout.
+- **Secrets:** add `HF_TOKEN` or DNS credentials through
+  [Runpod Secrets](https://docs.runpod.io/pods/templates/secrets), referenced
+  as `{{ RUNPOD_SECRET_secret_name }}`. The checked-in manifests expect a
+  secret named `desec_token`. Do not put credentials in the JSON or a shared
+  template.
+
+Runpod injects the Pod ID, public IP, mapped SSH port, and account public key.
+The image uses those values automatically: `PUBLIC_KEY` configures the
+key-only SSH daemon, and the logs print both URLs after boot:
+
+```text
+API direct:   https://model-<pod-id>.<desec-domain>:<mapped-8443-port>/v1
+API fallback: https://<pod-id>-8000.proxy.runpod.net/v1
+Dashboard: https://<pod-id>-1111.proxy.runpod.net/?token=<persistent-token>
+```
+
+Runpod's proxy supplies HTTPS to the client while forwarding HTTP inside the
+Pod, and the generated dashboard token persists on `/workspace` so its URL
+remains valid across restarts. For inference, Secure Cloud supplies a public
+IP and maps a public TCP port to container port 8443. The appliance registers
+that IP under the per-Pod deSEC name, obtains a Let's Encrypt certificate,
+starts a TLS pass-through listener to local vLLM, and prints the final mapped
+URL. If DNS configuration is absent or fails, it keeps the secure proxy URL
+instead of exposing plaintext direct TCP. The API still requires the generated
+`VLLM_API_KEY`, printed in the Pod logs and persisted on the volume.
+
+**Cold-start cost guard:** the published image has 46 layers totaling about
+11.6 GiB compressed (roughly 30 GB unpacked) before model weights. On an
+uncached Runpod machine, `runtime` can remain null and the proxy can return 404
+while the provider is still pulling the image; the machine's advertised
+network bandwidth is not a guarantee of registry throughput. Choose a maximum
+cold-pull time before renting, record the Pod ID immediately, and terminate
+the Pod if it has no runtime or port mappings at that deadline. A stopped Pod
+still incurs volume-storage charges.
+
+**Long requests:** Runpod documents a 100-second limit on HTTP-proxy
+connections. The supplied templates therefore expose the inference API as
+both `8000/http` and `8443/tcp` and set `RUNPOD_DIRECT_TLS=auto`.
+`PUBLIC_ENDPOINT` is derived automatically after deSEC registers the Pod's
+public IP. If deSEC is unavailable, the appliance keeps the managed HTTPS
+proxy as its secure fallback. For a credential-free long-request route, bypass
+the proxy with the existing SSH port:
+
+```bash
+ssh -p <mapped-ssh-port> root@<RUNPOD_PUBLIC_IP> -L 8000:localhost:8000
+```
+
+Then use `http://localhost:8000/v1`; the connection is encrypted by SSH and is
+not subject to the proxy timeout. Find the host and mapped port in the Pod's
+Connect panel. To force proxy-only API access, remove `8443/tcp` and set
+`RUNPOD_DIRECT_TLS=0`. Port behavior and the 100-second limit are documented in
+[Runpod's expose-ports guide](https://docs.runpod.io/pods/configuration/expose-ports).
 
 ## Why this exists
 
@@ -37,7 +197,7 @@ the incident.** This template is that button: rented GPUs, your keys, your
 data path, ~30 minutes from click to a 512K-context GLM-5.2 endpoint that
 answers only to you.
 
-## Vision (default ON)
+## GLM profile: vision (default ON)
 
 Images work out of the box: the MoonViT-3d tower (Kimi-K2.6, frozen) plus
 Baseten's trained 49.5M PatchMerger projector are grafted onto the EXL3 text
@@ -68,7 +228,7 @@ https://gist.github.com/malaiwah/c004c8b48bb177203f56cb29107f8540):
   a detector (OmniParser / OCR boxes) if you need clicks.
 - Images only — video is not supported by this checkpoint.
 
-## MTP78: quantized speculative-draft layer (default ON)
+## GLM profile: MTP78 quantized speculative-draft layer (default ON)
 
 The MTP draft layer ships in BF16 (19.3 GB). This template grafts a
 **3.0bpw EXL3 trellis version** (`malaiwah/GLM-5.2-EXL3-TR3-MTP78`,
@@ -92,15 +252,15 @@ edges NVFP4 on batched decode. Prefill/decode deltas are inside run-to-run
 noise. Full writeup, methodology and the two NVFP4 config gotchas:
 **https://gist.github.com/malaiwah/4bbb16bef2e336e94af165076cdba955**
 
-**DRAM offload and memlock.** Docker's default memlock ulimit (8 MiB) is far
-below any useful KV tier, and under rootless podman `--ulimit memlock=-1:-1`
-cannot raise it past the user's hard limit — so gating offload on memlock turns
-an advertised feature off with no way forward. It is measurably a false gate: a
-125 GiB tier offloads normally under a 31 GiB memlock, because the connector
-does not mlock the tier up front. So the default is warn-and-proceed, and it
-degrades rather than fails — `kv_load_failure_policy=recompute` means any KV
-block that cannot be fetched back is recomputed instead of erroring the request.
-Set `OFFLOAD_IGNORE_MEMLOCK=0` to get the old disable-instead behaviour.
+**DRAM offload and memlock.** Vast accepts only ports, environment variables
+and hostname in its template Docker Options, so a `--ulimit memlock=...` entry
+there is ignored. Fortunately, gating offload on memlock is measurably a false
+gate: a 125 GiB tier offloads normally under a 31 GiB limit because the
+connector does not mlock the tier up front. The default is therefore
+warn-and-proceed, and it degrades rather than fails —
+`kv_load_failure_policy=recompute` means any KV block that cannot be fetched
+back is recomputed instead of erroring the request. Set
+`OFFLOAD_IGNORE_MEMLOCK=0` for conservative disable-instead behaviour.
 
 **KV headroom:** available KV memory goes 5.27 -> 8.92 GiB/GPU (**+69%**). This
 template pins the pool at 512K (`--num-gpu-blocks-override 2048`), so the
@@ -150,19 +310,21 @@ to 384K-420K for a vision deployment, or `VISION=0` to keep the full 512K.
 *zero* draft acceptance on comparable hybrid grafts come from the speculator not
 seeing the nested `lm_head`; the plugin used here exposes it.
 
-Two knobs are load-bearing — without them the engine does not start:
+Two knobs are load-bearing in the validated graft configuration:
 
 - `ONLINE_QUANT=none` — serving presets that default to an mxfp8 online overlay
-  make EXL3 refuse with `quantization_config is only supported when ...`.
-- `VLLM_EXL3_TRELLIS_MIN_M=1` — vLLM captures CUDA graphs at batch m=1,2 but the
-  trellis window defaults to `[4,32]`, so capture falls into the eager parity
-  path and the worker dies with `EXL3 eager parity path entered during CUDA
-  graph capture (m=2)`.
+  make EXL3 refuse with `quantization_config is only supported when ...`. The
+  entrypoint sets this explicitly.
+- `VLLM_EXL3_TRELLIS_MIN_M=4` — this is the validated lower bound for the
+  in-checkpoint graft. Do **not** lower it to 1 to make the separate EXL3 draft
+  override boot: that clears a CUDA-graph error by moving unvalidated m=1..3
+  shapes onto the trellis kernel and was measured to cause silent long-context
+  corruption.
 
 A trellis (or BF16) MTP draft also needs `moe_backend=triton` **separately from**
 the target's backend — a rank-3 trellis tensor is not a fused expert weight.
 
-### Deploying it elsewhere (no checkpoint surgery)
+### Separate EXL3 draft override (experimental; do not use for production)
 
 The overlay works as a *separate draft directory* — leave the base checkpoint
 untouched and add one field:
@@ -173,8 +335,11 @@ untouched and add one field:
                        "model":"/path/to/GLM-5.2-EXL3-TR3-MTP78/3bpw-keep0"}'
 ```
 
-(Validated: KV showed 8.92 GiB with the base checkpoint reverted to stock BF16 —
-proof the trellis draft really loads from the override dir.)
+This proves that the draft loads independently and recovers the expected KV
+memory, but it is **not a production-safe path on the current image**: its
+speculator captures at m=3, outside the validated `[4,32]` trellis window.
+Lowering the window to 1 produced silent retrieval corruption. The turnkey
+therefore defaults to the validated in-place graft.
 
 ### Model quality (the target model, unrelated to the draft)
 
@@ -198,17 +363,26 @@ within sampling noise (~±3).
 > a future image build, the template falls back to the BF16 draft rather
 > than fail.
 
-## vast.ai template settings (manual setup)
+## Vast.ai template settings (manual setup)
 - **Image**: `ghcr.io/malaiwah/glm52-exl3-vast:latest` (the ghcr.io package
   must be set to **public** visibility, or vast hosts can't pull it)
 - **Launch mode**: docker ENTRYPOINT (vLLM logs appear on the instance console;
-  SSH works per vast standards)
-- **Docker options**: `-p 8000:8000 -p 1111:1111 --ipc=host --ulimit memlock=-1:-1 --ulimit nofile=1048576:1048576` (memlock is REQUIRED for DRAM offload; :1111 is the landing page)
-- **Disk**: >= 400 GB
-- **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB), CUDA >= 13.0
-- **Env (all optional)**: `HF_TOKEN` (faster download), `OFFLOAD_FRACTION`
-  (default 0.70; 0 disables), `MTP_TOKENS` (default 3; 0 disables),
-  `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (default 524288), `SERVED_MODEL_NAME`,
+  the image starts its own key-only SSH daemon)
+- **Docker options**: `-p 22:22 -p 8000:8000 -p 1111:1111`. Vast's current
+  [Docker Options documentation](https://docs.vast.ai/guides/instances/docker-environment#docker-create-options)
+  accepts only ports, environment variables and hostname in this field;
+  `--ipc` and `--ulimit` entries are ignored. Port 22 is SSH and port 1111 is
+  the landing page.
+- **Profile**: `MODEL_PROFILE=glm52-exl3` (default), or
+  `MODEL_PROFILE=qwen36-27b-nvfp4` for the low-cost development model.
+- **Disk**: >=450 GB for GLM; >=80 GB for Qwen.
+- **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB) for GLM; one RTX PRO 6000
+  Blackwell or RTX 5090 for Qwen.
+- **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
+  applicable Hub rate limits), `OFFLOAD_FRACTION`
+  (GLM default 0.70; Qwen default 0), `MTP_TOKENS` (GLM default 3; Qwen
+  default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 524288; Qwen 32768),
+  `SERVED_MODEL_NAME`,
   `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 = stock BF16 draft),
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
   extra env: `OPEN_BUTTON_PORT=1111` — the dashboard **Open** button then hits
@@ -216,11 +390,21 @@ within sampling noise (~±3).
   ready-to-paste client configs (oh-my-pi, opencode, Claude Code, Codex), and
   a minimal streaming chat UI at `/chat`. Token-gated; with TLS configured the
   page upgrades plain-HTTP hits to HTTPS and only then embeds the API key.
-  On ready, the instance labels itself "GLM-5.2 READY <endpoint>" in your dashboard
+  On ready, the instance labels itself "`<model> READY <endpoint>`" in your dashboard.
 
-Endpoint: `http://<instance>:8000/v1` once the console shows
+Endpoint: `http://<public-ip>:<mapped-8000-port>/v1` once the console shows
 `Application startup complete` (first boot: download + JIT, plan ~30-60 min;
 later boots only pay JIT).
+
+Checkpoint downloads use `huggingface_hub.snapshot_download` with the bundled
+`hf-xet` transport and `HF_XET_HIGH_PERFORMANCE=1`. `MODEL_DOWNLOAD_WORKERS`
+defaults to 16 concurrent files. Hugging Face's adaptive Xet concurrency remains
+the default for each file; advanced deployments can pass through
+`HF_XET_FIXED_DOWNLOAD_CONCURRENCY` after measuring their route. An `HF_TOKEN`
+authenticates the request and can avoid anonymous rate limits, but does not by
+itself guarantee that a particular host-to-CAS route will be fast. See Hugging
+Face's [model-download guidance](https://huggingface.co/docs/hub/models-downloading)
+and [Hub environment variables](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables).
 
 ## Evidence / why these defaults
 Root-cause investigation of the long-context corruption and the validated
@@ -233,8 +417,16 @@ config matrix (6 runs, 5 hosts, 4 driver families):
   https://gist.github.com/929d7d8e4ac94c43fe126c4b3f6a6ea6
 - 512K fp8 KV via `--num-gpu-blocks-override 2048` validated at util 0.93.
 
-Base image: `verdictai/glm52-exl3-sparkinfer@sha256:bfd6d667...` (pinned).
-Checkpoint: `brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw`.
+Base runtime image:
+`verdictai/glm52-exl3-sparkinfer@sha256:2bb9e804a283d1da3b7e3425ff87375121285141d0d0a40d3dc09d41bf881a10`
+(pinned). It contains the specialized GLM extensions, but also includes native
+vLLM support for `Qwen3_5ForConditionalGeneration`, ModelOpt/NVFP4, Qwen
+parsers, and MTP speculative decoding.
+
+Profile checkpoints:
+
+- GLM: `brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw`
+- Qwen: `nvidia/Qwen3.6-27B-NVFP4`
 
 ### Running it on your own hardware
 
@@ -243,13 +435,22 @@ existing endpoint:
 
 | env | default | why you'd change it |
 |---|---|---|
-| `MODEL_DIR` | `/workspace/GLM-5.2-EXL3-TR3-3.0bpw` | point at weights you already have; the download is skipped when `.download-complete` exists |
-| `SERVED_MODEL_NAME` | `GLM-5.2` | whitespace-separated list of aliases, so existing clients keep working (`"GLM-5.2 local-primary"`) |
+| `MODEL_PROFILE` | `glm52-exl3` | select `qwen36-27b-nvfp4` for low-cost testing, or `custom` with `MODEL_ID` |
+| `MODEL_ID` | profile checkpoint | use a compatible alternate checkpoint without changing its profile defaults |
+| `MODEL_DIR` | profile-specific path under `/workspace` | point at weights you already have; the download marker is tied to `MODEL_ID` |
+| `MODEL_DISPLAY_NAME` | profile name | dashboard and provider label |
+| `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working |
+| `TENSOR_PARALLEL_SIZE` | 4 GLM / 1 Qwen | match a supported profile topology |
+| `MAX_MODEL_LEN` | 524288 GLM / 32768 Qwen | increase the Qwen development context only after measuring VRAM |
+| `MULTIMODAL` | 1 GLM / 0 Qwen | Qwen `1` loads its native vision encoder; GLM vision remains controlled by `VISION` |
+| `QUANTIZATION` | custom profile only | vLLM quantizer name such as `modelopt` |
+| `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |
 | `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
-| `GPU_BLOCKS_OVERRIDE` | `2048` | `0` drops the pin and lets vLLM use all available KV |
-| `OFFLOAD_FRACTION` | `0.70` | fraction of RAM for the DRAM KV tier; `0` disables |
+| `ALLOW_UNSUPPORTED_GPU` | `0` | bypass the profile GPU-name check; the required visible GPU count still applies |
+| `GPU_BLOCKS_OVERRIDE` | 2048 GLM / 0 otherwise | `0` lets vLLM size KV normally |
+| `OFFLOAD_FRACTION` | 0.70 GLM / 0 otherwise | fraction of RAM for the DRAM KV tier |
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
-| `MTP78_MODE` | `override` | `override` points `--speculative-config` at a separate draft dir (target checkpoint untouched); `graft` is the legacy in-place surgery; `off` uses the stock BF16 draft |
+| `MTP78_MODE` | `graft` | validated in-place trellis draft; `off` restores the stock BF16 draft; `override` is experimental and currently unsafe at long context |
 
 ## Security
 
@@ -266,11 +467,17 @@ on hardware you own.
   image into a *trusted private network* — e.g. replacing an in-house endpoint
   whose clients are already configured without a key. It is never appropriate on
   a rented public host, so it is opt-in and printed as a loud warning at boot.
-- **SSH tunnel** (recommended for solo use): no public exposure needed —
+- **SSH tunnel** (recommended for solo use): no public API exposure needed —
   `ssh -p <ssh-port> root@<ssh-host> -L 8000:localhost:8000`
   then use `http://localhost:8000/v1`. You can omit `-p 8000:8000` from the
-  docker options entirely in this mode.
-- **TLS via Let's Encrypt DNS-01 — turnkey with deSEC** (recommended):
+  Vast Docker options entirely in this mode. Keep `-p 22:22`; Vast maps it to
+  the external SSH port shown in the instance panel. On Runpod, expose
+  `22/tcp` and use the public IP plus mapped port from the Connect panel. The
+  image installs Vast's `SSH_PUBLIC_KEY` or Runpod's `PUBLIC_KEY` and starts
+  key-only `sshd` itself.
+- **Direct-TCP TLS via Let's Encrypt DNS-01 — turnkey with deSEC**
+  (recommended for Vast and for Runpod's inference API; the Runpod dashboard
+  stays on managed proxy HTTPS):
   One-time setup (~2 minutes, free, reusable forever):
   1. Create an account at [desec.io](https://desec.io/signup) (email only).
   2. Register a dynDNS domain, e.g. `yourname.dedyn.io`
@@ -278,10 +485,16 @@ on hardware you own.
   3. Create an API token: [Token management](https://desec.io/tokens)
      ([docs](https://desec.readthedocs.io/en/latest/auth/tokens.html)).
 
-  Then, when launching the template, add two environment variables on the
-  launch page: `DESEC_TOKEN=<your-token>` and `DESEC_DOMAIN=yourname.dedyn.io`.
+  Store `DESEC_TOKEN=<your-token>` in Vast
+  [Account Settings](https://cloud.vast.ai/account/) **Environment Variables**
+  section, where it is encrypted and injected at launch. On Runpod, create a
+  Secret such as `desec_token` and reference it from the private template as
+  `{{ RUNPOD_SECRET_desec_token }}`. Add
+  `DESEC_DOMAIN=yourname.dedyn.io` to the instance or private template; on
+  Runpod also expose `8000/http` plus `8443/tcp` and set
+  `RUNPOD_DIRECT_TLS=auto` (secure proxy fallback) or `1` (fail-fast).
   At boot the instance registers a stable per-instance hostname
-  (`glm-<container-id>.yourname.dedyn.io`), points it at itself, obtains a
+  (`model-<provider-instance-id>.yourname.dedyn.io`), points it at itself, obtains a
   Let's Encrypt certificate via DNS-01 ([lego](https://go-acme.github.io/lego/dns/desec/)),
   and prints the final `https://...:<port>/v1` URL in the console logs next to
   the API key. Each instance gets its own name, stable across reboots — so
@@ -289,7 +502,7 @@ on hardware you own.
   while they have >7 days validity left.
 
 - **Other DNS providers** (Cloudflare, DuckDNS, 150+ via lego): set
-  `ACME_DOMAIN=glm.example.com`, `ACME_DNS_PROVIDER=cloudflare` (any lego
+  `ACME_DOMAIN=model.example.com`, `ACME_DNS_PROVIDER=cloudflare` (any lego
   provider), and the provider credential env (e.g.
   `CLOUDFLARE_DNS_API_TOKEN=...` with Zone:DNS:Edit scope; or DuckDNS:
   `ACME_DNS_PROVIDER=duckdns` + `DUCKDNS_TOKEN=...` — free, no domain needed).
@@ -297,13 +510,16 @@ on hardware you own.
   `https://<domain>:<mapped-port>/v1`. Certs persist on the volume and are
   reused while they have >7 days validity left, then re-issued at boot (avoids
   Let's Encrypt's 5/week duplicate-cert limit on reboot loops).
-- **Token hygiene**: anything in template env is visible to the host operator
-  and to anyone you share the template with — scope DNS tokens narrowly
-  (single zone, DNS-only), rotate them when the rental ends, and never
-  publish a template with tokens baked in.
+- **Token hygiene**: put `HF_TOKEN`, `DESEC_TOKEN`, API keys and other secrets
+  in Vast's account-level environment-variable store or Runpod Secrets, never
+  in a public template. They remain visible to the rented host's operator, so
+  scope DNS tokens narrowly (single zone, DNS-only) and rotate them when the
+  rental ends.
 - **Egress hygiene**: telemetry disabled (`VLLM_NO_USAGE_STATS`,
   `DO_NOT_TRACK`, `HF_HUB_DISABLE_TELEMETRY`), `HF_HUB_OFFLINE=1` once weights
   are local, and the boot log prints the listening-socket audit. Full egress
   firewalling is not possible without NET_ADMIN (not granted on vast).
-- **Disk note**: verify the instance actually allocated >=400 GB — some hosts
-  under-allocate silently; first boot needs ~332 GB for weights.
+- **Disk note**: verify the allocated disk matches the profile. GLM needs at
+  least 450 GB for weights, overlays, graft backup, vision and compile cache.
+  Qwen's checkpoint is about 21 GiB; its 80 GB volume leaves room for cache and
+  experiments.
