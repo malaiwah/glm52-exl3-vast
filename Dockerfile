@@ -15,6 +15,11 @@ COPY sshd_config /etc/ssh/sshd_config.d/99-model-turnkey.conf
 COPY landing.py /opt/landing.py
 COPY scripts/ /opt/scripts/
 COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
-RUN chmod +x /usr/local/bin/model-turnkey-entry.sh
+# The public Vast template predates the provider-neutral rename and may still
+# call glm52-entry.sh from its remote onstart field. Keep the old path as a
+# compatibility alias so a stale provider template cannot strand a rental
+# before the landing page is reachable.
+RUN chmod +x /usr/local/bin/model-turnkey-entry.sh \
+ && ln -sf model-turnkey-entry.sh /usr/local/bin/glm52-entry.sh
 EXPOSE 22 8000 8443 1111
 ENTRYPOINT ["/usr/local/bin/model-turnkey-entry.sh"]

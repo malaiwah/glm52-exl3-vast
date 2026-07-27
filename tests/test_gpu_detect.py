@@ -34,6 +34,8 @@ CASES = [
     ("CUDA stops at a repeat (0,0 -> 1)", SMI4, {"CUDA_VISIBLE_DEVICES": "0,0"}, 1),
     ("CUDA_VISIBLE_DEVICES empty means none", SMI4, {"CUDA_VISIBLE_DEVICES": ""}, 0),
     ("NVIDIA_VISIBLE_DEVICES=none", SMI4, {"NVIDIA_VISIBLE_DEVICES": "none"}, 0),
+    ("Vast SSH wrapper void sentinel leaves observed GPUs usable", SMI4,
+     {"NVIDIA_VISIBLE_DEVICES": "void"}, 4),
     ("NVIDIA_VISIBLE_DEVICES=all is a no-op", SMI4,
      {"NVIDIA_VISIBLE_DEVICES": "all"}, 4),
     ("the two compose (runtime 0,1 then CUDA 1)", SMI4,
@@ -72,6 +74,12 @@ def main():
     d = g.detect({"CUDA_VISIBLE_DEVICES": "0,9,1"}, SMI4)
     check("a truncated list says so",
           any("stops enumerating" in n for n in d["notes"]), str(d["notes"]))
+
+    print("\n=== provider wrapper compatibility ===")
+    with open(os.path.join(os.path.dirname(HERE), "Dockerfile")) as handle:
+        dockerfile = handle.read()
+    check("the stale public Vast onstart path remains a compatibility alias",
+          "ln -sf model-turnkey-entry.sh /usr/local/bin/glm52-entry.sh" in dockerfile)
 
     print(f"\n{len(OKS)} passed, {len(FAILS)} failed")
     for f in FAILS:
