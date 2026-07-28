@@ -70,6 +70,18 @@ def main():
     check("mixed models are listed, not collapsed to one",
           "," in g.detect({}, "0, GPU-a, NVIDIA H200\n1, GPU-b, NVIDIA A100\n")["name"])
 
+    print("\n=== CUDA 13.2 paired-driver admission ===")
+    check("the failed Runpod r580 host is rejected",
+          not g.driver_meets_minimum("580.126.09", "595.45.04"))
+    check("the Vast CUDA 13.1 r590 host is rejected",
+          not g.driver_meets_minimum("590.48.01", "595.45.04"))
+    check("AIBeast r595 is accepted",
+          g.driver_meets_minimum("595.71.05", "595.45.04"))
+    check("the qualified rental r610 is accepted",
+          g.driver_meets_minimum("610.43.03", "595.45.04"))
+    check("an unreadable driver never passes open",
+          not g.driver_meets_minimum("unknown", "595.45.04"))
+
     print("\n=== narrowing is explained, never silent ===")
     d = g.detect({"CUDA_VISIBLE_DEVICES": "0,9,1"}, SMI4)
     check("a truncated list says so",

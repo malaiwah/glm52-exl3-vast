@@ -79,6 +79,7 @@ Rows whose value equals the current source default are still called out.
 
 | environment | source default | selected value and reason | downside | verdict |
 |---|---|---|---|---|
+| minimum NVIDIA driver | CUDA 13.x minor compatibility permits r580 with feature limits | `595.45.04`, the CUDA 13.2 GA paired driver; live r580 failed NCCL and Vast labels r590 as CUDA 13.1 | rejects hosts that might work with a correctly installed forward-compatibility package | retain fail-fast gate; explicit override only |
 | `CUDA_DEVICE_MAX_CONNECTIONS` | CUDA default/driver-selected | `32`, matching the v20 overlap stack | may hurt another topology | retain, topology re-test |
 | `CUTE_DSL_ARCH` | detected | `sm_120a`, exact RTX PRO 6000 target | not portable to pre-Blackwell | retain |
 | `TORCH_CUDA_ARCH_LIST` / `FLASHINFER_CUDA_ARCH_LIST` | broad/detected | `12.0a` / `12.0f` to keep compiled artifacts architecture-specific | artifacts cannot be reused on another architecture | retain |

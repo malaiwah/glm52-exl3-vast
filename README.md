@@ -144,6 +144,16 @@ numbers with this table. AIBeast is scheduled for such a host refresh; until
 that pass is recorded, these values describe the tested stack rather than the
 future installation.
 
+The current GG image is CUDA 13.2. The appliance therefore fails fast below
+NVIDIA driver **595.45.04**, the driver paired with CUDA 13.2 GA in the
+[official release notes](https://docs.nvidia.com/cuda/archive/13.2.0/cuda-toolkit-release-notes/index.html),
+before it downloads model weights. This conservative floor is intentional: a
+Runpod r580 host failed in NCCL initialization and Vast correctly classified
+an r590 offer as CUDA 13.1. NVIDIA's broader CUDA 13.x minor-compatibility
+promise has feature limitations; this stack uses PTX JIT and custom
+collectives. Set `ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1` only when the operator has
+deliberately provided and validated a suitable `cuda-compat-13-2` stack.
+
 #### InstantTensor: qualified flagship loader with a context margin
 
 InstantTensor is the balanced DCP2 EXL3 profile's measured default. It loaded
@@ -235,9 +245,10 @@ not evidence that all peer transport is disabled.
 Use the public **Model Turnkey: GLM-5.2 EXL3** template; it preconfigures the
 image, `args` launch mode, ports, 450 GB disk and Blackwell host filters.
 Before accepting an offer, verify it is exactly 4x RTX PRO 6000 Blackwell,
-advertises adequate disk/network performance, and actually allocates at least
-450 GB. Wait for `Application startup complete` and the verification result in
-the instance logs, then use the generated API key and labeled endpoint.
+advertises **CUDA 13.2 or newer / driver 595.45.04 or newer**, adequate
+disk/network performance, and actually allocates at least 450 GB. Wait for
+`Application startup complete` and the verification result in the instance
+logs, then use the generated API key and labeled endpoint.
 
 For lower-cost Qwen testing, clone/create a private Vast template using the
 same image, select one compatible Blackwell GPU, allocate at least 80 GB of
@@ -287,7 +298,10 @@ the same values:
 - **Compute:** select exactly 4x RTX PRO 6000 Blackwell for the GLM manifest,
   or one RTX PRO 6000 Blackwell/RTX 5090 for the Qwen manifest. GPU type/count
   are selected at Pod deployment and are not fields in the reusable template
-  schema. Do not select RTX 4090 or another pre-Blackwell GPU.
+  schema. Do not select RTX 4090 or another pre-Blackwell GPU. After Runpod
+  assigns the host, confirm driver 595.45.04 or newer in the system logs; its
+  REST API's `allowedCudaVersions` currently stops at CUDA 13.0 and cannot
+  express this CUDA 13.2 requirement.
 - **Storage:** use a 50 GB container disk; mount at least 450 GB for GLM or
   80 GB for Qwen at `/workspace`. A volume disk survives stops/restarts but is
   deleted with the Pod; use a network volume if weights must survive deletion. See
@@ -819,6 +833,8 @@ existing endpoint:
 | `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |
 | `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
 | `ALLOW_UNSUPPORTED_GPU` | `0` | bypass the profile GPU-name check; the required visible GPU count still applies |
+| `MIN_NVIDIA_DRIVER_VERSION` | `595.45.04` | raise when a newer CUDA/base image requires it; the gate runs before model download |
+| `ALLOW_UNSUPPORTED_NVIDIA_DRIVER` | `0` | bypass the CUDA 13.2 driver floor only for an intentionally qualified compatibility-package stack |
 | `GPU_BLOCKS_OVERRIDE` | 0 | auto-profile the largest safe KV pool; set a positive block count to pin it |
 | `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host DRAM used as an aggregate L2 prefix cache (not active-context capacity); `0.5` is the measured agentic-workload setting on a 256 GiB host and native vLLM derives the TP worker slices |
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |

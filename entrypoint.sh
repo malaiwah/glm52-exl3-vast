@@ -36,8 +36,11 @@ case "$MODEL_PROFILE" in
 esac
 export MODEL_PROFILE
 echo "=== vLLM turnkey (profile $MODEL_PROFILE; family $MODEL_FAMILY) ==="
+NVIDIA_DRIVER_VERSION=""
 if command -v nvidia-smi >/dev/null 2>&1; then
-  nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | head -4 || true
+  GPU_INVENTORY="$(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null || true)"
+  printf '%s\n' "$GPU_INVENTORY" | head -4
+  NVIDIA_DRIVER_VERSION="$(printf '%s\n' "$GPU_INVENTORY" | head -1 | awk -F',' '{gsub(/^[ \t]+|[ \t]+$/, "", $3); print $3}')"
 fi
 # What can this container ACTUALLY use? nvidia-smi intersected with
 # NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES — see scripts/gpu_detect.py.
@@ -68,6 +71,30 @@ case "$GLM_PROVIDER" in
 esac
 INSTANCE_ID="$(printf '%s' "${CONTAINER_ID:-${RUNPOD_POD_ID:-}}" | tr -cd '[:alnum:]-' | cut -c1-40)"
 echo ">>> GPUs visible to this container: $NGPU${GPU_NAME:+ ($GPU_NAME)}  provider: $PLATFORM"
+# GG v20-r5 is built on CUDA 13.2 and uses PTX JIT/custom collectives that are
+# outside the conservative subset promised by CUDA 13.x minor-version
+# compatibility. NVIDIA pairs CUDA 13.2 GA with Linux driver 595.45.04. In live
+# qualification an r580 Runpod host reached NCCL initialization and failed with
+# "unhandled cuda error"; Vast accurately advertised an r590 host as CUDA 13.1.
+# Reject these shapes before the 309 GiB GLM checkpoint download. Operators
+# deliberately providing cuda-compat-13-2 can bypass this conservative gate.
+MIN_NVIDIA_DRIVER_VERSION="${MIN_NVIDIA_DRIVER_VERSION:-595.45.04}"
+if [ "${CONFIG_SMOKE:-0}" != "1" ] && [ "$NGPU" -gt 0 ] &&
+   [ "${ALLOW_UNSUPPORTED_NVIDIA_DRIVER:-0}" != "1" ]; then
+  if ! python3 - "$NVIDIA_DRIVER_VERSION" "$MIN_NVIDIA_DRIVER_VERSION" "$SCRIPTS_DIR" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[3])
+from gpu_detect import driver_meets_minimum
+raise SystemExit(0 if driver_meets_minimum(sys.argv[1], sys.argv[2]) else 1)
+PY
+  then
+    echo "FATAL: NVIDIA driver ${NVIDIA_DRIVER_VERSION:-unknown} is below the tested CUDA 13.2 floor ${MIN_NVIDIA_DRIVER_VERSION}."
+    echo "FATAL: choose a host advertising CUDA >=13.2 / driver >=${MIN_NVIDIA_DRIVER_VERSION};"
+    echo "FATAL: refusing to download model weights for a host likely to fail during CUDA/NCCL initialization."
+    echo "FATAL: set ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1 only when you intentionally provide a compatible cuda-compat-13-2 stack."
+    exit 1
+  fi
+fi
 case "${DESEC_TOKEN:-}" in
   *RUNPOD_SECRET_*) DESEC_TOKEN="" ;;
 esac

@@ -779,3 +779,20 @@ local contract suite passed before publishing a GPU-test branch image. The
 v31 provider numbers above remain historical evidence and are not silently
 relabelled as r5 results; r5 requires its own cold boot, feature, retrieval,
 memory and compact performance gates before promotion.
+
+The first r5 rental attempts found a provider-admission issue before model
+qualification:
+
+- Runpod Secure assigned four Server Edition cards on driver 580.126.09. The
+  image and checkpoint became available, but all four workers failed their
+  initial NCCL all-reduce with `unhandled cuda error`; the Pod was terminated
+  after about 11 minutes.
+- The next available Vast offer reported driver 590.48.01 and
+  `cuda_max_good=13.1`; it was terminated during image pull, before checkpoint
+  download.
+
+CUDA 13.2 GA is paired with Linux driver 595.45.04. The entrypoint now rejects
+an older driver before downloading weights, unless an operator explicitly sets
+`ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1` for a separately qualified
+`cuda-compat-13-2` installation. Unit coverage includes the rejected r580/r590
+and accepted r595/r610 branches. Neither rejected rental remains allocated.
