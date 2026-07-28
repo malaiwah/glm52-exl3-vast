@@ -54,7 +54,7 @@ def errs(findings):
 # --------------------------------------------------------------------------
 
 def test_glm_release_defaults():
-    section("the GLM GG v20-r5 release defaults")
+    section("the GLM GG v20-r8 release defaults")
     eff, src, _ = resolved(gpus=4)
     check("family defaults to glm52", eff["MODEL_FAMILY"] == "glm52")
     check("TP is 4 on a 4-GPU box, and it is DETECTED not assumed",
@@ -72,7 +72,7 @@ def test_glm_release_defaults():
     memory_finding = next(
         f for f in gc.validate(eff) if f["id"] == "gpu-util-high")
     check("the measured default gets the qualified high-utilization warning",
-          "GG v20-r5 qualified default" in memory_finding["message"]
+          "GG v20-r8 compute-qualified default" in memory_finding["message"]
           and "0.978" in memory_finding["message"],
           memory_finding["message"])
     check("the agentic profile reserves half of host DRAM as L2 prefix cache",
@@ -138,14 +138,14 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r5 runtime integration matches the measured launch contract")
+    section("the GG v20-r8 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
     local_runner = open(os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r5 manifest",
-          "sha256:7b230b45991d93065d99c863fdb9ae030fb49592b59fa3c930cc00bfde09e51d"
+    check("the base image is the pinned GG v20-r8 manifest",
+          "sha256:547269db0f9cdb1982432f9b3436eac371d21a3c0daadec7718d81f07739a51e"
           in dockerfile)
     check("deSEC DNS-01 runs the authoritative convergence guard",
           'desec_acme_guard.py"' in entry
@@ -153,6 +153,9 @@ def test_glm_release_integration():
           and 'ACME_GUARD_PID=$!' in entry
           and 'rrsets/_acme-challenge.${ACME_SUB}/TXT/' in entry
           and "dnspython==2.8.0" in dockerfile
+          and "lego_v4.35.2_linux_amd64.tar.gz" in dockerfile
+          and "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3"
+          in dockerfile
           and "COPY scripts/ /opt/scripts/" in dockerfile)
     check("the target/draft trellis minimum is role-aware",
           'if [ "${MTP_TOKENS:-3}" = "0" ]; then' in entry and
@@ -306,6 +309,9 @@ def test_madeby561_hybrid():
     check("the variant selects the published hybrid checkpoint",
           gc.derive(eff)["MODEL_REPO"]
           == "madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid")
+    check("the variant pins the audited release bundle",
+          gc.derive(eff)["MODEL_REVISION"]
+          == "66f3623dd8fefb5ca8046706912d5d31c8d196af")
     check("the variant chooses its native serialized NVFP4 MTP draft by default",
           eff["MTP_DRAFT"] == "native" and src["MTP_DRAFT"] == "variant",
           f"{eff['MTP_DRAFT']} / {src['MTP_DRAFT']}")

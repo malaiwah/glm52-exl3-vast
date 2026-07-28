@@ -13,6 +13,18 @@ autonomy level `0` (off). Levels 1–3 are explicitly enabled by environment or
 the token-gated landing page; startup verification and rollback remain
 authoritative.
 
+The appliance now pins **GG v20-r8**. It keeps the qualified r5 compute
+stack—vLLM, SparkInfer, FlashInfer, EXL3, attention, quantization and
+communication sources are unchanged—while adding XGrammar 0.2.5 and opt-in
+DCP-aware LMCache 0.5.2. XGrammar 0.2.5 fixes GLM
+`tool_choice=required` termination; the LMCache helper remains off by default
+and does not replace this appliance's measured native vLLM DRAM prefix tier.
+Upstream currently enables that LMCache helper for its dense/hybrid launchers,
+not the EXL3 launcher.
+The provider TLS helper is refreshed to Lego 4.35.2, the latest v4 maintenance
+release. Lego 5 is intentionally deferred because it changes CLI and account
+storage semantics and needs its own certificate-renewal migration test.
+
 The default `glm52-exl3` profile is the flagship production stack:
 BrandonMusic's 3.0-bpw EXL3/TR3 checkpoint (~77 GiB/rank), DCP2, native
 TR3 MTP-5, calibrated `nvfp4_ds_mla` KV, CUDA graphs through C8, and a
@@ -48,7 +60,8 @@ raise `MAX_MODEL_LEN` after measuring headroom. Set `MULTIMODAL=1` to load its
 native vision encoder, or opt into its included MTP module with
 `MTP_TOKENS=2`.
 
-On GG v20-r5, Qwen MTP2 cannot use the compiled FlashInfer decode wrapper: the
+On GG v20-r8 (the same compute path as r5), Qwen MTP2 cannot use the compiled
+FlashInfer decode wrapper: the
 wrapper freezes `q_len_per_req=1`, while the draft step needs `3`, and the first
 request kills the engine. The appliance therefore adds `--enforce-eager`
 automatically when Qwen MTP is enabled. That compatibility path passed the live
@@ -115,10 +128,11 @@ The July 28 provider comparison uses the same balanced
 TP4/DCP2/TR3-MTP5 profile and `llm-inference-bench` v0.4.29 protocol.
 All measured systems used four RTX PRO 6000 Blackwell 96 GB cards. Results are
 aggregate output throughput; PP is a cold unique-prefix request, so prefix
-cache hits do not inflate it. AIBeast is the final GG v20-r5 image; the rental
+cache hits do not inflate it. AIBeast is the final GG v20-r5 compute image;
+GG r8 retains that exact compute stack. The rental
 rows are the immediately preceding v31 candidate and remain the best measured
 rental estimates until a provider offers four cards on driver 595.45.04 or
-newer for an r5 rerun.
+newer for an r8 rerun.
 
 | environment | topology / power cap | PP 8K / 32K / 64K / 128K tok/s | TG C1 / C2 / C4 / C8 tok/s | exact long-context gate |
 |---|---|---:|---:|---|
@@ -174,7 +188,8 @@ target plus draft in 32.4–33.1 seconds, versus 60.5–62.6 seconds for
 warm-page-cache safetensors. The unmodified 524,288-token /
 utilization-0.978 profile failed KV admission twice because 9.04 GiB was
 needed and only 9.03 GiB remained. The earlier v31 image passed at 520,192.
-GG v20-r5 now safely accounts for its measured 0.81 GiB/GPU retained
+GG v20-r5, retained unchanged in r8's compute stack, safely accounts for its
+measured 0.81 GiB/GPU retained
 CUDA-graph pool, exposing 514,944 KV tokens at utilization 0.976. The new
 513,536 default leaves a 1,408-token admission margin and passed cold plus
 cache-reused boots, all required API features, two independent 510,534/510,535
@@ -211,18 +226,19 @@ The live hybrid suite passes authenticated model discovery, exact
 tokenization, ordinary chat, thinking-content visibility, streaming with
 usage, multi-turn with preserved reasoning, release-gating strict structured
 JSON both with and without thinking,
-one automatic tool call, and tool-result continuation. `tool_choice=required`
-is intentionally an optional probe: this active vLLM build emits five
-duplicate calls there, while `tool_choice=auto` emits exactly one. The
-duplication matches the class of [vLLM MTP/tool-parser issue
-#34449](https://github.com/vllm-project/vllm/issues/34449); it is not
-interleaved thinking and does not block normal automatic tool or agent
-workloads.
+one automatic tool call, and tool-result continuation. The former
+`tool_choice=required` duplicate-call behavior came from XGrammar's GLM
+structural-tag grammar allowing another tool tag, but no normal trailing text
+or end-of-turn path. GG r8's pinned XGrammar 0.2.5 changes the required grammar
+to permit normal completion after one or more calls while still requiring at
+least one. The probe remains optional until this derived r8 image completes
+the live appliance gate; `tool_choice=auto` remains release-required.
 
 Thinking plus structured output also crosses an MTP-specific boundary. The
 draft can have proposed several answer tokens before the reasoning-end marker
 activates the grammar. Those pre-mask proposals are allowed to be rejected and
-resampled; on GG r5, XGrammar logged each expected rejection as
+resampled; on GG r5's vLLM path, retained in r8, XGrammar logged each expected
+rejection as
 `Failed to advance FSM` at ERROR severity even when the request returned HTTP
 200 with exact schema-valid JSON. The entrypoint applies an idempotent
 compatibility patch that checks these post-marker probes against the packed
@@ -232,7 +248,7 @@ matcher. Valid probes still advance the temporary FSM state, and invalid
 serving verifier and feature suite now make strict JSON with thinking a release
 gate rather than inferring correctness from HTTP 200. This complements
 [vLLM #44993](https://github.com/vllm-project/vllm/pull/44993), whose reasoning
-boundary fix is already present in GG r5.
+boundary fix is already present in GG r5 and r8.
 
 The patched path was live-qualified on the full Qwen3.6-27B checkpoint with
 MTP2: 4/4 concurrent strict-schema requests passed in each of thinking-off,
@@ -283,7 +299,7 @@ not evidence that all peer transport is disabled.
 ## Launch GLM-5.2 on Vast.ai
 
 **[▶ Launch GLM-5.2 on Vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405)**.
-The linked public **Model Turnkey: GLM-5.2 EXL3 — GG v20-r5** template
+The linked public **Model Turnkey: GLM-5.2 EXL3 — GG v20-r8** template
 preconfigures the image, `args` launch mode, ports, 450 GB disk and Blackwell
 host filters.
 Before accepting an offer, verify it is exactly 4x RTX PRO 6000 Blackwell,
@@ -846,20 +862,23 @@ config matrix (6 runs, 5 hosts, 4 driver families):
   util 0.93. The v29 default instead uses calibrated NVFP4 KV and auto-sizing.
 
 Base runtime image:
-`voipmonitor/vllm@sha256:7b230b45991d93065d99c863fdb9ae030fb49592b59fa3c930cc00bfde09e51d`
-(pinned GG v20-r5). Its labels record GG base `4247d676`, vLLM EXL3
+`voipmonitor/vllm@sha256:547269db0f9cdb1982432f9b3436eac371d21a3c0daadec7718d81f07739a51e`
+(pinned GG v20-r8). Its labels record GG base `4247d676`, vLLM EXL3
 integration tree `936ed48` (including
 [PR #190](https://github.com/local-inference-lab/vllm/pull/190)), SparkInfer
 integration tree `f532ec9` (including
 [PR #49](https://github.com/local-inference-lab/sparkinfer/pull/49)), and
-FlashInfer `801d57a`. It also includes native vLLM support for
+FlashInfer `801d57a`. These compute trees are unchanged from r5. r8 adds
+LMCache `0.5.2+glm52dcp.3` at `9cebd405…` and XGrammar `0.2.5` at
+`2ea71da4…`. It also includes native vLLM support for
 `Qwen3_5ForConditionalGeneration`, ModelOpt/NVFP4, Qwen parsers, and MTP
 speculative decoding.
 
 Profile checkpoints:
 
 - GLM: `brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw` at `9297b9f1…`
-- MadeBy561 control: `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid` at `68babde2…`
+- MadeBy561 control: `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid` release bundle
+  `66f3623…`; its 184 weight shards remain the immutable `68babde2…` payload
 - Qwen: `nvidia/Qwen3.6-27B-NVFP4` at `0893e160…`
 
 ### Running it on your own hardware

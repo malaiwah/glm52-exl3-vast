@@ -181,7 +181,7 @@ FAMILIES = {
             "path, text-only compiled default, thinking-content normalization, "
             "structured output, tools and preserved multi-turn reasoning were "
             "live-qualified with the full 27B checkpoint on an RTX 5090. MTP is "
-            "opt-in and uses vLLM's current 'mtp' method; GG v20-r5 forces that "
+            "opt-in and uses vLLM's current 'mtp' method; GG v20-r8 forces that "
             "path to eager mode around a FlashInfer frozen-query-shape crash. "
             "GLM-only MLA/DCP/EXL3 settings are removed rather than inherited "
             "from the base image."),
@@ -249,7 +249,8 @@ VARIANTS = {
         "defaults": {
             "DCP": "2",
             # GG v20-r5 profiles the retained CUDA-graph pool before KV
-            # admission.  On the qualified 96 GiB TP4/DCP2 shape this exposes
+            # admission; r8 keeps the same compute and memory-planning sources.
+            # On the qualified 96 GiB TP4/DCP2 shape this exposes
             # 514,944 KV tokens; 513,536 keeps a measured 1,408-token admission
             # margin while still completing a 507,902 + 4,096 token request.
             "MAX_MODEL_LEN": 513536,
@@ -360,7 +361,10 @@ VARIANTS = {
         "family": "glm52",
         "label": "MadeBy561 MXFP8/NVFP4/NF3 hybrid (512K MTP3 profile)",
         "repo": "madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid",
-        "revision": "68babde27a97a4c980c2494e830dd424975cd5a3",
+        # The release-bundle commits add audited profiles, KLD receipts and the
+        # calibrated NVFP4 MLA scale sidecar. The 184 weight shards remain
+        # byte-identical to immutable weight revision 68babde2.
+        "revision": "66f3623dd8fefb5ca8046706912d5d31c8d196af",
         "dirname": "GLM-5.2-MXFP8-NVFP4-NF3-Hybrid",
         "quantization": "nvfp4_nf3_hybrid",
         "quantization_config": (
@@ -805,7 +809,8 @@ KNOBS = [
              "change. Safetensors OOMed at the same 514K prefill boundary with both "
              "auto and exact KV pools because the final sparse-indexer allocation "
              "could not obtain a contiguous 352 MiB segment. InstantTensor uses about "
-             "0.04 GiB/GPU more resident model memory. GG v20-r5 additionally "
+             "0.04 GiB/GPU more resident model memory. GG v20-r8's unchanged "
+             "r5 compute path additionally "
              "accounts for retained CUDA graphs, so the qualified balanced "
              "default is 513536 rather than 524288.")),
 
@@ -1416,7 +1421,7 @@ def family_serve_args(cfg: dict):
     if cfg.get("MODEL_FAMILY") in ("qwen36", "custom") and not cfg.get("MULTIMODAL"):
         args += ["--language-model-only"]
     if cfg.get("MODEL_FAMILY") == "qwen36" and cfg.get("MTP_TOKENS", 0) > 0:
-        # GG v20-r5 / FlashInfer freezes q_len_per_req=1 in the compiled
+        # GG v20-r8 / FlashInfer freezes q_len_per_req=1 in the compiled
         # decode wrapper, while Qwen's native MTP2 draft needs q_len=3. The
         # first request otherwise kills the engine. Eager mode is slower but
         # is the live-qualified compatibility path until upstream owns one
@@ -1510,7 +1515,7 @@ def validate(cfg: dict, context=None):
         warn(
             "qwen-mtp-eager",
             ["MTP_TOKENS"],
-            "Qwen native MTP currently forces --enforce-eager on GG v20-r5. "
+            "Qwen native MTP currently forces --enforce-eager on GG v20-r8. "
             "The compiled FlashInfer path freezes q_len_per_req=1 and crashes "
             "when MTP2 requires q_len=3. Eager MTP2 passed the live feature "
             "gate, but it gives up torch.compile/CUDA-graph throughput; keep "
@@ -1664,7 +1669,8 @@ def validate(cfg: dict, context=None):
              "GPU_MEMORY_UTILIZATION=0.978 failed KV admission on both InstantTensor "
              "attempts: 9.04 GiB was needed and 9.03 GiB remained. InstantTensor "
              "loaded ~0.04 GiB/GPU more resident model memory than safetensors. "
-             "The earlier v31 image passed MAX_MODEL_LEN=520192, but GG v20-r5 "
+             "The earlier v31 image passed MAX_MODEL_LEN=520192, but GG v20-r8's "
+             "unchanged r5 compute path "
              "now accounts for a measured 0.81 GiB/GPU retained CUDA-graph pool. "
              "On r5 the safe profiler exposed 514,944 KV tokens; "
              "MAX_MODEL_LEN=513536 passed cold and cache-reused boots, two "
@@ -1677,8 +1683,8 @@ def validate(cfg: dict, context=None):
                 and cfg["GPU_MEMORY_UTILIZATION"] <= 0.976):
             warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
                  f"{cfg['GPU_MEMORY_UTILIZATION']} is high by generic vLLM standards, "
-                 "but this exact DCP2/513,536-token profile is the GG v20-r5 "
-                 "qualified default. AIBeast passed cold and cache-reused starts, "
+                 "but this exact DCP2/513,536-token profile is the GG v20-r8 "
+                 "compute-qualified default. AIBeast passed cold and cache-reused starts, "
                  "C1-C8 decode, two ~510.5K five-depth retrievals, and an almost "
                  "exact 512K total request with safe graph accounting enabled. "
                  "The earlier 0.978/520K rental shape admitted KV but OOMed on its "

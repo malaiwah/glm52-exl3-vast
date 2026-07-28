@@ -147,7 +147,7 @@ KV, parsers and tool surface while replacing the target quantizer and draft:
 
 | knob | variant default |
 |---|---|
-| repository | `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid`, revision `68babde…` |
+| repository | `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid`, release bundle `66f3623…` (byte-identical weights from `68babde…`) |
 | quantization | `nvfp4_nf3_hybrid` with the checkpoint's MXFP8 dense/shared-expert overlay |
 | MTP | 3 tokens, native serialized NVFP4 experts, probabilistic proposals |
 | max context / pool | 524,288 / 2,048 blocks (exactly one maximum-length logical pool) |
