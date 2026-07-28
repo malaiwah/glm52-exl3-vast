@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -66,6 +67,29 @@ class StructuredOutputPatchTests(unittest.TestCase):
             self.assertEqual(patch.main([str(target)]), 0)
             compile(target.read_text(), str(target), "exec")
             self.assertEqual(patch.main([str(target)]), 0)
+
+    def test_compile_failure_restores_original_and_returns_1(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "manager.py"
+            # Write source with the OLD anchor but make the replacement produce
+            # unparseable Python so compileall fails — simulating a bad
+            # anchor match in a future runtime.
+            target.write_text(RUNTIME_SOURCE)
+            # Monkeypatch patch_text to inject a syntax error.
+            original_patch_text = patch.patch_text
+            def bad_patch(source):
+                # Pretend the patch applies, but produce broken Python.
+                return source.replace(patch.OLD, "def (", 1), "patched"
+            with mock.patch.object(patch, "patch_text", side_effect=bad_patch), \
+                 mock.patch.object(patch, "compileall") as mcompile:
+                mcompile.compile_file.return_value = False
+                rc = patch.main([str(target)])
+            self.assertEqual(rc, 1)
+            # The .orig backup was consumed by the atomic restore (os.replace
+            # moves it back onto the live file), and the live file must be
+            # the original unpatched source.
+            self.assertFalse((target.with_suffix(".py.orig")).exists())
+            self.assertEqual(target.read_text(), RUNTIME_SOURCE)
 
 
 if __name__ == "__main__":

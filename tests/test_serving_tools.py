@@ -227,6 +227,49 @@ class NeedleTests(unittest.TestCase):
             )
         self.assertFalse(result["ok"])
 
+    def test_structured_probe_retries_transient_failure(self):
+        import http.client
+        response = {
+            "choices": [{
+                "message": {
+                    "content": json.dumps({"answer": 42}),
+                    "reasoning_content": "brief reasoning",
+                },
+            }],
+        }
+        calls = {"n": 0}
+
+        def fake_req(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise http.client.IncompleteRead(b"")
+            return response
+
+        with mock.patch.object(verify, "_req", side_effect=fake_req), \
+             mock.patch.object(verify, "time") as mtime:
+            mtime.sleep = lambda _s: None
+            result = verify.structured_output_probe(
+                "http://test", "key", "model"
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(calls["n"], 2)
+
+    def test_structured_probe_does_not_retry_nontransient(self):
+        import urllib.error
+        calls = {"n": 0}
+
+        def fake_req(*args, **kwargs):
+            calls["n"] += 1
+            raise urllib.error.HTTPError(
+                "url", 400, "bad request", {}, None)
+
+        with mock.patch.object(verify, "_req", side_effect=fake_req):
+            result = verify.structured_output_probe(
+                "http://test", "key", "model"
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(calls["n"], 1)
+
     def test_probe_records_seed_duration_and_retrieval(self):
         def fake_count(_base, _key, _model, text):
             return len(text.split()), True

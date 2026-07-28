@@ -21,9 +21,10 @@ not found. An optional first argument overrides the vLLM source path for tests.
 from __future__ import annotations
 
 import compileall
+import os
+import shutil
 import sys
 from pathlib import Path
-
 
 MARKER = "turnkey: preflight post-reasoning speculative grammar probes via bitmask"
 LEGACY_MARKER = "turnkey: preflight post-reasoning speculative grammar probes"
@@ -104,7 +105,6 @@ def patch_text(source: str) -> tuple[str, str]:
         return source, "anchor not found"
     return source.replace(OLD, NEW, 1), "patched"
 
-
 def main(argv: list[str]) -> int:
     target = Path(argv[0]) if argv else default_target()
     source = target.read_text()
@@ -118,8 +118,25 @@ def main(argv: list[str]) -> int:
     if status == "already patched":
         print("structured-output/spec-decode: already patched")
         return 0
-    target.write_text(patched)
-    compileall.compile_file(str(target), quiet=2)
+    # Back up the original source first (atomic), then write the patch through
+    # a temp file + os.replace so an interrupted write cannot leave a
+    # half-patched module that breaks every subsequent vLLM boot.
+    bak = target.with_suffix(target.suffix + ".orig")
+    if not bak.exists():
+        _bak_tmp = bak.with_suffix(bak.suffix + ".tmp")
+        shutil.copy2(target, _bak_tmp)
+        os.replace(_bak_tmp, bak)
+    _patch_tmp = target.with_suffix(target.suffix + ".tmp")
+    _patch_tmp.write_text(patched)
+    os.replace(_patch_tmp, target)
+    if not compileall.compile_file(str(target), quiet=2):
+        os.replace(bak, target)
+        print(
+            "structured-output/spec-decode: patched module failed to compile; "
+            "restored the original from " + str(bak),
+            file=sys.stderr,
+        )
+        return 1
     print(f"structured-output/spec-decode: {status} OK")
     return 0
 

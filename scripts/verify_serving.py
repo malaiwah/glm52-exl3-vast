@@ -151,29 +151,43 @@ def structured_output_probe(base, key, model, timeout=300):
             },
         },
     }
-    try:
-        doc = _req(
-            base + "/v1/chat/completions",
-            payload,
-            key=key,
-            timeout=timeout,
-        )
-        msg = ((doc.get("choices") or [{}])[0].get("message") or {})
-        parsed = json.loads(msg.get("content") or "")
-        ok = parsed == {"answer": 42}
-        return {
-            "ok": ok,
-            "detail": (
-                "thinking + strict JSON schema passed"
-                if ok
-                else f"unexpected structured document: {parsed!r}"
-            ),
-            "reasoning_field": bool(
-                msg.get("reasoning_content") or msg.get("reasoning")
-            ),
-        }
-    except Exception as error:
+    error = None
+    doc = None
+    for attempt in range(TRANSIENT_RETRIES + 1):
+        try:
+            doc = _req(
+                base + "/v1/chat/completions",
+                payload,
+                key=key,
+                timeout=timeout,
+            )
+            error = None
+            break
+        except Exception as exc:
+            error = exc
+            if attempt < TRANSIENT_RETRIES and _is_transient(exc):
+                time.sleep(TRANSIENT_BACKOFF_S)
+                continue
+            break
+    if error is not None:
         return {"ok": False, "detail": f"request failed: {error}"}
+    msg = ((doc.get("choices") or [{}])[0].get("message") or {})
+    try:
+        parsed = json.loads(msg.get("content") or "")
+    except (TypeError, ValueError):
+        parsed = None
+    ok = parsed == {"answer": 42}
+    return {
+        "ok": ok,
+        "detail": (
+            "thinking + strict JSON schema passed"
+            if ok
+            else f"unexpected structured document: {parsed!r}"
+        ),
+        "reasoning_field": bool(
+            msg.get("reasoning_content") or msg.get("reasoning")
+        ),
+    }
 
 
 DEGENERATE_RE = re.compile(r"^[\s\W_]+$")
