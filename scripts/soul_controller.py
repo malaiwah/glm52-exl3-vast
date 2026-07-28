@@ -215,7 +215,7 @@ def _gpu(xid_state: Optional[Path] = None) -> Dict[str, Any]:
     return result
 
 
-def _network(status: Mapping[str, Any], port: int) -> Dict[str, Any]:
+async def _network(status: Mapping[str, Any], port: int) -> Dict[str, Any]:
     endpoint = str(status.get("endpoint") or "")
     host = "127.0.0.1"
     tls_port = None
@@ -229,9 +229,11 @@ def _network(status: Mapping[str, Any], port: int) -> Dict[str, Any]:
             pass
     result: Dict[str, Any] = {"target": host}
     try:
-        result["addresses"] = sorted({item[4][0] for item in socket.getaddrinfo(host, None)})
+        addrinfos = await asyncio.wait_for(
+            asyncio.to_thread(socket.getaddrinfo, host, None), timeout=5)
+        result["addresses"] = sorted({item[4][0] for item in addrinfos})
         result["dnsOk"] = True
-    except OSError as exc:
+    except (OSError, asyncio.TimeoutError) as exc:
         result.update({"dnsOk": False, "dnsError": str(exc)})
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=3):
@@ -324,7 +326,7 @@ def _configuration_state(root: Path) -> Dict[str, Any]:
     })
 
 
-def collect_snapshot(boot_status_path: Path, port: int, api_key: str) -> Dict[str, Any]:
+async def collect_snapshot(boot_status_path: Path, port: int, api_key: str) -> Dict[str, Any]:
     boot = _read_json(boot_status_path, {}) or {}
     root = sc.state_dir().parent
     base = f"http://127.0.0.1:{port}"
@@ -345,7 +347,7 @@ def collect_snapshot(boot_status_path: Path, port: int, api_key: str) -> Dict[st
         "filesystem": _filesystem(),
         "host": _memory_cpu(),
         "gpu": _gpu(sc.paths()["incidents"] / "xid-state.json"),
-        "network": _network(boot, port),
+        "network": await _network(boot, port),
         "logs": _logs(root, sc.paths()["incidents"] / "log-cursors.json"),
     }
     return sc.redact(snapshot)
@@ -510,7 +512,7 @@ def _nanobot_config(path: Path, workspace: Path, model: str, port: int,
                     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
                 ),
             },
-            "restrictToWorkspace": False,
+            "restrictToWorkspace": True,
         },
     }
     sc.atomic_json(path, document, mode=0o640)
@@ -841,6 +843,40 @@ def _compact_incident_state(path: Path, book: Optional[IncidentBook] = None) -> 
     sc.atomic_json(path, compact)
 
 
+def _open_incident_files(book: Optional[IncidentBook], journal: Path,
+                        root: Path) -> set:
+    """Absolute paths of evidence/snapshot/log files referenced by incidents
+    that are still open. Retention must preserve these even when they exceed
+    the age or size cutoff so an open incident never loses its evidence."""
+    protected: set = set()
+    if book is None:
+        return protected
+    incidents = book.data.get("incidents", {})
+    if not isinstance(incidents, dict):
+        return protected
+    open_ids = {iid for iid, inc in incidents.items()
+                if isinstance(inc, dict) and inc.get("state") == "open"}
+    if not open_ids:
+        return protected
+    for iid in open_ids:
+        sid = incidents[iid].get("snapshotId")
+        if isinstance(sid, str) and sid:
+            protected.add(root / "snapshots" / (sid + ".json"))
+    try:
+        for line in journal.read_text(encoding="utf-8").splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            if item.get("incidentId") in open_ids:
+                for ref in item.get("evidenceRefs", []) or []:
+                    if isinstance(ref, str) and ref and not ref.startswith("/"):
+                        protected.add(root / ref)
+    except OSError:
+        pass
+    return protected
+
+
 def enforce_retention(config: Mapping[str, Any],
                       book: Optional[IncidentBook] = None) -> None:
     p = sc.ensure_tree()
@@ -852,6 +888,7 @@ def enforce_retention(config: Mapping[str, Any],
     # defeating the appliance-wide hard cap.
     _tail_truncate(active_controller_log, min(4 * 1024 * 1024,
                                               max(64 * 1024, cap // 16)))
+    protected_refs = _open_incident_files(book, p["journal"], p["root"])
     cutoffs = {
         p["evidence"]: now - int(config["evidenceRetentionDays"]) * 86400,
         p["snapshots"]: now - int(config["evidenceRetentionDays"]) * 86400,
@@ -861,7 +898,8 @@ def enforce_retention(config: Mapping[str, Any],
         for path in root.glob("**/*"):
             try:
                 if (path.is_file() and path != active_controller_log
-                        and path.stat().st_mtime < cutoff):
+                        and path.stat().st_mtime < cutoff
+                        and path not in protected_refs):
                     path.unlink()
             except OSError:
                 pass
@@ -881,6 +919,8 @@ def enforce_retention(config: Mapping[str, Any],
         with tmp.open("w", encoding="utf-8") as stream:
             for item in kept:
                 stream.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(tmp, journal)
     except OSError:
         pass
@@ -897,6 +937,7 @@ def enforce_retention(config: Mapping[str, Any],
     evidence_roots = (p["evidence"], p["snapshots"], p["logs"])
     evidence = sorted((path for path in files
                        if path not in protected
+                       and path not in protected_refs
                        and any(root in path.parents for root in evidence_roots)),
                       key=lambda item: item.stat().st_mtime)
     for path in evidence:
@@ -922,7 +963,10 @@ def enforce_retention(config: Mapping[str, Any],
                 for item in entries)
             old_size = p["journal"].stat().st_size
             tmp = p["journal"].with_name(".journal.capped")
-            tmp.write_text(encoded, encoding="utf-8")
+            with tmp.open("w", encoding="utf-8") as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
             os.replace(tmp, p["journal"])
             total -= max(0, old_size - len(encoded.encode()))
     # Session history and auxiliary incident cursors count toward the hard cap
@@ -1072,7 +1116,7 @@ class SoulController:
                        lastError="", configNotes=notes)
         if now - self.last_snapshot < int(config["heartbeatIntervalS"]):
             return
-        snapshot = collect_snapshot(self.boot_status, self.port, self.api_key)
+        snapshot = await collect_snapshot(self.boot_status, self.port, self.api_key)
         if level == 3 and phase == "serving" and _active_requests(snapshot) == 0:
             if now - self.last_canary >= max(3600, int(config["heartbeatIntervalS"])):
                 snapshot["canary"] = _cheap_canary(self.port, self.api_key, model)

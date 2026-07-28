@@ -93,13 +93,7 @@ def redact(url: str) -> str:
     in the URL. This module always sends it as a Bearer header instead (which
     is what RunPod's SDK does), but URLs get recorded and displayed, so strip
     anything key-shaped on the way out regardless."""
-    out = url
-    for param in ("api_key=", "apiKey=", "token="):
-        i = out.find(param)
-        if i >= 0:
-            j = out.find("&", i)
-            out = out[:i + len(param)] + "REDACTED" + (out[j:] if j >= 0 else "")
-    return out
+    return re.sub(r"(api_key|apiKey|token)=[^&]*", r"\1=REDACTED", url)
 
 
 class HttpTransport:
@@ -279,7 +273,7 @@ class VastAI(Provider):
                                  {"Authorization": "Bearer " + self.api_key(),
                                   "Accept": "application/json"},
                                  destructive=True)
-        attempt = {"method": "DELETE", "url": url, "status": status,
+        attempt = {"method": "DELETE", "url": redact(url), "status": status,
                    "body": (text or "")[:400]}
         ok = status == 200
         if ok:
@@ -378,6 +372,11 @@ class RunPod(Provider):
         if not self.api_key():
             return "rejected", "no API key is available in this pod"
         iid = self.instance_id()
+        if iid and not self.valid_instance_id():
+            return "rejected", (
+                f"RunPod: the pod id in the environment ({iid}) has an invalid "
+                "format and is not safe to interpolate into a query. Set "
+                "RUNPOD_POD_ID to the pod's short id.")
         query = self.POD_PROBE_QUERY % iid if iid else self.ACCOUNT_PROBE_QUERY
         assert "mutation" not in query, "the probe must never mutate"
         status, text = transport("POST", self.GRAPHQL_URL,
@@ -422,7 +421,7 @@ class RunPod(Provider):
                                  {"Authorization": "Bearer " + key,
                                   "Accept": "application/json"},
                                  destructive=True)
-        attempts.append({"method": "DELETE", "url": url, "status": status,
+        attempts.append({"method": "DELETE", "url": redact(url), "status": status,
                          "body": (text or "")[:400]})
         if status in (200, 204) or status == 0:
             return {"ok": True, "status": status, "provider": self.name,
@@ -436,17 +435,39 @@ class RunPod(Provider):
                                    {"Authorization": "Bearer " + key,
                                     "Content-Type": "application/json"},
                                    body, destructive=True)
-        attempts.append({"method": "POST", "url": self.GRAPHQL_URL + " (podTerminate)",
+        attempts.append({"method": "POST", "url": redact(self.GRAPHQL_URL) + " (podTerminate)",
                          "status": gstatus, "body": (gtext or "")[:400]})
         if gstatus == 0:
             return {"ok": True, "status": gstatus, "provider": self.name,
                     "detail": _explain(gstatus, gtext, self), "attempts": attempts}
-        if gstatus == 200 and '"errors"' not in (gtext or ""):
-            return {"ok": True, "status": gstatus, "provider": self.name,
-                    "detail": ("Terminate accepted by RunPod (GraphQL podTerminate). "
-                               "Confirm in the dashboard that the Pod is gone and "
-                               "billing has stopped."),
-                    "attempts": attempts}
+        if gstatus == 200:
+            # Parse the body rather than substring-match "errors": a 200 without
+            # the literal token is not proof of success. RunPod's podTerminate
+            # mutation returns Void — MEASURED on a live pod (2026-07-26):
+            # {"data":{"podTerminate":null}} IS the success shape. Success
+            # therefore requires a parsed object with no top-level `errors` key
+            # and a `data` object that actually HAS the `podTerminate` key
+            # (key presence, not truthiness — null is the documented success
+            # value). A body that fails to parse, or lacks the key entirely, is
+            # a failure, not a silent success.
+            try:
+                payload = json.loads(gtext or "")
+            except ValueError:
+                payload = None
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if (isinstance(payload, dict) and "errors" not in payload
+                    and isinstance(data, dict) and "podTerminate" in data):
+                return {"ok": True, "status": gstatus, "provider": self.name,
+                        "detail": ("Terminate accepted by RunPod (GraphQL podTerminate). "
+                                   "Confirm in the dashboard that the Pod is gone and "
+                                   "billing has stopped."),
+                        "attempts": attempts}
+            # HTTP 200 is not proof of GraphQL-level success (GraphQL returns
+            # 200 for content-level errors too). Mark this attempt so the final
+            # failure report below doesn't fall through to _explain's blanket
+            # "200 = accepted" — that would tell the user termination succeeded
+            # when the GraphQL response actually reported it did not.
+            attempts[-1]["graphql_failed"] = True
 
         # 3. runpodctl, only if this image happens to carry it. Not bundled:
         #    the call is one HTTP POST and the binary is 13.8 MB.
@@ -454,15 +475,23 @@ class RunPod(Provider):
         cli = shutil.which("runpodctl")
         if cli:
             rc, out = runner([cli, "pod", "delete", iid])
-            attempts.append({"method": "runpodctl", "url": f"{cli} pod delete {iid}",
+            attempts.append({"method": "runpodctl", "url": redact(f"{cli} pod delete {iid}"),
                              "status": rc, "body": (out or "")[:400]})
             if rc == 0:
                 return {"ok": True, "status": rc, "provider": self.name,
                         "detail": ("Pod deleted via runpodctl (delete = terminate; the "
                                    "storage stops billing too)."),
                         "attempts": attempts}
-        return {"ok": False, "status": status, "provider": self.name,
-                "detail": _explain(status, text, self), "attempts": attempts}
+        last = attempts[-1]
+        if last.get("graphql_failed"):
+            detail = ("RunPod's GraphQL termination call returned HTTP 200 but did "
+                      "not report success (%s). THE INSTANCE MAY STILL BE RUNNING "
+                      "AND BILLING — check the dashboard."
+                      % ((last["body"] or "no body")[:200]))
+        else:
+            detail = _explain(last["status"], last["body"], self)
+        return {"ok": False, "status": last["status"], "provider": self.name,
+                "detail": detail, "attempts": attempts}
 
 
 class UnknownProvider(Provider):

@@ -43,6 +43,13 @@ def p_request_stop():
 
 def p_engine_stopped():
     return os.path.join(gc.runtime_dir(), "engine-stopped")
+def _clear_request_stop():
+    """Remove the terminate-in-progress flag so the supervisor may restart the
+    engine on a failed terminate. Safe to call when the flag is absent."""
+    try:
+        os.remove(p_request_stop())
+    except OSError:
+        pass
 
 
 def read_progress():
@@ -122,8 +129,11 @@ def run(opts, transport=None, runner=None, provider_obj=None, stopper=None,
 
     pr.step("stopping-engine", "stopping vLLM so VRAM can be cleared and no new "
                                "requests are logged")
-    stopper = stopper or default_stopper
-    stopped, detail = stopper(pr)
+    if dry_run:
+        stopped, detail = True, "dry run: engine stop skipped"
+    else:
+        stopper = stopper or default_stopper
+        stopped, detail = stopper(pr)
     pr.step("engine-stopped", detail, engine_stopped=stopped)
 
     # ---- erase -----------------------------------------------------------
@@ -151,15 +161,36 @@ def run(opts, transport=None, runner=None, provider_obj=None, stopper=None,
 
     # ---- the destructive call -------------------------------------------
     pr.step("terminating", f"asking {p.label} to destroy instance {p.instance_id()}")
+    # Re-check the kill switch: a lock can be thrown mid-flight through the
+    # landing-page ratchet. If termination is no longer allowed, clean up the
+    # request-stop flag so the supervisor may restart the engine, then bail.
+    allowed, why = gc.termination_allowed(env)
+    if not allowed:
+        _clear_request_stop()
+        return pr.finish(False, f"termination was refused mid-flight: {why}. "
+                                "Serving was stopped; the operator may need to "
+                                "restart the engine via the provider dashboard.",
+                        refused="switch")
     transport = transport or prov.HttpTransport(allow_destructive=True, dry_run=dry_run)
     try:
         res = p.terminate(transport, runner=runner)
     except prov.NotArmed as e:
-        return pr.finish(False, f"internal safety refusal: {e}", refused="not-armed")
+        _clear_request_stop()
+        return pr.finish(False, f"internal safety refusal: {e}. Serving was "
+                                "stopped; the operator may need to restart the "
+                                "engine via the provider dashboard.",
+                        refused="not-armed")
     except Exception as e:
+        _clear_request_stop()
         return pr.finish(False, f"the terminate call raised {type(e).__name__}: {e}. "
-                                "THE INSTANCE MAY STILL BE RUNNING AND BILLING — check "
-                                "your provider dashboard.")
+                                "Serving was stopped; THE INSTANCE MAY STILL BE "
+                                "RUNNING AND BILLING — check your provider "
+                                "dashboard, and restart the engine if needed.")
+    if not res.get("ok"):
+        _clear_request_stop()
+        return pr.finish(False, res.get("detail", "") + " Serving was stopped; the "
+                                "operator may need to restart the engine via the "
+                                "provider dashboard.", terminate=res)
     return pr.finish(bool(res.get("ok")), res.get("detail", ""), terminate=res)
 
 

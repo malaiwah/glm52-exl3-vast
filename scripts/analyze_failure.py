@@ -22,6 +22,31 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glm_config as gc  # noqa: E402
+import re as _re  # noqa: E402
+
+# Raw boot logs and config diffs can carry credentials. Never send them to the
+# model unredacted. Prefer the shared soul_config redactor; fall back to a
+# small built-in pattern set if soul_config is unavailable in this context.
+try:
+    import soul_config as sc  # noqa: E402
+    _redact = sc.redact
+except Exception:  # pragma: no cover - import guard
+    _FALLBACK_PATTERNS = (
+        (_re.compile(r"(?i)\b(authorization\s*:\s*)(?:bearer|basic)\s+\S+"),
+         r"\1[REDACTED]"),
+        (_re.compile(
+            r"(?i)\b((?:[A-Za-z][A-Za-z0-9_-]*[_-])?"
+            r"(?:api[-_]?key|token|secret|password|private[-_]?key|authorization))"
+            r"(\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"),
+         r"\1\2[REDACTED]"),
+        (_re.compile(r"\b(?:hf_|sk-)[A-Za-z0-9_-]{12,}\b"), "[REDACTED TOKEN]"),
+    )
+
+    def _redact(value):
+        if isinstance(value, str):
+            for pattern, replacement in _FALLBACK_PATTERNS:
+                value = pattern.sub(replacement, value)
+        return value
 
 MAX_ATTEMPTS = 3
 FAILED_LOG_CHARS = 14000
@@ -126,13 +151,23 @@ def main(argv):
     ) or "(none of the changed keys is a known knob)"
     signatures = "\n".join(f"- {s}" for s in meta.get("signatures") or []) or "(no known signature matched)"
 
+    # Redact secrets before anything is sent to the model or written to disk.
+    # `changed`/`rationales` only ever use the knob key name (left of the
+    # first colon), which the redactor preserves, so they are computed from the
+    # raw diff above and are safe to reuse.
+    diff = _redact(diff)
+    failed_log = _redact(_tail_chars(os.path.join(fdir, "error.log"),
+                                    FAILED_LOG_CHARS))
+    good_log = _redact(_tail_chars(os.path.join(gc.p_logs(), "last-good.log"),
+                                  GOOD_LOG_CHARS))
+
     prompt = TEMPLATE.format(
         diff=diff,
         reason=meta.get("reason") or "(not recorded)",
         signatures=signatures,
         rationales=rationales,
-        failed_log=_tail_chars(os.path.join(fdir, "error.log"), FAILED_LOG_CHARS),
-        good_log=_tail_chars(os.path.join(gc.p_logs(), "last-good.log"), GOOD_LOG_CHARS))
+        failed_log=failed_log,
+        good_log=good_log)
 
     try:
         answer = ask(args.base_url, args.api_key, args.model, prompt)

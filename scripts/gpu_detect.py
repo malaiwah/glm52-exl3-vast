@@ -70,10 +70,13 @@ def parse_smi(output: str):
             except (IndexError, ValueError):
                 continue
             uuid, name = "", ""
-            if "UUID:" in line:
-                head, uuid = line.rsplit("UUID:", 1)
+            # The name is everything between the first ":" and the optional
+            # "(UUID: ...)" suffix; parse it whether or not UUID is present.
+            head = line.split(":", 1)[1]
+            if "UUID:" in head:
+                head, uuid = head.rsplit("UUID:", 1)
                 uuid = uuid.strip().rstrip(")")
-                name = head.split(":", 1)[1].strip().rstrip("(").strip()
+            name = head.strip().rstrip("(").strip()
             devices.append((idx, uuid, name))
     return devices
 

@@ -1001,6 +1001,11 @@ def env_layer(env=None) -> dict:
             legacy = "nvfp4" if env.get("DRAFT_QUANTIZATION", "") == "modelopt_fp4" else legacy
         if legacy:
             out["MTP_DRAFT"] = legacy
+    # GLM_GPU_COUNT is exported by gpu_detect.py at boot; not a KNOB, but
+    # detected_gpu_count() needs it from the startup snapshot.
+    gpu_count = env.get("GLM_GPU_COUNT", "")
+    if str(gpu_count).strip():
+        out["GLM_GPU_COUNT"] = gpu_count
     return out
 
 

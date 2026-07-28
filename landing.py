@@ -13,6 +13,7 @@ validated OPEN_BUTTON_TOKEN — or over plain HTTP if LANDING_ALLOW_INSECURE=1
 /metrics from the browser (vLLM CORS is open) — no server-side proxying.
 Requires OPEN_BUTTON_PORT=1111 env + '-p 1111:1111' in the template.
 """
+import hmac
 import html
 import json
 import os
@@ -20,6 +21,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -55,6 +57,14 @@ STATUS_FILE = os.environ.get("STATUS_FILE", "/tmp/glm-boot-status.json")
 ALLOW_INSECURE = os.environ.get("LANDING_ALLOW_INSECURE", "0") == "1"
 TRUST_PROXY_HTTPS = os.environ.get("LANDING_TRUST_PROXY_HTTPS", "0") == "1"
 API_PORT = os.environ.get("LANDING_API_PORT", "8000")
+
+# Per-connection socket timeout (seconds). A stalled client must not hold the
+# single-threaded accept loop or a handler thread indefinitely.
+LANDING_TIMEOUT = float(os.environ.get("LANDING_TIMEOUT", "30"))
+
+# Serializes the check-then-spawn sequence in start_termination so two
+# concurrent POSTs cannot both pass the "already in progress" check.
+_terminate_lock = threading.Lock()
 
 
 _ssl_ctx = None
@@ -1023,6 +1033,24 @@ def _form_values(form: dict):
     return values, errs
 
 
+def _coerce_imported_values(values: dict):
+    """Coerce imported JSON knob values through gc.coerce, collecting per-field
+    errors exactly like _form_values does for a submitted form — so a bad
+    import surfaces the error instead of being silently dropped by minimize."""
+    coerced, errs = {}, []
+    knobs = {knob["key"]: knob for knob in gc.KNOBS}
+    for key, raw in values.items():
+        knob = knobs.get(key)
+        if knob is None or not knob.get("editable", True):
+            continue
+        try:
+            coerced[key] = gc.coerce(knob, raw)
+        except gc.ConfigError as e:
+            errs.append({"id": "coerce", "level": "error", "keys": [key],
+                         "message": str(e)})
+    return coerced, errs
+
+
 def apply_values(values: dict):
     """Validate a candidate, persist it, and ask the supervisor for a restart.
 
@@ -1318,27 +1346,28 @@ def start_termination(form) -> tuple:
     if typed != expected:
         return False, ("Nothing was done: the confirmation text did not match. Type "
                        f"<code>{html.escape(expected)}</code> exactly."), "bad"
-    doc = terminate_worker.read_progress()
-    if doc and not doc.get("done"):
-        return False, "A termination is already in progress.", ""
-    opts = ["--confirm", typed]
-    if form.get("erase", [""])[0] == "1":
-        opts.append("--erase")
-        if form.get("ram", [""])[0] == "1":
-            opts.append("--ram")
-        if form.get("vram", [""])[0] == "1":
-            opts.append("--vram")
-    try:
-        os.makedirs(gc.runtime_dir(), exist_ok=True)
-        logf = open(os.path.join(gc.runtime_dir(), "terminate.log"), "ab")
-        subprocess.Popen(
-            [sys.executable, os.path.join(SCRIPTS_DIR, "terminate_worker.py")] + opts,
-            stdout=logf, stderr=logf, start_new_session=True, close_fds=True)
-    except Exception as e:
-        return False, ("Could not start the termination worker: "
-                       + html.escape(str(e))), "bad"
-    return True, ("Termination started. This page now shows its progress; do not close "
-                  "it until the outcome is reported."), ""
+    with _terminate_lock:
+        doc = terminate_worker.read_progress()
+        if doc and not doc.get("done"):
+            return False, "A termination is already in progress.", ""
+        opts = ["--confirm", typed]
+        if form.get("erase", [""])[0] == "1":
+            opts.append("--erase")
+            if form.get("ram", [""])[0] == "1":
+                opts.append("--ram")
+            if form.get("vram", [""])[0] == "1":
+                opts.append("--vram")
+        try:
+            os.makedirs(gc.runtime_dir(), exist_ok=True)
+            logf = open(os.path.join(gc.runtime_dir(), "terminate.log"), "ab")
+            subprocess.Popen(
+                [sys.executable, os.path.join(SCRIPTS_DIR, "terminate_worker.py")] + opts,
+                stdout=logf, stderr=logf, start_new_session=True, close_fds=True)
+        except Exception as e:
+            return False, ("Could not start the termination worker: "
+                           + html.escape(str(e))), "bad"
+        return True, ("Termination started. This page now shows its progress; do not close "
+                      "it until the outcome is reported."), ""
 
 
 def render(secure: bool, tok: str = "") -> bytes:
@@ -1495,17 +1524,24 @@ def render(secure: bool, tok: str = "") -> bytes:
 class DualProtocolServer(ThreadingHTTPServer):
     """Peek the first byte of each connection: TLS handshake (0x16) or plain HTTP."""
 
+    # Handler threads are daemon so a stalled client cannot keep the process
+    # alive indefinitely; each accepted socket gets a recv timeout below.
+    daemon_threads = True
+    timeout = LANDING_TIMEOUT
+
     def get_request(self):
         sock, addr = self.socket.accept()
+        sock.settimeout(LANDING_TIMEOUT)
         try:
             first = sock.recv(1, socket.MSG_PEEK)
-        except OSError:
-            first = b""
+        except (socket.timeout, OSError):
+            sock.close()
+            raise
         ctx = ssl_ctx()
         if ctx and first == b"\x16":
             try:
                 sock = ctx.wrap_socket(sock, server_side=True)
-            except ssl.SSLError:
+            except (socket.timeout, ssl.SSLError):
                 sock.close()
                 raise OSError("TLS handshake failed")
         return sock, addr
@@ -1547,7 +1583,8 @@ class Handler(BaseHTTPRequestHandler):
         if gc is None:
             self.send_error(503, "config editor unavailable (glm_config import failed)")
             return False
-        if not TOKEN or tok != TOKEN:
+        if not TOKEN or not hmac.compare_digest(tok.encode("utf-8", "replace"),
+                                              TOKEN.encode("utf-8")):
             self.send_error(403, "the config editor requires OPEN_BUTTON_TOKEN")
             return False
         return True
@@ -1569,7 +1606,12 @@ class Handler(BaseHTTPRequestHandler):
             length = 0
         if length <= 0 or length > 1 << 20:
             return {}
-        return parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+        try:
+            return parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+        except (socket.timeout, OSError):
+            # A stalled client (LANDING_TIMEOUT) or a broken pipe must not
+            # take the page down; an empty form simply fails the auth check.
+            return {}
 
     def _redirect(self, path):
         self.send_response(303)
@@ -1607,9 +1649,14 @@ class Handler(BaseHTTPRequestHandler):
                     body = render_config(tok, secure, f"Import failed: {html.escape(str(e))}",
                                          "bad")
                 else:
-                    ok, findings, msg = apply_values(values)
-                    body = render_config(tok, secure, msg, "good" if ok else "bad",
-                                         [] if ok else findings)
+                    coerced, errs = _coerce_imported_values(values)
+                    if errs:
+                        body = render_config(tok, secure, "Nothing was imported.",
+                                             "bad", errs)
+                    else:
+                        ok, findings, msg = apply_values(coerced)
+                        body = render_config(tok, secure, msg, "good" if ok else "bad",
+                                             [] if ok else findings)
             elif url.path == "/config/reset":
                 try:
                     os.remove(gc.p_state())
@@ -1664,8 +1711,13 @@ class Handler(BaseHTTPRequestHandler):
                                "re-enabled from this page.")
                     body = render_terminate(tok, secure, msg, "good")
         except Exception as e:  # never take the landing page down on a bad form
-            body = render_config(tok, secure,
-                                 "Internal error: " + html.escape(str(e)), "bad")
+            err = "Internal error: " + html.escape(str(e))
+            if url.path.startswith("/soul"):
+                body = render_soul(tok, secure, err, "bad")
+            elif url.path.startswith("/terminate"):
+                body = render_terminate(tok, secure, err, "bad")
+            else:
+                body = render_config(tok, secure, err, "bad")
         self._send(body)
 
     def do_GET(self):
@@ -1674,7 +1726,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         tok = parse_qs(url.query).get("token", [""])[0]
-        if TOKEN and tok != TOKEN:
+        # Strip CR/LF so a crafted token can never inject header fields into
+        # the plain->HTTPS redirect Location below.
+        tok = tok.replace("\r", "").replace("\n", "")
+        if TOKEN and not hmac.compare_digest(tok.encode("utf-8", "replace"),
+                                           TOKEN.encode("utf-8")):
             self.send_error(403, "bad token (use the vast console Open button)")
             return
         secure = is_secure_connection(self.connection)

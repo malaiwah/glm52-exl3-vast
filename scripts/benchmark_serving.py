@@ -177,6 +177,7 @@ def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
     token_events = []
     usage = {}
     pieces = []
+    pieces_len = 0
     try:
         with request(base + "/v1/chat/completions", payload, key, timeout,
                      stream=True, insecure=insecure) as response:
@@ -205,7 +206,9 @@ def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
                     if first is None:
                         first = now
                     token_events.append(now)
-                    pieces.append(str(piece))
+                    if pieces_len < 120:
+                        pieces.append(str(piece))
+                        pieces_len += len(str(piece))
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", "replace")[:1000]
         return {"ok": False, "error": f"HTTP {error.code}: {detail}"}

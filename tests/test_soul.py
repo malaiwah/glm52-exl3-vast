@@ -486,6 +486,139 @@ class SoulLandingTests(unittest.TestCase):
                 self.stop_landing(proc)
 
 
+class RedactShellToolResultsTests(unittest.TestCase):
+    """Test _redact_shell_tool_results without requiring the nanobot package.
+
+    The function lazily imports ToolResult inside its body, so we mock that
+    import path and build a minimal fake bot with fake tools to verify the
+    redaction wrapping is applied correctly."""
+
+    def test_shell_tool_output_is_redacted(self):
+        """A secret in a tool's output is scrubbed before reaching the model."""
+        import asyncio
+
+        async def fake_execute(*args, **kwargs):
+            return "api_key=sk-secret123456789 token=bearer_xyz"
+
+        class FakeTool:
+            def __init__(self):
+                self.execute = fake_execute
+
+        class FakeRegistry:
+            def __init__(self):
+                self._tools = {
+                    "exec": FakeTool(),
+                    "list_exec_sessions": FakeTool(),
+                    "write_stdin": FakeTool(),
+                }
+
+            def get(self, name):
+                return self._tools.get(name)
+
+        class FakeBot:
+            def __init__(self):
+                self._loop = SimpleNamespace(tools=FakeRegistry())
+
+        # Mock the nanobot import that happens inside _redact_shell_tool_results
+        class FakeToolResult:
+            def __init__(self, content, is_error=False):
+                self.content = content
+                self.is_error = is_error
+
+            def __str__(self):
+                return str(self.content)
+
+        with mock.patch.dict(sys.modules, {
+            "nanobot": mock.MagicMock(),
+            "nanobot.agent": mock.MagicMock(),
+            "nanobot.agent.tools": mock.MagicMock(),
+            "nanobot.agent.tools.base": mock.MagicMock(ToolResult=FakeToolResult),
+        }):
+            bot = FakeBot()
+            controller._redact_shell_tool_results(bot)
+
+            # All three shell tools should now have wrapped execute methods
+            for name in ("exec", "list_exec_sessions", "write_stdin"):
+                tool = bot._loop.tools.get(name)
+                self.assertIsNot(tool.execute, fake_execute,
+                                 f"{name} execute was not wrapped")
+                result = asyncio.run(tool.execute())
+                self.assertNotIn("sk-secret123456789", result,
+                                  f"secret leaked through {name} redaction")
+                self.assertNotIn("bearer_xyz", result,
+                                  f"token leaked through {name} redaction")
+
+    def test_toolresult_preserves_error_flag(self):
+        """When the original returns a ToolResult, the redacted result keeps is_error."""
+        import asyncio
+
+        class FakeToolResult:
+            def __init__(self, content, is_error=False):
+                self.content = content
+                self.is_error = is_error
+
+            def __str__(self):
+                return str(self.content)
+
+        async def fake_execute(*args, **kwargs):
+            return FakeToolResult("api_key=sk-leak password=hunter2",
+                                  is_error=True)
+
+        class FakeTool:
+            def __init__(self):
+                self.execute = fake_execute
+
+        class FakeRegistry:
+            def __init__(self):
+                self._tools = {"exec": FakeTool()}
+
+            def get(self, name):
+                return self._tools.get(name)
+
+        class FakeBot:
+            def __init__(self):
+                self._loop = SimpleNamespace(tools=FakeRegistry())
+
+        with mock.patch.dict(sys.modules, {
+            "nanobot": mock.MagicMock(),
+            "nanobot.agent": mock.MagicMock(),
+            "nanobot.agent.tools": mock.MagicMock(),
+            "nanobot.agent.tools.base": mock.MagicMock(ToolResult=FakeToolResult),
+        }):
+            bot = FakeBot()
+            controller._redact_shell_tool_results(bot)
+            tool = bot._loop.tools.get("exec")
+            result = asyncio.run(tool.execute())
+            self.assertIsInstance(result, FakeToolResult)
+            self.assertTrue(result.is_error)
+            self.assertNotIn("sk-leak", str(result))
+            self.assertNotIn("hunter2", str(result))
+
+    def test_missing_tools_are_skipped(self):
+        """Tools that don't exist (None) are silently skipped, not an error."""
+
+        class FakeRegistry:
+            def __init__(self):
+                self._tools = {}  # no tools registered
+
+            def get(self, name):
+                return self._tools.get(name)
+
+        class FakeBot:
+            def __init__(self):
+                self._loop = SimpleNamespace(tools=FakeRegistry())
+
+        with mock.patch.dict(sys.modules, {
+            "nanobot": mock.MagicMock(),
+            "nanobot.agent": mock.MagicMock(),
+            "nanobot.agent.tools": mock.MagicMock(),
+            "nanobot.agent.tools.base": mock.MagicMock(),
+        }):
+            bot = FakeBot()
+            # Should not raise
+            controller._redact_shell_tool_results(bot)
+
+
 @unittest.skipUnless(importlib.util.find_spec("nanobot"),
                      "Nanobot is installed only in the image's isolated venv")
 class SoulSdkIntegrationTests(unittest.TestCase):

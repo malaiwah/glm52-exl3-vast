@@ -7,6 +7,8 @@ KeyError '...routed_experts.w2_rank0.mcg'.
 Exit 0 = patched or already patched; exit 1 = anchor missing (fall back to
 BF16 draft).
 """
+import os
+import shutil
 import sys
 import vllm.model_executor.models.deepseek_mtp as m
 
@@ -38,7 +40,21 @@ NEW = """        _pending_wk_fp8: dict = {}  # FP8 indexer wk dequant buffer
 if OLD not in s:
     print("deepseek_mtp: anchor not found in this image build — cannot patch")
     sys.exit(1)
-open(F, "w").write(s.replace(OLD, NEW))
+# Back up the original source first (atomic), then write the patch through a
+# temp file + os.replace so an interrupted write cannot leave a half-patched
+# module that breaks every subsequent vLLM boot.
+bak = F + ".orig"
+if not os.path.exists(bak):
+    _bak_tmp = bak + ".tmp"
+    shutil.copy2(F, _bak_tmp)
+    os.replace(_bak_tmp, bak)
+_patch_tmp = F + ".tmp"
+with open(_patch_tmp, "w") as fh:
+    fh.write(s.replace(OLD, NEW))
+os.replace(_patch_tmp, F)
 import compileall
-compileall.compile_file(F, quiet=2)
+if not compileall.compile_file(F, quiet=2):
+    os.replace(bak, F)
+    raise SystemExit("deepseek_mtp: patch compiled with errors; restored the "
+                     "original module from " + bak)
 print("deepseek_mtp: patched OK")

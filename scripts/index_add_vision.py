@@ -43,5 +43,8 @@ idx["weight_map"] = wm
 idx.setdefault("metadata", {})["total_size"] = sum(
     os.path.getsize(os.path.join(model_dir, s)) for s in set(wm.values())
     if os.path.exists(os.path.join(model_dir, s)))
-json.dump(idx, open(IDX, "w"))
+_idx_tmp = IDX + ".tmp"
+with open(_idx_tmp, "w") as f:
+    json.dump(idx, f)
+os.replace(_idx_tmp, IDX)
 print(f"index: +{added} vision tensors registered")

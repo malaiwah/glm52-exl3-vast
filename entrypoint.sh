@@ -691,14 +691,20 @@ fetch_weights() {
   fi
   # HF_HUB_OFFLINE is exported later in the boot; a variant switch at runtime has
   # to be able to reach the hub again, so clear it for the download only.
-  HF_HUB_OFFLINE=0 HF_XET_HIGH_PERFORMANCE=1 python3 -c "
+  # set -e is unreliable here: fetch_weights is invoked as `if ! fetch_weights`
+  # by its caller, and bash suppresses errexit for a function's ENTIRE body
+  # when the function is the tested command of an if/while condition. A
+  # failure inside must therefore be checked explicitly, not left to errexit,
+  # or it is silently swallowed and the completion marker below gets written
+  # for a download that never actually finished.
+  if ! HF_HUB_OFFLINE=0 HF_XET_HIGH_PERFORMANCE=1 MODEL_REPO="${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}" MODEL_DIR="$MODEL_DIR" python3 -c '
+import os
 from huggingface_hub import snapshot_download
-snapshot_download(
-    '${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}',
-    revision='${MODEL_REVISION:-main}',
-    local_dir='$MODEL_DIR',
-    max_workers=16,
-)"
+snapshot_download(os.environ["MODEL_REPO"], revision=os.environ.get("MODEL_REVISION") or "main", local_dir=os.environ["MODEL_DIR"], max_workers=16)'
+  then
+    echo "!!! weights download failed for ${MODEL_REPO:-?}"
+    return 1
+  fi
   printf '%s\n' "$_wanted_checkpoint" > "$_complete_marker"
   printf '%s' "${MODEL_REPO:-}" > "$MODEL_DIR/.download-repo" 2>/dev/null || true
   boot_note ">>> Weights ready (${MODEL_REPO:-?})."
@@ -723,10 +729,10 @@ MTP78_DRAFT_DIR=""
 
 fetch_mtp78_overlay() {
   [ -d "$MODEL_DIR/.mtp78-overlay/3bpw-keep0" ] && return 0
-  echo ">>> MTP78: downloading 3bpw-keep0 trellis overlay (~3.7 GB)"
-  HF_HUB_OFFLINE=0 python3 -c "
+  HF_HUB_OFFLINE=0 MODEL_DIR="$MODEL_DIR" python3 -c '
+import os
 from huggingface_hub import snapshot_download
-snapshot_download('malaiwah/GLM-5.2-EXL3-TR3-MTP78', allow_patterns=['3bpw-keep0/*'], local_dir='$MODEL_DIR/.mtp78-overlay', max_workers=8)"
+snapshot_download("malaiwah/GLM-5.2-EXL3-TR3-MTP78", allow_patterns=["3bpw-keep0/*"], local_dir=os.environ["MODEL_DIR"] + "/.mtp78-overlay", max_workers=8)'
 }
 
 prepare_nvfp4_mtp78_draft() {
@@ -874,13 +880,14 @@ sys.exit(0 if 'text_config' in c or any('Glm5v' in a for a in c.get('architectur
       status_update installing-vision
       echo ">>> Vision: downloading tower + projector + processor (~1 GB) from $VISION_REPO"
       vision_ok=1
-      HF_HUB_OFFLINE=0 python3 -c "
+      HF_HUB_OFFLINE=0 VISION_REPO="$VISION_REPO" MODEL_DIR="$MODEL_DIR" python3 -c '
+import os
 from huggingface_hub import snapshot_download
-snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
-  allow_patterns=['vision_tower.safetensors','mm_projector.safetensors','config.json',
-                  'configuration_glm5v.py','kimi_k25_processor.py','kimi_k25_vision_processing.py',
-                  'media_utils.py','preprocessor_config.json','chat_template.jinja',
-                  'plugins/**'], max_workers=8)" || vision_ok=0
+snapshot_download(os.environ["VISION_REPO"], local_dir=os.environ["MODEL_DIR"] + "/.vision",
+  allow_patterns=["vision_tower.safetensors","mm_projector.safetensors","config.json",
+                  "configuration_glm5v.py","kimi_k25_processor.py","kimi_k25_vision_processing.py",
+                  "media_utils.py","preprocessor_config.json","chat_template.jinja",
+                  "plugins/**"], max_workers=8)' || vision_ok=0
       if [ "$vision_ok" = "1" ]; then
         cp "$MODEL_DIR/.vision"/vision_tower.safetensors "$MODEL_DIR/.vision"/mm_projector.safetensors "$MODEL_DIR/" || vision_ok=0
         for f in configuration_glm5v.py kimi_k25_processor.py kimi_k25_vision_processing.py media_utils.py preprocessor_config.json; do
@@ -933,7 +940,7 @@ snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
     fi
   elif [ -f "$MODEL_DIR/.vision-enabled" ]; then
     echo ">>> VISION=0: reverting to text-only config"
-    python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert
+    python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert || true
     python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" --revert || true
     if [ -f "$MODEL_DIR/chat_template.jinja.text-only" ]; then
       # copy, not mv: the backup has to survive so a later VISION=1 -> 0 cycle
@@ -955,7 +962,18 @@ snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
 # DISK, so a transition cannot leave the config describing weights that are not
 # there. It is idempotent and cheap (safetensors headers only).
 prepare_checkpoint() {
-  fetch_weights
+  # Fix 4: a termination request during checkpoint prep (tens of minutes on
+  # first boot) would otherwise be invisible — the supervisor only checks
+  # TERMINATE_FLAG inside the post-serve monitoring loop. Abort prep early so
+  # the supervisor loop can handle the termination cleanly.
+  if [ -f "$TERMINATE_FLAG" ]; then return 0; fi
+  # Fix 3: fetch_weights runs under `set -e`; a download failure (network
+  # blip, bad HF_TOKEN, invalid MODEL_ID) would kill PID 1 immediately,
+  # bypassing the supervisor's restart/rollback loop. Catch it here instead.
+  if ! fetch_weights; then
+    echo "!!! checkpoint download failed; supervisor will retry"
+    return 1
+  fi
   # The MTP78 graft/overlay and the Glm5v vision wrapper are surgery on a GLM-5.2
   # checkpoint's layer 78 and config.json. They are meaningless — and would be
   # destructive — anywhere else, so they are gated on the family rather than on
@@ -1008,7 +1026,7 @@ prepare_checkpoint() {
         echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
     fi
   elif [ "${MODEL_FAMILY:-}" = "qwen36" ]; then
-    MODEL_DIR="$MODEL_DIR" MTP_TOKENS="${MTP_TOKENS:-0}" python3 - <<'PY'
+    if ! MODEL_DIR="$MODEL_DIR" MTP_TOKENS="${MTP_TOKENS:-0}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -1042,6 +1060,10 @@ if int(os.environ["MTP_TOKENS"]) > 0:
         )
 print(f">>> Qwen checkpoint verified: {architectures[0]}, ModelOpt {algorithm}")
 PY
+    then
+      echo "!!! checkpoint verification failed; supervisor will retry"
+      return 1
+    fi
   else
     echo ">>> ${MODEL_FAMILY:-glm52}: no checkpoint surgery (MTP78 graft and the vision"
     echo ">>> wrapper are GLM-5.2-specific); serving the downloaded weights as they are."
@@ -1756,7 +1778,10 @@ if [ "${SUPERVISOR:-1}" = "0" ]; then
   refresh_family_runtime_env
   apply_profile_runtime_env
   apply_tuning_overrides
-  prepare_checkpoint
+  if ! prepare_checkpoint; then
+    echo "!!! checkpoint preparation failed (SUPERVISOR=0: no retry loop here)" >&2
+    exit 1
+  fi
   compute_offload
   compute_vision_args
   warn_capture_window
@@ -1897,7 +1922,13 @@ while :; do
   refresh_family_runtime_env
   apply_profile_runtime_env
   apply_tuning_overrides
-  prepare_checkpoint
+  if ! prepare_checkpoint; then
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt "$MAXR" ]; then
+      break
+    fi
+    continue
+  fi
   compute_offload
   compute_vision_args
   warn_capture_window

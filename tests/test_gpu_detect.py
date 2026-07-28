@@ -8,7 +8,9 @@ production traffic, and the whole point of the module is that its logic is a
 pure function over the strings nvidia-smi would have produced.
 """
 import os
+import subprocess
 import sys
+from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "scripts"))
@@ -92,6 +94,33 @@ def main():
         dockerfile = handle.read()
     check("the stale public Vast onstart path remains a compatibility alias",
           "ln -sf model-turnkey-entry.sh /usr/local/bin/glm52-entry.sh" in dockerfile)
+
+    print("\n=== run_smi() exercises the actual subprocess call ===")
+    # Every test above injects a canned string into detect(), bypassing
+    # run_smi() entirely.  These tests mock subprocess.run so run_smi()'s
+    # own parsing and fallback logic is exercised.
+    csv_ok = subprocess.CompletedProcess(args=[], returncode=0, stdout=SMI4)
+    with patch("subprocess.run", return_value=csv_ok):
+        out = g.run_smi()
+    check("run_smi returns CSV output when nvidia-smi succeeds",
+          out == SMI4, f"got {out!r}")
+
+    # The --query-gpu form fails; run_smi must fall back to nvidia-smi -L.
+    csv_fail = subprocess.CompletedProcess(args=[], returncode=1, stdout="")
+    L_ok = subprocess.CompletedProcess(
+        args=[], returncode=0,
+        stdout="GPU 0: NVIDIA H200 (UUID: GPU-x)\nGPU 1: NVIDIA H200 (UUID: GPU-y)")
+    with patch("subprocess.run", side_effect=[csv_fail, L_ok]):
+        out = g.run_smi()
+    check("run_smi falls back to -L format on --query-gpu failure",
+          "GPU 0: NVIDIA H200" in out, f"got {out!r}")
+
+    # Both invocations fail (no GPU / nvidia-smi not installed).
+    fail = subprocess.CompletedProcess(args=[], returncode=1, stdout="")
+    with patch("subprocess.run", return_value=fail):
+        out = g.run_smi()
+    check("run_smi returns empty string when nvidia-smi is unavailable",
+          out == "", f"got {out!r}")
 
     print(f"\n{len(OKS)} passed, {len(FAILS)} failed")
     for f in FAILS:

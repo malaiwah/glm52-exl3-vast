@@ -14,6 +14,7 @@ a `$KNOB` reference in entrypoint.sh, a `%(KNOB)s` placeholder in a family's
 serve args, or an explicit entry in INDIRECT below saying who reads it and how.
 Adding a knob without wiring it fails here rather than on a rented GPU.
 """
+import inspect
 import os
 import re
 import sys
@@ -24,33 +25,74 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 
 import glm_config as gc  # noqa: E402
 
-# Knobs consumed somewhere other than the entrypoint's own text. Each needs a
-# reason, and the reason is checked where it can be.
+# Knobs consumed somewhere other than the entrypoint's own text.  Each entry is
+# machine-checkable so the claim is verified, not trusted:
+#   "derives": [KEY, ...]  each KEY must be emitted by gc.derive() AND referenced
+#                           in entrypoint.sh (the entrypoint reads the derived value)
+#   "serve_args": True      the knob is consumed by gc.family_serve_args() (the
+#                           function source is inspected for the key name)
+#   "landing": True         the knob is read by landing.py
+#   "config_env": True       the knob is exported via config_cli.py's env command
 INDIRECT = {
-    "MODEL_FAMILY": ("read by glm_config.resolve/derive to pick the family; the "
-                     "entrypoint consumes the derived FAMILY_ENV_BLOCK, "
-                     "FAMILY_SERVE_ARGS, SPEC_METHOD and MODEL_REPO"),
-    "MODEL_VARIANT": ("read by glm_config.derive to produce MODEL_REPO, "
-                      "MODEL_DIRNAME and the family's --quantization"),
-    "MODEL_ID": ("read by glm_config.derive to produce MODEL_REPO and "
-                 "MODEL_DIRNAME for the custom family"),
-    "QUANTIZATION": ("read by glm_config.family_serve_args for the custom "
-                     "profile's --quantization flag"),
-    "REASONING_PARSER": ("read by glm_config.family_serve_args for the custom "
-                         "profile's --reasoning-parser flag"),
-    "TOOL_CALL_PARSER": ("read by glm_config.family_serve_args for the custom "
-                         "profile's auto-tool-choice flags"),
-    "MULTIMODAL": ("read by glm_config.family_serve_args to add or omit "
-                   "--language-model-only"),
-    "CLAMP_ROPE_TABLES": ("read by glm_config.family_serve_args to add the "
-                          "served MAX_MODEL_LEN to GLM hf_overrides"),
-    "MODEL_OUTPUT_LIMIT": ("read by landing.deployment for generated client "
-                           "configuration and quick-chat max_tokens"),
-    "MTP_DRAFT": ("read by glm_config.derive, which turns it into MTP78_MODE, "
-                  "DRAFT_MODEL and DRAFT_QUANTIZATION — the three values the "
-                  "entrypoint actually consumes"),
-    "VLLM_EXL3_TRELLIS_MAX_M": ("exported as an engine env var by config.env and "
-                                "read by the EXL3 kernel, not by this script"),
+    "MODEL_FAMILY": {
+        "derives": ["FAMILY_ENV_BLOCK", "FAMILY_SERVE_ARGS", "SPEC_METHOD",
+                    "MODEL_REPO"],
+        "why": "read by glm_config.resolve/derive to pick the family; the "
+               "entrypoint consumes the derived values listed above",
+    },
+    "MODEL_VARIANT": {
+        "derives": ["MODEL_REPO", "MODEL_DIRNAME"],
+        "why": "read by glm_config.derive to produce MODEL_REPO and "
+               "MODEL_DIRNAME (the variant's --quantization reaches vLLM "
+               "through FAMILY_SERVE_ARGS, not the entrypoint's own text)",
+    },
+    "MODEL_ID": {
+        "derives": ["MODEL_REPO", "MODEL_DIRNAME"],
+        "why": "read by glm_config.derive to produce MODEL_REPO and "
+               "MODEL_DIRNAME for the custom family",
+    },
+    "MTP_DRAFT": {
+        "derives": ["MTP78_MODE", "DRAFT_MODEL", "DRAFT_QUANTIZATION"],
+        "why": "read by glm_config.derive, which turns it into MTP78_MODE, "
+               "DRAFT_MODEL and DRAFT_QUANTIZATION — the three values the "
+               "entrypoint actually consumes",
+    },
+    "QUANTIZATION": {
+        "serve_args": True,
+        "why": "read by glm_config.family_serve_args for the custom "
+               "profile's --quantization flag",
+    },
+    "REASONING_PARSER": {
+        "serve_args": True,
+        "why": "read by glm_config.family_serve_args for the custom "
+               "profile's --reasoning-parser flag",
+    },
+    "TOOL_CALL_PARSER": {
+        "serve_args": True,
+        "why": "read by glm_config.family_serve_args for the custom "
+               "profile's auto-tool-choice flags",
+    },
+    "MULTIMODAL": {
+        "serve_args": True,
+        "why": "read by glm_config.family_serve_args to add or omit "
+               "--language-model-only",
+    },
+    "CLAMP_ROPE_TABLES": {
+        "serve_args": True,
+        "why": "read by glm_config.family_serve_args to add the served "
+               "MAX_MODEL_LEN to GLM hf_overrides",
+    },
+    "MODEL_OUTPUT_LIMIT": {
+        "landing": True,
+        "why": "read by landing.deployment for generated client "
+               "configuration and quick-chat max_tokens",
+    },
+    "VLLM_EXL3_TRELLIS_MAX_M": {
+        "entrypoint": True,
+        "why": "exported and consumed by entrypoint.sh as an EXL3 kernel env "
+               "var (the config layer validates it; the entrypoint wires it to "
+               "the kernel through the serve env block)",
+    },
 }
 
 FAILURES, PASSED = [], []
@@ -83,7 +125,8 @@ def main():
         indirect = key in INDIRECT
         where = ("entrypoint.sh" if in_entry else
                  "family serve args" if in_family else
-                 "indirect: " + INDIRECT.get(key, "") if indirect else "NOWHERE")
+                 "indirect: " + INDIRECT.get(key, {}).get("why", "") if indirect
+                 else "NOWHERE")
         check(f"{key} is consumed ({where[:60]})",
               in_entry or in_family or indirect,
               "declared in the registry but read by nothing")
@@ -113,6 +156,35 @@ def main():
     check("FAMILY_SERVE_ARGS is emitted as an array and expanded in the serve line",
           "FAMILY_SERVE_ARGS" in derived
           and "${FAMILY_SERVE_ARGS[@]" in entry)
+
+    print("\n=== indirect knobs: their claims are verified, not trusted ===")
+    # Each INDIRECT entry now carries a machine-checkable spec.  The free-text
+    # explanations that used to be here could rot silently — a derived key
+    # renamed or an entrypoint rewrite would leave the claim stale.  Now we
+    # assert the claim against the real source.
+    serve_args_src = inspect.getsource(gc.family_serve_args)
+    config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
+    for knob, spec in sorted(INDIRECT.items()):
+        for dk in spec.get("derives", []):
+            check(f"{knob} derives {dk}: emitted by derive()",
+                  dk in derived, f"{dk} not in derive() output keys")
+            check(f"{knob} derives {dk}: referenced in entrypoint.sh",
+                  bool(re.search(r"\$\{?" + re.escape(dk) + r"[:}\s=\[@]", entry)),
+                  f"{dk} not referenced in entrypoint.sh")
+        if spec.get("serve_args"):
+            check(f"{knob} is consumed by family_serve_args()",
+                  knob in serve_args_src,
+                  f"{knob} not found in family_serve_args source")
+        if spec.get("landing"):
+            check(f"{knob} is read by landing.py",
+                  knob in landing, f"{knob} not found in landing.py")
+        if spec.get("config_env"):
+            check(f"{knob} is exported by config_cli.py",
+                  knob in config_cli, f"{knob} not found in config_cli.py")
+        if spec.get("entrypoint"):
+            check(f"{knob} is consumed by entrypoint.sh",
+                  bool(re.search(r"\$\{?" + re.escape(knob) + r"[:}\s=\[@]", entry)),
+                  f"{knob} not found in entrypoint.sh")
 
     print("\n=== knobs the landing page must not silently hardcode ===")
     # The header used to advertise "512K context / MTP-3 / 4x RTX PRO 6000"

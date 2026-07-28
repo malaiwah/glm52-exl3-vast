@@ -30,8 +30,10 @@ import re
 import ssl
 import sys
 import time
-
+import urllib.error
 import urllib.request
+import http.client
+import socket
 
 FILLER = [
     "The maintenance log for bay {i} recorded nominal pressure and no operator action.",
@@ -42,6 +44,26 @@ FILLER = [
 ]
 CITIES = ["Kyoto", "Reykjavik", "Valparaiso", "Ouagadougou", "Trondheim",
           "Montevideo", "Samarkand", "Wellington"]
+
+# Bounded retry for transient HTTP failures so a single dropped connection or
+# timeout does not roll back a known-good config. Non-transient failures
+# (e.g. 4xx auth errors) are never retried.
+TRANSIENT_RETRIES = 2
+TRANSIENT_BACKOFF_S = 5.0
+
+
+def _is_transient(exc):
+    """True for failures worth retrying: connection/timeout errors and 5xx.
+
+    urllib.error.HTTPError is a subclass of URLError, so the HTTPError branch
+    must come first; a 4xx response is a definitive failure, not transient.
+    """
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code >= 500
+    if isinstance(exc, (urllib.error.URLError, TimeoutError, ConnectionError,
+                        socket.timeout, OSError, http.client.HTTPException)):
+        return True
+    return False
 
 
 def _req(url, payload=None, key="", timeout=60):
@@ -195,8 +217,18 @@ def build_haystack(target_tokens, depths, seed=20260726):
     """Filler with codes buried at fractional depths. Returns (text, [(city, code)])."""
     rng = random.Random(seed)
     needles = []
-    for d in depths:
-        city = CITIES[len(needles) % len(CITIES)]
+    if len(depths) > len(CITIES):
+        sys.stderr.write(
+            f"warning: {len(depths)} depths requested but only {len(CITIES)} "
+            f"city names available; assigning suffixed names to keep needles "
+            f"distinct.\n")
+    for index, d in enumerate(depths):
+        # Each needle must address a unique city so the retrieval question
+        # never asks for the same name twice. When there are more depths than
+        # city names, append a numeric suffix (e.g. "Kyoto-2") to keep the
+        # labels distinct instead of silently colliding.
+        base_city = CITIES[index % len(CITIES)]
+        city = base_city if index < len(CITIES) else f"{base_city}-{index // len(CITIES) + 1}"
         code = "%s-%04d" % ("".join(rng.choice("ABCDEFGHJKLMNPQRSTUVWXYZ") for _ in range(3)),
                             rng.randrange(1000, 9999))
         needles.append((city, code, d))
@@ -214,9 +246,9 @@ def build_haystack(target_tokens, depths, seed=20260726):
     return body, [(c, k) for c, k, _ in needles]
 
 
-def needle_probe(base, key, model, target_tokens, depths, timeout=600,
-                 seed=20260726):
-    """One prefill, all depths — the harness shape that found the 490K result."""
+def _needle_probe_once(base, key, model, target_tokens, depths, timeout,
+                       seed):
+    """Single needle-probe attempt; may raise on a transient failure."""
     started = time.perf_counter()
     build_target = target_tokens
     text, needles = build_haystack(build_target, depths, seed)
@@ -255,6 +287,29 @@ def needle_probe(base, key, model, target_tokens, depths, timeout=600,
     }
 
 
+def needle_probe(base, key, model, target_tokens, depths, timeout=600,
+                 seed=20260726):
+    """One prefill, all depths — the harness shape that found the 490K result.
+
+    A single transient network failure is retried once so a dropped connection
+    during a long, expensive prefill does not by itself fail a good config.
+    Non-transient failures (e.g. a 4xx auth error) propagate immediately; the
+    caller decides how to record them.
+    """
+    last_error = None
+    for attempt in range(2):
+        try:
+            return _needle_probe_once(base, key, model, target_tokens, depths,
+                                      timeout, seed)
+        except Exception as exc:
+            last_error = exc
+            if attempt == 0 and _is_transient(exc):
+                time.sleep(TRANSIENT_BACKOFF_S)
+                continue
+            break
+    raise last_error
+
+
 SHORT_CHECKS = [
     ("arithmetic", "What is 17 * 23? Reply with only the number.", r"\b391\b"),
     ("factual", "What is the capital of France? Reply with only the city name.", r"(?i)paris"),
@@ -265,10 +320,27 @@ SHORT_CHECKS = [
 def short_probe(base, key, model, timeout=180):
     checks = []
     for name, prompt, expect in SHORT_CHECKS:
-        try:
-            answer = complete(base, key, model, prompt, max_tokens=32, timeout=timeout)
-        except Exception as e:
-            checks.append({"name": name, "ok": False, "detail": f"request failed: {e}"})
+        # Retry transient failures (connection/timeout) a bounded number of
+        # times so a single blip does not fail a good config. Non-transient
+        # failures (e.g. 4xx auth errors) fail immediately — retrying those
+        # would only mask a genuinely broken configuration.
+        answer = None
+        error = None
+        for attempt in range(TRANSIENT_RETRIES + 1):
+            try:
+                answer = complete(base, key, model, prompt, max_tokens=32,
+                                   timeout=timeout)
+                error = None
+                break
+            except Exception as e:
+                error = e
+                if attempt < TRANSIENT_RETRIES and _is_transient(e):
+                    time.sleep(TRANSIENT_BACKOFF_S)
+                    continue
+                break
+        if error is not None:
+            checks.append({"name": name, "ok": False,
+                           "detail": f"request failed: {error}"})
             continue
         bad = degenerate(answer)
         ok = bool(re.search(expect, answer)) and not bad
@@ -293,6 +365,8 @@ def main(argv):
     ap.add_argument("--timeout", type=int, default=2400, help="seconds to wait for /health")
     ap.add_argument("--pid", default="")
     ap.add_argument("--skip-long-context", action="store_true")
+    ap.add_argument("--needle-timeout", type=int, default=600,
+                    help="per-request timeout for the needle probe, seconds")
     args = ap.parse_args(argv)
     if args.api_key_env:
         args.api_key = os.environ.get(args.api_key_env, "")
@@ -356,7 +430,8 @@ def main(argv):
 
     depths = [float(d) for d in args.depths.split(",") if d.strip()]
     try:
-        lc = needle_probe(base, args.api_key, args.model, budget, depths)
+        lc = needle_probe(base, args.api_key, args.model, budget, depths,
+                          timeout=args.needle_timeout)
     except Exception as e:
         lc = {"attempted": True, "ok": False, "detail": f"probe failed: {e}"}
     verdict["long_context"] = lc

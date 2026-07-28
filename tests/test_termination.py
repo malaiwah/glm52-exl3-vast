@@ -24,6 +24,7 @@ import io
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -51,6 +52,7 @@ def check(name, cond, detail=""):
     else:
         FAILURES.append((name, detail))
         print(f"  FAIL {name} {detail}")
+        raise AssertionError(detail)
 
 
 def section(title):
@@ -213,7 +215,7 @@ def test_runpod_terminate():
     provider.shutil.which = lambda name: None
     try:
         t = StubTransport([(403, '{"error":"forbidden"}'),
-                           (200, '{"data":{"podTerminate":null}}')])
+                           (200, '{"data":{"podTerminate":"pod-abc123"}}')])
         res = p.terminate(t)
     finally:
         provider.shutil.which = real_which
@@ -338,7 +340,10 @@ def test_runpod_probe_and_volume():
                   for w in provider.get(RUNPOD_ENV).warnings()),
           str(provider.get(RUNPOD_ENV).warnings()))
 
-    # MEASURED success shape of the mutation: data.podTerminate is null
+    # MEASURED success shape of the mutation (live pod, 2026-07-26): the
+    # podTerminate mutation returns Void, so a real success is
+    # {"data":{"podTerminate":null}} — null IS success; what matters is that
+    # the `podTerminate` key is present with no top-level `errors`.
     t = StubTransport([(403, "no"), (200, '{"data":{"podTerminate":null}}')])
     real_which = provider.shutil.which
     provider.shutil.which = lambda name: None
@@ -348,6 +353,16 @@ def test_runpod_probe_and_volume():
         provider.shutil.which = real_which
     check("{'data':{'podTerminate':null}} is the measured SUCCESS shape",
           res["ok"] is True, json.dumps(res)[:200])
+    provider.shutil.which = lambda name: None
+    try:
+        res_missing = provider.get(RUNPOD_ENV).terminate(
+            StubTransport([(403, "no"), (200, '{"data":{}}')]))
+    finally:
+        provider.shutil.which = real_which
+    check("a response missing the podTerminate key is NOT success",
+          not res_missing["ok"], json.dumps(res_missing)[:200])
+    check("and the failure detail does not falsely claim acceptance",
+          "accepted" not in res_missing["detail"].lower(), res_missing["detail"])
 
     p = provider.get(dict(RUNPOD_ENV, RUNPOD_VOLUME_ID="vol-xyz"))
     warns = " ".join(p.warnings())
@@ -577,15 +592,22 @@ def test_worker_dry_run(tmp):
     section("dry run")
     env = worker_env(tmp, TERMINATE_ENABLED="1", TERMINATE_DRY_RUN="1")
     gc.init_switches({"TERMINATE_ENABLED": "1"})
-    t = provider.HttpTransport  # guarded class; the worker must not build one
+    stopper_calls = []
+    def _stub_stopper(pr):
+        stopper_calls.append(1)
+        return (True, "stub")
     doc = terminate_worker.run(
         {"confirm": "9876543", "erase": False},
         transport=StubTransport([(0, '{"dry_run": true}')]),
-        stopper=lambda pr: (True, "stub"), env=env)
+        stopper=_stub_stopper, env=env)
     check("dry run is recorded in the progress doc", doc["dry_run"] is True)
     check("and reported as success without claiming destruction",
           doc["ok"] is True and "DRY RUN" in doc["detail"], doc["detail"])
-    del t
+    check("dry run does NOT call the real stopper", stopper_calls == [],
+          f"stopper was called {len(stopper_calls)} time(s)")
+    check("dry run does not leave a request-stop flag",
+          not os.path.isfile(terminate_worker.p_request_stop()),
+          "the request-stop flag should not exist in a dry run")
 
 
 # --------------------------------------------------------------------------
@@ -784,6 +806,14 @@ def test_erase_keeps_progress_file(tmp):
 # 6. the landing page: auth, confirmation, locked refusal
 # --------------------------------------------------------------------------
 
+def _free_port():
+    """Bind to port 0, read the OS-assigned port, release it for the landing page."""
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
 def http(method, path, data=None, port=18333):
     url = f"http://127.0.0.1:{port}{path}"
     body = data.encode() if data else None
@@ -811,13 +841,13 @@ def test_landing(tmp):
     section("landing page: auth, confirmation, locked refusal")
     root = os.path.join(tmp, "inst5")
     build_fake_instance(root)
-    env = dict(os.environ)
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", ""),
+            "LANG": os.environ.get("LANG", "C"), "LC_ALL": os.environ.get("LC_ALL", "C")}
     env.update(erase_env(root))
     env.update(VAST_ENV)
+    port = _free_port()
     env.update({"OPEN_BUTTON_TOKEN": "tok", "LANDING_ALLOW_INSECURE": "1",
-                "LANDING_PORT": "18333", "GLM_SCRIPTS_DIR": os.path.join(REPO, "scripts"),
-                # kill switch ON so the confirmation logic is reachable; the
-                # provider is stubbed by never letting a real POST through.
+                "LANDING_PORT": str(port), "GLM_SCRIPTS_DIR": os.path.join(REPO, "scripts"),
                 "TERMINATE_ENABLED": "1"})
     # the page reads switches from the runtime dir; seed it as a container start would
     subprocess.run([sys.executable, os.path.join(REPO, "scripts", "config_cli.py"),
@@ -826,11 +856,11 @@ def test_landing(tmp):
                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         for _ in range(60):
-            if http("GET", "/?token=tok")[0] == 200:
+            if http("GET", "/?token=tok", port=port)[0] == 200:
                 break
             time.sleep(0.25)
 
-        headers = {k.lower(): v for k, v in http_headers("/?token=tok").items()}
+        headers = {k.lower(): v for k, v in http_headers("/?token=tok", port=port).items()}
         check("credential-bearing landing responses are not cached",
               headers.get("cache-control") == "no-store", str(headers))
         check("landing capability tokens are not sent as referrers",
@@ -838,14 +868,15 @@ def test_landing(tmp):
         check("the landing page cannot be framed",
               headers.get("x-frame-options") == "DENY", str(headers))
 
-        code, _ = http("GET", "/terminate")
+        code, _ = http("GET", "/terminate", port=port)
         check("GET /terminate with no token is refused", code == 403, str(code))
-        code, _ = http("GET", "/terminate?token=wrong")
+        code, _ = http("GET", "/terminate?token=wrong", port=port)
         check("GET /terminate with a wrong token is refused", code == 403, str(code))
-        code, body = http("POST", "/terminate", "confirm=9876543&understand=1")
+        code, body = http("POST", "/terminate", "confirm=9876543&understand=1", port=port)
         check("POST /terminate with no token is refused", code == 403, str(code))
+        time.sleep(0.5)  # let the handler thread clean up after the 403
 
-        code, body = http("GET", "/terminate?token=tok")
+        code, body = http("GET", "/terminate?token=tok", port=port)
         check("the confirmation page renders", code == 200, str(code))
         check("it shows the instance id to type", "9876543" in body)
         check("it says irreversible", "irreversible" in body.lower())
@@ -858,11 +889,11 @@ def test_landing(tmp):
               "wear levelling" in body and "network volume" in body)
 
         code, body = http("POST", "/terminate?token=tok",
-                          "token=tok&confirm=9876543")
+                          "token=tok&confirm=9876543", port=port)
         check("POST without the understand checkbox does nothing",
               code == 200 and "did not tick the box" in body, str(code))
         code, body = http("POST", "/terminate?token=tok",
-                          "token=tok&understand=1&confirm=WRONG")
+                          "token=tok&understand=1&confirm=WRONG", port=port)
         check("POST with a wrong typed confirmation does nothing",
               code == 200 and "did not match" in body, str(code))
         check("no worker was started",
@@ -870,21 +901,24 @@ def test_landing(tmp):
 
         # now LOCK it through the UI ratchet, and prove a perfect request fails
         code, body = http("POST", "/terminate/lock?token=tok",
-                          "token=tok&understand=1&action=lock")
+                          "token=tok&understand=1&action=lock", port=port)
         check("the lock button locks", code == 200 and "now LOCKED" in body, body[:200])
         code, body = http("POST", "/terminate?token=tok",
-                          "token=tok&understand=1&confirm=9876543")
+                          "token=tok&understand=1&confirm=9876543", port=port)
         check("a LOCKED instance refuses a perfect request",
               code == 200 and "LOCKED" in body, body[:300])
         check("still no worker started",
               not os.path.isfile(os.path.join(root, "run", "terminate.json")))
-        code, body = http("GET", "/terminate/status?token=tok")
+        code, body = http("GET", "/terminate/status?token=tok", port=port)
         st = json.loads(body)
         check("status endpoint reports the lock",
               st["switches"]["locked"] is True and st["allowed"] is False, body[:200])
     finally:
         proc.terminate()
-        proc.wait(timeout=10)
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
     shutil.rmtree(root, ignore_errors=True)
 
 
@@ -892,11 +926,12 @@ def test_landing_unknown_provider(tmp):
     section("landing page on an unidentified provider")
     root = os.path.join(tmp, "inst6")
     build_fake_instance(root)
-    env = {k: v for k, v in os.environ.items()
-           if k not in ("CONTAINER_ID", "CONTAINER_API_KEY", "RUNPOD_POD_ID")}
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", ""),
+            "LANG": os.environ.get("LANG", "C"), "LC_ALL": os.environ.get("LC_ALL", "C")}
     env.update(erase_env(root))
+    port = _free_port()
     env.update({"OPEN_BUTTON_TOKEN": "tok", "LANDING_ALLOW_INSECURE": "1",
-                "LANDING_PORT": "18334", "GLM_SCRIPTS_DIR": os.path.join(REPO, "scripts"),
+                "LANDING_PORT": str(port), "GLM_SCRIPTS_DIR": os.path.join(REPO, "scripts"),
                 "TERMINATE_ENABLED": "1", "TERMINATE_PROVIDER": ""})
     subprocess.run([sys.executable, os.path.join(REPO, "scripts", "config_cli.py"),
                     "snapshot-env"], env=env, capture_output=True)
@@ -904,10 +939,10 @@ def test_landing_unknown_provider(tmp):
                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         for _ in range(60):
-            if http("GET", "/?token=tok", port=18334)[0] == 200:
+            if http("GET", "/?token=tok", port=port)[0] == 200:
                 break
             time.sleep(0.25)
-        code, body = http("GET", "/terminate?token=tok", port=18334)
+        code, body = http("GET", "/terminate?token=tok", port=port)
         check("page renders", code == 200, str(code))
         check("says termination is not supported here",
               "not supported here" in body, body[:300])
@@ -923,34 +958,44 @@ def test_landing_unknown_provider(tmp):
 
 # --------------------------------------------------------------------------
 
+def _run(test, *args):
+    """Run one test_*(); an AssertionError is already recorded by check(), so
+    swallow it here so the direct-invocation path continues and exits 1 via
+    main()'s FAILURES check. pytest still sees the raised AssertionError."""
+    try:
+        test(*args)
+    except AssertionError:
+        pass
+
+
 def main():
-    test_transport_refuses_unarmed()
+    _run(test_transport_refuses_unarmed)
     # From here on, constructing a real transport is a test failure.
     provider.HttpTransport = _NoRealTransport
 
     tmp = tempfile.mkdtemp(prefix="glm-term-test-")
     saved_env = dict(os.environ)
     try:
-        test_detection()
-        test_unknown_provider_degrades()
-        test_vast_terminate()
-        test_runpod_terminate()
-        test_runpod_probe_and_volume()
-        test_pid1_env(tmp)
-        test_failure_reporting()
-        test_switch_defaults(tmp)
-        test_state_file_cannot_set_switches(tmp)
-        test_ratchet(tmp)
-        test_worker_gates(tmp)
-        test_worker_happy_path(tmp)
-        test_worker_dry_run(tmp)
-        test_erase_plan(tmp)
-        test_erase_without_manifest(tmp)
-        test_erase_execution(tmp)
-        test_erase_keeps_progress_file(tmp)
-        test_no_secret_written_world_readable(tmp)
-        test_landing(tmp)
-        test_landing_unknown_provider(tmp)
+        _run(test_detection)
+        _run(test_unknown_provider_degrades)
+        _run(test_vast_terminate)
+        _run(test_runpod_terminate)
+        _run(test_runpod_probe_and_volume)
+        _run(test_pid1_env, tmp)
+        _run(test_failure_reporting)
+        _run(test_switch_defaults, tmp)
+        _run(test_state_file_cannot_set_switches, tmp)
+        _run(test_ratchet, tmp)
+        _run(test_worker_gates, tmp)
+        _run(test_worker_happy_path, tmp)
+        _run(test_worker_dry_run, tmp)
+        _run(test_erase_plan, tmp)
+        _run(test_erase_without_manifest, tmp)
+        _run(test_erase_execution, tmp)
+        _run(test_erase_keeps_progress_file, tmp)
+        _run(test_no_secret_written_world_readable, tmp)
+        _run(test_landing, tmp)
+        _run(test_landing_unknown_provider, tmp)
     finally:
         os.environ.clear()
         os.environ.update(saved_env)

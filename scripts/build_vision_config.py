@@ -52,7 +52,10 @@ if "hybrid_tr3_tail" in text_cfg:
     merged["hybrid_tr3_tail"] = text_cfg["hybrid_tr3_tail"]
 merged["architectures"] = ["Glm5vForConditionalGeneration"]
 
-json.dump(merged, open(CFG, "w"), indent=1)
+_cfg_tmp = CFG + ".tmp"
+with open(_cfg_tmp, "w") as f:
+    json.dump(merged, f, indent=1)
+os.replace(_cfg_tmp, CFG)
 open(os.path.join(model_dir, ".vision-enabled"), "w").write("glm5v\n")
 print(f"vision config built: arch={merged['architectures'][0]} "
       f"text_arch={text_cfg.get('architectures')} "

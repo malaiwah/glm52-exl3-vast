@@ -160,7 +160,14 @@ def public_manifest(model_dir):
 
 def _is_derived(rel):
     top = rel.split(os.sep)[0]
-    return top in DERIVED_UNDER_MODEL or rel.endswith(DERIVED_SUFFIXES)
+    if top in DERIVED_UNDER_MODEL:
+        return True
+    # The backup suffixes (.orig/.text-only/.pre-qa-ignore-backup) are only ever
+    # written by this template directly under the model dir (e.g. config.json.orig,
+    # model.safetensors.index.json.text-only). Anchor the match to top-level
+    # files so a user's own file nested in a subdirectory — or sharing a suffix
+    # by accident — is not silently skipped and left unerased.
+    return os.sep not in rel and rel.endswith(DERIVED_SUFFIXES)
 
 
 def user_files_under_model(model_dir):
@@ -187,7 +194,12 @@ def user_files_under_model(model_dir):
                 size = os.path.getsize(path)
             except OSError:
                 continue
-            if manifest is None and size >= LARGE_FILE_MB * (1 << 20):
+            if size >= LARGE_FILE_MB * (1 << 20):
+                # A large file we cannot tie to the public checkpoint is REPORTED,
+                # not erased — a 4 GiB adapter is far more likely yours than the
+                # model's. This safety net applies whether or not a manifest is
+                # present: a manifest only proves which files came from the Hub,
+                # it does not make a large unknown file safe to overwrite.
                 unknown_large.append({"path": path, "size": size})
                 continue
             targets.append({"path": path, "size": size, "group": "user-files",
@@ -282,10 +294,14 @@ def plan(paths=None, keep=()):
 
     # 3. configuration state ----------------------------------------------
     for name in ("config.json", "known-good.json", "apply-state.json",
-                 "verify-last.json", "checkpoint-baseline.json",
-                 "terminate-switches.json"):
+                 "verify-last.json", "checkpoint-baseline.json"):
         _add(targets, os.path.join(p.state_dir, name), "config-state",
              "your saved configuration and its history", seen)
+    # terminate-switches.json lives in the per-container runtime dir, not the
+    # persisted state dir (glm_config.p_switches) — it is the opted-in state
+    # of the terminate control and must be erased with this container.
+    _add(targets, gc.p_switches(), "config-state",
+         "terminate switches — the opted-in state of the terminate control", seen)
     _add_tree(targets, os.path.join(p.state_dir, "failures"), "config-state",
               "preserved failed configurations, their boot logs and the model's "
               "written analysis of them", seen)

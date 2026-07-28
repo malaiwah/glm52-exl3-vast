@@ -44,7 +44,9 @@ for f in (LSHARD, IDX, CFG):
     src = os.path.join(model_dir, f)
     bak = src + ".orig"
     if not os.path.exists(bak):
-        shutil.copy2(src, bak)
+        tmp_bak = bak + ".tmp"
+        shutil.copy2(src, tmp_bak)
+        os.replace(tmp_bak, bak)
 
 # merged replacement shard: 23 non-expert layer-78 tensors + all trellis
 tensors = {}
@@ -70,7 +72,10 @@ for k in tensors:
 idx["weight_map"] = wm
 idx["metadata"]["total_size"] = sum(
     os.path.getsize(os.path.join(model_dir, s)) for s in set(wm.values()))
-json.dump(idx, open(os.path.join(model_dir, IDX), "w"))
+_idx_tmp = os.path.join(model_dir, IDX + ".tmp")
+with open(_idx_tmp, "w") as f:
+    json.dump(idx, f)
+os.replace(_idx_tmp, os.path.join(model_dir, IDX))
 
 # config: span the MTP layer + stop ignoring it
 cfg = json.load(open(os.path.join(model_dir, CFG + ".orig")))
@@ -79,7 +84,19 @@ if t and int(t["moe_layers"][1]) < 78:
     t["moe_layers"] = [int(t["moe_layers"][0]), 78]
 ig = cfg.get("quantization_config", {}).get("ignore", [])
 cfg["quantization_config"]["ignore"] = [p for p in ig if "layers.78" not in p]
-json.dump(cfg, open(os.path.join(model_dir, CFG), "w"), indent=1)
+# Glm5v wrapper nests the text config; keep its MTP fields in sync too
+if isinstance(cfg.get("text_config"), dict):
+    _tc = cfg["text_config"]
+    _tt = _tc.get("hybrid_tr3_tail")
+    if _tt and int(_tt["moe_layers"][1]) < 78:
+        _tt["moe_layers"] = [int(_tt["moe_layers"][0]), 78]
+    _tq = _tc.get("quantization_config")
+    if _tq is not None:
+        _tq["ignore"] = [p for p in _tq.get("ignore", []) if "layers.78" not in p]
+_cfg_tmp = os.path.join(model_dir, CFG + ".tmp")
+with open(_cfg_tmp, "w") as f:
+    json.dump(cfg, f, indent=1)
+os.replace(_cfg_tmp, os.path.join(model_dir, CFG))
 
 open(os.path.join(model_dir, ".mtp78-grafted"), "w").write("3bpw-keep0\n")
 print("MTP78-GRAFT-OK (trellis draft active; ~3.8 GB/GPU freed for KV)")

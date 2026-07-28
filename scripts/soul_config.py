@@ -32,8 +32,8 @@ TIMEZONE_DEFAULT = "UTC"
 SECRET_PATTERNS = (
     (re.compile(r"(?i)\b(authorization\s*:\s*)(?:bearer|basic)\s+\S+"), r"\1[REDACTED]"),
     (re.compile(
-        r"(?i)\b((?:[A-Za-z][A-Za-z0-9_-]*[_-])?"
-        r"(?:api[-_]?key|token|secret|password|private[-_]?key|authorization))"
+        r"(?i)(?<![A-Za-z0-9])"
+        r"(api[-_]?key|secret[-_]?key|private[-_]?key|token|secret|password|pass|pwd|authorization)"
         r"(\s*[=:]\s*)"
         r"(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"),
      r"\1\2[REDACTED]"),
@@ -45,7 +45,7 @@ SECRET_PATTERNS = (
     (re.compile(r"(?i)(https?://[^\s?#]+[?&](?:token|access_token|key|api_key|"
                 r"signature|sig|x-amz-signature)=)[^&#\s]+"),
      r"\1[REDACTED]"),
-    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+    (re.compile(r"(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
                 re.DOTALL), "[REDACTED PRIVATE KEY]"),
     (re.compile(r"\b(?:hf_|sk-)[A-Za-z0-9_-]{12,}\b"), "[REDACTED TOKEN]"),
     (re.compile(r"\bAKIA[A-Z0-9]{16}\b"), "[REDACTED AWS KEY]"),
@@ -59,7 +59,7 @@ def _secret_key(name: Any) -> bool:
     normalized = re.sub(r"[-\s]+", "_", str(name).strip().lower())
     parts = normalized.split("_")
     return (
-        any(part in {"token", "secret", "password", "authorization"} for part in parts)
+        any(part in {"token", "secret", "password", "pass", "pwd", "authorization"} for part in parts)
         or normalized.endswith(("api_key", "apikey", "private_key", "secret_access_key"))
     )
 

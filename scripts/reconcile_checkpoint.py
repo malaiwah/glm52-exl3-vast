@@ -69,10 +69,28 @@ PACKED_TRELLIS_RE = re.compile(
 
 def tensor_names(path):
     """Tensor names straight from the safetensors header (8-byte LE length +
-    JSON). No torch, no safetensors package — this must run early in boot."""
+    JSON). No torch, no safetensors package — this must run early in boot.
+
+    Also validates that the file is not truncated: the declared tensor data
+    offsets must fit inside the bytes actually on disk. A truncated shard
+    raises ValueError so the callers (which already catch it) treat the shard
+    as unusable instead of silently building an index that misses tensors."""
     with open(path, "rb") as fh:
         (hdr_len,) = struct.unpack("<Q", fh.read(8))
         header = json.loads(fh.read(hdr_len))
+    header_offset = 8 + hdr_len
+    end = 0
+    for k, v in header.items():
+        if k == "__metadata__":
+            continue
+        offs = v.get("data_offsets") if isinstance(v, dict) else None
+        if offs and len(offs) == 2:
+            end = max(end, int(offs[1]))
+    if os.path.getsize(path) < header_offset + end:
+        raise ValueError(
+            "truncated safetensors: %s declares %d bytes of tensor data but "
+            "only %d bytes are on disk" % (path, header_offset + end,
+                                            os.path.getsize(path)))
     return [k for k in header if k != "__metadata__"]
 
 
@@ -152,9 +170,14 @@ def baseline(model_dir, current_text, log):
     is only trusted for moe_layers if it does NOT already say 78 — that is the
     grafted value, and taking it would re-introduce exactly the stale-snapshot
     bug this file exists to fix."""
+    current_checkpoint_id = os.environ.get("MODEL_REPO") or os.path.realpath(model_dir)
     cached = gc.read_json(gc.p_baseline())
-    if cached.get("moe_layers") and cached.get("captured"):
+    if (cached.get("moe_layers") and cached.get("captured")
+            and cached.get("checkpoint_id") == current_checkpoint_id):
         return cached
+    if cached.get("captured") and cached.get("checkpoint_id") != current_checkpoint_id:
+        log(f">>> reconcile: discarding stale baseline cache (was for "
+            f"{cached.get('checkpoint_id')!r}, now {current_checkpoint_id!r})")
 
     candidates = [("config.json.orig", os.path.join(model_dir, CFG + ".orig")),
                   ("config.json.text-only", os.path.join(model_dir, CFG + ".text-only"))]
@@ -189,7 +212,8 @@ def baseline(model_dir, current_text, log):
         log("!!! reconcile: no layer-78 entries found in any quantization_config.ignore "
             "backup; a BF16 layer 78 will not be re-added to the ignore list.")
 
-    doc = {"captured": True, "moe_layers": moe, "moe_layers_source": moe_src,
+    doc = {"captured": True, "checkpoint_id": current_checkpoint_id,
+           "moe_layers": moe, "moe_layers_source": moe_src,
            "layer78_ignore": ign, "layer78_ignore_source": ign_src,
            "architectures": current_text.get("architectures")}
     gc.write_json_atomic(gc.p_baseline(), doc, mode=0o644)

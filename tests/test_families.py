@@ -28,6 +28,7 @@ def check(name, cond, detail=""):
     print(("  ok   " if cond else "  FAIL ") + name + ("" if cond else f"  {detail}"))
     if not cond:
         FAILURES[-1] = (name, detail)
+        raise AssertionError(detail)
 
 
 def section(t):
@@ -623,6 +624,16 @@ def test_env_layer_still_wins_over_family():
           src["TENSOR_PARALLEL_SIZE"] == "default")
 
 
+def run(test):
+    """Run one test_* function. A failing check() raises AssertionError
+    after recording the failure; swallow it here so the rest of the
+    suite still runs and main() still returns 1 on any failure."""
+    try:
+        test()
+    except AssertionError:
+        pass
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="glm-fam-test-")
     saved = dict(os.environ)
@@ -631,18 +642,18 @@ def main():
     os.makedirs(os.environ["GLM_STATE_DIR"], exist_ok=True)
     os.makedirs(os.environ["GLM_RUNTIME_DIR"], exist_ok=True)
     try:
-        test_glm_release_defaults()
-        test_glm_release_integration()
-        test_glm_max_context_profile()
-        test_madeby561_hybrid()
-        test_qwen_preset()
-        test_custom_profile()
-        test_inapplicable_knobs()
-        test_rules_are_family_scoped()
-        test_family_coherence_rules()
-        test_gpu_count_gate()
-        test_long_context_gate_is_family_independent()
-        test_env_layer_still_wins_over_family()
+        run(test_glm_release_defaults)
+        run(test_glm_release_integration)
+        run(test_glm_max_context_profile)
+        run(test_madeby561_hybrid)
+        run(test_qwen_preset)
+        run(test_custom_profile)
+        run(test_inapplicable_knobs)
+        run(test_rules_are_family_scoped)
+        run(test_family_coherence_rules)
+        run(test_gpu_count_gate)
+        run(test_long_context_gate_is_family_independent)
+        run(test_env_layer_still_wins_over_family)
     finally:
         os.environ.clear()
         os.environ.update(saved)

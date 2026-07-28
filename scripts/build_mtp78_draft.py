@@ -77,7 +77,8 @@ if "text_config" in cfg and isinstance(cfg["text_config"], dict):
     if outer_quant and not cfg.get("quantization_config"):
         cfg["quantization_config"] = outer_quant
     cfg.pop("auto_map", None)
-cfg.setdefault("hybrid_tr3_tail", {})["moe_layers"] = [3, 78]
+_src_moe = cfg.get("hybrid_tr3_tail", {}).get("moe_layers") or [3]
+cfg.setdefault("hybrid_tr3_tail", {})["moe_layers"] = [int(_src_moe[0]), 78]
 q = cfg.get("quantization_config") or {}
 if q:
     q["ignore"] = [x for x in (q.get("ignore") or [])
@@ -94,7 +95,21 @@ import struct  # noqa: E402
 def tensor_names(path):
     with open(path, "rb") as fh:
         (hdr_len,) = struct.unpack("<Q", fh.read(8))
-        return [k for k in json.loads(fh.read(hdr_len)) if k != "__metadata__"]
+        header = json.loads(fh.read(hdr_len))
+    header_offset = 8 + hdr_len
+    end = 0
+    for k, v in header.items():
+        if k == "__metadata__":
+            continue
+        offs = v.get("data_offsets") if isinstance(v, dict) else None
+        if offs and len(offs) == 2:
+            end = max(end, int(offs[1]))
+    if os.path.getsize(path) < header_offset + end:
+        raise ValueError(
+            "truncated safetensors: %s declares %d bytes of tensor data but "
+            "only %d bytes are on disk" % (path, header_offset + end,
+                                            os.path.getsize(path)))
+    return [k for k in header if k != "__metadata__"]
 
 
 keys = tensor_names(dst_shard)

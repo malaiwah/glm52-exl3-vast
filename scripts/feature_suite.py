@@ -20,7 +20,7 @@ import urllib.request
 import zlib
 
 
-def http_request(url, payload=None, key="", timeout=600):
+def http_request(url, payload=None, key="", timeout=120):
     data = json.dumps(payload).encode() if payload is not None else None
     headers = {"Content-Type": "application/json"}
     if key:
@@ -30,7 +30,7 @@ def http_request(url, payload=None, key="", timeout=600):
     return urllib.request.urlopen(req, timeout=timeout)
 
 
-def json_request(url, payload=None, key="", timeout=600):
+def json_request(url, payload=None, key="", timeout=120):
     with http_request(url, payload, key, timeout) as response:
         return json.loads(response.read().decode("utf-8", "replace"))
 
@@ -109,7 +109,10 @@ def stream_chat(base, key, model):
             data = line[6:]
             if data == "[DONE]":
                 break
-            packet = json.loads(data)
+            try:
+                packet = json.loads(data)
+            except ValueError:
+                continue
             usage = packet.get("usage") or usage
             choices = packet.get("choices") or []
             if choices:
@@ -151,147 +154,126 @@ def release_ok(checks):
     return all(item["ok"] for item in checks if item.get("required", True))
 
 
-def run(base, key, model, vision, auth_enabled=None):
+def run(base, key, model, vision, auth_enabled=None, checkpoint=None):
+    """Run every feature check, isolating failures so one bad endpoint call
+    cannot discard the rest of the run.
+
+    ``checkpoint`` is invoked with the current checks list after each record so
+    partial results survive an interruption, matching benchmark_serving.py's
+    incremental-persistence discipline.
+    """
     checks = []
     if auth_enabled is None:
         auth_enabled = bool(key)
+
+    def _record(name, ok, detail="", required=True, **data):
+        record(checks, name, ok, detail, required=required, **data)
+        if checkpoint is not None:
+            checkpoint(checks)
+
     try:
         json_request(base + "/v1/models", key="definitely-wrong")
-        record(checks, "auth-rejects-bad-key", not auth_enabled,
-               ("bad key was accepted as expected because authentication is disabled"
-                if not auth_enabled else "bad key was accepted"))
+        _record("auth-rejects-bad-key", not auth_enabled,
+                ("bad key was accepted as expected because authentication is disabled"
+                 if not auth_enabled else "bad key was accepted"))
     except urllib.error.HTTPError as error:
-        record(checks, "auth-rejects-bad-key",
-               auth_enabled and error.code in (401, 403),
-               f"HTTP {error.code}; authentication configured={auth_enabled}")
+        _record("auth-rejects-bad-key",
+                auth_enabled and error.code in (401, 403),
+                f"HTTP {error.code}; authentication configured={auth_enabled}")
+    except Exception as error:
+        _record("auth-rejects-bad-key", False,
+                f"{type(error).__name__}: {error}")
 
-    tokenized = json_request(
-        base + "/tokenize", {"model": model, "prompt": "one two three"}, key)
-    record(checks, "tokenize", isinstance(tokenized.get("count"), int),
-           f"count={tokenized.get('count')}")
+    try:
+        tokenized = json_request(
+            base + "/tokenize", {"model": model, "prompt": "one two three"}, key)
+        _record("tokenize", isinstance(tokenized.get("count"), int),
+                f"count={tokenized.get('count')}")
+    except Exception as error:
+        _record("tokenize", False, f"{type(error).__name__}: {error}")
 
-    basic = message(chat(
-        base, key, model,
-        [{"role": "user", "content":
-          "Reply with exactly BANANA-OK and nothing else."}],
-        chat_template_kwargs={"enable_thinking": False}))
-    basic_text = visible_text(basic)
-    record(checks, "chat-no-thinking", "BANANA-OK" in basic_text, basic_text)
-
-    thinking = message(chat(
-        base, key, model,
-        [{"role": "user", "content":
-          "Think briefly, then state the result of 19 * 23."}],
-        max_tokens=512, chat_template_kwargs={"enable_thinking": True}))
-    thinking_text = visible_text(thinking)
-    reasoning = thinking.get("reasoning_content") or thinking.get("reasoning") or ""
-    record(checks, "chat-thinking-visible", "437" in thinking_text,
-           thinking_text, reasoning_field=bool(reasoning))
-
-    stream_text, usage = stream_chat(base, key, model)
-    record(checks, "streaming-with-usage", "STREAM-OK" in stream_text
-           and isinstance(usage.get("completion_tokens"), int),
-           stream_text, completion_tokens=usage.get("completion_tokens"))
-
-    turn1 = message(chat(
-        base, key, model,
-        [{"role": "user", "content":
-          "Remember the code COBALT-731. Acknowledge briefly."}],
-        chat_template_kwargs={"enable_thinking": True}))
-    assistant_turn = {"role": "assistant", "content": turn1.get("content") or ""}
-    preserved = turn1.get("reasoning_content") or turn1.get("reasoning")
-    if preserved:
-        assistant_turn["reasoning_content"] = preserved
-    turn2 = message(chat(
-        base, key, model,
-        [{"role": "user", "content":
-          "Remember the code COBALT-731. Acknowledge briefly."},
-         assistant_turn,
-         {"role": "user", "content": "What code did I ask you to remember?"}],
-        chat_template_kwargs={"enable_thinking": False}))
-    turn2_text = visible_text(turn2)
-    record(checks, "multi-turn-preserve-thinking", "COBALT-731" in turn2_text,
-           turn2_text, preserved_reasoning=bool(preserved))
-
-    structured = structured_answer(base, key, model, thinking=False)
-    _structured_doc, structured_ok = parse_structured_answer(structured)
-    record(checks, "structured-json", structured_ok,
-           structured.get("content") or "")
-
-    structured_thinking = structured_answer(base, key, model, thinking=True)
-    _thinking_doc, thinking_ok = parse_structured_answer(structured_thinking)
-    record(
-        checks,
-        "structured-json-thinking",
-        thinking_ok,
-        structured_thinking.get("content") or "",
-        reasoning_field=bool(
-            structured_thinking.get("reasoning_content")
-            or structured_thinking.get("reasoning")
-        ),
-    )
-
-    tool = message(chat(
-        base, key, model,
-        [{"role": "user", "content":
-          "Call get_weather exactly once for Montreal; do not call it more than once."}],
-        tools=[{
-            "type": "function",
-            "function": {
-                "name": "get_weather",
-                "description": "Get current weather for a city.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"city": {"type": "string"}},
-                    "required": ["city"],
-                },
-            },
-        }],
-        tool_choice="auto",
-        chat_template_kwargs={"enable_thinking": False}))
-    calls = tool.get("tool_calls") or []
-    record(checks, "tool-call", bool(calls)
-           and calls[0].get("function", {}).get("name") == "get_weather",
-           json.dumps(calls)[:400])
-    signatures = {
-        (call.get("function", {}).get("name"),
-         call.get("function", {}).get("arguments"))
-        for call in calls
-    }
-    record(checks, "tool-call-single", len(calls) == 1 and len(signatures) == 1,
-           f"calls={len(calls)}, unique={len(signatures)}")
-
-    forced = message(chat(
-        base, key, model,
-        [{"role": "user", "content": "Get the weather for Montreal."}],
-        max_tokens=48,
-        tools=[{
-            "type": "function",
-            "function": {
-                "name": "get_weather",
-                "description": "Get current weather for a city.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"city": {"type": "string"}},
-                    "required": ["city"],
-                },
-            },
-        }],
-        tool_choice="required",
-        chat_template_kwargs={"enable_thinking": False}))
-    forced_calls = forced.get("tool_calls") or []
-    record(checks, "tool-choice-required", len(forced_calls) == 1,
-           f"calls={len(forced_calls)}", required=False)
-
-    if calls:
-        first = calls[0]
-        tool_id = first.get("id") or "qualification-call"
-        round_trip = message(chat(
+    try:
+        basic = message(chat(
             base, key, model,
-            [{"role": "user", "content": "What is the weather in Montreal?"},
-             {"role": "assistant", "content": None, "tool_calls": [first]},
-             {"role": "tool", "tool_call_id": tool_id,
-              "content": "QUALIFICATION-WEATHER-17C"}],
+            [{"role": "user", "content":
+              "Reply with exactly BANANA-OK and nothing else."}],
+            chat_template_kwargs={"enable_thinking": False}))
+        basic_text = visible_text(basic)
+        _record("chat-no-thinking", "BANANA-OK" in basic_text, basic_text)
+    except Exception as error:
+        _record("chat-no-thinking", False, f"{type(error).__name__}: {error}")
+
+    try:
+        thinking = message(chat(
+            base, key, model,
+            [{"role": "user", "content":
+              "Think briefly, then state the result of 19 * 23."}],
+            max_tokens=512, chat_template_kwargs={"enable_thinking": True}))
+        thinking_text = visible_text(thinking)
+        reasoning = thinking.get("reasoning_content") or thinking.get("reasoning") or ""
+        _record("chat-thinking-visible", "437" in thinking_text,
+                thinking_text, reasoning_field=bool(reasoning))
+    except Exception as error:
+        _record("chat-thinking-visible", False, f"{type(error).__name__}: {error}")
+
+    try:
+        stream_text, usage = stream_chat(base, key, model)
+        _record("streaming-with-usage", "STREAM-OK" in stream_text
+                and isinstance(usage.get("completion_tokens"), int),
+                stream_text, completion_tokens=usage.get("completion_tokens"))
+    except Exception as error:
+        _record("streaming-with-usage", False, f"{type(error).__name__}: {error}")
+
+    try:
+        turn1 = message(chat(
+            base, key, model,
+            [{"role": "user", "content":
+              "Remember the code COBALT-731. Acknowledge briefly."}],
+            chat_template_kwargs={"enable_thinking": True}))
+        assistant_turn = {"role": "assistant", "content": turn1.get("content") or ""}
+        preserved = turn1.get("reasoning_content") or turn1.get("reasoning")
+        if preserved:
+            assistant_turn["reasoning_content"] = preserved
+        turn2 = message(chat(
+            base, key, model,
+            [{"role": "user", "content":
+              "Remember the code COBALT-731. Acknowledge briefly."},
+             assistant_turn,
+             {"role": "user", "content": "What code did I ask you to remember?"}],
+            chat_template_kwargs={"enable_thinking": False}))
+        turn2_text = visible_text(turn2)
+        _record("multi-turn-preserve-thinking", "COBALT-731" in turn2_text,
+                turn2_text, preserved_reasoning=bool(preserved))
+    except Exception as error:
+        _record("multi-turn-preserve-thinking", False,
+                f"{type(error).__name__}: {error}")
+
+    try:
+        structured = structured_answer(base, key, model, thinking=False)
+        _structured_doc, structured_ok = parse_structured_answer(structured)
+        _record("structured-json", structured_ok,
+                structured.get("content") or "")
+    except Exception as error:
+        _record("structured-json", False, f"{type(error).__name__}: {error}")
+
+    try:
+        structured_thinking = structured_answer(base, key, model, thinking=True)
+        _thinking_doc, thinking_ok = parse_structured_answer(structured_thinking)
+        _record("structured-json-thinking", thinking_ok,
+                structured_thinking.get("content") or "",
+                reasoning_field=bool(
+                    structured_thinking.get("reasoning_content")
+                    or structured_thinking.get("reasoning")))
+    except Exception as error:
+        _record("structured-json-thinking", False,
+                f"{type(error).__name__}: {error}")
+
+    calls = []
+    try:
+        tool = message(chat(
+            base, key, model,
+            [{"role": "user", "content":
+              "Call get_weather exactly once for Montreal; do not call it more than once."}],
             tools=[{
                 "type": "function",
                 "function": {
@@ -306,30 +288,101 @@ def run(base, key, model, vision, auth_enabled=None):
             }],
             tool_choice="auto",
             chat_template_kwargs={"enable_thinking": False}))
-        round_trip_text = visible_text(round_trip)
-        record(checks, "tool-result-round-trip",
-               ("17" in round_trip_text
-                and "montreal" in round_trip_text.lower()),
-               round_trip_text)
+        calls = tool.get("tool_calls") or []
+        _record("tool-call", bool(calls)
+                and calls[0].get("function", {}).get("name") == "get_weather",
+                json.dumps(calls)[:400])
+        signatures = {
+            (call.get("function", {}).get("name"),
+             call.get("function", {}).get("arguments"))
+            for call in calls
+        }
+        _record("tool-call-single", len(calls) == 1 and len(signatures) == 1,
+                f"calls={len(calls)}, unique={len(signatures)}")
+    except Exception as error:
+        _record("tool-call", False, f"{type(error).__name__}: {error}")
+        _record("tool-call-single", False, f"{type(error).__name__}: {error}")
+
+    try:
+        forced = message(chat(
+            base, key, model,
+            [{"role": "user", "content": "Get the weather for Montreal."}],
+            max_tokens=48,
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get current weather for a city.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                },
+            }],
+            tool_choice="required",
+            chat_template_kwargs={"enable_thinking": False}))
+        forced_calls = forced.get("tool_calls") or []
+        _record("tool-choice-required", len(forced_calls) == 1,
+                f"calls={len(forced_calls)}", required=False)
+    except Exception as error:
+        _record("tool-choice-required", False, f"{type(error).__name__}: {error}",
+                required=False)
+
+    if calls:
+        try:
+            first = calls[0]
+            tool_id = first.get("id") or "qualification-call"
+            round_trip = message(chat(
+                base, key, model,
+                [{"role": "user", "content": "What is the weather in Montreal?"},
+                 {"role": "assistant", "content": None, "tool_calls": [first]},
+                 {"role": "tool", "tool_call_id": tool_id,
+                  "content": "QUALIFICATION-WEATHER-17C"}],
+                tools=[{
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get current weather for a city.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                            "required": ["city"],
+                        },
+                    },
+                }],
+                tool_choice="auto",
+                chat_template_kwargs={"enable_thinking": False}))
+            round_trip_text = visible_text(round_trip)
+            _record("tool-result-round-trip",
+                    ("17" in round_trip_text
+                     and "montreal" in round_trip_text.lower()),
+                    round_trip_text)
+        except Exception as error:
+            _record("tool-result-round-trip", False,
+                    f"{type(error).__name__}: {error}")
     else:
-        record(checks, "tool-result-round-trip", False,
-               "outbound tool call was unavailable")
+        _record("tool-result-round-trip", False,
+                "outbound tool call was unavailable")
 
     if vision:
-        vision_msg = message(chat(
-            base, key, model,
-            [{"role": "user", "content": [
-                {"type": "image_url",
-                 "image_url": {"url": red_png_data_uri()}},
-                {"type": "text",
-                 "text": "What is the dominant color? Reply with one word."},
-            ]}],
-            chat_template_kwargs={"enable_thinking": False}))
-        vision_text = visible_text(vision_msg)
-        record(checks, "vision-red-image", "red" in vision_text.lower(), vision_text)
+        try:
+            vision_msg = message(chat(
+                base, key, model,
+                [{"role": "user", "content": [
+                    {"type": "image_url",
+                     "image_url": {"url": red_png_data_uri()}},
+                    {"type": "text",
+                     "text": "What is the dominant color? Reply with one word."},
+                ]}],
+                chat_template_kwargs={"enable_thinking": False}))
+            vision_text = visible_text(vision_msg)
+            _record("vision-red-image", "red" in vision_text.lower(), vision_text)
+        except Exception as error:
+            _record("vision-red-image", False, f"{type(error).__name__}: {error}")
     else:
-        record(checks, "vision-red-image", True, "skipped: vision disabled",
-               skipped=True)
+        _record("vision-red-image", True, "skipped: vision disabled",
+                skipped=True)
     return checks
 
 
@@ -361,19 +414,41 @@ def main(argv):
     else:
         key = os.environ.get("VLLM_API_KEY", "")
     base = args.base_url.rstrip("/")
-    models = json_request(base + "/v1/models", key=key).get("data") or []
-    model = args.model or (models[0]["id"] if models else "")
-    checks = run(base, key, model, args.vision, auth_enabled=bool(key))
     doc = {
         "schema": 1,
         "ts": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "base_url": base,
-        "model": model,
+        "model": "",
         "vision_requested": args.vision,
-        "checks": checks,
-        "ok": release_ok(checks),
+        "checks": [],
+        "ok": False,
     }
-    write_result(args.out, doc)
+
+    def checkpoint(checks):
+        doc["checks"] = checks
+        doc["ok"] = release_ok(checks)
+        write_result(args.out, doc)
+
+    try:
+        models = json_request(base + "/v1/models", key=key).get("data") or []
+    except Exception as error:
+        doc["fatal_error"] = (f"model discovery failed: "
+                              f"{type(error).__name__}: {error}")
+        write_result(args.out, doc)
+        return 1
+    model = args.model or (models[0]["id"] if models else "")
+    doc["model"] = model
+    try:
+        checks = run(base, key, model, args.vision, auth_enabled=bool(key),
+                     checkpoint=checkpoint)
+    except BaseException as exc:
+        # run() isolates each check, but guard against an unexpected crash so
+        # partial results are still persisted with a recorded cause.
+        doc["fatal_error"] = f"{type(exc).__name__}: {exc}"
+        doc["ok"] = False
+        write_result(args.out, doc)
+        raise
+    checkpoint(checks)
     return 0 if doc["ok"] else 1
 
 
