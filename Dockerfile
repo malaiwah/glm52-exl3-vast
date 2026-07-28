@@ -1,14 +1,16 @@
-# v29 = GG v20 + the current EXL3/Trellis layer. In particular, draft layers
-# now advertise a capturable m=1 minimum while target layers retain m=4. That
-# removes the old global VLLM_EXL3_TRELLIS_MIN_M workaround and its startup
-# failure at the MTP draft's m=1..3 graph shapes.
-FROM docker.io/verdictai/glm52-exl3-sparkinfer@sha256:2996b8ac37ff126a8aeebaa24df72e2154a2a1573df41f99eb48a4275e33eb41
+# GG v20 r5 is the first common upstream image that carries the EXL3/Trellis
+# source integration directly (vLLM integration tree 936ed48, SparkInfer tree
+# f532ec9). It supersedes the separately overlaid verdictai v31 image while
+# retaining the July 27 page-stride, 64-bit offset and PCIe-lifetime fixes.
+# Pin the immutable July 28 manifest; every base change is a requalification
+# boundary for compile-cache identity, memory planning and the 517K gate.
+FROM docker.io/voipmonitor/vllm@sha256:7b230b45991d93065d99c863fdb9ae030fb49592b59fa3c930cc00bfde09e51d
 LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai and Runpod" \
       org.opencontainers.image.description="Profile-driven OpenAI endpoint: validated GLM-5.2 EXL3 production defaults plus a low-cost Qwen3.6-27B NVFP4 development profile. Weights auto-download on first boot." \
       ai.malaiwah.evidence="gists: cae272443a 7d5d7e68 f3096ae9 e8a587ad 65bb725e 929d7d8e" \
-      ai.malaiwah.base="verdictai/glm52-exl3-sparkinfer@sha256:2996b8ac37ff126a8aeebaa24df72e2154a2a1573df41f99eb48a4275e33eb41"
+      ai.malaiwah.base="voipmonitor/vllm@sha256:7b230b45991d93065d99c863fdb9ae030fb49592b59fa3c930cc00bfde09e51d"
 COPY requirements-soul.lock /opt/requirements-soul.lock
-RUN pip install --no-cache-dir huggingface_hub && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux && rm -rf /var/lib/apt/lists/* \
+RUN pip install --no-cache-dir huggingface_hub==1.25.1 hf-xet==1.5.2 dnspython==2.8.0 && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && curl -sSL -o /tmp/lego.tgz https://github.com/go-acme/lego/releases/download/v4.21.0/lego_v4.21.0_linux_amd64.tar.gz \
  && echo "c8cc7fb636f8a5f1167e013dbd01485a72eb7393faf1776664c765a722cd6070  /tmp/lego.tgz" | sha256sum -c - \

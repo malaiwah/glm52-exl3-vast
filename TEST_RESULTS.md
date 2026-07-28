@@ -246,6 +246,28 @@ and same-host A/B tests, but not as an absolute performance reference:
 - CUDA peer reads/writes work, while native peer atomics do not.
 - The provider charged `$7.248/hour`, including the enlarged disk.
 
+The extensive AIBeast results in this section are pinned to the following
+tested envelope:
+
+| component | tested value |
+|---|---|
+| GPUs | 4x NVIDIA RTX PRO 6000 Blackwell, 97,887 MiB reported per GPU |
+| topology | all four GPU paths `NODE`, one NUMA node |
+| power limit | 280 W per card |
+| CPU / host RAM | AMD Ryzen Threadripper 9970X, 32 cores / 64 threads; 251 GiB |
+| host OS / kernel | Ubuntu 24.04.4 LTS; Linux 6.8.0-136-generic |
+| container runtime | Podman 4.9.3 |
+| NVIDIA driver | 595.71.05 |
+| driver-reported CUDA compatibility | 13.2 |
+| `nvidia-smi` client banner | 580.95.05 |
+
+The CUDA value is the compatibility level printed by `nvidia-smi`, not a
+claim about every toolkit bundled in the container. A forthcoming AIBeast
+driver/CUDA refresh is a requalification boundary: compile caches must be
+isolated or invalidated as appropriate, then cold retrieval, memory headroom,
+features, and the compact performance matrix must be repeated before new
+measurements are compared with this record.
+
 Both checkpoints fit simultaneously: approximately 303 GB for EXL3 and
 341 GB for `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid`. The authenticated
 MadeBy561 Hugging Face Xet transfer completed in 3 minutes 45 seconds. Local
@@ -280,7 +302,8 @@ volumes. `SOUL_AUTONOMY_LEVEL` and its startup ceiling remained zero.
 
 ### v20 MadeBy561 memory search
 
-Every candidate used TP4/DCP4, MTP3, the stock BF16 draft, calibrated
+Every candidate used TP4/DCP4, MTP3, the checkpoint-native draft (serialized
+NVFP4 experts with the checkpoint's MXFP8 dense overlay), calibrated
 `nvfp4_ds_mla` KV, synchronous scheduling, B12X MLA/MoE, and a maximum request
 length of 524,288. The v20 topology calibrator selected lossless PCIe DMA at a
 393,216-byte crossover, enabled DCP query splitting from 8,192 context tokens,
@@ -300,7 +323,7 @@ found DMA about 61–63% faster than NCCL above the crossover.
 The failure shape is important. Startup admission and one short request are
 not sufficient evidence for this target: the NF3/MTP transient allocation is
 not fully represented by the apparent KV headroom. The configurator therefore
-supplies the pool, chunk, workspace, utilization, stock draft, and proposal
+supplies the pool, chunk, workspace, utilization, native draft, and proposal
 method as one `madeby561-hybrid` variant default while retaining explicit
 per-knob overrides.
 
@@ -315,8 +338,9 @@ gate while forced mode does not.
 ### AIBeast absolute performance (280 W/card)
 
 AIBeast has four all-`NODE` RTX PRO 6000 Blackwell 96 GB GPUs on one NUMA node.
-All cards were power-limited to 280 W. Each concurrency level used eight
-unique 1K prompts requesting 512 output tokens:
+All cards were power-limited to 280 W. Driver 595.71.05 reported CUDA 13.2;
+the `nvidia-smi` client banner was 580.95.05. Each concurrency level used
+eight unique 1K prompts requesting 512 output tokens:
 
 | target / candidate | unique prefill | aggregate decode / MAL |
 |---|---|---|
@@ -340,11 +364,256 @@ prints `204.8`, `0`, `204.8`, `0` when successive chunks straddle alternating
 buckets, and `409.6` when two land together. Exact unique prompt tokens divided
 by end-to-end prefill time are the comparable metric.
 
+### Final v20 vision qualification
+
+The read-only EXL3 derivative installed its vision plugin from a writable
+temporary copy, leaving the checkpoint untouched. DCP4 at
+`GPU_MEMORY_UTILIZATION=0.975` loaded 79.65 GiB/GPU versus 77.66 GiB/GPU for
+the text target and exposed 564,736 KV tokens. A deterministic 5120x2880
+Retina-style dashboard then produced:
+
+| probe | result |
+|---|---|
+| detailed first turn | 17/18 exact requested details; 11.395s |
+| prompt accounting | 2,131 tokens, including 2,074 multimodal tokens |
+| image-history follow-up | exact three requested values; 0.712s and 2,048 cached tokens |
+| text-only regression | exact; 0.185s |
+| cold 32K retrieval gate | **0/3; degenerate output** |
+| speculative behavior at failure | MAL 1.25–1.50, average draft acceptance about 5–10% |
+
+Capacity and correctness were separate failure modes. At utilization 0.98,
+the same DCP4 wrapper exposed 610,560 KV tokens but left 37.12 MiB free and
+OOMed on its first 48 MiB verification allocation. At 0.975 it served short
+vision reliably, and persistent AOT reuse reduced the main-backbone compile
+phase from about 103 seconds to a 2.03-second cache load, but long-context
+retrieval still failed. Vision remains opt-in and short-context-only; the
+flagship text profile keeps it off.
+
+Preserved artifacts on AIBeast:
+
+- `/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260727/glm52-vision-5k-result.json`
+- `/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260727/glm52-vision-5k-dashboard.png`
+- `/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260727/vision-dcp4-gmu0975-safetensors.log`
+- `/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260727/vision-dcp4-gmu0975-safetensors.inspect.json`
+
+This failure does not establish that the Baseten MoonViT/PatchMerger graft is
+inherently unsafe. Upstream evidence narrows the diagnosis:
+
+- Chronarion's published
+  [MadeBy561 vision merge](https://huggingface.co/chronarion/GLM-5.2-Vision-MXFP8-NVFP4-NF3-Hybrid)
+  uses byte-identical hybrid text shards and reports MTP-5 text/vision parity.
+  Its plugin is the source already selected by this appliance.
+- Jarrel's
+  [NVFP4+AQLM vision merge](https://huggingface.co/jarrelscy/GLM-5.2-NVFP4-AQLM-hybrid)
+  reports exact mixed image-plus-needle retrieval at 130K with healthy MTP.
+  Its runtime delegates missing top-level wrapper fields to `text_config`,
+  preserves standalone inner-model names, and remaps checkpoint names only
+  while loading weights.
+- 0xSero's
+  [EXL3/TR3 vision merge](https://huggingface.co/0xSero/GLM-5.2-TR3-Vision)
+  shows the same class of long-prompt MTP collapse, although its published
+  long probes are repeated-token performance tests rather than retrieval
+  correctness tests.
+
+The quant-family discriminator was then run against the published MadeBy561
+wrapper with MTP completely disabled. At `GPU_MEMORY_UTILIZATION=0.94` it
+passed all three short text controls and recovered all three 32K needles in
+14.56 seconds, but recovered only 1/18 requested values from the same 5K
+dashboard and hallucinated repeated fields. This rules out speculative
+drafting and makes EXL3 expert ordering insufficient as the sole explanation.
+It does not prove that the tower cannot perform simpler image tasks.
+
+Jarrel's independently successful wrapper differs in two relevant ways: it
+delegates absent top-level configuration fields to `text_config`, and confines
+checkpoint-name remapping to weight loading rather than leaving a mapper on
+the live inner language model. A transient read-only copy of those corrections
+was applied to the MadeBy561 plugin. It booted cleanly and retained 3/3 short
+and 3/3 32K text retrieval, but improved the detailed dashboard by only one
+field, to 2/18. The correction was therefore not promoted as a vision-quality
+fix.
+
+The wrapper change also produced the expected performance null result:
+
+| MadeBy561 vision wrapper | periodic 32K PP | steady C1 TG |
+|---|---:|---:|
+| published Chronarion plugin | 2,457.4 tok/s | 49.6–49.7 tok/s |
+| Jarrel-style mapper/prefix correction | 2,471.2 tok/s | 49.2 tok/s |
+
+The +0.6% PP and roughly -1% TG movements are run noise, not a throughput
+change. A seeded benchmark of the corrected MTP-off arm measured 2,652.4 and
+2,566.9 tok/s PP at 8K and 32K. This is deliberately reported separately from
+the flagship MTP-on profile: disabling its native speculative draft explains
+the lower C1 generation rate.
+
+The evidence now supports a narrower conclusion. The EXL3 composition is good
+at detailed short-image extraction but fails long text; the currently
+published MadeBy561 composition is text-safe at 32K but fails detailed image
+extraction. Neither is a generally qualified multimodal flagship. Successful
+upstream simple-image and mixed image-plus-needle results remain credible, but
+they do not substitute for this appliance's Retina-dashboard gate.
+
+Additional preserved artifacts on AIBeast:
+
+- `/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260727/madeby-vision-mtpoff-5k-result.json`
+- `/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260727/madeby-vision-wrapperfix-5k-result.json`
+- `/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260727/madeby-vision-wrapperfix-benchmark.json`
+- `/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260727/madeby-vision-wrapperfix.log`
+
+### InstantTensor loader qualification
+
+The first exact 524,288-token InstantTensor launch did not merely flap once:
+two consecutive engine attempts loaded successfully, then both failed KV
+admission. InstantTensor reported 77.70 GiB/GPU resident model memory versus
+77.66 GiB/GPU for safetensors, leaving 9.03 GiB KV when 9.04 GiB was required.
+The supervisor's retry behavior was treated as failed startup, not eventual
+success.
+
+With `MAX_MODEL_LEN=520192` and the same 0.978 utilization:
+
+- five launches booted on their first engine attempt;
+- every built-in 32K gate retrieved 3/3 codes;
+- cached starts reached a verified verdict in 132.8 seconds;
+- target+draft load took 32.4–33.1 seconds, versus 60.5–62.6 seconds for
+  safetensors;
+- the required feature suite passed, including thinking visibility,
+  streaming usage, preserved-thinking multi-turn, one automatic tool call,
+  and tool-result continuation;
+- two independent ~517K prompts recovered 5/5 needles at 1%, 15%, 50%, 90%,
+  and 99% in 233.7–237.4 seconds with no degeneration.
+
+The benchmark harness gained `--prompt-seed` after an unseeded comparison
+showed that per-run UUID text could materially change speculative acceptance.
+The corrected identical-prompt matrix was:
+
+| loader | PP 8K / 32K | TG C1 / C2 / C4 / C8 | MAL C1 / C2 / C4 / C8 |
+|---|---:|---:|---:|
+| safetensors | 2,794.8 / 2,680.2 | 170.9 / 227.7 / 318.7 / 409.1 | 5.82 / 5.82 / 5.83 / 5.70 |
+| InstantTensor | 2,782.4 / 2,680.4 | 168.7 / 230.6 / 306.2 / 402.6 | 5.71 / 5.98 / 5.79 / 5.62 |
+
+All 64 decode requests completed with zero failure or preemption. The mixed
+throughput deltas (+1.3% to -3.9%) do not support a steady-state loader
+regression.
+
+A later exact near-maximum challenge changed the default decision. Safetensors
+failed three times at 514,432 computed tokens when the sparse indexer requested
+a contiguous 352 MiB allocation: standard verification with an auto 530,304
+pool, block verification with that same pool, and standard verification with
+an exact 520,192-token pool. InstantTensor completed the same request on the
+current image with 5/5 retrieval and no degeneration. The balanced profile
+therefore defaults to InstantTensor plus `MAX_MODEL_LEN=520192`; safetensors
+remains selectable but is not qualified for this profile's near-max envelope.
+
+Artifacts:
+
+- `instanttensor-currentimage-nearmax-five-depth.json`
+- `instanttensor-currentimage-final.log`
+- `standard-auto-blocks-nearmax-oom.log`
+- `safetensors-4064blocks-nearmax-oom.log`
+- `block-verification-full.log`
+
+### Standard versus block speculative verification
+
+The two verification methods were tested on the same InstantTensor/DCP2/MTP5
+control with temperature 1, identical seeded prompts, and two repetitions per
+concurrency. Values below are the two-run means:
+
+| verifier | C1 TG / MAL | C2 TG / MAL | C4 TG / MAL | C8 TG / MAL |
+|---|---:|---:|---:|---:|
+| standard | 95.48 / 2.936 | 134.56 / 3.253 | 187.46 / 3.545 | 194.95 / 2.964 |
+| block | 109.23 / 3.494 | 124.43 / 2.991 | 167.04 / 3.162 | 197.90 / 3.135 |
+| block TG delta | +14.4% | -7.5% | -10.9% | +1.5% |
+
+Block verification also completed the exact 517,178-token five-depth retrieval
+with 5/5 needles, no degeneration, and output identical to the standard arm.
+The long-context failure seen in a separate block run reproduced under
+standard verification and was isolated to safetensors fragmentation, not the
+verifier. Because the throughput result reverses sign across the supported
+concurrency range, `standard` remains the production default and `block`
+remains an explicit experiment.
+
+Additional artifacts:
+
+- `block-verification-standard-run1.json`
+- `block-verification-standard-run2.json`
+- `block-verification-block-run1.json`
+- `block-verification-block-run2.json`
+- `instanttensor-block-nearmax-five-depth.json`
+
+### 3,072 versus 4,096 batched-token admission
+
+The balanced profile's 3,072-token batch was challenged with a single-variable
+4,096 cold boot at the same DCP2, MTP5, 520,192 maximum, GMU 0.978, graph
+window, KV dtype and offload settings. The larger shape compiled under a
+distinct cache key, then failed deterministic KV admission:
+
+| batch | model/runtime memory | available KV | 520,192 admission |
+|---:|---:|---:|---|
+| 3,072 | 77.66 GiB/GPU | 9.15 GiB / 530,304 tokens | pass |
+| 4,096 | 77.83 GiB/GPU | 7.57 GiB / ~438,656 tokens | fail; 8.97 GiB required |
+
+The 4,096 Trellis arena was 1,374.2 MiB. Because this arm could not meet the
+512K–520K context requirement, no PP/TG benchmark was used to rationalize it.
+The profile retains 3,072.
+
+### DRAM prefix-cache eviction and reuse
+
+DRAM offload was tested as a second-level prefix cache, not as a way to enlarge
+the active GPU KV pool. Source inspection found that native vLLM's
+`cpu_bytes_to_use` is already an aggregate TP-world budget: dividing it by TP
+in the appliance made a requested 125 GiB tier only ~31 GiB in practice. That
+version stored 71.7 GB across the test stream but had evicted the original
+prefix from CPU by the final request, which recomputed in 58.48 seconds.
+
+After passing the full 125 GiB aggregate value, the same TP4/DCP2 service used
+`OFFLOAD_FRACTION=0.5` on a 251 GiB host and completed this matrix:
+
+| phase | prompt | TTFT | GPU hit | external DRAM hit | transfer |
+|---|---:|---:|---:|---:|---:|
+| target, cold | 133,731 tokens | 52.47s | 0 | 0 | stored 9.90 GB |
+| target, immediate repeat | 133,731 | 0.59s | 133,504 | 0 | none |
+| five unique eviction prompts | ~133,734 each | 54.43–58.03s | 0 | 0 | stored 9.90 GB each |
+| target, after GPU eviction | 133,731 | **0.69s** | **0** | **133,504** | **9.89 GB CPU→GPU** |
+
+The final load completed across four workers in 0.87 seconds aggregate with no
+allocation failures, making DRAM reuse about 76x faster than recomputing this
+prefix. Host memory stayed flat at roughly 199 GiB used and 51 GiB available.
+That makes 50% a qualified setting for large reusable agentic prefixes on this
+256 GiB host. A 70% tier was not attempted because it would consume almost all
+of the observed operating margin; a larger host may qualify it separately.
+
 The warning that native P2P atomics are unavailable was present in both v19
 and v20. Peer reads/writes pass, but PyTorch symmetric-memory barriers require
 system-scope atomic CAS and disable that one/two-shot communicator. Separate
 v20 logs confirm B12X PCIe fused all-reduce and B12X DCP collectives are active,
 so the warning is not an all-P2P fallback.
+
+### MadeBy561 native MTP identification and Luke external-draft control
+
+The selected MadeBy561 path was initially described as a "stock BF16 MTP
+draft." Direct inspection of the exact revision disproved that label. Layer
+78 expert weights are serialized `U8` with FP8 E4M3 `weight_scale` plus FP32
+secondary/input scales. The v20 `nvfp4_nf3_hybrid` loader treats an MTP layer
+outside the target hybrid bit-map as uniform NVFP4; eligible dense BF16 pieces
+receive the checkpoint's MXFP8 load-time overlay. In other words, this is the
+checkpoint-native optimized NVFP4/MXFP8 path, not a BF16 draft.
+
+An apples-to-apples substitution with a standalone draft assembled from
+`lukealonso/GLM-5.2-NVFP4`'s MTP-only shards booted successfully with the B12X
+ModelOpt FP4 draft backend, but regressed on the same AIBeast shape:
+
+| MadeBy561 MTP path | model load/GPU | auto-profile blocks | prefill @8K / 32K / 66K | aggregate decode / MAL |
+|---|---:|---:|---|---|
+| **native checkpoint path** | **83.97 GiB** | 2,720 | **2,701 / 2,176 / 1,987 tok/s** | **C1 121.6 / 3.941; C2 142.3 / 3.657; C4 208.4 / 3.954; C8 269.7 / 3.913** |
+| Luke external ModelOpt NVFP4 | 84.09 GiB | 2,817 | 1,968 / 1,905 / 1,868 tok/s | C1 87.1 / 3.536; C2 102.7 / 3.276; C4 161.1 / 3.616; C8 174.1 / 3.662 |
+
+Both runs pinned the served pool to 2,048 blocks; the auto-profile values are
+reported only to expose the loader/workspace difference. Luke provided 97
+additional profiled blocks (24,832 logical tokens) but slightly increased
+resident model memory and lost 28–35% of aggregate decode throughput. It is
+therefore supported as an advanced external-draft experiment, not a
+recommended MadeBy561 profile. The draft-memory savings previously measured
+for Luke apply when replacing Brandon's genuinely BF16 MTP layer; they do not
+describe the already-quantized MadeBy561 native path.
 
 ### Startup timing
 
@@ -355,3 +624,278 @@ configuration reached health in 9m43s and was verified in 10m44s; with AOT
 caches populated, the ring configuration reached health in 6m31s and was
 verified in 6m49s. With the ring-specific CuTe kernels cached too, the final
 repeat was verified in exactly 5m00s. Its 32K gate took 17–19s.
+
+## v31 cross-provider flagship qualification (2026-07-28)
+
+### Runpod Secure: full release matrix
+
+The release candidate
+`ghcr.io/malaiwah/glm52-exl3-vast:v31-rental-candidate-20260728` ran on a
+Runpod Secure Pod with four RTX PRO 6000 Blackwell Workstation cards. The
+cards exposed 97,887 MiB each, driver 610.43.02 and a 600 W/card power limit.
+GPU 0/1 and 2/3 were separate `NODE` islands with `SYS` paths between them.
+
+Cold click-to-health was 25m13s:
+
+- registry-image pull: about 8m24s;
+- authenticated 309 GiB Brandon checkpoint download: 3m35s, roughly
+  1.3 GiB/s;
+- InstantTensor target load: 169.23s; draft load: 3.81s; complete model load:
+  180.47s;
+- first backbone/draft compilation: 105.69s + 7.34s.
+
+A restart reused the persisted AOT artifacts. The target/draft loaded in
+192.71s + 3.68s, while the compile phases fell to 2.13s + 4.74s. Short and
+long output remained correct and throughput remained in family, disproving
+the prior cache-corruption concern on this exact runtime/cache key.
+
+`GPU_MEMORY_UTILIZATION=0.978` admitted 534,272 KV tokens but left only
+7.94 MiB free; the first benchmark request needed a 36 MiB EXL3 transient
+allocation and OOMed. This is a runtime-headroom failure even though boot and
+KV admission passed. At 0.976 the profile exposed 523,264 KV tokens, retained
+about 564 MiB steady-state free memory (about 98 MiB under C8), and completed
+the matrix without OOM.
+
+The required feature suite passed authentication, tokenization, ordinary
+chat, visible thinking content, streaming usage, multi-turn history with
+optional preserved reasoning, structured JSON, one automatic tool call and
+tool-result continuation. `tool_choice=required` still emitted five duplicate
+calls and remains an optional diagnostic. Vision was deliberately off.
+
+The exact 516,096-token target produced a 517,176-token request and recovered
+all five needles at 1%, 10%, 50%, 90% and 99% in 196.17s without degeneration.
+The engine remained healthy.
+
+Canonical `llm-inference-bench` v0.4.29 results:
+
+| measurement | 8K | 32K | 64K | 128K |
+|---|---:|---:|---:|---:|
+| cold prefill tok/s | 3,316 | 3,443 | 3,152 | 3,126 |
+| focused prefill tok/s | 3,554 | 3,449 | 3,357 | 3,114 |
+| focused total GPU power | 1,728.93 W | 1,785.56 W | 1,923.56 W | 1,803.15 W |
+
+| decode context | C1 | C2 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| zero | 63.0 | 155.8 | 223.1 | 343.5 |
+| 32K | 56.7 | 149.4 | 217.1 | 334.3 |
+| 128K | 61.1 | 136.4 | capacity-limited | capacity-limited |
+
+The complete benchmark averaged 1,457.24 W and peaked at 1,949.96 W under a
+2,400 W aggregate card limit. Zero-context C1 averaged 1,012.15 W; C8 averaged
+1,742.53 W. These are GPU telemetry totals, not wall-outlet system power.
+
+Both Runpod routes passed external TLS and authenticated chat: the managed
+HTTPS proxy, and the direct deSEC/Let's Encrypt TCP endpoint on mapped port
+8443. The latter avoids the managed proxy's documented 100-second connection
+limit. The Pod was deleted after qualification and a follow-up API read
+returned 404.
+
+Artifacts are preserved under
+`evidence/runpod-secure-20260728/` in the qualification workspace.
+
+### Release inputs and upstream audit
+
+Docker Hub reported v31 as the newest `verdictai/glm52-exl3-sparkinfer`
+publication, at the exact pinned digest
+`sha256:0433ae94665b769b78dd301f952d907508a3ba80bce47a1630ec20ade8812dff`.
+The runtime identifies itself as vLLM `0c79e41`, SparkInfer integration
+`c3828fd`, FlashInfer integration `801d57a`, CUDA 13.2.
+
+The Hugging Face API reported that all selected revisions were current:
+BrandonMusic `9297b9f1…`, MadeBy561 `68babde2…`, and NVIDIA Qwen NVFP4
+`0893e160…`. The Qwen revision is now pinned too, even though that 27B profile
+remains a lower-cost residual GPU test.
+
+The same-day upstream review found two relevant draft/opt-in changes:
+per-token outer scaling for NVFP4 KV
+(`local-inference-lab/vllm#189` + `sparkinfer#86`) and deterministic
+oldest-boundary sparse-indexer tie handling (`sparkinfer#84`). Neither was a
+release-ready default. The current calibrated per-layer scale path already
+passed the exact ~517K gate, so adopting either change requires a separate
+cold five-depth quality and performance comparison. The v31 image already
+contains the runtime-stride, page-table-offset, PCIe output-lifetime,
+query-split crossover and partial-indexer topology work relevant to this
+profile.
+
+### Vast Community: full release matrix
+
+Vast instance `46068195` used four RTX PRO 6000 Blackwell Workstation cards,
+driver 610.43.03, CUDA compatibility 13.3, 600 W/card limits and an all-`NODE`
+GPU topology. The candidate image was cached but the Brandon checkpoint was
+not. Click-to-health was approximately 55 minutes: about 48 minutes for the
+authenticated 309 GiB checkpoint transfer at roughly 0.9 Gbit/s, then about
+six minutes for model load, profiling, compilation and graph capture.
+InstantTensor loaded the target in 42.35 seconds; compilation took 85.51
+seconds. The stable profile exposed 523,264 KV tokens.
+
+All required external-path feature checks passed through the deSEC hostname
+and mapped TLS port. Normal automatic tool choice emitted one call;
+`tool_choice=required` reproduced the same optional five-call duplication seen
+on Runpod. Vision was deliberately disabled.
+
+The exact near-maximum prompt contained 517,176 tokens and recovered all five
+needles at 1%, 10%, 50%, 90% and 99% in 244.10 seconds. No degeneration was
+detected and the engine remained healthy.
+
+Canonical `llm-inference-bench` v0.4.29:
+
+| measurement | 8K | 32K | 64K | 128K |
+|---|---:|---:|---:|---:|
+| cold prefill tok/s | 3,001 | 2,968 | 2,916 | 2,716 |
+| focused prefill tok/s | 3,046 | 2,939 | 2,875 | 2,700 |
+| focused total GPU power | 1,615.27 W | 1,673.14 W | 1,686.95 W | 1,695.67 W |
+
+| decode context | C1 | C2 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| zero | 78.5 | 140.8 | 210.1 | 330.8 |
+| 32K | 73.4 | 144.8 | 210.1 | 313.5 |
+| 128K | 75.4 | 140.8 | capacity-limited | capacity-limited |
+
+Zero-context decode power averaged 1,241.19 W at C1, 1,535.20 W at C2,
+1,592.34 W at C4 and 1,739.02 W at C8. The all-`NODE` topology materially
+improved C1 over the two-island Runpod Secure host. The rental and its deSEC
+A/TXT records were deleted after artifacts were copied; the final provider and
+DNS API reads returned no resource.
+
+Artifacts are preserved under
+`evidence/vast-community-20260728/` in the qualification workspace.
+
+### Same-day GG v20-r5 requalification boundary
+
+After the v31 provider matrix completed, Docker Hub published a newer common
+upstream image:
+
+`voipmonitor/vllm:gilded-gnosis-v20-vllm936ed48-sif532ec9-fi801d57a-cu132-20260728-r5`
+
+at manifest
+`sha256:7b230b45991d93065d99c863fdb9ae030fb49592b59fa3c930cc00bfde09e51d`.
+Unlike the older common GG image, r5 carries the EXL3/Trellis source
+integration directly. Its image labels record GG base `4247d676`, vLLM
+integration tree `936ed48` including EXL3 PR #190, SparkInfer integration tree
+`f532ec9` including Trellis PR #49, and FlashInfer `801d57a`.
+
+The turnkey candidate was rebased to this immutable r5 manifest. The full
+local contract suite passed before publishing a GPU-test branch image. The
+v31 provider numbers above remain historical evidence and are not silently
+relabelled as r5 results; r5 requires its own cold boot, feature, retrieval,
+memory and compact performance gates before promotion.
+
+The first r5 rental attempts found a provider-admission issue before model
+qualification:
+
+- Runpod Secure assigned four Server Edition cards on driver 580.126.09. The
+  image and checkpoint became available, but all four workers failed their
+  initial NCCL all-reduce with `unhandled cuda error`; the Pod was terminated
+  after about 11 minutes.
+- The next available Vast offer reported driver 590.48.01 and
+  `cuda_max_good=13.1`; it was terminated during image pull, before checkpoint
+  download.
+
+CUDA 13.2 GA is paired with Linux driver 595.45.04. The entrypoint now rejects
+an older driver before downloading weights, unless an operator explicitly sets
+`ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1` for a separately qualified
+`cuda-compat-13-2` installation. Unit coverage includes the rejected r580/r590
+and accepted r595/r610 branches. Neither rejected rental remains allocated.
+
+## GG v20-r5 AIBeast flagship qualification (2026-07-28)
+
+The final candidate
+`ghcr.io/malaiwah/glm52-exl3-vast:c083aa6a1d84bc6030a76236ee4f80bb4a2b6881`
+was qualified on four RTX PRO 6000 Blackwell 96 GB cards. AIBeast used loaded
+driver 595.71.05, CUDA 13.2, an all-`NODE` peer topology, the effective NVIDIA
+P2P override, and a 280 W/card power limit. The runtime reported GG v20-r5,
+vLLM `936ed48`, SparkInfer `f532ec9`, FlashInfer `801d57a`, and native EXL3
+integration from PR #190 / Trellis PR #49.
+
+The qualified shape was TP4/DCP2, external rank-sliced TR3 MTP-5,
+probabilistic draft sampling, standard rejection sampling, 3,072 batched
+tokens, eight sequences, CUDA graph and Trellis capture through 64, calibrated
+`nvfp4_ds_mla` KV, InstantTensor, 140,000-token full-CKV gather, 50% aggregate
+DRAM prefix offload, utilization 0.976, and vision off.
+
+GG r5 safely accounts for a measured 0.81 GiB/GPU retained CUDA-graph pool.
+At the former 520,192 request limit, KV validation correctly failed: 8.97 GiB
+was required and 8.88 GiB was available, for an estimated 514,944-token
+ceiling. The selected `MAX_MODEL_LEN=513536` preserves 1,408 tokens of
+admission margin without disabling the new graph estimator.
+
+The read-only target and draft loaded in about 33 seconds with InstantTensor.
+A fresh compile-cache boot reached health in 4m35s. Reusing the same cache
+loaded the backbone AOT directly (`torch.compile` 0.45s) and reached health in
+2m25s; a subsequent production-port restart took 2m02s. The draft head still
+spent about two seconds compiling. Output correctness and performance remained
+normal after reuse.
+
+All required feature-suite checks passed both on isolated port 18000 and the
+final production port 8000: tokenization, thinking and non-thinking chat,
+streaming usage, multi-turn with preserved reasoning, structured JSON
+(informational), one automatic tool call, and tool-result continuation.
+`tool_choice=required` continued to emit five calls and remains an optional
+diagnostic. Vision was deliberately disabled.
+
+Fresh-cache compact results:
+
+| measurement | 8K | 32K | 64K | 128K |
+|---|---:|---:|---:|---:|
+| prefill tok/s | 1,890 cold-first-cell | 2,732 | 2,650 | 2,496 |
+
+| decode context | C1 | C2 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| ~1K | 142.4 | 150.2 | 223.9 | 285.9 |
+| MTP mean acceptance length | 5.59 | 5.03 | 4.74 | 5.56 |
+
+Cache-reused compact results:
+
+| measurement | 8K | 32K | 64K | 128K |
+|---|---:|---:|---:|---:|
+| prefill tok/s | 2,853 | 2,749 | 2,658 | 2,504 |
+
+| decode context | C1 | C2 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| ~1K | 138.8 | 189.8 | 223.8 | 312.1 |
+| MTP mean acceptance length | 5.34 | 5.41 | 5.04 | 5.39 |
+
+Canonical `llm-inference-bench` v0.4.29 at commit `86cf05c`:
+
+| measurement | 8K | 32K | 64K | 128K |
+|---|---:|---:|---:|---:|
+| cold unique-prefix prefill tok/s | 2,827 | 2,535 | 2,652 | 2,369 |
+
+| decode context | C1 | C2 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| zero | 106.7 | 145.6 | 207.9 | 284.5 |
+| 32K | 103.9 | 144.3 | 203.2 | 274.1 |
+| 128K | 102.1 | 135.8 | capacity-limited | capacity-limited |
+
+The capacity-limited cells are expected: the product requirement is one solo
+near-maximum session plus useful C1-C8 aggregate throughput, not four or eight
+simultaneous 128K sessions. Whole-run GPU power averaged 1,055.67 W and peaked
+at 1,127.91 W under a 1,120 W aggregate configured limit. Zero-context C1
+averaged 1,084.14 W and C8 averaged 1,109.73 W.
+
+Two independent uncached near-maximum requests used different seeds and exact
+served-tokenizer counts of 510,534 and 510,535 document tokens. Both recovered
+all five needles at 1%, 10%, 50%, 90% and 99%, with no degeneration, in 231.06
+and 234.97 seconds. The precise envelope probe completed a 507,902-token served
+prompt plus 4,096 generated tokens (511,998 total) in 267.15 seconds. TTFT was
+224.70s, decode TPOT 10.37ms (about 96.5 tok/s), and MTP mean acceptance length
+was 3.43.
+
+The benchmark prompt builder previously accepted a three-percent token-count
+error, which could overshoot a 500K request by thousands of tokens. It now
+iterates to 0.01% with a 32-token floor; the exact-envelope result above used
+that corrected harness.
+
+After the final profile returned to production port 8000, live agent traffic
+kept MTP-5 mean acceptance length between 3.90 and 5.13, with 58.0–82.7%
+average draft acceptance across populated ten-second windows. Historical
+MadeBy561/DCP4 MTP-3 field windows were 2.70–3.53 MAL and 56.8–84.4% average
+draft acceptance. Those targets and runtime shapes differ, so this is a
+real-workload sanity check rather than the matched A/B; the controlled GSM8K
+result (51.5 tok/s at MTP-3 versus 53.4 at MTP-5) remains the selection
+evidence.
+
+Artifacts and SHA-256 checksums are preserved under
+`evidence/aibeast-r5-20260728/` in the qualification workspace. The r5
+container remains healthy on AIBeast port 8000 with zero restarts; the prior
+production container is retained stopped as an exact rollback.

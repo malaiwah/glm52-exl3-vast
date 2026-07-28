@@ -104,7 +104,7 @@ def cmd_env(_args):
     # FAMILY_SERVE_ARGS now (it comes from the variant), and exporting it as well
     # would be a second source of truth for one flag — the kind of thing the knob
     # wiring audit exists to catch.
-    for key in ("MODEL_REPO", "MODEL_DIRNAME", "MTP78_MODE",
+    for key in ("MODEL_REPO", "MODEL_REVISION", "MODEL_DIRNAME", "MTP78_MODE",
                 "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK", "SPEC_METHOD"):
         lines.append("export %s=%s" % (key, shlex.quote(str(derived.get(key, "")))))
     # A bash ARRAY, not a string: these values are JSON with spaces and braces,
@@ -112,6 +112,8 @@ def cmd_env(_args):
     # exported, which is fine — config.env is sourced into the same shell.
     lines.append("FAMILY_SERVE_ARGS=(%s)" % " ".join(
         shlex.quote(a) for a in derived.get("FAMILY_SERVE_ARGS", [])))
+    lines.append("PROFILE_RUNTIME_ENV=(%s)" % " ".join(
+        shlex.quote(a) for a in derived.get("PROFILE_RUNTIME_ENV", [])))
     # a compact source map so the boot log can explain where a value came from
     lines.append("export GLM_CONFIG_SOURCES=%s" % shlex.quote(json.dumps(sources)))
     print("\n".join(lines))

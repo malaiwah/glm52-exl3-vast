@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 
 import benchmark_serving as bench  # noqa: E402
 import needle_matrix  # noqa: E402
+import offload_prefix_benchmark as offload  # noqa: E402
 import verify_serving as verify  # noqa: E402
 
 
@@ -102,8 +103,79 @@ not_a_number NaN
             self.assertEqual(partial["prefill"][0]["target_prompt_tokens"], 1024)
             self.assertIn("ConnectionResetError", partial["fatal_error"])
 
+    def test_prompt_seed_makes_ab_request_text_reproducible(self):
+        nonces = []
+
+        def fake_prompt(_base, _key, _model, _tokens, nonce, _insecure):
+            nonces.append(nonce)
+            return f"prompt {nonce}", 32
+
+        ok = {
+            "ok": True, "prompt_tokens": 32, "output_tokens": 1,
+            "ttft_ms": 1, "tpot_ms": 0, "mean_itl_ms": 0,
+        }
+        with mock.patch.object(bench, "make_prompt", side_effect=fake_prompt), \
+             mock.patch.object(bench, "get_metrics", return_value={}), \
+             mock.patch.object(bench, "stream_completion", return_value=ok):
+            bench.run_level(
+                "http://test", "", "model", 32, 1, 2, 3, 10,
+                nonce_prefix="loader-ab-c2")
+        self.assertEqual(nonces, [
+            "loader-ab-c2-0", "loader-ab-c2-1", "loader-ab-c2-2"])
+
+    def test_temperature_and_seed_reach_each_matched_request(self):
+        ok = {
+            "ok": True, "prompt_tokens": 32, "output_tokens": 1,
+            "ttft_ms": 1, "tpot_ms": 0, "mean_itl_ms": 0,
+        }
+        with mock.patch.object(
+                bench, "make_prompt", return_value=("prompt", 32)), \
+             mock.patch.object(bench, "get_metrics", return_value={}), \
+             mock.patch.object(
+                 bench, "stream_completion", return_value=ok) as completion:
+            bench.run_level(
+                "http://test", "", "model", 32, 1, 1, 2, 10,
+                nonce_prefix="block-ab", temperature=1.0, seed=1776)
+        self.assertEqual(completion.call_count, 2)
+        for call in completion.call_args_list:
+            self.assertEqual(call.args[-2:], (1.0, 1776))
+
+
+class OffloadBenchmarkTests(unittest.TestCase):
+    def test_metric_summary_distinguishes_gpu_and_dram_prefix_hits(self):
+        before = {
+            "vllm:prefix_cache_hits_total": 10,
+            "vllm:external_prefix_cache_hits_total": 20,
+            "vllm:kv_offload_load_bytes_total": 100,
+            "vllm:kv_offload_total_bytes": 1000,
+        }
+        after = {
+            "vllm:prefix_cache_hits_total": 42,
+            "vllm:external_prefix_cache_hits_total": 84,
+            "vllm:kv_offload_load_bytes_total": 612,
+            "vllm:kv_offload_total_bytes": 2000,
+        }
+        result = offload.metric_summary(before, after)
+        self.assertEqual(result["gpu_prefix_hit_tokens"], 32)
+        self.assertEqual(result["external_prefix_hit_tokens"], 64)
+        self.assertEqual(result["kv_offload_load_bytes"], 512)
+        self.assertEqual(result["kv_offload_total_bytes"], 2000)
+
+    def test_metric_summary_never_reports_negative_counter_deltas(self):
+        result = offload.metric_summary(
+            {"vllm:kv_offload_load_bytes": 100},
+            {"vllm:kv_offload_load_bytes": 1})
+        self.assertEqual(result["kv_offload_load_bytes"], 0)
+
 
 class NeedleTests(unittest.TestCase):
+    def test_verifier_discovers_the_served_model_alias(self):
+        with mock.patch.object(
+                verify, "_req",
+                return_value={"data": [{"id": "GLM-5.2"}]}):
+            self.assertEqual(
+                verify.discover_model("http://test", ""), "GLM-5.2")
+
     def test_haystack_is_seeded_unique_and_contains_every_needle(self):
         text_a, needles_a = verify.build_haystack(8192, [0.01, 0.5, 0.99], 7)
         text_b, needles_b = verify.build_haystack(8192, [0.01, 0.5, 0.99], 8)

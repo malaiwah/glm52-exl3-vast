@@ -53,37 +53,51 @@ def errs(findings):
 # --------------------------------------------------------------------------
 
 def test_glm_release_defaults():
-    section("the GLM v29 release defaults")
+    section("the GLM GG v20-r5 release defaults")
     eff, src, _ = resolved(gpus=4)
     check("family defaults to glm52", eff["MODEL_FAMILY"] == "glm52")
     check("TP is 4 on a 4-GPU box, and it is DETECTED not assumed",
           eff["TENSOR_PARALLEL_SIZE"] == 4 and src["TENSOR_PARALLEL_SIZE"] == "detected",
           f"{eff['TENSOR_PARALLEL_SIZE']} / {src['TENSOR_PARALLEL_SIZE']}")
-    check("DCP follows TP", eff["DCP"] == "4" and src["DCP"] == "detected")
-    check("context is 512K", eff["MAX_MODEL_LEN"] == 524288)
-    check("MTP-3", eff["MTP_TOKENS"] == 3)
+    check("the balanced profile selects DCP2 on TP4",
+          eff["DCP"] == "2" and src["DCP"] == "variant")
+    check("context keeps the measured near-520K runtime margin",
+          eff["MAX_MODEL_LEN"] == 513536)
+    check("the lightweight trellis draft uses MTP-5", eff["MTP_TOKENS"] == 5)
     check("calibrated NVFP4 MLA KV", eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla")
     check("KV pool is auto-profiled", eff["GPU_BLOCKS_OVERRIDE"] == 0)
-    check("util 0.96", eff["GPU_MEMORY_UTILIZATION"] == 0.96)
-    check("DRAM offload is opt-in", eff["OFFLOAD_FRACTION"] == 0)
+    check("the cross-provider runtime margin uses GMU 0.976",
+          eff["GPU_MEMORY_UTILIZATION"] == 0.976)
+    memory_finding = next(
+        f for f in gc.validate(eff) if f["id"] == "gpu-util-high")
+    check("the measured default gets the qualified high-utilization warning",
+          "GG v20-r5 qualified default" in memory_finding["message"]
+          and "0.978" in memory_finding["message"],
+          memory_finding["message"])
+    check("the agentic profile reserves half of host DRAM as L2 prefix cache",
+          eff["OFFLOAD_FRACTION"] == 0.5)
     check("vision is an opt-in feature profile", eff["VISION"] is False)
-    check("the v29-qualified draft method is greedy",
-          eff["MTP_DRAFT_SAMPLE_METHOD"] == "greedy")
-    check("lossless B12X PCIe DMA is on and topology-calibrated",
+    check("the measured MTP5 profile uses probabilistic drafting",
+          eff["MTP_DRAFT_SAMPLE_METHOD"] == "probabilistic")
+    check("the qualified profile keeps standard rejection sampling",
+          eff["MTP_REJECTION_SAMPLE_METHOD"] == "standard")
+    check("lossless B12X PCIe DMA is on with the measured DCP2 prefetch policy",
           eff["B12X_PCIE_DMA"] is True and eff["F8_DMA"] == "0"
           and eff["PCIE_CALIBRATION"] == "auto"
-          and eff["DCP_CKV_PREFETCH_DEPTH"] == "auto")
+          and eff["DCP_CKV_PREFETCH_DEPTH"] == "0")
+    check("full-CKV gather covers the measured 128K prefill matrix",
+          eff["DCP_CKV_GATHER_MAX_TOKENS"] == 140000)
     check("served name GLM-5.2", eff["SERVED_MODEL_NAME"] == "GLM-5.2")
 
     args = gc.family_serve_args(eff)
     line = " ".join(args)
     for flag in ("--quantization exl3",
-                 "--decode-context-parallel-size 4",
+                 "--decode-context-parallel-size 2",
                  "--dcp-comm-backend a2a",
-                 "--dcp-kv-cache-interleave-size 64",
+                 "--dcp-kv-cache-interleave-size 1",
                  "--attention-backend B12X_MLA_SPARSE",
                  "--moe-backend b12x",
-                 "--load-format safetensors",
+                 "--load-format instanttensor",
                  "--enable-auto-tool-choice",
                  "--tool-call-parser glm47",
                  "--reasoning-parser glm45"):
@@ -92,7 +106,7 @@ def test_glm_release_defaults():
           "index_topk_pattern" in line and "FFFSSS" in line)
     check("hf_overrides still sets use_index_cache", '"use_index_cache":true' in line)
     check("GLM RoPE tables are clamped to the served context",
-          '"max_position_embeddings":524288' in line)
+          '"max_position_embeddings":513536' in line)
     unclamped, _, _ = resolved(gpus=4, CLAMP_ROPE_TABLES=False)
     check("the pre-clamp control can omit the RoPE override for a clean A/B",
           "max_position_embeddings" not in " ".join(
@@ -100,27 +114,53 @@ def test_glm_release_defaults():
     check("compilation config still has custom_ops + fuse_allreduce_rms",
           '"custom_ops":["all"]' in line and '"fuse_allreduce_rms":true' in line)
     check("capture sizes are substituted from the knob",
-          '"cudagraph_capture_sizes":[4,8,12,16,20,24,28,32]' in line, line[-200:])
+          '"cudagraph_capture_sizes":[4,8,12,16,20,24,28,32,36,40,44,48,52,56,60,64]'
+          in line, line[-250:])
     d = gc.derive(eff)
     check("the GLM env block is selected", d["FAMILY_ENV_BLOCK"] == "glm52")
     check("spec method is mtp", d["SPEC_METHOD"] == "mtp")
-    check("the MTP78 graft is still the default draft", d["MTP78_MODE"] == "graft")
+    check("the pinned checkpoint uses its native rank-sliced TR3 MTP78",
+          d["MTP78_MODE"] == "off" and eff["MTP_DRAFT"] == "native")
+    profile_env = dict(item.split("=", 1) for item in d["PROFILE_RUNTIME_ENV"])
+    for key, expected in (
+            ("VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE", "1"),
+            ("VLLM_DCP_TOPK_OWNER_MERGE", "0"),
+            ("VLLM_EXL3_PREFILL_CHUNK", "1"),
+            ("VLLM_EXL3_PREFILL_BLOCK_M", "64"),
+            ("VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD", "16"),
+            ("VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD", "1024")):
+        check(f"the balanced route bundle sets {key}",
+              profile_env.get(key) == expected, str(profile_env))
     check("repo unchanged", d["MODEL_REPO"] == "brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw")
+    check("checkpoint revision is immutable",
+          d["MODEL_REVISION"] == "9297b9f1d53af5c67cffa01e30cc071a1ff7144b")
 
 
 def test_glm_release_integration():
-    section("the v29 runtime integration matches the measured launch contract")
+    section("the GG v20-r5 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
+    local_runner = open(os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned v29 manifest",
-          "sha256:2996b8ac37ff126a8aeebaa24df72e2154a2a1573df41f99eb48a4275e33eb41"
+    check("the base image is the pinned GG v20-r5 manifest",
+          "sha256:7b230b45991d93065d99c863fdb9ae030fb49592b59fa3c930cc00bfde09e51d"
           in dockerfile)
+    check("deSEC DNS-01 runs the authoritative convergence guard",
+          'desec_acme_guard.py"' in entry
+          and '--zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN"' in entry
+          and 'ACME_GUARD_PID=$!' in entry
+          and 'rrsets/_acme-challenge.${ACME_SUB}/TXT/' in entry
+          and "dnspython==2.8.0" in dockerfile
+          and "COPY scripts/ /opt/scripts/" in dockerfile)
     check("the target/draft trellis minimum is role-aware",
           'if [ "${MTP_TOKENS:-3}" = "0" ]; then' in entry and
           "export VLLM_EXL3_TRELLIS_MIN_M=1" in entry and
           "unset VLLM_EXL3_TRELLIS_MIN_M" in entry)
+    check("the validated Trellis ceiling survives the runtime env refresh",
+          'VLLM_EXL3_TRELLIS_MAX_M="${VLLM_EXL3_TRELLIS_MAX_M:-32}"'
+          in entry and
+          "export VLLM_EXL3_TRELLIS_MAX_M=32" not in entry)
     for setting in (
             "VLLM_DCP_QUERY_SPLIT=1",
             "VLLM_DCP_TOPK_OWNER_MERGE=1",
@@ -128,30 +168,135 @@ def test_glm_release_integration():
             "VLLM_DCP_PROJECT_BEFORE_MERGE=1",
             "VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1"):
         check(f"prefill policy includes {setting}", setting in entry)
+    check("the DCP prefill workspace is topology-safe",
+          'if [ "${DCP:-4}" = "4" ]; then' in entry
+          and "VLLM_DCP_PROJECT_BEFORE_MERGE=0" in entry
+          and "VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=0" in entry)
     check("the DCP prefill workspace is self-service",
           'VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}"'
           in entry)
-    check("the stable loader is the GLM default",
+    check("safetensors remains the architecture-level fallback",
           gc.family("glm52")["defaults"]["LOAD_FORMAT"] == "safetensors")
+    check("the balanced profile promotes the near-max-qualified loader",
+          resolved(gpus=4)[0]["LOAD_FORMAT"] == "instanttensor")
     check("local shared checkpoints have an explicit immutable mode",
           'if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then' in entry
           and "Checkpoint is read-only; mutation steps skipped." in entry)
+    check("a prepared vision derivative is allowed read-only",
+          '[ ! -f "$MODEL_DIR/.vision-enabled" ]' in entry
+          and '--vision "${VISION:-0}" --dry-run --quiet' in entry)
+    check("vision plugins install from a writable copy for read-only checkpoints",
+          "install_vision_plugin()" in entry
+          and 'cp -a "$plugin_dir/." "$install_dir/"' in entry
+          and "--no-build-isolation --no-deps" in entry
+          and "read-only derivative plugin registered" in entry)
+    check("a missing vision plugin fails before the vLLM restart loop",
+          "FATAL: Vision marker is present" in entry
+          and "FATAL: read-only vision derivative cannot register" in entry)
+    check("immutable targets default all compile caches away from the checkpoint",
+          'export VLLM_CACHE_ROOT="/cache/vllm"' in entry
+          and 'export TRITON_CACHE_DIR="/cache/triton"' in entry
+          and 'export TORCH_EXTENSIONS_DIR="/cache/torch_extensions"' in entry
+          and 'export TORCHINDUCTOR_CACHE_DIR="/cache/torchinductor"' in entry)
+    check("auto profile sentinels do not leak into the calibration helper",
+          "env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" in entry
+          and "-u PCIE_DMA_MIN_BYTES" in entry)
+    for key in ("OFFLOAD_FRACTION", "OFFLOAD_IGNORE_MEMLOCK",
+                "CUDAGRAPH_CAPTURE_SIZES", "MAX_CUDAGRAPH_CAPTURE_SIZE",
+                "VLLM_EXL3_TRELLIS_MAX_M", "DCP_CKV_GATHER_MAX_TOKENS",
+                "DCP_KV_CACHE_INTERLEAVE_SIZE",
+                "MTP_REJECTION_SAMPLE_METHOD"):
+        check(f"the local runner forwards an explicit {key}",
+              key in local_runner and
+              'config_env+=(-e "$config_name=${!config_name}")' in local_runner)
+    check("the local runner can explicitly override detected TP and DCP",
+          "TENSOR_PARALLEL_SIZE DCP MAX_MODEL_LEN" in local_runner)
+    check("the local runner does not mask the selected variant with old defaults",
+          'MAX_NUM_BATCHED_TOKENS:-2048' not in local_runner
+          and 'GPU_BLOCKS_OVERRIDE:-2048' not in local_runner
+          and 'F8_DMA:-ring' not in local_runner)
+    check("the local runner forwards arbitrary validated TUNE_ overrides",
+          "TUNE_[A-Z0-9_]*" in local_runner
+          and '"${tuning_env[@]}"' in local_runner)
+    check("the local runner can compose a read-only vision derivative",
+          'VISION_ASSET_HOST="${VISION_ASSET_HOST:-}"' in local_runner
+          and '$MODEL_DIR_CONTAINER/.vision:ro' in local_runner
+          and '$MODEL_DIR_CONTAINER/.vision-enabled:ro' in local_runner
+          and "set both VISION_ASSET_HOST and VISION_MARKER_HOST" in local_runner)
+    check("the local runner can supply an immutable shared tokenizer",
+          'TOKENIZER_JSON_HOST="${TOKENIZER_JSON_HOST:-}"' in local_runner
+          and '$MODEL_DIR_CONTAINER/tokenizer.json:ro' in local_runner
+          and "tokenizer serialization does not exist" in local_runner)
+    check("absolute shared-store checkpoint symlinks remain resolvable",
+          'SHARED_MODEL_STORE_HOST="${SHARED_MODEL_STORE_HOST:-}"' in local_runner
+          and 'SHARED_MODEL_STORE_CONTAINER="${SHARED_MODEL_STORE_CONTAINER:-$SHARED_MODEL_STORE_HOST}"'
+          in local_runner
+          and "SHARED_MODEL_STORE_CONTAINER must be an absolute path" in local_runner)
+    check("an external draft is compatible with an immutable target",
+          '[ "${MTP78_MODE:-off}" != "off" ] && [ -z "${DRAFT_MODEL:-}" ]'
+          in entry)
     check("InstantTensor is an explicit opt-in",
           gc.KNOB_BY_KEY["LOAD_FORMAT"]["choices"] == ["safetensors", "instanttensor"])
     check("the CLI explains the variant inheritance layer",
           "default < family < variant < env < state file" in config_cli)
-    check("offload is divided across TP workers",
+    check("offload reports a per-worker physical estimate",
           "OFF_BYTES=$((OFF_TOTAL_BYTES / OFFLOAD_RANKS))" in entry)
-    check("the Runpod GLM template does not override safe defaults",
-          runpod["env"]["OFFLOAD_FRACTION"] == "0" and
-          runpod["env"]["VISION"] == "0" and
-          runpod["env"]["MTP_DRAFT_SAMPLE_METHOD"] == "greedy")
-    for setting in ("VLLM_USE_B12X_PCIE_DMA", "VLLM_PCIE_DMA_FP8",
+    check("the native connector receives the aggregate offload budget",
+          '"cpu_bytes_to_use\\":$OFF_TOTAL_BYTES' in entry
+          and '"cpu_bytes_to_use\\":$OFF_BYTES' not in entry)
+    check("the Runpod GLM template inherits the measured variant defaults",
+          runpod["env"]["VISION"] == "0"
+          and "OFFLOAD_FRACTION" not in runpod["env"]
+          and "MTP_DRAFT_SAMPLE_METHOD" not in runpod["env"]
+          and "MTP78_MODE" not in runpod["env"])
+    for setting in ("VLLM_PCIE_DMA_FP8",
                     "SPARKINFER_PCIE_DMA_FP8", "PCIE_CALIBRATION_ONLY=1",
                     "VLLM_USE_MEGA_AOT_ARTIFACT=1",
                     "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS:--1",
                     "PCIE_DMA_MIN_BYTES:--1"):
         check(f"the v20 transport path includes {setting}", setting in entry)
+    for obsolete in ("VLLM_USE_B12X_PCIE_DMA",
+                     "VLLM_RTX6K_FUSED_ALLREDUCE_ADD",
+                     "VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER"):
+        check(f"the appliance removes inherited legacy knob {obsolete}",
+              f"unset {obsolete}" in entry
+              and f"export {obsolete}" not in entry)
+    check("the vision argument fragment does not duplicate trust-remote-code",
+          'VISION_ARGS=(--limit-mm-per-prompt "{\\"vision_chunk\\":${VISION_CHUNKS:-8}}")'
+          in entry)
+
+
+def test_glm_max_context_profile():
+    section("the Brandon DCP4 maximum-context profile")
+    eff, src, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-max-context")
+    for key, expected in (
+            ("DCP", "4"),
+            ("MAX_MODEL_LEN", 524288),
+            ("MAX_NUM_BATCHED_TOKENS", 4096),
+            ("MTP_TOKENS", 5),
+            ("DCP_CKV_GATHER_MAX_TOKENS", 140000),
+            ("DCP_KV_CACHE_INTERLEAVE_SIZE", "64"),
+            ("GPU_MEMORY_UTILIZATION", 0.98),
+            ("GPU_BLOCKS_OVERRIDE", 0),
+            ("OFFLOAD_FRACTION", 0.5),
+            ("MAX_CUDAGRAPH_CAPTURE_SIZE", 64),
+            ("VLLM_EXL3_TRELLIS_MAX_M", 64)):
+        check(f"the maximum-context profile sets {key}",
+              eff[key] == expected and src[key] == "variant",
+              f"{eff[key]} / {src[key]}")
+    check("the maximum-context profile uses the pinned checkpoint-native draft",
+          eff["MTP_DRAFT"] == "native")
+    check("the maximum-context profile is retrieval-qualified",
+          gc.VARIANTS["exl3-tr3-max-context"]["tested"] is True)
+    check("the profile has no balanced DCP2 route overrides",
+          gc.derive(eff)["PROFILE_RUNTIME_ENV"] == [])
+    check("the profile is accepted without a DCP capacity warning",
+          "dcp-reduces-pool" not in ids(gc.validate(eff)))
+    line = " ".join(gc.family_serve_args(eff))
+    check("the profile serves with DCP4 and interleave64",
+          "--decode-context-parallel-size 4" in line
+          and "--dcp-kv-cache-interleave-size 64" in line)
 
 
 def test_madeby561_hybrid():
@@ -160,8 +305,8 @@ def test_madeby561_hybrid():
     check("the variant selects the published hybrid checkpoint",
           gc.derive(eff)["MODEL_REPO"]
           == "madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid")
-    check("the variant chooses the stock BF16 MTP draft by default",
-          eff["MTP_DRAFT"] == "bf16" and src["MTP_DRAFT"] == "variant",
+    check("the variant chooses its native serialized NVFP4 MTP draft by default",
+          eff["MTP_DRAFT"] == "native" and src["MTP_DRAFT"] == "variant",
           f"{eff['MTP_DRAFT']} / {src['MTP_DRAFT']}")
     for key, expected in (
             ("MAX_NUM_BATCHED_TOKENS", 2048),
@@ -182,15 +327,21 @@ def test_madeby561_hybrid():
     check("the exact 521K-qualified ring shape does not warn new users",
           "compressed-dma-needs-retrieval" not in ids(gc.validate(eff)))
     check("MTP3 remains enabled", eff["MTP_TOKENS"] == 3)
+    check("standard rejection sampling remains the production control",
+          eff["MTP_REJECTION_SAMPLE_METHOD"] == "standard")
     line = " ".join(gc.family_serve_args(eff))
     check("the native hybrid quantizer is selected",
           "--quantization nvfp4_nf3_hybrid" in line, line[:300])
     check("the published MXFP8 dense/shared-expert overlay is selected",
           "--quantization-config" in line
           and '"shared_experts":{"weight":"mxfp8"}' in line, line[-500:])
-    check("the stock draft needs no graft or external quantizer",
+    check("the native draft needs no graft or external quantizer",
           gc.derive(eff)["MTP78_MODE"] == "off"
           and gc.derive(eff)["DRAFT_QUANTIZATION"] == "")
+    check("the old MTP78_MODE=off spelling migrates to neutral native terminology",
+          gc.env_layer({"MTP78_MODE": "off"})["MTP_DRAFT"] == "native")
+    check("the explicit bf16 spelling remains accepted for old templates",
+          gc.env_layer({"MTP_DRAFT": "bf16"})["MTP_DRAFT"] == "bf16")
     explicit, explicit_src, _ = resolved(
         gpus=4, MODEL_VARIANT="madeby561-hybrid", MTP_DRAFT="off")
     check("an explicit draft choice still wins",
@@ -228,6 +379,9 @@ def test_qwen_preset():
     line = " ".join(d["FAMILY_SERVE_ARGS"])
     check("repo is the NVFP4 development checkpoint",
           d["MODEL_REPO"] == "nvidia/Qwen3.6-27B-NVFP4")
+    check("Qwen checkpoint revision is immutable",
+          d["MODEL_REVISION"] ==
+          "0893e1606ff3d5f97a441f405d5fc541a6bdf404")
     check("ModelOpt quantization is selected", "--quantization modelopt" in line, line)
     for flag in ("--decode-context-parallel-size", "--dcp-comm-backend",
                  "--dcp-kv-cache-interleave-size", "B12X_MLA_SPARSE",
@@ -280,7 +434,9 @@ def test_inapplicable_knobs():
     section("knobs that cannot apply are refused, not ignored")
     eff, src, _ = resolved("qwen36")
     for key in ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
-                "MTP_DRAFT_SAMPLE_METHOD", "VLLM_EXL3_TRELLIS_MAX_M",
+                "DCP_CKV_GATHER_MAX_TOKENS", "DCP_KV_CACHE_INTERLEAVE_SIZE",
+                "MTP_DRAFT_SAMPLE_METHOD", "MTP_REJECTION_SAMPLE_METHOD",
+                "VLLM_EXL3_TRELLIS_MAX_M",
                 "VISION", "VISION_CHUNKS"):
         check(f"{key} is marked n/a on qwen36", src[key] == "n/a", src[key])
         check(f"{key} is applicable on glm52",
@@ -337,6 +493,27 @@ def test_rules_are_family_scoped():
     f = gc.validate(eff)
     check("the concurrency rule still fires on GLM",
           "concurrency-window" in errs(f), str(errs(f)))
+    eff, _, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-max-context", VISION=True)
+    check("the max-context EXL3 profile cannot evade the vision quality warning",
+          "vision-long-context" in ids(gc.validate(eff)))
+    eff, _, _ = resolved(
+        gpus=4, LOAD_FORMAT="instanttensor", MAX_MODEL_LEN=524288)
+    check("InstantTensor warns before retrying the failed 524288 admission shape",
+          "instanttensor-context-margin" in ids(gc.validate(eff)))
+    eff, _, _ = resolved(
+        gpus=4, LOAD_FORMAT="instanttensor", MAX_MODEL_LEN=513536)
+    check("the measured InstantTensor context margin clears its specific warning",
+          "instanttensor-context-margin" not in ids(gc.validate(eff)))
+    too_small, _, _ = resolved(
+        gpus=4, DCP="2", MAX_MODEL_LEN=513536,
+        GPU_BLOCKS_OVERRIDE=4011)
+    exact, _, _ = resolved(
+        gpus=4, DCP="2", MAX_MODEL_LEN=513536,
+        GPU_BLOCKS_OVERRIDE=4012)
+    check("the pool-pin validator accounts for DCP2 logical capacity",
+          "pool-smaller-than-context" in errs(gc.validate(too_small))
+          and "pool-smaller-than-context" not in errs(gc.validate(exact)))
     eff, _, _ = resolved(MTP_DRAFT="tr3-override")
     check("v29 accepts the separately rank-sliced EXL3 draft",
           "tr3-draft-on-v20" not in ids(gc.validate(eff)))
@@ -399,7 +576,7 @@ def test_long_context_gate_is_family_independent():
     check("and the needle probe is the thing that sets it",
           "needle_probe" in src and "long_context_verified" in src)
     # the probe budget follows MAX_MODEL_LEN, which is a family default
-    for fam, expected in (("glm52", 524288), ("qwen36", 32768)):
+    for fam, expected in (("glm52", 513536), ("qwen36", 32768)):
         eff, _, _ = resolved(fam)
         check(f"{fam} probes against its own context ceiling ({expected})",
               eff["MAX_MODEL_LEN"] == expected)
@@ -440,6 +617,7 @@ def main():
     try:
         test_glm_release_defaults()
         test_glm_release_integration()
+        test_glm_max_context_profile()
         test_madeby561_hybrid()
         test_qwen_preset()
         test_custom_profile()

@@ -30,6 +30,27 @@ import subprocess
 import sys
 
 
+def version_tuple(value: str):
+    """Normalize an NVIDIA dotted driver version for reliable comparison."""
+    parts = []
+    for item in (value or "").strip().split("."):
+        try:
+            parts.append(int(item))
+        except ValueError:
+            break
+    return tuple(parts)
+
+
+def driver_meets_minimum(actual: str, minimum: str):
+    """True only when both versions parse and actual >= minimum."""
+    got = version_tuple(actual)
+    want = version_tuple(minimum)
+    if not got or not want:
+        return False
+    width = max(len(got), len(want))
+    return got + (0,) * (width - len(got)) >= want + (0,) * (width - len(want))
+
+
 def parse_smi(output: str):
     """`nvidia-smi --query-gpu=index,uuid,name --format=csv,noheader`
     -> [(index, uuid, name)]. Also accepts the `nvidia-smi -L` line format."""

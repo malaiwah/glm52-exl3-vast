@@ -134,10 +134,17 @@ FILLER = (
 
 
 def make_prompt(base, key, model, target_tokens, nonce, insecure=False):
-    """Build an uncached prompt within roughly 3% of the requested token count."""
+    """Build an uncached prompt close enough for near-limit envelope tests.
+
+    A three-percent tolerance is harmless for ordinary throughput points, but at
+    500K it can overshoot the model limit by thousands of tokens.  Keep the
+    adaptive line builder, while tightening the stopping condition to 0.01%
+    (with a 32-token floor for small prompts).
+    """
     target_tokens = max(32, int(target_tokens))
     nlines = max(2, target_tokens // 24)
-    for _ in range(4):
+    tolerance = max(32, target_tokens // 10_000)
+    for _ in range(10):
         lines = [f"Benchmark document {nonce}; all records are independent."]
         lines.extend(FILLER.format(i=i) for i in range(nlines))
         lines.append(
@@ -145,24 +152,26 @@ def make_prompt(base, key, model, target_tokens, nonce, insecure=False):
             "Do not summarize the document.")
         text = "\n".join(lines)
         actual = count_tokens(base, key, model, text, insecure)
-        if abs(actual - target_tokens) / target_tokens <= 0.03:
+        if abs(actual - target_tokens) <= tolerance:
             return text, actual
         nlines = max(1, round(nlines * target_tokens / max(actual, 1)))
     return text, actual
 
 
 def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
-                      timeout=1800, insecure=False):
+                      timeout=1800, insecure=False, temperature=0.0, seed=None):
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.0,
+        "temperature": float(temperature),
         "max_tokens": int(output_tokens),
         "stream": True,
         "stream_options": {"include_usage": True},
         "ignore_eos": True,
         "chat_template_kwargs": {"enable_thinking": False},
     }
+    if seed is not None:
+        payload["seed"] = int(seed)
     started = time.perf_counter()
     first = None
     token_events = []
@@ -281,9 +290,10 @@ def summarize_requests(results, wall_s, before, after, concurrency):
 
 
 def run_level(base, key, model, input_tokens, output_tokens, concurrency,
-              request_count, timeout, insecure=False):
+              request_count, timeout, insecure=False, nonce_prefix="",
+              temperature=0.0, seed=None):
     prompts = []
-    run_id = uuid.uuid4().hex
+    run_id = nonce_prefix or uuid.uuid4().hex
     for index in range(request_count):
         prompt, actual = make_prompt(
             base, key, model, input_tokens, f"{run_id}-{index}", insecure)
@@ -293,7 +303,7 @@ def run_level(base, key, model, input_tokens, output_tokens, concurrency,
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
         futures = [
             pool.submit(stream_completion, base, key, model, prompt, actual,
-                        output_tokens, timeout, insecure)
+                        output_tokens, timeout, insecure, temperature, seed)
             for prompt, actual in prompts
         ]
         results = [future.result() for future in futures]
@@ -332,7 +342,18 @@ def main(argv):
     parser.add_argument("--requests-per-level", type=int, default=8)
     parser.add_argument("--prefill-tokens", default="1024,8192,32768")
     parser.add_argument("--warmup", type=int, default=1)
+    parser.add_argument(
+        "--temperature", type=float, default=0.0,
+        help=("sampling temperature; use 1.0 for a distribution-sensitive "
+              "speculative-verification comparison"))
+    parser.add_argument(
+        "--seed", type=int, default=None,
+        help="optional server sampling seed for a reproducible matched A/B")
     parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument(
+        "--prompt-seed", default="",
+        help=("stable prefix for prompt nonces; use the same value for matched "
+              "A/B runs, or leave empty for a fresh UUID"))
     parser.add_argument("--metadata", action="append", default=[])
     parser.add_argument("--insecure", action="store_true")
     parser.add_argument("--out", default="")
@@ -359,6 +380,9 @@ def main(argv):
             "requests_per_level": args.requests_per_level,
             "prefill_tokens": parse_ints(args.prefill_tokens),
             "warmup": args.warmup,
+            "temperature": args.temperature,
+            "seed": args.seed,
+            "prompt_seed": args.prompt_seed,
         },
         "metadata": metadata,
         "prefill": [],
@@ -376,10 +400,15 @@ def main(argv):
     checkpoint()
     try:
         for index in range(args.warmup):
-            run_level(base, key, model, 256, 32, 1, 1, args.timeout, args.insecure)
+            run_level(
+                base, key, model, 256, 32, 1, 1, args.timeout, args.insecure,
+                f"{args.prompt_seed}-warmup-{index}" if args.prompt_seed else "",
+                args.temperature, args.seed)
         for tokens in parse_ints(args.prefill_tokens):
             result = run_level(
-                base, key, model, tokens, 1, 1, 1, args.timeout, args.insecure)
+                base, key, model, tokens, 1, 1, 1, args.timeout, args.insecure,
+                f"{args.prompt_seed}-prefill-{tokens}" if args.prompt_seed else "",
+                args.temperature, args.seed)
             result["target_prompt_tokens"] = tokens
             doc["prefill"].append(result)
             checkpoint()
@@ -387,7 +416,9 @@ def main(argv):
             count = max(concurrency, args.requests_per_level)
             doc["concurrency"].append(run_level(
                 base, key, model, args.input_tokens, args.output_tokens,
-                concurrency, count, args.timeout, args.insecure))
+                concurrency, count, args.timeout, args.insecure,
+                f"{args.prompt_seed}-c{concurrency}" if args.prompt_seed else "",
+                args.temperature, args.seed))
             checkpoint()
     except BaseException as exc:
         doc["fatal_error"] = f"{type(exc).__name__}: {exc}"

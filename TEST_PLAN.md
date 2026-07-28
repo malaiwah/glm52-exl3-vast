@@ -1,22 +1,24 @@
 # Cost-controlled appliance test plan
 
-This plan validates one immutable image on Vast.ai and Runpod without paying
-to load the production GLM checkpoint or downloading the 27B Qwen checkpoint
-twice. Live rentals are sequential, use one GPU each, and are destroyed as
-soon as their evidence is collected.
+This plan has two cost tiers. A sub-1B Qwen representative validates provider,
+UI and OpenAI-API plumbing on one GPU. A single four-GPU flagship pass per
+provider then validates the immutable GLM image, loader, 520K envelope,
+performance and power without repeating every failure experiment. Rentals are
+sequential and are deleted as soon as their evidence is copied.
 
 ## Guardrails
 
 - Publish the test image under its Git commit SHA; never replace `latest` from
   a manual workflow dispatch.
-- Use one on-demand GPU at a time and record the provider's hourly price before
-  accepting the rental.
+- Use one on-demand GPU for provider/UI smoke tests and exactly four cards only
+  for the final GLM profile. Record the hourly price before accepting either.
 - Require an RTX 5090 or RTX PRO 6000 Blackwell because the pinned CUDA image
   and custom kernels target `sm120+`. Do not substitute an RTX 4090/Ada GPU
   merely because the smoke-test model fits. Set an automatic provider
   termination deadline where supported.
 - Use a 60 GB local disk on Vast and a 50 GB container disk plus 20 GB
-  `/workspace` volume on Runpod.
+  `/workspace` volume on Runpod for the smoke profile. Allocate at least
+  450 GB for the GLM checkpoint and evidence.
 - Use `Qwen/Qwen3.5-0.8B` through the `custom` profile with an 8K context. Its
   small download keeps the live test short while exercising the Qwen3.5
   architecture supported by the pinned vLLM runtime.
@@ -45,6 +47,11 @@ soon as their evidence is collected.
 | Qwen text-only mode | — | yes | yes |
 | Native Qwen vision mode | — | one provider | one provider if time remains |
 | Qwen MTP speculative decoding | config | one provider | one provider if time remains |
+| GLM v31 InstantTensor cold boot and AOT-cache reuse | config | yes | yes |
+| GLM feature suite at production scale | harness | yes | yes |
+| GLM cold prefill and sustained C1/C2/C4/C8 decode | harness | yes | yes |
+| Per-phase GPU power and power-limit telemetry | harness | yes | yes |
+| Exact ~517K five-depth needle and degeneration gate | harness | yes | yes |
 | Supervisor recovery after terminating the engine child | — | yes | yes |
 | Vast readiness label | — | yes | — |
 | Runpod HTTPS proxy and dashboard URL | — | — | yes |
@@ -108,12 +115,11 @@ same already-rented machine.
 
 ## Explicit residual tests
 
-The one-GPU budget cannot validate GLM TP4/DCP4, the EXL3/MTP78 graft,
-GLM-specific vision graft, DRAM KV offload at production scale, or 512K
-correctness. The real 27B NVFP4 profile also requires a separate performance
-and memory qualification before its conservative 32K default is raised. These
-are release qualification tests, not economical provider-integration smoke
-tests.
+The real 27B Qwen NVFP4 profile still needs a one-card performance and memory
+qualification before its conservative 32K default is raised. GLM vision is
+also a separate opt-in feature profile: the current EXL3 graft passes detailed
+short screenshot extraction but fails the mandatory 32K text gate, so it is
+not allowed to borrow the flagship text profile's 520K claim.
 
 ## Flagship GLM-5.2 qualification
 

@@ -97,17 +97,17 @@ knobs to the model. Summary of the trade each one makes:
 | knob | trades |
 |---|---|
 | `MODEL_VARIANT` | EXL3-TR3 (provider default), the measured MadeBy561 MXFP8/NVFP4/NF3 hybrid, the legacy experimental NVFP4 checkpoint, or a family-specific development target. A variant may supply a coherent draft/memory preset; switching costs a full re-download. |
-| `MTP_DRAFT` | `tr3-graft` (3.7 GB, +3.8 GB/GPU of KV) / v29-compatible separate `tr3-override` / `nvfp4` (external dir, needs `DRAFT_QUANTIZATION`) / `bf16` (19.3 GB) / `off` (~30% slower decode). |
+| `MTP_DRAFT` | `native` uses the checkpoint's own draft (rank-sliced TR3 in the pinned Brandon revision; serialized NVFP4 experts in MadeBy561). `tr3-graft`, `tr3-override`, external `nvfp4`, legacy `bf16`, and `off` remain controlled compatibility/experiment paths. |
 | `MTP_TOKENS` | Depth of speculation. With the cheap trellis draft MTP-5 beats MTP-3 (53.4 vs 51.5 tok/s); with the 19.3 GB BF16 draft it lost 22%. Also widens the decode query width. |
-| `MTP_DRAFT_SAMPLE_METHOD` | `greedy` drafting for EXL3 vs the MadeBy561 daily-driver's `probabilistic` proposals; either remains explicitly overridable. |
-| `DCP` | KV sharded across ranks (4) vs replicated (1). DCP=4 is what makes 512K fit. |
+| `MTP_DRAFT_SAMPLE_METHOD` | The measured GLM profiles use `probabilistic`; `greedy` remains explicitly overridable for matched A/B work. |
+| `DCP` | The balanced Brandon default uses DCP2 for ordinary prefill/decode while retaining a verified ~517K request. DCP4 is the maximum-context variant; DCP1 prioritizes low-concurrency decode but cannot expose the same context envelope. |
 | `DCP_CKV_PREFETCH_DEPTH`, `DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS` | Topology overlap and the context crossover for query splitting. `auto`/`-1` retain calibration; the MadeBy561 profile pins the measured 0/8,192 shape. |
 | `F8_DMA`, `PCIE_DMA_MIN_BYTES`, `PCIE_CALIBRATION` | Collective wire format and byte crossover. The family stays lossless/automatic; the MadeBy561 profile pins the 521K-qualified FP8 ring/393,216-byte shape. |
-| `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM v29 default) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
+| `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM default; cross-provider-qualified on v31 and re-gated at each base refresh) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
 | `MAX_MODEL_LEN` | Longest request, and a hard startup gate against available KV. |
-| `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool (~1.0–1.1M on the release shape); a positive value pins a reproducible smaller pool. |
-| `OFFLOAD_FRACTION` | Opt-in host RAM for a pinned KV tier; total bytes are divided across TP workers; pure cache, `recompute` on miss. |
-| `VISION` | Image input vs long-context correctness on EXL3 (see rule 6) and ~1.31 GiB/GPU + ~13% text decode. |
+| `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool. The portable DCP2/GMU-0.976 release shape exposed 523,264 logical tokens on Runpod; the value varies with usable VRAM, graphs, driver and loader. A positive value pins a reproducible smaller pool. |
+| `OFFLOAD_FRACTION` | Host DRAM used as an L2 prefix cache after GPU eviction—not extra active-context capacity. It is passed as one aggregate native-connector budget (vLLM derives the TP worker slices), with `recompute` on miss. At 50% of a 251 GiB host, an evicted 133,504-token prefix reloaded in 0.69s instead of a 52.47s recompute; 50% also retained ~51 GiB host headroom. |
+| `VISION` | Image input vs long-context correctness on EXL3 (see rule 6) and ~1.99 GiB/GPU on the final v20 qualification shape. |
 | `MAX_NUM_SEQS`, `MAX_NUM_BATCHED_TOKENS`, `GPU_MEMORY_UTILIZATION` | Concurrency and prefill chunk against the capture window and against VRAM headroom. |
 | `MAX_CUDAGRAPH_CAPTURE_SIZE`, `CUDAGRAPH_CAPTURE_SIZES`, `VLLM_EXL3_TRELLIS_MAX_M` | The three ceilings that must move together to serve more streams. |
 
@@ -121,7 +121,7 @@ findings, so the UI, the boot log and this table agree.
 
 ### `concurrency-window` — error
 `MAX_NUM_SEQS * (1 + MTP_TOKENS)` must be `<= min(MAX_CUDAGRAPH_CAPTURE_SIZE,
-VLLM_EXL3_TRELLIS_MAX_M)`, both 32 by default. Exceeding it does **not** error
+VLLM_EXL3_TRELLIS_MAX_M)`, both 64 in the balanced MTP-5 profile. Exceeding it does **not** error
 at boot; decode silently leaves the captured trellis fast path under
 concurrency and loses throughput. Raising concurrency requires raising
 `CUDAGRAPH_CAPTURE_SIZES`, `MAX_CUDAGRAPH_CAPTURE_SIZE` and
@@ -154,16 +154,46 @@ registry entry explicitly declares equivalent calibration.
 
 ### `vision-long-context` — warn (blunt)
 `VISION=1` on the EXL3-TR3 checkpoint **corrupts long-context output**: measured
-32K needle 0/2 with degenerate text on both the v20 and pre-v20 bases, while
-short-prompt and vision smoke tests passed 6/6. Marked EXPERIMENTAL /
-known-broken-at-long-context rather than blocked, because vision is genuinely
-useful for short-prompt image work. Vision is opt-in; the long-context
-probe fails this configuration by design, so it will be reported as unverified
-rather than healthy.
+32K needle 0/3 with degenerate text on the final v20 turnkey image; mean MTP
+acceptance collapsed to 1.25–1.50. The same process described a 5120×2880
+screenshot with 17/18 exact details, answered an exact multi-turn follow-up
+that reused the image, and passed text-only chat. Marked EXPERIMENTAL /
+known-broken-at-long-context rather than blocked because vision is genuinely
+useful for short-prompt image work. Vision is opt-in; the long-context probe
+fails this configuration by design, so it is reported as unverified rather
+than healthy. This rule applies to both the balanced and max-context EXL3-TR3
+variants.
+
+The warning is not inferred solely from the EXL3 quantizer. A separate
+MadeBy561 MTP-off run passed 3/3 32K text retrieval but only 1/18 fields on the
+same detailed image; an upstream-style wrapper mapper/prefix correction reached
+2/18 without changing PP/TG. The failure therefore spans the two compositions
+tested, although simpler upstream image tests may still pass. No general GLM
+vision profile is promoted until one composition passes both detailed image
+and long-context gates.
 
 ### `vision-kv-pressure` — warn
-Vision raises memory pressure enough that `MAX_MODEL_LEN` 384K has failed KV
-validation (needed 5.7 GiB, had 3.97 GiB). Warned above 384K.
+The current graft adds about 1.99 GiB/GPU. DCP4 at utilization 0.975 exposed
+564,736 KV tokens and served the short vision suite; 0.98 exposed 610,560
+tokens but left 37.12 MiB free and OOMed on the first 48 MiB verification
+allocation. Boot-time KV admission is not runtime headroom. The warning above
+384K recommends no more than 0.975 on that exact tested shape and requires
+cold memory plus retrieval requalification for any other shape.
+
+### `instanttensor-context-margin` — warn
+On the exact TP4/DCP2 EXL3 profile, InstantTensor loaded about 0.04 GiB/GPU
+more resident model memory than safetensors. `MAX_MODEL_LEN=524288` at
+utilization 0.978 then failed KV admission twice (9.04 GiB needed, 9.03 GiB
+available). That earlier v31 shape passed `MAX_MODEL_LEN=520192`; GG v20-r5
+adds safe retained-CUDA-graph accounting and exposes 514,944 KV tokens at the
+same utilization. The current `MAX_MODEL_LEN=513536` default passed cold and
+cache-reused boots, the required feature suite, two independent ~510.5K
+five-depth retrievals, and a 507,902 + 4,096 token request. The loader reduced
+target+draft load from 60.5–62.6 seconds to 32.4–33.1 seconds. It remains the
+balanced EXL3 default because safetensors failed three near-max runtime
+attempts at the same 514,432-token boundary. This warning protects larger
+overrides rather than disabling safe graph accounting or treating retries as
+success.
 
 ### `pool-smaller-than-context` — error
 `GPU_BLOCKS_OVERRIDE * 256 < MAX_MODEL_LEN` cannot start: vLLM refuses when it
@@ -349,7 +379,7 @@ This layer is no longer justified only by static substitutions:
   lifecycle were exercised on live Vast and Runpod Blackwell rentals.
 - Both the 303 GB rank-sliced EXL3 checkpoint and the 341 GB MadeBy561 hybrid
   have booted through the resolved GLM arguments on four RTX PRO 6000
-  Blackwell GPUs. The hybrid's native quantizer, stock BF16 MTP draft,
+  Blackwell GPUs. The hybrid's native quantizer and serialized NVFP4 MTP experts,
   calibrated KV, explicit pool, chunk/workspace controls, and C1–C8 serving
   have been measured rather than inferred.
 - The real GLM-5.2 model answered three fresh 32K probes (15/15 needles) and
@@ -365,6 +395,7 @@ This layer is no longer justified only by static substitutions:
 
 Absolute v20 throughput is confirmed on the all-NODE AIBeast host at 280 W/card:
 2,701 tok/s at 8K, 1,987 at 66K, 121.6 tok/s C1 and 269.7 aggregate at C8.
-Remaining claims stay narrow: InstantTensor remains opt-in until repeat cold
-starts are reliable, and GLM vision remains a separate
+Remaining claims stay narrow: InstantTensor is promoted only for the exact
+balanced EXL3 profile and the current 513,536-token GG r5 envelope; other
+variants retain their own loader choice. GLM vision remains a separate
 short-context experiment rather than part of the text flagship envelope.
