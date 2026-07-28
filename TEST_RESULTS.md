@@ -987,3 +987,25 @@ Local patch/idempotence and legacy-upgrade tests, unknown-runtime behavior,
 verifier, feature-suite, Python and shell tests passed. Per the operator's
 instruction, the patch was **not** loaded into or restarted on AIBeast; its
 production endpoint remained online throughout.
+
+### GG v20-r8 upstream refresh smoke (AIBeast left online)
+
+The published appliance at commit `7b0bc08a16807d6de78ede0e6f8987be4bddd8c6`
+and manifest `sha256:8ea41df6a4102ebf8a5b58e5cd1e7589897790c14bb974dac11e58ef4a0353fd`
+was cold-started on Vast instance `46142351`: one RTX 5090, NVIDIA driver
+595.71.05, CUDA 13.2 compatibility, and the `Qwen/Qwen3.5-0.8B` custom-family
+smoke checkpoint. The exact immutable GG base was v20-r8. The container reached
+the running state after about 7.9 minutes and the API health endpoint passed
+after 13 minutes 25 seconds. The model download itself took about four seconds
+and weight loading 0.82 seconds; most of the remaining interval was the cold
+image pull followed by first-use compilation and kernel warm-up.
+
+The runtime banner reported the expected r8 build, model architecture
+resolution and structured-output/speculative-decode patch preflight all
+succeeded, and no engine fatal error occurred before health. This is a base
+runtime/startup smoke only: the harness treated the landing page's expected
+authenticated HTTP 403 as a dashboard failure and therefore released the
+rental before running the feature suite. It must not be cited as GLM quality,
+throughput, required-tool-choice, or full-feature evidence. Both Vast and
+RunPod inventories were verified empty afterward; AIBeast production was not
+restarted or modified.
