@@ -190,6 +190,43 @@ class NeedleTests(unittest.TestCase):
         self.assertIn("repeats", verify.degenerate("one two three " * 10))
         self.assertEqual(verify.degenerate("Kyoto: ABC-1234"), "")
 
+    def test_structured_probe_requires_exact_schema_and_enables_thinking(self):
+        response = {
+            "choices": [{
+                "message": {
+                    "content": json.dumps({"answer": 42}),
+                    "reasoning_content": "brief reasoning",
+                },
+            }],
+        }
+        with mock.patch.object(verify, "_req", return_value=response) as request:
+            result = verify.structured_output_probe(
+                "http://test", "key", "model"
+            )
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["reasoning_field"])
+        payload = request.call_args.args[1]
+        self.assertTrue(
+            payload["chat_template_kwargs"]["enable_thinking"]
+        )
+        self.assertTrue(
+            payload["response_format"]["json_schema"]["strict"]
+        )
+
+    def test_structured_probe_rejects_extra_schema_fields(self):
+        response = {
+            "choices": [{
+                "message": {
+                    "content": json.dumps({"answer": 42, "extra": True}),
+                },
+            }],
+        }
+        with mock.patch.object(verify, "_req", return_value=response):
+            result = verify.structured_output_probe(
+                "http://test", "", "model"
+            )
+        self.assertFalse(result["ok"])
+
     def test_probe_records_seed_duration_and_retrieval(self):
         def fake_count(_base, _key, _model, text):
             return len(text.split()), True

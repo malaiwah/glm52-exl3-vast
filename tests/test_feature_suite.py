@@ -83,12 +83,17 @@ class FeatureSuiteTests(unittest.TestCase):
         self.assertTrue(all(item["ok"] for item in checks))
         structured = next(
             item for item in checks if item["name"] == "structured-json")
-        self.assertFalse(structured["required"])
+        self.assertTrue(structured["required"])
+        structured_thinking = next(
+            item for item in checks
+            if item["name"] == "structured-json-thinking")
+        self.assertTrue(structured_thinking["required"])
         self.assertEqual(
             {item["name"] for item in checks},
             {"auth-rejects-bad-key", "tokenize", "chat-no-thinking",
              "chat-thinking-visible", "streaming-with-usage",
-             "multi-turn-preserve-thinking", "structured-json", "tool-call",
+             "multi-turn-preserve-thinking", "structured-json",
+             "structured-json-thinking", "tool-call",
              "tool-call-single", "tool-choice-required",
              "tool-result-round-trip", "vision-red-image"})
         self.assertTrue(any(

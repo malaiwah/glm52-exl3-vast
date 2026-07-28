@@ -50,6 +50,8 @@ jobs:
         run: python3 tests/test_nvfp4_mtp_draft.py
       - name: OpenAI feature qualification harness
         run: python3 tests/test_feature_suite.py
+      - name: structured output + speculative decode compatibility patch
+        run: python3 tests/test_structured_output_patch.py
       - name: checkpoint reconciliation
         run: python3 tests/test_checkpoint_reconcile.py
       - name: embedded SOUL controller

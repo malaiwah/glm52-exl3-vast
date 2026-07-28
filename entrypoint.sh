@@ -1739,6 +1739,19 @@ if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   exit 0
 fi
 
+# vLLM's reasoning-aware structured-output manager tolerates MTP drafts that
+# were sampled before the grammar became active, but XGrammar logs those
+# expected rejected probes as engine ERRORs. Preflight only that boundary case;
+# committed tokens retain the backend's normal validation/error path. Failure is
+# a warning rather than a boot blocker because a future runtime may have fixed
+# or refactored the code independently; the serving verifier below still gates
+# actual structured-output correctness.
+if ! python3 "$SCRIPTS_DIR/patch_structured_output_spec.py"; then
+  echo "!!! structured-output/spec-decode compatibility patch was not applied."
+  echo "!!! The verifier will test correctness, but inspect vLLM release changes"
+  echo "!!! before accepting repeated 'Failed to advance FSM' engine errors."
+fi
+
 if [ "${SUPERVISOR:-1}" = "0" ]; then
   refresh_family_runtime_env
   apply_profile_runtime_env

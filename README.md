@@ -199,7 +199,8 @@ cannot contaminate the result.
 
 The live hybrid suite passes authenticated model discovery, exact
 tokenization, ordinary chat, thinking-content visibility, streaming with
-usage, multi-turn with preserved reasoning, structured JSON (informational),
+usage, multi-turn with preserved reasoning, release-gating strict structured
+JSON both with and without thinking,
 one automatic tool call, and tool-result continuation. `tool_choice=required`
 is intentionally an optional probe: this active vLLM build emits five
 duplicate calls there, while `tool_choice=auto` emits exactly one. The
@@ -207,6 +208,20 @@ duplication matches the class of [vLLM MTP/tool-parser issue
 #34449](https://github.com/vllm-project/vllm/issues/34449); it is not
 interleaved thinking and does not block normal automatic tool or agent
 workloads.
+
+Thinking plus structured output also crosses an MTP-specific boundary. The
+draft can have proposed several answer tokens before the reasoning-end marker
+activates the grammar. Those pre-mask proposals are allowed to be rejected and
+resampled; on GG r5, XGrammar logged each expected rejection as
+`Failed to advance FSM` at ERROR severity even when the request returned HTTP
+200 with exact schema-valid JSON. The entrypoint applies an idempotent
+compatibility patch that non-mutatingly preflights only these post-marker
+speculative probes. Valid probes still advance the temporary FSM state, and
+invalid *committed* tokens retain vLLM's original hard-error path. The automatic
+serving verifier and feature suite now make strict JSON with thinking a release
+gate rather than inferring correctness from HTTP 200. This complements
+[vLLM #44993](https://github.com/vllm-project/vllm/pull/44993), whose reasoning
+boundary fix is already present in GG r5.
 
 [`preserve thinking`](https://docs.z.ai/guides/capabilities/thinking-mode)
 means forwarding the assistant's complete, unmodified prior

@@ -99,6 +99,59 @@ def complete(base, key, model, prompt, max_tokens=64, timeout=300):
     return (msg.get("content") or "").strip()
 
 
+def structured_output_probe(base, key, model, timeout=300):
+    """Exercise the reasoning→grammar boundary used by agent clients."""
+    payload = {
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": (
+                "Think briefly, then return the integer 42 as the answer. "
+                "Follow the supplied schema exactly."
+            ),
+        }],
+        "max_tokens": 768,
+        "temperature": 0.0,
+        "chat_template_kwargs": {"enable_thinking": True},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "answer",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {"answer": {"type": "integer"}},
+                    "required": ["answer"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+    }
+    try:
+        doc = _req(
+            base + "/v1/chat/completions",
+            payload,
+            key=key,
+            timeout=timeout,
+        )
+        msg = ((doc.get("choices") or [{}])[0].get("message") or {})
+        parsed = json.loads(msg.get("content") or "")
+        ok = parsed == {"answer": 42}
+        return {
+            "ok": ok,
+            "detail": (
+                "thinking + strict JSON schema passed"
+                if ok
+                else f"unexpected structured document: {parsed!r}"
+            ),
+            "reasoning_field": bool(
+                msg.get("reasoning_content") or msg.get("reasoning")
+            ),
+        }
+    except Exception as error:
+        return {"ok": False, "detail": f"request failed: {error}"}
+
+
 DEGENERATE_RE = re.compile(r"^[\s\W_]+$")
 
 
@@ -249,6 +302,7 @@ def main(argv):
         "base_url": base,
         "health": False,
         "short_prompt": {"ok": False, "checks": []},
+        "structured_output": {"ok": False, "detail": "not attempted"},
         "long_context": {"attempted": False, "ok": False,
                          "detail": "not attempted"},
         "long_context_verified": False,
@@ -274,6 +328,16 @@ def main(argv):
         verdict["reason"] = "short-prompt checks failed: " + "; ".join(
             f"{c['name']}: {c['detail']}" for c in verdict["short_prompt"]["checks"]
             if not c["ok"])
+        return _finish(verdict, args, started)
+
+    verdict["structured_output"] = structured_output_probe(
+        base, args.api_key, args.model
+    )
+    if not verdict["structured_output"]["ok"]:
+        verdict["reason"] = (
+            "thinking + structured-output check failed: "
+            + verdict["structured_output"]["detail"]
+        )
         return _finish(verdict, args, started)
 
     budget = min(args.needle_tokens, max(0, args.max_model_len - 4096))

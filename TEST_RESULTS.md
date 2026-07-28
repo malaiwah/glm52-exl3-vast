@@ -899,3 +899,46 @@ Artifacts and SHA-256 checksums are preserved under
 `evidence/aibeast-r5-20260728/` in the qualification workspace. The r5
 container remains healthy on AIBeast port 8000 with zero restarts; the prior
 production container is retained stopped as an exact rollback.
+
+### Structured output + MTP follow-up (production left online)
+
+Oh My Pi traffic exposed repeated XGrammar
+`Failed to advance FSM ... Please file an issue` messages during structured
+requests. Source inspection confirmed GG r5 already includes the substantive
+reasoning-boundary work from vLLM #44993. In the remaining path, draft tokens
+after a reasoning-end marker were proposed before the JSON bitmask existed;
+the manager deliberately tolerated their rejection and the verifier resampled
+them, but `accept_tokens` logged the expected speculative rejection as an
+engine ERROR before returning `False`.
+
+The unmodified AIBeast control was exercised without restarting or modifying
+production:
+
+- 8/8 concurrent strict-schema requests passed with thinking disabled;
+- 8/8 passed with thinking enabled;
+- 8/8 passed with the thinking option omitted;
+- the updated full feature suite passed both strict-JSON modes, including an
+  exact `{"answer":42}` document and a populated reasoning field;
+- the engine returned HTTP 200, remained healthy with zero restarts, and still
+  emitted the diagnostic FSM errors during the thinking request.
+
+This establishes the current messages as false-severity diagnostics for the
+observed Chat Completions path, not evidence that Oh My Pi received malformed
+JSON. It does not generalize to every FSM error: upstream reports include
+genuine HTTP 500 and request-termination variants, so committed-token failures
+must remain fatal.
+
+The candidate entrypoint now pre-validates only the post-reasoning speculative
+probes without mutating grammar state. It accepts valid probes temporarily so
+later masks in the same MTP window remain exact, skips the noisy backend call
+for expected-invalid probes, and leaves the original accept/assert path intact
+for committed tokens. Both thinking and non-thinking strict JSON are required
+by the feature suite, and the automatic boot verifier now gates thinking plus
+strict JSON before long-context qualification. Local patch/idempotence,
+unknown-runtime, verifier, feature-suite, Python and shell tests passed.
+
+Per the operator's instruction, this patch has **not** been loaded into the
+running AIBeast process: there was no maintenance window. A patched-process
+concurrency run and zero-new-FSM-error log comparison remain required on a
+rental or during the next approved restart before the workaround is promoted
+as live-qualified.

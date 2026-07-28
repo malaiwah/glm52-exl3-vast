@@ -4,8 +4,8 @@
 The suite keeps generations short so it can accompany every candidate without
 distorting rental cost. It covers auth, tokenization, ordinary and thinking
 chat, streaming, multi-turn (including preserved reasoning), outbound and
-round-trip tool calling, optional vision, and an informational structured-JSON
-capability probe.
+round-trip tool calling, optional vision, and release-gating structured JSON
+both with and without thinking because agent clients rely on both shapes.
 """
 import argparse
 import base64
@@ -53,6 +53,37 @@ def chat(base, key, model, messages, **extra):
     }
     payload.update(extra)
     return json_request(base + "/v1/chat/completions", payload, key)
+
+
+def structured_answer(base, key, model, thinking):
+    return message(chat(
+        base, key, model,
+        [{"role": "user", "content":
+          "Think briefly if thinking is enabled, then return the integer 42 "
+          "as the answer. Follow the supplied schema exactly."}],
+        max_tokens=768 if thinking else 96,
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "answer",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {"answer": {"type": "integer"}},
+                    "required": ["answer"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        chat_template_kwargs={"enable_thinking": thinking}))
+
+
+def parse_structured_answer(msg):
+    try:
+        doc = json.loads(msg.get("content") or "")
+    except (TypeError, ValueError):
+        return {}, False
+    return doc, doc == {"answer": 42}
 
 
 def stream_chat(base, key, model):
@@ -179,29 +210,23 @@ def run(base, key, model, vision, auth_enabled=None):
     record(checks, "multi-turn-preserve-thinking", "COBALT-731" in turn2_text,
            turn2_text, preserved_reasoning=bool(preserved))
 
-    structured = message(chat(
-        base, key, model,
-        [{"role": "user", "content": "Return the integer 42 as the answer."}],
-        response_format={
-            "type": "json_schema",
-            "json_schema": {
-                "name": "answer",
-                "strict": True,
-                "schema": {
-                    "type": "object",
-                    "properties": {"answer": {"type": "integer"}},
-                    "required": ["answer"],
-                    "additionalProperties": False,
-                },
-            },
-        },
-        chat_template_kwargs={"enable_thinking": False}))
-    try:
-        structured_doc = json.loads(structured.get("content") or "")
-    except (TypeError, ValueError):
-        structured_doc = {}
-    record(checks, "structured-json", structured_doc.get("answer") == 42,
-           structured.get("content") or "", required=False)
+    structured = structured_answer(base, key, model, thinking=False)
+    _structured_doc, structured_ok = parse_structured_answer(structured)
+    record(checks, "structured-json", structured_ok,
+           structured.get("content") or "")
+
+    structured_thinking = structured_answer(base, key, model, thinking=True)
+    _thinking_doc, thinking_ok = parse_structured_answer(structured_thinking)
+    record(
+        checks,
+        "structured-json-thinking",
+        thinking_ok,
+        structured_thinking.get("content") or "",
+        reasoning_field=bool(
+            structured_thinking.get("reasoning_content")
+            or structured_thinking.get("reasoning")
+        ),
+    )
 
     tool = message(chat(
         base, key, model,
