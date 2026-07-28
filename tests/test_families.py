@@ -395,13 +395,25 @@ def test_qwen_preset():
           "--enable-auto-tool-choice" in line)
     check("the economical profile is text-only by default",
           "--language-model-only" in line)
+    check("the default compiled Qwen profile does not force eager mode",
+          "--enforce-eager" not in line)
+    mtp_eff, _, _ = resolved("qwen36", gpus=1, MTP_TOKENS=2)
+    mtp_line = " ".join(gc.family_serve_args(mtp_eff))
+    check("Qwen MTP2 uses the live-qualified eager compatibility path",
+          "--enforce-eager" in mtp_line, mtp_line)
+    mtp_findings = gc.validate(mtp_eff)
+    check("the configurator explains Qwen MTP's eager-mode tradeoff",
+          "qwen-mtp-eager" in ids(mtp_findings),
+          str(ids(mtp_findings)))
     check("the generic env block is selected", d["FAMILY_ENV_BLOCK"] == "generic")
     check("spec method uses vLLM's current mtp name", d["SPEC_METHOD"] == "mtp")
     check("the MTP78 apparatus is forced off", d["MTP78_MODE"] == "off")
     check("no draft dir or draft quantization is derived",
           d["DRAFT_MODEL"] == "" and d["DRAFT_QUANTIZATION"] == "")
     check("vision is forced off", d["VISION"] is False)
-    check("the family is flagged untested", gc.family("qwen36")["tested"] is False)
+    check("the full-size text profile is flagged live-qualified",
+          gc.family("qwen36")["tested"] is True
+          and gc.VARIANTS["qwen36-nvfp4"]["tested"] is True)
 
 
 def test_custom_profile():
@@ -534,7 +546,11 @@ def test_family_coherence_rules():
     msg = [x["message"] for x in f if x["id"] == "kv-dtype-family"][0]
     check("and explains that nvfp4_ds_mla is an MLA layout", "MLA KV layout" in msg, msg)
     eff, _, _ = resolved("qwen36")
-    check("an untested family always warns", "family-untested" in ids(gc.validate(eff)))
+    check("the live-qualified Qwen family no longer emits the untested warning",
+          "family-untested" not in ids(gc.validate(eff)))
+    custom, _, _ = resolved("custom")
+    check("an untested family still warns",
+          "family-untested" in ids(gc.validate(custom)))
 
 
 def test_gpu_count_gate():

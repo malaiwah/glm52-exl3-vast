@@ -33,7 +33,7 @@ sequential and are deleted as soon as their evidence is copied.
 |---|---:|---:|---:|
 | Bash, Python, workflow, JSON, Docker build | yes | image pull | image pull |
 | GLM, Qwen 27B, and custom profile resolution | yes | custom | custom |
-| Qwen 27B architecture/quant/MTP metadata guard | yes | — | — |
+| Qwen 27B architecture/quant/MTP metadata guard | yes | yes | — |
 | Provider detection and generated endpoint | — | yes | yes |
 | GPU count/name guard | fixtures | yes | yes |
 | Key-only SSH and port forwarding | config lint | yes | yes |
@@ -43,12 +43,12 @@ sequential and are deleted as soon as their evidence is copied.
 | Dashboard token rejection and accepted view | handler tests | yes | yes |
 | API authentication (`401` without key, success with key) | — | yes | yes |
 | `/health`, `/v1/models`, chat, streaming, usage details | — | yes | yes |
-| Qwen reasoning and automatic tool-call parser | — | yes | yes |
-| Qwen text-only mode | — | yes | yes |
+| Qwen reasoning and automatic tool-call parser | — | yes, full 27B | yes |
+| Qwen text-only mode | — | yes, full 27B | yes |
 | Native Qwen vision mode | — | one provider | one provider if time remains |
-| Qwen MTP speculative decoding | config | one provider | one provider if time remains |
+| Qwen MTP speculative decoding | config | eager MTP2 passed; compiled path rejected | one provider if time remains |
 | GLM v31 InstantTensor cold boot and AOT-cache reuse | config | yes | yes |
-| GLM feature suite at production scale | harness | yes | yes |
+| GLM feature suite at production scale, including strict JSON with thinking | harness | yes | yes |
 | GLM cold prefill and sustained C1/C2/C4/C8 decode | harness | yes | yes |
 | Per-phase GPU power and power-limit telemetry | harness | yes | yes |
 | Exact ~517K five-depth needle and degeneration gate | harness | yes | yes |
@@ -143,8 +143,11 @@ Execute in this order so a failure cannot contaminate later conclusions:
    any arm that boots but later OOMs, degenerates, or loses retrieval.
 4. On the selected arm, run authenticated discovery/tokenization, ordinary
    and thinking chat, SSE usage, multi-turn with optional preserved thinking,
-   automatic tool call and tool-result continuation. Structured output,
-   forced-tool mode, and vision are informational rather than release gates.
+   automatic tool call and tool-result continuation. Strict JSON-schema output
+   must pass both with thinking disabled and across the thinking-to-answer
+   boundary; run concurrent requests and reject any HTTP failure, invalid
+   schema, or genuine committed-token FSM failure. Forced-tool mode and vision
+   remain separate diagnostics rather than flagship text-profile release gates.
 5. Measure unique-prefix prefill at 1K/8K/32K and aggregate decode at
    C1/C2/C4/C8. Record TTFT, output throughput, failures, preemptions, mean
    speculative acceptance length, per-position acceptance, and the exact

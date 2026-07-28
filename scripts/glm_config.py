@@ -148,7 +148,7 @@ FAMILIES = {
     },
     "qwen36": {
         "label": "Qwen3.6 27B NVFP4 — low-cost Blackwell development profile",
-        "tested": False,
+        "tested": True,
         "env_block": "generic",
         "default_variant": "qwen36-nvfp4",
         # nvfp4_ds_mla is an MLA KV layout; it does not exist for this family.
@@ -178,11 +178,13 @@ FAMILIES = {
         ],
         "notes": (
             "ModelOpt NVFP4 checkpoint sized for one Blackwell GPU. The appliance "
-            "path, native vision handling, thinking-content normalization and MTP "
-            "method were live-qualified with a small Qwen3.5 checkpoint; the full "
-            "27B checkpoint remains a production-scale residual test. MTP is opt-in "
-            "and uses vLLM's current 'mtp' method. GLM-only MLA/DCP/EXL3 settings "
-            "are removed rather than inherited from the base image."),
+            "path, text-only compiled default, thinking-content normalization, "
+            "structured output, tools and preserved multi-turn reasoning were "
+            "live-qualified with the full 27B checkpoint on an RTX 5090. MTP is "
+            "opt-in and uses vLLM's current 'mtp' method; GG v20-r5 forces that "
+            "path to eager mode around a FlashInfer frozen-query-shape crash. "
+            "GLM-only MLA/DCP/EXL3 settings are removed rather than inherited "
+            "from the base image."),
     },
     "custom": {
         "label": "Custom checkpoint — conservative generic vLLM profile",
@@ -406,7 +408,7 @@ VARIANTS = {
         "quantization": "modelopt",
         "kv_scales_calibrated": False,
         "download_gib": 21,
-        "tested": False,
+        "tested": True,
     },
     "custom": {
         "family": "custom",
@@ -1408,6 +1410,13 @@ def family_serve_args(cfg: dict):
         args += ["--quantization-config", variant["quantization_config"]]
     if cfg.get("MODEL_FAMILY") in ("qwen36", "custom") and not cfg.get("MULTIMODAL"):
         args += ["--language-model-only"]
+    if cfg.get("MODEL_FAMILY") == "qwen36" and cfg.get("MTP_TOKENS", 0) > 0:
+        # GG v20-r5 / FlashInfer freezes q_len_per_req=1 in the compiled
+        # decode wrapper, while Qwen's native MTP2 draft needs q_len=3. The
+        # first request otherwise kills the engine. Eager mode is slower but
+        # is the live-qualified compatibility path until upstream owns one
+        # wrapper per draft query length.
+        args += ["--enforce-eager"]
     if cfg.get("MODEL_FAMILY") == "custom":
         if cfg.get("QUANTIZATION"):
             args = ["--quantization", cfg["QUANTIZATION"]] + args
@@ -1491,6 +1500,17 @@ def validate(cfg: dict, context=None):
     fam_name = cfg.get("MODEL_FAMILY", "glm52")
     fam = family(fam_name)
     is_glm = fam_name == "glm52"
+
+    if fam_name == "qwen36" and toks > 0:
+        warn(
+            "qwen-mtp-eager",
+            ["MTP_TOKENS"],
+            "Qwen native MTP currently forces --enforce-eager on GG v20-r5. "
+            "The compiled FlashInfer path freezes q_len_per_req=1 and crashes "
+            "when MTP2 requires q_len=3. Eager MTP2 passed the live feature "
+            "gate, but it gives up torch.compile/CUDA-graph throughput; keep "
+            "MTP_TOKENS=0 for the fast development default.",
+        )
 
     # 0. family coherence ---------------------------------------------------
     if not fam.get("tested"):
