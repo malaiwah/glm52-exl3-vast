@@ -40,24 +40,24 @@ Its exact log is preserved at:
 | `glm47` tool parser + auto tool choice | off | GLM native tool syntax | tool calls and agentic loops work | parser bugs can affect malformed calls | retain; feature-suite gated |
 | prompt-token details + forced stream usage | off | appliance observability and UI accounting | exact PP tests and streamed usage | tiny response/CPU overhead | retain |
 | quantization `exl3` | inferred/none | target is an EXL3 rank-sliced checkpoint | makes the 753B model fit four 96 GB cards with measured quality | custom kernel/source layer; SM120-only qualification | retain |
-| `MAX_MODEL_LEN=520192` | checkpoint advertises 1,048,576 | target requirement is usable 512K–520K on TP4; 524,288 failed InstantTensor admission | exact ~517K requests pass with output reserve | not the checkpoint maximum | retain |
-| RoPE clamp to 520,192 | checkpoint table is 1,048,576 | served and allocated envelopes must agree | avoids building/using unnecessary tables outside admission | changing context requires regeneration/requalification | retain |
+| `MAX_MODEL_LEN=513536` | checkpoint advertises 1,048,576 | GG r5's safe profiler exposes 514,944 KV tokens on the qualified TP4/DCP2 shape | two ~510.5K five-depth passes and 507,902 + 4,096 generation pass with a 1,408-token KV margin | not the checkpoint maximum | retain |
+| RoPE clamp to 513,536 | checkpoint table is 1,048,576 | served and allocated envelopes must agree | avoids building/using unnecessary tables outside admission | changing context requires regeneration/requalification | retain |
 | `use_index_cache=true` + GLM sparse-layer pattern | checkpoint/runtime dependent | GLM has learned sparse-attention layers | required for the intended DSA path and long-context performance | incorrect pattern corrupts attention routing | retain; checkpoint-coupled |
-| load format `instanttensor` | auto | five first-attempt boots and two exact ~517K retrievals passed | target+draft load 32–33 s versus 60–63 s; avoids the safetensors near-max fragmentation/OOM observed three times | exact 524,288 admission failed twice; profile must stay at 520,192 | retain as balanced default |
+| load format `instanttensor` | auto | cold and reused-cache r5 boots plus two ~510.5K retrievals passed | target+draft load ~33 s; avoids the safetensors near-max fragmentation/OOM observed three times | exact 524,288 admission failed twice; graph-aware r5 profile stays at 513,536 | retain as balanced default |
 | safetensors | auto/fallback | operator-selectable generic loader | conventional loader and valid for shorter gates | failed three times at the 514,432-token boundary on this near-max shape; not full-envelope-qualified | fallback only |
 | attention backend `B12X_MLA_SPARSE` | auto | SM120 GLM sparse MLA implementation | required for the measured PP/TG/context envelope | custom fork and kernels | retain |
 | MoE backend `b12x` | auto | Blackwell routed-expert path | contributes to >100 tok/s C1 with MTP | hardware-specific and actively developed | retain |
 | TP4 | 1/detected | four local cards and rank-sliced target | model fit and full-card utilization | inter-card traffic | retain, derived from detected GPU count |
-| DCP2 | 1 | balanced production topology | 513,536+ logical KV capacity in the independent issue-33 study, long-prefill gains, stock-like decode, and 520K admission here | DCP1 decodes faster; DCP4 exposes more context but slows ordinary work | retain balanced profile |
+| DCP2 | 1 | balanced production topology | 513,536 logical request envelope, long-prefill gains, stock-like decode, and one 512K-class session | DCP1 decodes faster; DCP4 exposes more context but slows ordinary work | retain balanced profile |
 | DCP `a2a` transport | backend default | measured DCP2 route | correct sharded-query exchange on this fork | collective overhead at small batches | retain |
-| KV dtype `nvfp4_ds_mla` | auto | calibrated GLM scale file is supplied | enough KV capacity for 520K and good decode | quality depends on exact scales; never use uncalibrated | retain |
-| GPU utilization 0.976 | 0.9 | cross-provider admission point with graph profiling | preserves the 520,192-token request envelope while leaving runtime workspace on cards that expose less than AIBeast's usable VRAM | a smaller KV surplus than 0.978; driver changes still require a cold boot | retain |
+| KV dtype `nvfp4_ds_mla` | auto | calibrated GLM scale file is supplied | enough KV capacity for a 513,536 request limit and good decode | quality depends on exact scales; never use uncalibrated | retain |
+| GPU utilization 0.976 | 0.9 | cross-provider admission point with graph profiling | exposes 514,944 KV tokens and preserves the 513,536 request limit with runtime headroom | smaller KV surplus than optimistic accounting; driver changes still require a cold boot | retain |
 | explicit block override | auto | zero lets the corrected profiler size it | InstantTensor exposes 523,776 tokens and retains runtime headroom | an exact 4,064-block pin did not rescue safetensors and increased fragmentation | retain auto |
 | prefix caching | off/model dependent | agentic workloads repeat large histories | avoids re-prefill when a prefix remains resident | KV bookkeeping/memory | retain |
 | DRAM offload 50% | off | L2 prefix cache, not active-GPU-KV expansion | 125.5 GiB aggregate host tier can restore large evicted prefixes faster than PP | experimental connector; host memlock is only ~31 GiB per worker and must be raised for fully pinned pages | retain with explicit warning |
 | offload failure policy `recompute` | connector default varies | cache is an optimization | page/load failure does not kill inference | a miss pays full PP | retain |
 | maximum sequences 8 | 256 | product concurrency target is C1–C8 | aggregate generation rises through C8 | eight maximum-length sessions cannot coexist; graph/trellis window must cover `8×(1+MTP)` | retain |
-| batched tokens 3,072 | model-dependent | matched issue-33 and local performance control | strong long PP while keeping activation memory compatible with 520K | vLLM emits a generic speculative-slot warning | retain; 4,096 failed admission |
+| batched tokens 3,072 | model-dependent | matched issue-33 and local performance control | strong long PP while keeping activation memory compatible with 513,536 | vLLM emits a generic speculative-slot warning | retain; 4,096 failed admission |
 | chunked prefill | on for long contexts | explicit for clarity | bounds activation memory and interleaves work | chunk boundaries add scheduling overhead | retain |
 | async scheduling | often off | v20 EXL3 release constraint is speculative/CKV lifetime safety | avoids unqualified lifetime races | may leave throughput on the table | retain off |
 | graph capture sizes 4..64 step 4 | auto-derived | MTP5 × C8 requires up to 48 query tokens/step | keeps all supported concurrency in captured trellis path | 0.20 GiB/GPU plus 11 s capture | retain |
@@ -95,7 +95,7 @@ Rows whose value equals the current source default are still called out.
 | `VLLM_USE_AOT_COMPILE` | false | `1` | persistent compiled model reloads in ~1.1 s instead of recompiling | stale/corrupt caches were a historical risk; fingerprint and retrieval gate are mandatory | retain |
 | `VLLM_USE_MEGA_AOT_ARTIFACT` | false | `1` | reconstructs 77 target artifacts and two draft artifacts directly | disk usage and strict software/config fingerprint | retain |
 | compile/autotune cache directories | user cache | immutable-checkpoint-external persistent volume | reuse survives container replacement and cannot mutate weights | consumes local SSD; invalidate on fingerprint change | retain |
-| `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS` | true | `1`, same as fork default | accounts graph high-water before KV allocation | reports less KV than older optimistic behavior | pin for safety |
+| `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS` | true | `1`, same as fork default; an explicit expert `0` is honored | accounts the measured ~0.81 GiB/GPU graph high-water before KV allocation | reports less KV than older optimistic behavior | retain on; override requires cold runtime and near-max requalification |
 | `VLLM_MEMORY_PROFILE_INCLUDE_ATTN` | false | `1` | includes persistent DCP/attention resources before sizing KV | lower advertised KV is possible | retain for reliable high-GMU boot |
 | `VLLM_USE_V2_MODEL_RUNNER` | auto | `1`, release-qualified execution path | new runner changes rapidly | retain with pinned image |
 | `VLLM_USE_BREAKABLE_CUDAGRAPH` | false | `0`, same as default | full qualified graph behavior | less flexible dynamic escape | pin |
@@ -190,8 +190,13 @@ detection. EXL3 registrations are already covered by upstream PR #139.
 
 Only changes with a plausible path to a product requirement advance:
 
-1. MTP3 versus MTP5 is rechecked under sustained real agent traffic after the
-   controlled decode artifact is captured. Compare accepted and drafted
+1. MTP3 versus MTP5 was decided by the matched GSM8K run: 51.5 versus
+   53.4 tok/s with the quantized draft. After the final MTP5 profile returned
+   to production port 8000, real agent traffic reported MAL 3.90–5.13 and
+   58.0–82.7% average draft acceptance in populated ten-second windows.
+   Historical MTP3 field traffic on the MadeBy561/DCP4 stack reported MAL
+   2.70–3.53 and 56.8–84.4%, but that is not a matched A/B and therefore is
+   only a field sanity check. Future comparisons must use accepted/drafted
    counter deltas, normalized draft acceptance `(MAL-1)/depth`, aggregate
    throughput, latency, and errors; raw MAL alone is not comparable because
    MTP5 has a higher ceiling.
@@ -199,7 +204,7 @@ Only changes with a plausible path to a product requirement advance:
    driver/OS refresh; cached results include driver, GPU order, affinity, and
    software revision.
 3. Partial indexer replication is not a balanced-profile candidate while the
-   520K requirement needs the roughly 5% KV capacity it consumes.
+   near-512K requirement needs the roughly 5% KV capacity it consumes.
 4. New sparse-indexer selection policies from SparkInfer PRs #82/#84 are not
    applied universally. The current Brandon control already passed the
    five-depth 521K gate; a checkpoint-specific policy requires a frozen cold

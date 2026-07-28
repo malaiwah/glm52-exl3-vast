@@ -796,3 +796,106 @@ an older driver before downloading weights, unless an operator explicitly sets
 `ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1` for a separately qualified
 `cuda-compat-13-2` installation. Unit coverage includes the rejected r580/r590
 and accepted r595/r610 branches. Neither rejected rental remains allocated.
+
+## GG v20-r5 AIBeast flagship qualification (2026-07-28)
+
+The final candidate
+`ghcr.io/malaiwah/glm52-exl3-vast:c083aa6a1d84bc6030a76236ee4f80bb4a2b6881`
+was qualified on four RTX PRO 6000 Blackwell 96 GB cards. AIBeast used loaded
+driver 595.71.05, CUDA 13.2, an all-`NODE` peer topology, the effective NVIDIA
+P2P override, and a 280 W/card power limit. The runtime reported GG v20-r5,
+vLLM `936ed48`, SparkInfer `f532ec9`, FlashInfer `801d57a`, and native EXL3
+integration from PR #190 / Trellis PR #49.
+
+The qualified shape was TP4/DCP2, external rank-sliced TR3 MTP-5,
+probabilistic draft sampling, standard rejection sampling, 3,072 batched
+tokens, eight sequences, CUDA graph and Trellis capture through 64, calibrated
+`nvfp4_ds_mla` KV, InstantTensor, 140,000-token full-CKV gather, 50% aggregate
+DRAM prefix offload, utilization 0.976, and vision off.
+
+GG r5 safely accounts for a measured 0.81 GiB/GPU retained CUDA-graph pool.
+At the former 520,192 request limit, KV validation correctly failed: 8.97 GiB
+was required and 8.88 GiB was available, for an estimated 514,944-token
+ceiling. The selected `MAX_MODEL_LEN=513536` preserves 1,408 tokens of
+admission margin without disabling the new graph estimator.
+
+The read-only target and draft loaded in about 33 seconds with InstantTensor.
+A fresh compile-cache boot reached health in 4m35s. Reusing the same cache
+loaded the backbone AOT directly (`torch.compile` 0.45s) and reached health in
+2m25s; a subsequent production-port restart took 2m02s. The draft head still
+spent about two seconds compiling. Output correctness and performance remained
+normal after reuse.
+
+All required feature-suite checks passed both on isolated port 18000 and the
+final production port 8000: tokenization, thinking and non-thinking chat,
+streaming usage, multi-turn with preserved reasoning, structured JSON
+(informational), one automatic tool call, and tool-result continuation.
+`tool_choice=required` continued to emit five calls and remains an optional
+diagnostic. Vision was deliberately disabled.
+
+Fresh-cache compact results:
+
+| measurement | 8K | 32K | 64K | 128K |
+|---|---:|---:|---:|---:|
+| prefill tok/s | 1,890 cold-first-cell | 2,732 | 2,650 | 2,496 |
+
+| decode context | C1 | C2 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| ~1K | 142.4 | 150.2 | 223.9 | 285.9 |
+| MTP mean acceptance length | 5.59 | 5.03 | 4.74 | 5.56 |
+
+Cache-reused compact results:
+
+| measurement | 8K | 32K | 64K | 128K |
+|---|---:|---:|---:|---:|
+| prefill tok/s | 2,853 | 2,749 | 2,658 | 2,504 |
+
+| decode context | C1 | C2 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| ~1K | 138.8 | 189.8 | 223.8 | 312.1 |
+| MTP mean acceptance length | 5.34 | 5.41 | 5.04 | 5.39 |
+
+Canonical `llm-inference-bench` v0.4.29 at commit `86cf05c`:
+
+| measurement | 8K | 32K | 64K | 128K |
+|---|---:|---:|---:|---:|
+| cold unique-prefix prefill tok/s | 2,827 | 2,535 | 2,652 | 2,369 |
+
+| decode context | C1 | C2 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| zero | 106.7 | 145.6 | 207.9 | 284.5 |
+| 32K | 103.9 | 144.3 | 203.2 | 274.1 |
+| 128K | 102.1 | 135.8 | capacity-limited | capacity-limited |
+
+The capacity-limited cells are expected: the product requirement is one solo
+near-maximum session plus useful C1-C8 aggregate throughput, not four or eight
+simultaneous 128K sessions. Whole-run GPU power averaged 1,055.67 W and peaked
+at 1,127.91 W under a 1,120 W aggregate configured limit. Zero-context C1
+averaged 1,084.14 W and C8 averaged 1,109.73 W.
+
+Two independent uncached near-maximum requests used different seeds and exact
+served-tokenizer counts of 510,534 and 510,535 document tokens. Both recovered
+all five needles at 1%, 10%, 50%, 90% and 99%, with no degeneration, in 231.06
+and 234.97 seconds. The precise envelope probe completed a 507,902-token served
+prompt plus 4,096 generated tokens (511,998 total) in 267.15 seconds. TTFT was
+224.70s, decode TPOT 10.37ms (about 96.5 tok/s), and MTP mean acceptance length
+was 3.43.
+
+The benchmark prompt builder previously accepted a three-percent token-count
+error, which could overshoot a 500K request by thousands of tokens. It now
+iterates to 0.01% with a 32-token floor; the exact-envelope result above used
+that corrected harness.
+
+After the final profile returned to production port 8000, live agent traffic
+kept MTP-5 mean acceptance length between 3.90 and 5.13, with 58.0–82.7%
+average draft acceptance across populated ten-second windows. Historical
+MadeBy561/DCP4 MTP-3 field windows were 2.70–3.53 MAL and 56.8–84.4% average
+draft acceptance. Those targets and runtime shapes differ, so this is a
+real-workload sanity check rather than the matched A/B; the controlled GSM8K
+result (51.5 tok/s at MTP-3 versus 53.4 at MTP-5) remains the selection
+evidence.
+
+Artifacts and SHA-256 checksums are preserved under
+`evidence/aibeast-r5-20260728/` in the qualification workspace. The r5
+container remains healthy on AIBeast port 8000 with zero restarts; the prior
+production container is retained stopped as an exact rollback.

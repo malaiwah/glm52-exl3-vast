@@ -246,7 +246,11 @@ VARIANTS = {
         "default_draft": "native",
         "defaults": {
             "DCP": "2",
-            "MAX_MODEL_LEN": 520192,
+            # GG v20-r5 profiles the retained CUDA-graph pool before KV
+            # admission.  On the qualified 96 GiB TP4/DCP2 shape this exposes
+            # 514,944 KV tokens; 513,536 keeps a measured 1,408-token admission
+            # margin while still completing a 507,902 + 4,096 token request.
+            "MAX_MODEL_LEN": 513536,
             "MAX_NUM_BATCHED_TOKENS": 3072,
             "MAX_NUM_SEQS": 8,
             "MTP_TOKENS": 5,
@@ -258,10 +262,10 @@ VARIANTS = {
             "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": 8192,
             # AIBeast can run 0.978 because its cards expose about 0.58 GiB
             # more usable VRAM than the RunPod RTX PRO 6000 WS cards tested
-            # on 2026-07-28.  On RunPod, 0.978 admitted the 520K KV pool but
+            # on 2026-07-28.  On RunPod, 0.978 admitted the old 520K KV pool but
             # left 7.94 MiB free and the first 36 MiB EXL3 transient
-            # allocation killed the engine.  0.976 keeps the 520,192-token
-            # admission envelope while restoring portable runtime headroom.
+            # allocation killed the engine.  0.976 plus r5's graph-aware
+            # profiler admits 513,536 while restoring portable headroom.
             "GPU_MEMORY_UTILIZATION": 0.976,
             "GPU_BLOCKS_OVERRIDE": 0,
             "LOAD_FORMAT": "instanttensor",
@@ -799,8 +803,9 @@ KNOBS = [
              "change. Safetensors OOMed at the same 514K prefill boundary with both "
              "auto and exact KV pools because the final sparse-indexer allocation "
              "could not obtain a contiguous 352 MiB segment. InstantTensor uses about "
-             "0.04 GiB/GPU more resident model memory, so its qualified context "
-             "ceiling is 520192 rather than 524288.")),
+             "0.04 GiB/GPU more resident model memory. GG v20-r5 additionally "
+             "accounts for retained CUDA graphs, so the qualified balanced "
+             "default is 513536 rather than 524288.")),
 
     dict(key="MODEL_OUTPUT_LIMIT", type="int", default=131072, min=256, max=262144,
          group="Serving", scope="engine", label="Client output limit",
@@ -831,14 +836,15 @@ KNOBS = [
          label="Vision (image input) — EXPERIMENTAL on EXL3",
          rationale=(
              "Bolts the MoonViT-3d tower + PatchMerger projector (~890 MB, BF16, no "
-             "text weight touched) onto the text backbone. KNOWN BROKEN AT LONG "
-             "CONTEXT ON THE EXL3 TARGET: the final v20 turnkey image measured 32K "
-             "needle 0/3 with degenerate text and collapsed MTP acceptance. In the "
-             "same run a 5120x2880 screenshot returned 17/18 exact details, a follow-up "
-             "turn preserved the image context, and text-only chat remained exact. "
-             "The current graft adds ~1.99 GiB/GPU. Use it for short-prompt image work "
-             "only, and turn it off for anything that depends on long-context "
-             "retrieval.")),
+             "text weight touched) onto the text backbone. QUALIFICATION IS "
+             "COMPOSITION-SPECIFIC: our EXL3/TR3 composition returned 17/18 exact "
+             "details from a 5120x2880 screenshot but failed the 32K text gate; the "
+             "tested MadeBy561 composition passed the 32K text gate but extracted "
+             "only 1-2/18 dashboard details. Other published Baseten-tower merges "
+             "report successful mixed image/retrieval tests, so this is not a claim "
+             "that the tower itself is broken. The current graft adds ~1.99 GiB/GPU. "
+             "Keep it opt-in until this exact checkpoint passes both detailed-image "
+             "and long-context gates.")),
 
     dict(key="VISION_CHUNKS", families=("glm52",), type="int", default=8, min=1, max=64,
          group="Multimodal", scope="engine", label="Max vision chunks per request",
@@ -1599,13 +1605,14 @@ def validate(cfg: dict, context=None):
     if (is_glm and cfg["VISION"]
             and cfg["MODEL_VARIANT"].startswith("exl3-tr3")):
         warn("vision-long-context", ["VISION"],
-             "EXPERIMENTAL / KNOWN BROKEN AT LONG CONTEXT: VISION=1 on the EXL3-TR3 "
-             "checkpoint corrupts long-context output. The final v20 turnkey image "
+             "EXPERIMENTAL / THIS COMPOSITION FAILED LONG CONTEXT: VISION=1 on the "
+             "tested EXL3-TR3 checkpoint corrupts long-context output. The final v20 turnkey image "
              "measured 32K needle 0/3 with degenerate text and mean MTP acceptance "
              "collapsing to 1.25-1.50, while a 5120x2880 screenshot returned 17/18 "
-             "exact details and its multi-turn follow-up was exact. Safe only for "
-             "short-prompt image work. The long-context probe will fail this "
-             "configuration by design.")
+             "exact details and its multi-turn follow-up was exact. This finding is "
+             "not generalized to the Baseten tower or other published quant/wrapper "
+             "compositions. Safe here only for short-prompt image work; the "
+             "long-context probe will fail this configuration by design.")
     if is_glm and cfg["VISION"] and cfg["MAX_MODEL_LEN"] > 393216:
         warn("vision-kv-pressure", ["VISION", "MAX_MODEL_LEN"],
              f"the current vision graft adds ~1.99 GiB/GPU. On the tested DCP4 "
@@ -1624,7 +1631,7 @@ def validate(cfg: dict, context=None):
     # 7. memory / pool sanity ------------------------------------------------
     if (is_glm and cfg["MODEL_VARIANT"].startswith("exl3-tr3")
             and cfg["LOAD_FORMAT"] == "instanttensor"
-            and cfg["MAX_MODEL_LEN"] > 520192
+            and cfg["MAX_MODEL_LEN"] > 513536
             and cfg["GPU_MEMORY_UTILIZATION"] <= 0.978):
         warn("instanttensor-context-margin",
              ["LOAD_FORMAT", "MAX_MODEL_LEN", "GPU_MEMORY_UTILIZATION"],
@@ -1632,19 +1639,25 @@ def validate(cfg: dict, context=None):
              "GPU_MEMORY_UTILIZATION=0.978 failed KV admission on both InstantTensor "
              "attempts: 9.04 GiB was needed and 9.03 GiB remained. InstantTensor "
              "loaded ~0.04 GiB/GPU more resident model memory than safetensors. "
-             "MAX_MODEL_LEN=520192 passed four first-attempt boots plus a "
-             "517,179-token five-depth retrieval. Use that measured margin, or "
-             "re-qualify another utilization/context pair without relying on retries.")
+             "The earlier v31 image passed MAX_MODEL_LEN=520192, but GG v20-r5 "
+             "now accounts for a measured 0.81 GiB/GPU retained CUDA-graph pool. "
+             "On r5 the safe profiler exposed 514,944 KV tokens; "
+             "MAX_MODEL_LEN=513536 passed cold and cache-reused boots, two "
+             "~510.5K five-depth retrievals, and a 507,902 + 4,096 token request. "
+             "Use that measured margin, or re-qualify another utilization/context "
+             "pair without disabling graph accounting.")
     if cfg["GPU_MEMORY_UTILIZATION"] > 0.95 and not cfg["GPU_BLOCKS_OVERRIDE"]:
         if (is_glm and cfg["MODEL_VARIANT"] == "exl3-tr3"
-                and cfg["MAX_MODEL_LEN"] == 520192
+                and cfg["MAX_MODEL_LEN"] == 513536
                 and cfg["GPU_MEMORY_UTILIZATION"] <= 0.976):
             warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
                  f"{cfg['GPU_MEMORY_UTILIZATION']} is high by generic vLLM standards, "
-                 "but this exact DCP2/520,192-token profile is the cross-provider "
-                 "qualified default. RunPod Secure passed the first request, C1-C8 "
-                 "decode, and an exact ~517K five-depth retrieval with this setting; "
-                 "0.978 admitted KV but OOMed on its first 36 MiB transient allocation. "
+                 "but this exact DCP2/513,536-token profile is the GG v20-r5 "
+                 "qualified default. AIBeast passed cold and cache-reused starts, "
+                 "C1-C8 decode, two ~510.5K five-depth retrievals, and an almost "
+                 "exact 512K total request with safe graph accounting enabled. "
+                 "The earlier 0.978/520K rental shape admitted KV but OOMed on its "
+                 "first 36 MiB transient allocation. "
                  "A new driver, GPU SKU, loader, graph shape, or vision setting is still "
                  "a cold-boot and near-maximum retrieval requalification boundary.")
         else:

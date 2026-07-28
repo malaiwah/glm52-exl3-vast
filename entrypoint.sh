@@ -1213,7 +1213,12 @@ fi
 # warning, EXL3 planner and CUDA-graph ceiling all describe the same window.
 export VLLM_EXL3_TRELLIS_MAX_M="${VLLM_EXL3_TRELLIS_MAX_M:-32}"
 export VLLM_EXL3_TRELLIS_BLOCK_M=8 VLLM_EXL3_PREFILL_CHUNK=128
-export VLLM_MEMORY_PROFILE_INCLUDE_ATTN=1 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
+# Keep the graph-aware, attention-aware profiler as the safe default, while
+# honoring an explicit expert override.  A previous unconditional export made
+# `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` appear accepted in the container
+# environment but silently replaced it in EngineCore workers.
+export VLLM_MEMORY_PROFILE_INCLUDE_ATTN="${VLLM_MEMORY_PROFILE_INCLUDE_ATTN:-1}"
+export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS="${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS:-1}"
 unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 
   # v20's calibrator measures the lossless DMA crossover, DCP query split and

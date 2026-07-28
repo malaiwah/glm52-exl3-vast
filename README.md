@@ -16,7 +16,7 @@ authoritative.
 The default `glm52-exl3` profile is the flagship production stack:
 BrandonMusic's 3.0-bpw EXL3/TR3 checkpoint (~77 GiB/rank), DCP2, native
 TR3 MTP-5, calibrated `nvfp4_ds_mla` KV, CUDA graphs through C8, and a
-520,192-token request limit. vLLM auto-profiles the KV pool at the
+513,536-token request limit. vLLM auto-profiles the KV pool at the
 cross-provider-qualified `GPU_MEMORY_UTILIZATION=0.976`. Half of host DRAM is
 available as an L2 prefix cache for repeated agentic prefixes; it does not
 increase active context capacity. Vision remains opt-in because the current
@@ -88,7 +88,7 @@ speculation shape; it is not merely a different download URL:
 
 | variant | topology / speculation | context and memory | intended use |
 |---|---|---|---|
-| **`exl3-tr3`** | TP4/DCP2, native TR3 MTP-5, probabilistic proposals | 520,192 max, auto NVFP4 KV at GMU 0.976, 3,072-token prefill batch, 1 GiB workspace, 50% DRAM prefix tier | balanced flagship; default |
+| **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 513,536 max, 514,944-token auto NVFP4 KV pool at GMU 0.976, 3,072-token prefill batch, 1 GiB workspace, 50% DRAM prefix tier | balanced flagship; default |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
@@ -102,14 +102,17 @@ needle—is not a 512K profile.
 #### Performance: compare like with like
 
 The July 28 provider comparison uses the same balanced
-TP4/DCP2/native-TR3-MTP5 profile and `llm-inference-bench` v0.4.29 protocol.
+TP4/DCP2/TR3-MTP5 profile and `llm-inference-bench` v0.4.29 protocol.
 All measured systems used four RTX PRO 6000 Blackwell 96 GB cards. Results are
 aggregate output throughput; PP is a cold unique-prefix request, so prefix
-cache hits do not inflate it.
+cache hits do not inflate it. AIBeast is the final GG v20-r5 image; the rental
+rows are the immediately preceding v31 candidate and remain the best measured
+rental estimates until a provider offers four cards on driver 595.45.04 or
+newer for an r5 rerun.
 
 | environment | topology / power cap | PP 8K / 32K / 64K / 128K tok/s | TG C1 / C2 / C4 / C8 tok/s | exact long-context gate |
 |---|---|---:|---:|---|
-| **AIBeast (owned)** | all `NODE`, 280 W/card | 2,854 / 2,737 / 2,661 / 2,497 | 97.2 / 146.1 / 206.6 / 268.3 | ~517K, 5/5 depths |
+| **AIBeast (owned, GG r5)** | all `NODE`, 280 W/card | 2,853 / 2,749 / 2,658 / 2,504 | 106.7 / 145.6 / 207.9 / 284.5 | 510,535-token document, 5/5 depths |
 | **Vast Community** | all `NODE`, 600 W/card | 3,046 / 2,939 / 2,875 / 2,700 | 78.5 / 140.8 / 210.1 / 330.8 | 517,176 tokens, 5/5 depths |
 | **Runpod Secure** | two `NODE` pairs, cross-pair `SYS`, 600 W/card | 3,554 / 3,449 / 3,357 / 3,114 | 63.0 / 155.8 / 223.1 / 343.5 | 517,176 tokens, 5/5 depths |
 | **Runpod Community estimate** | host-dependent, commonly Vast-like | **2,500–3,500 / 2,400–3,400 / 2,300–3,300 / 2,100–3,100** | **55–95 / 125–165 / 185–230 / 280–350** | expected when the same 4x96 GB shape boots; run the gate |
@@ -122,11 +125,11 @@ Conversely, its network and storage made cold provisioning much faster.
 
 GPU telemetry, not wall-outlet system power:
 
-| phase | AIBeast | Vast Community | Runpod Secure |
+| phase | AIBeast GG r5 | Vast Community v31 | Runpod Secure v31 |
 |---|---:|---:|---:|
-| focused PP average | 1,062 W | 1,636 W | 1,766 W |
-| zero-context C1 | 1,087 W | 1,241 W | 1,012 W |
-| zero-context C8 | 1,111 W | 1,739 W | 1,743 W |
+| complete canonical run average | 1,056 W | 1,495 W | 1,457 W |
+| zero-context C1 | 1,084 W | 1,241 W | 1,012 W |
+| zero-context C8 | 1,110 W | 1,739 W | 1,743 W |
 
 AIBeast remains the efficiency reference: the rental power ceiling improves
 prefill and high-concurrency aggregate throughput, but does not overcome
@@ -160,9 +163,12 @@ InstantTensor is the balanced DCP2 EXL3 profile's measured default. It loaded
 target plus draft in 32.4–33.1 seconds, versus 60.5–62.6 seconds for
 warm-page-cache safetensors. The unmodified 524,288-token /
 utilization-0.978 profile failed KV admission twice because 9.04 GiB was
-needed and only 9.03 GiB remained. At 520,192 tokens it passed five
-first-attempt boots, every 32K gate, all required API features, and two
-independent exact ~517K five-depth retrievals.
+needed and only 9.03 GiB remained. The earlier v31 image passed at 520,192.
+GG v20-r5 now safely accounts for its measured 0.81 GiB/GPU retained
+CUDA-graph pool, exposing 514,944 KV tokens at utilization 0.976. The new
+513,536 default leaves a 1,408-token admission margin and passed cold plus
+cache-reused boots, all required API features, two independent 510,534/510,535
+five-depth retrievals, and a 507,902-token prompt plus 4,096 generated tokens.
 
 A seeded same-prompt matrix found no systematic steady-state change:
 
@@ -219,7 +225,8 @@ idle during any one of them.
 
 | environment | measured first click → `/health` | what dominated | practical first-use budget |
 |---|---:|---|---:|
-| AIBeast, weights/NFS pages and compatible AOT cached | 5–10 minutes | NFS/cachefilesd page-in plus engine warm-up | 10–15 minutes |
+| AIBeast GG r5, weights/NFS pages cached, fresh AOT | 4m35s | InstantTensor load, compile and graph profile/capture | 5 minutes |
+| AIBeast GG r5, compatible AOT reused | 2m02s–2m25s | weight page-in, draft compile and graph capture | 3 minutes |
 | Vast Community, image cached but weights absent | 55 minutes | ~48-minute HF transfer at ~0.9 Gbit/s; post-download engine ~6 minutes | 60–90 minutes |
 | Runpod Secure, image and weights absent | 25m13s | image pull 8m24s, HF transfer 3m35s, load/compile/calibration | 30 minutes |
 | Runpod Community | not a single stable class | host registry/HF/storage route | 30–90 minutes; enforce a cost deadline |
@@ -241,9 +248,10 @@ not evidence that all peer transport is disabled.
 
 ## Launch GLM-5.2 on Vast.ai
 
-**[▶ Open Vast.ai with the project referral](https://cloud.vast.ai/?ref_id=386667)**.
-Use the public **Model Turnkey: GLM-5.2 EXL3** template; it preconfigures the
-image, `args` launch mode, ports, 450 GB disk and Blackwell host filters.
+**[▶ Launch GLM-5.2 on Vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405)**.
+The linked public **Model Turnkey: GLM-5.2 EXL3 — GG v20-r5** template
+preconfigures the image, `args` launch mode, ports, 450 GB disk and Blackwell
+host filters.
 Before accepting an offer, verify it is exactly 4x RTX PRO 6000 Blackwell,
 advertises **CUDA 13.2 or newer / driver 595.45.04 or newer**, adequate
 disk/network performance, and actually allocates at least 450 GB. Wait for
@@ -260,9 +268,11 @@ MODEL_PROFILE=qwen36-27b-nvfp4
 
 ## Launch on Runpod
 
-**[▶ Open Runpod with the project referral](https://runpod.io?ref=4ahycj93)**.
-Choose the public **Model Turnkey: GLM-5.2 EXL3** Pod template for the flagship
-or **Model Turnkey: Qwen3.6-27B NVFP4** for the one-GPU development profile.
+Choose **[▶ GLM-5.2 EXL3 on Runpod](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93)**
+for the four-GPU flagship, or
+**[▶ Qwen3.6-27B NVFP4 on Runpod](https://console.runpod.io/deploy?template=m9j7oh6cv2&ref=4ahycj93)**
+for the lower-cost one-GPU development profile. Both links select public Pod
+templates and include the project referral.
 
 This image is a **Runpod Pod** template, not a Serverless worker or Hub
 application. It runs a persistent OpenAI-compatible service and does not
@@ -516,7 +526,7 @@ first. Full design note, provider matrix and cited sources:
 
 Set `VISION=1` (or enable it in the configurator) to graft the MoonViT-3d
 tower (Kimi-K2.6, frozen) plus
-Baseten's trained 49.5M PatchMerger projector are grafted onto the EXL3 text
+Baseten's trained 49.5M PatchMerger projector onto the EXL3 text
 backbone — **~890 MB**, no text weight touched. The default `VISION=0` text
 profile preserves the maximum context/performance envelope; the operation is
 fully reversible.
@@ -651,7 +661,11 @@ capacity and pass retrieval before promotion.
 **MTP-5 53.4** (+3.7%). MTP-5 used to lose ~22% with the 19.3 GB BF16 draft;
 with a small quantized draft the extra proposals win. MTP-5 is now the
 qualified default and the capture/trellis windows are both 64 so C8 remains
-inside the captured path.
+inside the captured path. After restoration on production port 8000, real
+agent traffic held MTP-5 MAL between 3.90 and 5.13 (58.0–82.7% average draft
+acceptance across populated ten-second windows). This is the expected field
+sanity check; the matched GSM8K comparison, rather than unmatched traffic,
+decides MTP-5 versus MTP-3.
 
 ### Historical pre-v31 comparison: EXL3 + grafted MTP78
 
@@ -759,7 +773,7 @@ within sampling noise (~±3).
 - **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
   applicable Hub rate limits), `OFFLOAD_FRACTION`
   (GLM default 0.5 for reusable agentic prefixes), `MTP_TOKENS` (GLM default 5; Qwen
-  default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 520192; Qwen 32768),
+  default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 513536; Qwen 32768),
   `SERVED_MODEL_NAME`,
   `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 = stock BF16 draft),
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
@@ -827,7 +841,7 @@ existing endpoint:
 | `MODEL_DISPLAY_NAME` | profile name | dashboard and provider label |
 | `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working |
 | `TENSOR_PARALLEL_SIZE` | 4 GLM / 1 Qwen | match a supported profile topology |
-| `MAX_MODEL_LEN` | 520192 GLM / 32768 Qwen | increase the Qwen development context only after measuring VRAM |
+| `MAX_MODEL_LEN` | 513536 GLM / 32768 Qwen | increase the Qwen development context only after measuring VRAM |
 | `MULTIMODAL` | n/a GLM / 0 Qwen | Qwen `1` loads its native vision encoder; GLM vision remains controlled by `VISION` (default 0) |
 | `QUANTIZATION` | custom profile only | vLLM quantizer name such as `modelopt` |
 | `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |

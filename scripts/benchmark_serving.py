@@ -134,10 +134,17 @@ FILLER = (
 
 
 def make_prompt(base, key, model, target_tokens, nonce, insecure=False):
-    """Build an uncached prompt within roughly 3% of the requested token count."""
+    """Build an uncached prompt close enough for near-limit envelope tests.
+
+    A three-percent tolerance is harmless for ordinary throughput points, but at
+    500K it can overshoot the model limit by thousands of tokens.  Keep the
+    adaptive line builder, while tightening the stopping condition to 0.01%
+    (with a 32-token floor for small prompts).
+    """
     target_tokens = max(32, int(target_tokens))
     nlines = max(2, target_tokens // 24)
-    for _ in range(4):
+    tolerance = max(32, target_tokens // 10_000)
+    for _ in range(10):
         lines = [f"Benchmark document {nonce}; all records are independent."]
         lines.extend(FILLER.format(i=i) for i in range(nlines))
         lines.append(
@@ -145,7 +152,7 @@ def make_prompt(base, key, model, target_tokens, nonce, insecure=False):
             "Do not summarize the document.")
         text = "\n".join(lines)
         actual = count_tokens(base, key, model, text, insecure)
-        if abs(actual - target_tokens) / target_tokens <= 0.03:
+        if abs(actual - target_tokens) <= tolerance:
             return text, actual
         nlines = max(1, round(nlines * target_tokens / max(actual, 1)))
     return text, actual

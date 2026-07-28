@@ -99,7 +99,11 @@ def main():
     derived_keys = ("MODEL_REPO", "MODEL_REVISION", "MODEL_DIRNAME", "MTP78_MODE",
                     "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK",
                     "SPEC_METHOD")
-    eff, _s, _n = gc.resolve(state_values={})
+    # This is a structural wiring audit, so do not inherit a startup snapshot
+    # left in /tmp by an earlier integration test (or a local appliance run).
+    # In particular, a custom-family snapshot legitimately has no pinned model
+    # revision and would make this check depend on test execution order.
+    eff, _s, _n = gc.resolve(state_values={}, env_values={})
     derived = gc.derive(eff)
     for k in derived_keys:
         used = bool(re.search(r"\$\{?" + re.escape(k) + r"[:}\s]", entry))

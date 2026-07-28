@@ -184,13 +184,16 @@ cold memory plus retrieval requalification for any other shape.
 On the exact TP4/DCP2 EXL3 profile, InstantTensor loaded about 0.04 GiB/GPU
 more resident model memory than safetensors. `MAX_MODEL_LEN=524288` at
 utilization 0.978 then failed KV admission twice (9.04 GiB needed, 9.03 GiB
-available). At `MAX_MODEL_LEN=520192`, five first-attempt boots passed, as did
-every 32K gate, the required feature suite, and two exact ~517K five-depth
-retrievals. The loader reduced target+draft load from 60.5–62.6 seconds to
-32.4–33.1 seconds. It is the balanced EXL3 profile default because safetensors
-failed three near-max runtime attempts at the same 514,432-token boundary.
-This warning protects explicit 524,288 overrides rather than silently changing
-the user's context or treating supervisor retries as success.
+available). That earlier v31 shape passed `MAX_MODEL_LEN=520192`; GG v20-r5
+adds safe retained-CUDA-graph accounting and exposes 514,944 KV tokens at the
+same utilization. The current `MAX_MODEL_LEN=513536` default passed cold and
+cache-reused boots, the required feature suite, two independent ~510.5K
+five-depth retrievals, and a 507,902 + 4,096 token request. The loader reduced
+target+draft load from 60.5–62.6 seconds to 32.4–33.1 seconds. It remains the
+balanced EXL3 default because safetensors failed three near-max runtime
+attempts at the same 514,432-token boundary. This warning protects larger
+overrides rather than disabling safe graph accounting or treating retries as
+success.
 
 ### `pool-smaller-than-context` — error
 `GPU_BLOCKS_OVERRIDE * 256 < MAX_MODEL_LEN` cannot start: vLLM refuses when it
@@ -393,6 +396,6 @@ This layer is no longer justified only by static substitutions:
 Absolute v20 throughput is confirmed on the all-NODE AIBeast host at 280 W/card:
 2,701 tok/s at 8K, 1,987 at 66K, 121.6 tok/s C1 and 269.7 aggregate at C8.
 Remaining claims stay narrow: InstantTensor is promoted only for the exact
-balanced EXL3 profile and 520,192-token envelope; other variants retain their
-own loader choice. GLM vision remains a separate short-context experiment
-rather than part of the text flagship envelope.
+balanced EXL3 profile and the current 513,536-token GG r5 envelope; other
+variants retain their own loader choice. GLM vision remains a separate
+short-context experiment rather than part of the text flagship envelope.
