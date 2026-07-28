@@ -26,10 +26,12 @@ class StructuredOutputPatchTests(unittest.TestCase):
         self.assertEqual(status, "patched")
         self.assertIn(patch.MARKER, result)
         self.assertIn(
-            "grammar.validate_tokens([token]) == [token]\n"
-            "                            if post_reasoning_end_in_window",
+            "self._grammar_bitmask[\n"
+            "                                        cumulative_index, token >> 5",
             result,
         )
+        self.assertIn("& (1 << (token & 31))", result)
+        self.assertNotIn("grammar.validate_tokens", result)
         # A committed token bypasses preflight and retains accept_tokens plus
         # the original assertion path.
         self.assertIn("else True", result)
@@ -43,6 +45,13 @@ class StructuredOutputPatchTests(unittest.TestCase):
         self.assertEqual(second_status, "already patched")
         self.assertEqual(twice, once)
         self.assertEqual(twice.count(patch.MARKER), 1)
+
+    def test_legacy_validator_patch_is_upgraded(self):
+        legacy = RUNTIME_SOURCE.replace(patch.OLD, patch.LEGACY_NEW)
+        result, status = patch.patch_text(legacy)
+        self.assertEqual(status, "upgraded")
+        self.assertIn(patch.MARKER, result)
+        self.assertNotIn("grammar.validate_tokens", result)
 
     def test_unknown_runtime_is_not_modified(self):
         source = "class NewUpstreamImplementation:\n    pass\n"

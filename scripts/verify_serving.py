@@ -106,11 +106,13 @@ def structured_output_probe(base, key, model, timeout=300):
         "messages": [{
             "role": "user",
             "content": (
-                "Think briefly, then return the integer 42 as the answer. "
+                "Think briefly, then return integer 42 as the answer. "
                 "Follow the supplied schema exactly."
             ),
         }],
-        "max_tokens": 768,
+        # Qwen3.6 has empirically needed up to ~820 tokens to cross the
+        # reasoning boundary for this probe; leave room for the JSON answer.
+        "max_tokens": 1024,
         "temperature": 0.0,
         "chat_template_kwargs": {"enable_thinking": True},
         "response_format": {

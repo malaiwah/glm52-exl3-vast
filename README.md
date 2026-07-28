@@ -39,11 +39,21 @@ The Qwen profile serves
 [`nvidia/Qwen3.6-27B-NVFP4`](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4)
 with `--quantization modelopt`, the `qwen3` reasoning parser and
 `qwen3_coder` tool parser. It defaults to text-only mode to preserve VRAM,
-one GPU, no DRAM KV offload, and no speculative decoding until this particular
-image/profile combination is benchmarked. Qwen's native context is 262,144;
+one GPU, no DRAM KV offload, and no speculative decoding as the fast,
+conservative development shape. The full 27B text profile is now
+live-qualified on one RTX 5090 at its conservative 32K default: thinking,
+non-thinking, streaming, preserved multi-turn reasoning, tools, and strict
+structured output all passed. Qwen's native context is 262,144;
 raise `MAX_MODEL_LEN` after measuring headroom. Set `MULTIMODAL=1` to load its
 native vision encoder, or opt into its included MTP module with
 `MTP_TOKENS=2`.
+
+On GG v20-r5, Qwen MTP2 cannot use the compiled FlashInfer decode wrapper: the
+wrapper freezes `q_len_per_req=1`, while the draft step needs `3`, and the first
+request kills the engine. The appliance therefore adds `--enforce-eager`
+automatically when Qwen MTP is enabled. That compatibility path passed the live
+feature gate but gives up torch compilation and CUDA graphs; the fast default
+remains `MTP_TOKENS=0`.
 
 The [Qwen3.6-27B model card](https://huggingface.co/Qwen/Qwen3.6-27B)
 documents the architecture, native context, text-only switch, Qwen parsers,
@@ -54,8 +64,8 @@ specifies the ModelOpt loader and 262K serving command. This image's
 [pinned GG source and EXL3 integration](https://github.com/local-inference-lab/vllm/pull/190)
 contains the required Qwen3.5 architecture, parser, speculative method, and
 mixed-precision ModelOpt implementation. The 32K, text-only, single-GPU
-settings here are deliberately conservative development defaults; they have
-not yet been GPU-benchmarked as a profile.
+settings here are deliberately conservative development defaults rather than
+a claim that the checkpoint's complete native context has been qualified.
 
 For another checkpoint:
 
@@ -215,13 +225,22 @@ activates the grammar. Those pre-mask proposals are allowed to be rejected and
 resampled; on GG r5, XGrammar logged each expected rejection as
 `Failed to advance FSM` at ERROR severity even when the request returned HTTP
 200 with exact schema-valid JSON. The entrypoint applies an idempotent
-compatibility patch that non-mutatingly preflights only these post-marker
-speculative probes. Valid probes still advance the temporary FSM state, and
-invalid *committed* tokens retain vLLM's original hard-error path. The automatic
+compatibility patch that checks these post-marker probes against the packed
+grammar bitmask row vLLM already filled, without probing or mutating the
+matcher. Valid probes still advance the temporary FSM state, and invalid
+*committed* tokens retain vLLM's original hard-error path. The automatic
 serving verifier and feature suite now make strict JSON with thinking a release
 gate rather than inferring correctness from HTTP 200. This complements
 [vLLM #44993](https://github.com/vllm-project/vllm/pull/44993), whose reasoning
 boundary fix is already present in GG r5.
+
+The patched path was live-qualified on the full Qwen3.6-27B checkpoint with
+MTP2: 4/4 concurrent strict-schema requests passed in each of thinking-off,
+thinking-on and omitted/default-thinking modes, followed by a clean full
+feature-suite pass. There were no `Failed to advance FSM` messages, HTTP 500s
+or engine failures. XGrammar can still print a native post-EOS warning under
+speculation; exact output, health, and the committed-token failure path remain
+the release criteria.
 
 [`preserve thinking`](https://docs.z.ai/guides/capabilities/thinking-mode)
 means forwarding the assistant's complete, unmodified prior

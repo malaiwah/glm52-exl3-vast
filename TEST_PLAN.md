@@ -33,7 +33,7 @@ sequential and are deleted as soon as their evidence is copied.
 |---|---:|---:|---:|
 | Bash, Python, workflow, JSON, Docker build | yes | image pull | image pull |
 | GLM, Qwen 27B, and custom profile resolution | yes | custom | custom |
-| Qwen 27B architecture/quant/MTP metadata guard | yes | — | — |
+| Qwen 27B architecture/quant/MTP metadata guard | yes | yes | — |
 | Provider detection and generated endpoint | — | yes | yes |
 | GPU count/name guard | fixtures | yes | yes |
 | Key-only SSH and port forwarding | config lint | yes | yes |
@@ -43,10 +43,10 @@ sequential and are deleted as soon as their evidence is copied.
 | Dashboard token rejection and accepted view | handler tests | yes | yes |
 | API authentication (`401` without key, success with key) | — | yes | yes |
 | `/health`, `/v1/models`, chat, streaming, usage details | — | yes | yes |
-| Qwen reasoning and automatic tool-call parser | — | yes | yes |
-| Qwen text-only mode | — | yes | yes |
+| Qwen reasoning and automatic tool-call parser | — | yes, full 27B | yes |
+| Qwen text-only mode | — | yes, full 27B | yes |
 | Native Qwen vision mode | — | one provider | one provider if time remains |
-| Qwen MTP speculative decoding | config | one provider | one provider if time remains |
+| Qwen MTP speculative decoding | config | eager MTP2 passed; compiled path rejected | one provider if time remains |
 | GLM v31 InstantTensor cold boot and AOT-cache reuse | config | yes | yes |
 | GLM feature suite at production scale, including strict JSON with thinking | harness | yes | yes |
 | GLM cold prefill and sustained C1/C2/C4/C8 decode | harness | yes | yes |

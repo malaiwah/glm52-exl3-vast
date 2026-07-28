@@ -59,9 +59,12 @@ def structured_answer(base, key, model, thinking):
     return message(chat(
         base, key, model,
         [{"role": "user", "content":
-          "Think briefly if thinking is enabled, then return the integer 42 "
-          "as the answer. Follow the supplied schema exactly."}],
-        max_tokens=768 if thinking else 96,
+          "Think briefly, then return integer 42 as the answer. "
+          "Follow the supplied schema exactly."}],
+        # Qwen3.6 can spend ~820 tokens reaching the reasoning boundary even
+        # for this tiny schema. Keep enough room for the constrained answer so
+        # the qualification measures grammar correctness rather than truncation.
+        max_tokens=1024 if thinking else 96,
         response_format={
             "type": "json_schema",
             "json_schema": {

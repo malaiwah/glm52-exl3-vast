@@ -928,17 +928,62 @@ JSON. It does not generalize to every FSM error: upstream reports include
 genuine HTTP 500 and request-termination variants, so committed-token failures
 must remain fatal.
 
-The candidate entrypoint now pre-validates only the post-reasoning speculative
-probes without mutating grammar state. It accepts valid probes temporarily so
-later masks in the same MTP window remain exact, skips the noisy backend call
-for expected-invalid probes, and leaves the original accept/assert path intact
-for committed tokens. Both thinking and non-thinking strict JSON are required
-by the feature suite, and the automatic boot verifier now gates thinking plus
-strict JSON before long-context qualification. Local patch/idempotence,
-unknown-runtime, verifier, feature-suite, Python and shell tests passed.
+The candidate entrypoint now inspects the already-filled packed grammar
+bitmask for only those post-reasoning speculative probes. It accepts an
+allowed probe temporarily so later masks in the same MTP window remain exact,
+skips the noisy backend call for expected-invalid speculation, and leaves the
+original accept/assert path intact for committed tokens. A prior validator-
+based version was made automatically upgradeable after log review showed that
+even a non-mutating matcher probe could produce a native post-EOS warning.
 
-Per the operator's instruction, this patch has **not** been loaded into the
-running AIBeast process: there was no maintenance window. A patched-process
-concurrency run and zero-new-FSM-error log comparison remain required on a
-rental or during the next approved restart before the workaround is promoted
-as live-qualified.
+The immutable candidate image
+`ghcr.io/malaiwah/glm52-exl3-vast:b806ee6fb8700f43068cd87558f72d09fd93bc9e`
+then ran on Vast instance `46116148`, one RTX 5090 with driver 595.71.05,
+CUDA 13.2 compatibility and a 575 W limit at `$0.637/hour`. The image pulled
+in about four minutes and the 20.4 GiB pinned Qwen checkpoint downloaded in
+about 20 seconds on this unusually well-connected host. After the first log
+review, the rental source was upgraded in place from the image's validator
+preflight to the final bitmask implementation; the committed migration handles
+both source shapes idempotently.
+
+The rental exposed a separate Qwen MTP qualification bug before the grammar
+test: GG v20-r5's compiled FlashInfer wrapper was planned with
+`q_len_per_req=1`, while MTP2 needed `3`. The first verifier request killed the
+engine, and the supervisor retry reproduced the same fatal error. With the
+same checkpoint, source patch and MTP2 configuration in `--enforce-eager`
+mode:
+
+- the final bitmask implementation passed 4/4 concurrent strict-schema
+  requests with thinking disabled, 4/4 with thinking enabled and 4/4 with the
+  option omitted;
+- the full required feature suite passed tokenization, both chat modes,
+  streaming usage, preserved multi-turn reasoning, both strict-JSON modes,
+  one automatic tool call and tool-result continuation;
+- all structured documents were exact `{"answer":42}` values, thinking
+  requests populated the reasoning field, and the engine recorded zero FSM
+  ERRORs, zero HTTP 500s and zero fatal errors;
+- MTP2 reported roughly 2.5–2.7 mean acceptance length and about 93–101
+  aggregate generation tok/s during four-way decode windows.
+
+XGrammar still printed a native “matcher has terminated ... token 198” warning
+after some speculative stop tokens. It is distinct from the removed vLLM FSM
+ERROR path: outputs remained exact and the engine remained healthy. The
+compiled, MTP-off default was therefore tested separately. Its first uncached
+shape compile reached health in about three minutes, the complete feature
+suite passed, and its log had zero FSM errors, zero post-EOS matcher warnings,
+zero HTTP 500s and zero fatal errors. The Qwen profile now keeps that fast
+compiled mode as the default and automatically adds `--enforce-eager` only
+when `MTP_TOKENS>0`, with an explicit configurator warning.
+
+Qwen occasionally used 820 completion tokens before crossing the reasoning
+boundary on the tiny strict-schema probe. The verifier budget was raised from
+768 to 1,024 so it measures schema correctness rather than truncation. Prompt
+wording also mattered: “at most one short sentence” could remain in thinking
+for the full 2,048-token control, whereas the simpler “Think briefly, then”
+crossed the boundary and returned exact JSON.
+
+Both thinking and non-thinking strict JSON remain required release gates.
+Local patch/idempotence and legacy-upgrade tests, unknown-runtime behavior,
+verifier, feature-suite, Python and shell tests passed. Per the operator's
+instruction, the patch was **not** loaded into or restarted on AIBeast; its
+production endpoint remained online throughout.
