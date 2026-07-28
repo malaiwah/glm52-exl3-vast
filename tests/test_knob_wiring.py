@@ -96,7 +96,7 @@ def main():
     print("\n=== the derived values the entrypoint reads are all emitted ===")
     # QUANTIZATION is intentionally absent: it reaches vLLM through
     # FAMILY_SERVE_ARGS only, and exporting it too would duplicate the flag.
-    derived_keys = ("MODEL_REPO", "MODEL_DIRNAME", "MTP78_MODE",
+    derived_keys = ("MODEL_REPO", "MODEL_REVISION", "MODEL_DIRNAME", "MTP78_MODE",
                     "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK",
                     "SPEC_METHOD")
     eff, _s, _n = gc.resolve(state_values={})

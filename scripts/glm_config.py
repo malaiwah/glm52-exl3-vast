@@ -92,8 +92,12 @@ FAMILIES = {
         "spec_method": "mtp",
         # knobs that only make sense here; everything else is generic
         "own_knobs": ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
-                      "MTP_DRAFT_SAMPLE_METHOD", "VLLM_EXL3_TRELLIS_MAX_M",
+                      "MTP_DRAFT_SAMPLE_METHOD",
+                      "MTP_REJECTION_SAMPLE_METHOD",
+                      "VLLM_EXL3_TRELLIS_MAX_M",
                       "DCP_PREFILL_WORKSPACE_MIB", "DCP_CKV_PREFETCH_DEPTH",
+                      "DCP_CKV_GATHER_MAX_TOKENS",
+                      "DCP_KV_CACHE_INTERLEAVE_SIZE",
                       "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS",
                       "B12X_PCIE_DMA", "F8_DMA", "PCIE_CALIBRATION",
                       "PCIE_DMA_MIN_BYTES",
@@ -103,6 +107,8 @@ FAMILIES = {
             "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
             "DCP_PREFILL_WORKSPACE_MIB": 1024,
             "DCP_CKV_PREFETCH_DEPTH": "auto",
+            "DCP_CKV_GATHER_MAX_TOKENS": 140000,
+            "DCP_KV_CACHE_INTERLEAVE_SIZE": 64,
             "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": -1,
             "B12X_PCIE_DMA": True,
             "F8_DMA": "0",
@@ -120,7 +126,7 @@ FAMILIES = {
         "serve_args": [
             "--decode-context-parallel-size", "%(DCP)s",
             "--dcp-comm-backend", "a2a",
-            "--dcp-kv-cache-interleave-size", "64",
+            "--dcp-kv-cache-interleave-size", "%(DCP_KV_CACHE_INTERLEAVE_SIZE)s",
             "--attention-backend", "B12X_MLA_SPARSE",
             "--moe-backend", "b12x",
             "--load-format", "%(LOAD_FORMAT)s",
@@ -229,13 +235,107 @@ def family(name=None) -> dict:
 VARIANTS = {
     "exl3-tr3": {
         "family": "glm52",
-        "label": "EXL3-TR3 3.0bpw (default, measured)",
+        "label": "EXL3-TR3 3.0bpw — balanced DCP2/MTP5 (default, measured)",
         "repo": "brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw",
+        "revision": "9297b9f1d53af5c67cffa01e30cc071a1ff7144b",
         "dirname": "GLM-5.2-EXL3-TR3-3.0bpw",
         "quantization": "exl3",
+        # The pinned July 27 checkpoint serializes layer 78 as the same
+        # rank-sliced EXL3/TR3 format as layers 3..77. A separate draft is no
+        # longer needed; the old external arm remains selectable for A/Bs.
+        "default_draft": "native",
+        "defaults": {
+            "DCP": "2",
+            "MAX_MODEL_LEN": 520192,
+            "MAX_NUM_BATCHED_TOKENS": 3072,
+            "MAX_NUM_SEQS": 8,
+            "MTP_TOKENS": 5,
+            "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
+            "DCP_PREFILL_WORKSPACE_MIB": 1024,
+            "DCP_CKV_PREFETCH_DEPTH": "0",
+            "DCP_CKV_GATHER_MAX_TOKENS": 140000,
+            "DCP_KV_CACHE_INTERLEAVE_SIZE": "1",
+            "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": 8192,
+            # AIBeast can run 0.978 because its cards expose about 0.58 GiB
+            # more usable VRAM than the RunPod RTX PRO 6000 WS cards tested
+            # on 2026-07-28.  On RunPod, 0.978 admitted the 520K KV pool but
+            # left 7.94 MiB free and the first 36 MiB EXL3 transient
+            # allocation killed the engine.  0.976 keeps the 520,192-token
+            # admission envelope while restoring portable runtime headroom.
+            "GPU_MEMORY_UTILIZATION": 0.976,
+            "GPU_BLOCKS_OVERRIDE": 0,
+            "LOAD_FORMAT": "instanttensor",
+            "OFFLOAD_FRACTION": 0.5,
+            "F8_DMA": "0",
+            "PCIE_CALIBRATION": "auto",
+            "PCIE_DMA_MIN_BYTES": -1,
+            "MAX_CUDAGRAPH_CAPTURE_SIZE": 64,
+            "CUDAGRAPH_CAPTURE_SIZES":
+                "4,8,12,16,20,24,28,32,36,40,44,48,52,56,60,64",
+            "VLLM_EXL3_TRELLIS_MAX_M": 64,
+        },
+        # Applied after the family block and before explicit TUNE_* overrides.
+        # These are the published issue-33 route choices independently
+        # reproduced on AIBeast with the Brandon target + EXL3 MTP78.
+        "runtime_env": {
+            "VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE": "1",
+            "VLLM_DCP_TOPK_OWNER_MERGE": "0",
+            "VLLM_DISABLE_SHARED_EXPERTS_STREAM": "0",
+            "VLLM_EXL3_PREFILL_BLOCK_M": "64",
+            "VLLM_EXL3_PREFILL_CHUNK": "1",
+            "VLLM_EXL3_TRELLIS_BLOCK_M": "8",
+            "VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD": "1024",
+            "VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD": "16",
+            "VLLM_PCIE_ONESHOT_ALLOW_CROSS_NUMA": "1",
+            "VLLM_PCIE_ONESHOT_SINGLE_CHANNEL": "0",
+            "SPARKINFER_FUSED_INDEXER": "1",
+            "SPARKINFER_INDEXER_DIRECT_K": "1",
+            "SPARKINFER_INDEXER_STREAM_SCORER": "1",
+            "SPARKINFER_MLA_PREFILL_STRATEGY": "auto",
+            "SPARKINFER_MLA_SM120_NUM_SPLITS": "0",
+            "SPARKINFER_MLA_SM120_PREFILL_MG": "1",
+            "SPARKINFER_PAGED_INDEX_SUPERTILE_K": "32768",
+            "SPARKINFER_W4A16_SMALL_M_DIRECT": "1",
+            "B12X_PAGED_INDEX_SUPERTILE_K": "32768",
+        },
         # v29 carries the checkpoint-calibrated GLM-5.2 MLA outer scales at
         # VLLM_NVFP4_MLA_SCALES_FILE. The scales are model-wide, not tied to
         # the target weight quantization.
+        "kv_scales_calibrated": True,
+        "download_gib": 309,
+        "tested": True,
+    },
+    "exl3-tr3-max-context": {
+        "family": "glm52",
+        "label": "EXL3-TR3 3.0bpw — DCP4 maximum-context (measured)",
+        "repo": "brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw",
+        "revision": "9297b9f1d53af5c67cffa01e30cc071a1ff7144b",
+        "dirname": "GLM-5.2-EXL3-TR3-3.0bpw",
+        "quantization": "exl3",
+        "default_draft": "native",
+        "defaults": {
+            "DCP": "4",
+            "MAX_MODEL_LEN": 524288,
+            "MAX_NUM_BATCHED_TOKENS": 4096,
+            "MAX_NUM_SEQS": 8,
+            "MTP_TOKENS": 5,
+            "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
+            "DCP_PREFILL_WORKSPACE_MIB": 1024,
+            "DCP_CKV_PREFETCH_DEPTH": "auto",
+            "DCP_CKV_GATHER_MAX_TOKENS": 140000,
+            "DCP_KV_CACHE_INTERLEAVE_SIZE": "64",
+            "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": -1,
+            "GPU_MEMORY_UTILIZATION": 0.98,
+            "GPU_BLOCKS_OVERRIDE": 0,
+            "OFFLOAD_FRACTION": 0.5,
+            "F8_DMA": "0",
+            "PCIE_CALIBRATION": "auto",
+            "PCIE_DMA_MIN_BYTES": -1,
+            "MAX_CUDAGRAPH_CAPTURE_SIZE": 64,
+            "CUDAGRAPH_CAPTURE_SIZES":
+                "4,8,12,16,20,24,28,32,36,40,44,48,52,56,60,64",
+            "VLLM_EXL3_TRELLIS_MAX_M": 64,
+        },
         "kv_scales_calibrated": True,
         "download_gib": 309,
         "tested": True,
@@ -265,7 +365,11 @@ VARIANTS = {
             '"re:.*\\\\.mlp\\\\.gate$",'
             '"model.layers.78.eh_proj","lm_head"]}'
         ),
-        "default_draft": "bf16",
+        # The checkpoint's native layer-78 experts are already serialized
+        # NVFP4 (U8 weights + FP8/FP32 scales). Do not call this "bf16": only
+        # some dense/attention tensors remain BF16 and eligible ones receive
+        # the checkpoint's MXFP8 load-time overlay.
+        "default_draft": "native",
         # v20's automatic pool sizing consumed the memory that the hybrid MTP
         # proposal needs on its first real request. Pinning exactly one 512K
         # request preserves runtime headroom. A 3072-token chunk with a 512 MiB
@@ -293,6 +397,7 @@ VARIANTS = {
         "family": "qwen36",
         "label": "Qwen3.6-27B ModelOpt NVFP4",
         "repo": "nvidia/Qwen3.6-27B-NVFP4",
+        "revision": "0893e1606ff3d5f97a441f405d5fc541a6bdf404",
         "dirname": "Qwen3.6-27B-NVFP4",
         "quantization": "modelopt",
         "kv_scales_calibrated": False,
@@ -318,7 +423,12 @@ VARIANTS = {
 # `nvfp4`       external NVFP4 draft; MUST carry its own quantization (rule 4)
 DRAFTS = {
     "off":           {"label": "off (no speculative decode)", "mtp78_mode": "off"},
-    "bf16":          {"label": "BF16 in-checkpoint draft (stock, 19.3 GB)", "mtp78_mode": "off"},
+    "native":        {"label": "Native in-checkpoint draft", "mtp78_mode": "off"},
+    # Kept as a backwards-compatible spelling. It is literally BF16 for the
+    # Brandon EXL3 checkpoint, but means the same native path as `native` and
+    # must not be used to describe MadeBy561's serialized NVFP4 experts.
+    "bf16":          {"label": "Native/BF16 in-checkpoint draft (legacy name)",
+                      "mtp78_mode": "off"},
     "tr3-graft":     {"label": "EXL3 3bpw trellis, grafted into the target", "mtp78_mode": "graft"},
     "tr3-override":  {"label": "EXL3 3bpw trellis, separate draft dir", "mtp78_mode": "override"},
     "nvfp4":         {"label": "External NVFP4 draft dir", "mtp78_mode": "off",
@@ -421,7 +531,7 @@ KNOBS = [
              "Overrides the checkpoint's max_position_embeddings with MAX_MODEL_LEN. "
              "The MadeBy561 checkpoint advertises 1,048,576 positions while the "
              "turnkey profile serves 524,288; the known-good v19 launcher clamps it "
-             "to avoid allocating unused target and draft BF16 RoPE tables. Disable "
+             "to avoid allocating unused target and draft RoPE tables. Disable "
              "only for a controlled A/B against the checkpoint-native allocation.")),
 
     dict(key="GPU_BLOCKS_OVERRIDE", type="int", default=0, min=0, max=65536,
@@ -447,23 +557,28 @@ KNOBS = [
          group="Speculative decoding", scope="checkpoint", label="MTP draft type",
          aliases=[],
          rationale=(
-             "Which draft model proposes the speculative tokens. All four drafts "
-             "accept near-identically (MAL ~3.52, ~84%); what differs is VRAM and "
-             "whether they boot. 'tr3-graft' (default) swaps layer 78 of the target "
-             "for a 3.0bpw EXL3 trellis version in place: 19.3 GB -> 3.7 GB, ~3.8 "
-             "GB/GPU straight into KV, and it has the longest appliance evidence. "
+             "Which draft model proposes the speculative tokens. On the Brandon EXL3 "
+             "target, native BF16, both EXL3 forms, and Luke NVFP4 accepted "
+             "near-identically (MAL ~3.52, ~84%); that result is target-specific. "
+             "'tr3-graft' (default) swaps Brandon's layer 78 for a 3.0bpw EXL3 "
+             "trellis version in place: 19.3 GB -> 3.7 GB, ~3.8 GB/GPU straight into "
+             "KV, and it has the longest appliance evidence. "
              "'tr3-override' keeps the target byte-identical and measured slightly "
              "better on acceptance; v29 supports its separately rank-sliced draft "
-             "graphs. 'nvfp4' is an external "
-             "draft dir that avoids the rank-sliced path entirely (and must declare "
-             "its own quantization). 'bf16' is the stock in-checkpoint draft: always "
-             "works, costs 19.3 GB. 'off' disables speculation (~30% slower decode).")),
+             "graphs. 'native' keeps the checkpoint's own representation: BF16 on "
+             "Brandon, but already serialized NVFP4 experts plus an MXFP8 dense "
+             "overlay on MadeBy561. 'nvfp4' is a separate Luke draft dir that avoids "
+             "the rank-sliced path (and must declare its own quantization); it "
+             "regressed the measured MadeBy561 native path and is not interchangeable "
+             "with it. 'bf16' remains only as a legacy spelling for native. 'off' "
+             "disables speculation (~30% slower decode).")),
 
     dict(key="MTP_TOKENS", type="int", default=3, min=0, max=8,
          group="Speculative decoding", scope="engine", label="Speculation depth",
          rationale=(
              "How many tokens the draft proposes per step. 3 is the shipped default. "
-             "The optimum moves with the draft's cost: with the 19.3 GB BF16 draft, "
+             "The optimum moves with the draft's cost: with Brandon's 19.3 GB BF16 "
+             "native draft, "
              "MTP-5 lost ~22%; with the 3.7 GB trellis draft it WINS (GSM8K n=30: "
              "MTP-2 42.9, MTP-3 51.5, MTP-5 53.4 tok/s). Raising it also raises the "
              "decode query width m = MAX_NUM_SEQS x (1 + MTP_TOKENS), which has to "
@@ -478,6 +593,20 @@ KNOBS = [
              "long-context qualification use greedy drafting, which is the turnkey "
              "default. Probabilistic drafting remains available for controlled "
              "quality/acceptance experiments.")),
+
+    dict(key="MTP_REJECTION_SAMPLE_METHOD", families=("glm52",), type="choice",
+         default="standard", choices=["standard", "block"],
+         group="Speculative decoding", scope="engine",
+         label="Draft verification method",
+         rationale=(
+             "How target probabilities accept or reject speculative draft tokens. "
+             "Standard is vLLM's established distribution-preserving default and the "
+             "qualified turnkey control. Block verification passed the same exact "
+             "~517K five-depth retrieval gate, but a matched two-run temperature-one "
+             "GLM A/B was workload-sensitive: C1 improved 14.4%, C2 fell 7.5%, C4 "
+             "fell 10.9%, and C8 improved 1.5%. Keep it experimental because it did "
+             "not produce a consistent end-to-end gain across the supported "
+             "concurrency envelope.")),
 
     dict(key="DRAFT_MODEL", families=("glm52",), type="str", default="", group="Speculative decoding",
          scope="checkpoint", label="External draft dir (advanced)",
@@ -552,6 +681,27 @@ KNOBS = [
              "can win on a single-root NODE layout and lose badly when one rank "
              "crosses CPU sockets; 0 disables the overlap without disabling the "
              "full-CKV path. The calibrated decision is cached on the model volume.")),
+
+    dict(key="DCP_CKV_GATHER_MAX_TOKENS", families=("glm52",), type="int",
+         default=140000, min=512, max=1048576,
+         group="Performance", scope="engine", label="Full-CKV gather ceiling",
+         rationale=(
+             "Largest logical context covered by the transient full-CKV gather path. "
+             "The old 16,384 ceiling forced ordinary 64K/128K prefills onto a slower "
+             "distributed path. The public issue-33 study measured +15.8%/+12.6% "
+             "at 64K/128K under DCP2 and +49.1%/+50.0% under DCP4 when raised to "
+             "140,000. This appliance independently passed a five-depth 521K gate "
+             "with the 140K DCP2 shape. Larger values consume transient workspace "
+             "and must preserve enough auto-profiled KV for MAX_MODEL_LEN.")),
+
+    dict(key="DCP_KV_CACHE_INTERLEAVE_SIZE", families=("glm52",), type="choice",
+         default="64", choices=["1", "2", "4", "8", "16", "32", "64"],
+         group="Performance", scope="engine", label="DCP KV interleave",
+         rationale=(
+             "Interleave granularity inside each 64-token KV block. The historical "
+             "turnkey value is 64; the public issue-33 DCP2 production study selected "
+             "1 after finding 16 mixed. Treat changes as topology-specific and compare "
+             "prefill, C1-C8 decode, KV capacity and maximum-context retrieval.")),
 
     dict(key="DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS", families=("glm52",), type="int",
          default=-1, min=-1, max=1048576,
@@ -642,13 +792,15 @@ KNOBS = [
          choices=["safetensors", "instanttensor"],
          group="Memory", scope="engine", label="Weight loader",
          rationale=(
-             "safetensors is the conservative, repeatable default. instanttensor uses "
-             "the base image's distributed BUFFERED loader and can reduce model-load "
-             "time on a suitable filesystem, but it has shown intermittent startup "
-             "behavior in rental environments. Treat it as experimental until the "
-             "same host passes several cold starts plus short and long correctness "
-             "gates; the appliance never enables it merely because the package is "
-             "installed.")),
+             "safetensors is the generic fallback. On the balanced EXL3 profile, "
+             "InstantTensor is the measured default: it reduced target+draft loading "
+             "from 60.5-62.6s to 32.4-33.1s, passed five first-attempt boots and two "
+             "exact ~517K five-depth retrievals, and showed no systematic PP/TG "
+             "change. Safetensors OOMed at the same 514K prefill boundary with both "
+             "auto and exact KV pools because the final sparse-indexer allocation "
+             "could not obtain a contiguous 352 MiB segment. InstantTensor uses about "
+             "0.04 GiB/GPU more resident model memory, so its qualified context "
+             "ceiling is 520192 rather than 524288.")),
 
     dict(key="MODEL_OUTPUT_LIMIT", type="int", default=131072, min=256, max=262144,
          group="Serving", scope="engine", label="Client output limit",
@@ -660,26 +812,33 @@ KNOBS = [
     dict(key="OFFLOAD_FRACTION", type="float", default=0.0, min=0.0, max=0.95,
          group="Memory", scope="engine", label="DRAM KV offload fraction",
          rationale=(
-             "Fraction of the instance's RAM allocation used as a pinned CPU KV tier "
-             "(0 disables and is the production default). The total is divided across "
-             "TP workers; vLLM interprets cpu_bytes_to_use per worker. Sized from "
+             "Fraction of the instance's RAM allocation used as an L2 CPU prefix "
+             "cache after GPU eviction; it does not enlarge active GPU KV capacity "
+             "(0 disables). Current native vLLM "
+             "interprets cpu_bytes_to_use as one aggregate budget and derives each TP "
+             "worker's physical slice from it; the appliance must not divide the "
+             "connector value by TP a second time. Sized from "
              "min(cgroup limit, MemTotal), so a partial rental does not oversize it. "
              "It is a pure cache tier: kv_load_failure_policy="
              "recompute means a block that cannot be fetched back is recomputed rather "
              "than failing the request. Costs host RAM and nothing else; the win is on "
-             "prefix-cache hits across requests.")),
+             "prefix-cache hits across requests. Live TP4 validation at 0.5 restored "
+             "an evicted 133,504-token prefix in 0.69s instead of 52.47s recomputation "
+             "and retained about 51 GiB available on a 251 GiB host. Larger fractions "
+             "need equivalent host-headroom validation.")),
 
     dict(key="VISION", families=("glm52",), type="bool", default=False, group="Multimodal", scope="checkpoint",
          label="Vision (image input) — EXPERIMENTAL on EXL3",
          rationale=(
              "Bolts the MoonViT-3d tower + PatchMerger projector (~890 MB, BF16, no "
              "text weight touched) onto the text backbone. KNOWN BROKEN AT LONG "
-             "CONTEXT ON THE EXL3 TARGET: measured 32K needle 0/2 with degenerate text "
-             "on both the v20 and pre-v20 bases, while short-prompt and vision smoke "
-             "tests passed 6/6. It also costs ~1.31 GiB/GPU and ~13% of text decode, "
-             "enough memory pressure that MAX_MODEL_LEN 384K can fail KV validation "
-             "(needed 5.7 GiB, had 3.97). Use it for short-prompt image work only, and "
-             "turn it off for anything that depends on long-context retrieval.")),
+             "CONTEXT ON THE EXL3 TARGET: the final v20 turnkey image measured 32K "
+             "needle 0/3 with degenerate text and collapsed MTP acceptance. In the "
+             "same run a 5120x2880 screenshot returned 17/18 exact details, a follow-up "
+             "turn preserved the image context, and text-only chat remained exact. "
+             "The current graft adds ~1.99 GiB/GPU. Use it for short-prompt image work "
+             "only, and turn it off for anything that depends on long-context "
+             "retrieval.")),
 
     dict(key="VISION_CHUNKS", families=("glm52",), type="int", default=8, min=1, max=64,
          group="Multimodal", scope="engine", label="Max vision chunks per request",
@@ -825,11 +984,11 @@ def env_layer(env=None) -> dict:
         elif mode == "override":
             legacy = "tr3-override"
         elif mode == "off":
-            legacy = "bf16"
+            legacy = "native"
         # Order matters and matches the old entrypoint: MTP78_TRELLIS=0 was
         # applied AFTER MTP78_MODE and won over it.
         if env.get("MTP78_TRELLIS", "") == "0":
-            legacy = "bf16"
+            legacy = "native"
         if env.get("DRAFT_MODEL", ""):
             legacy = "nvfp4" if env.get("DRAFT_QUANTIZATION", "") == "modelopt_fp4" else legacy
         if legacy:
@@ -1147,7 +1306,11 @@ def resolve(state_values=None, env_values=None):
     # every individual knob remains overridable.
     variant = VARIANTS.get(effective.get("MODEL_VARIANT"), {})
     for key, raw in variant.get("defaults", {}).items():
-        if key not in KNOB_BY_KEY or sources.get(key) not in ("default", "family"):
+        # Hardware detection supplies a safe topology-shaped default (not an
+        # operator override). A measured variant may intentionally choose DCP2
+        # on TP4, so it outranks "detected"; explicit env/file choices still win.
+        if key not in KNOB_BY_KEY or sources.get(key) not in (
+                "default", "family", "detected"):
             continue
         try:
             effective[key] = coerce(KNOB_BY_KEY[key], raw)
@@ -1268,11 +1431,15 @@ def derive(cfg: dict) -> dict:
         out["QUANTIZATION"] = cfg.get("QUANTIZATION", "")
     else:
         out["MODEL_REPO"] = variant["repo"]
+        out["MODEL_REVISION"] = variant.get("revision", "")
         out["MODEL_DIRNAME"] = variant["dirname"]
         out["QUANTIZATION"] = variant["quantization"]
     out["FAMILY_ENV_BLOCK"] = fam.get("env_block", "generic")
     out["SPEC_METHOD"] = fam.get("spec_method", "mtp")
     out["FAMILY_SERVE_ARGS"] = family_serve_args(cfg)
+    out["PROFILE_RUNTIME_ENV"] = [
+        f"{key}={value}" for key, value in variant.get("runtime_env", {}).items()
+    ]
     # The MTP78 draft apparatus is GLM-only; outside it there is no graft, no
     # overlay and no external draft dir, just a speculation depth.
     if fam_name != "glm52":
@@ -1397,11 +1564,12 @@ def validate(cfg: dict, context=None):
     # v29 stamps the draft role at construction and gives draft layers a
     # capturable m=1 floor while target layers keep m=4. The former v20 blanket
     # rejection and global MIN_M workaround are both obsolete.
-    if is_glm and draft.startswith("tr3-") and cfg["MODEL_VARIANT"] != "exl3-tr3":
+    if (is_glm and draft.startswith("tr3-")
+            and variant.get("quantization") != "exl3"):
         err("tr3-draft-needs-exl3", ["MTP_DRAFT", "MODEL_VARIANT"],
             "the TR3 trellis drafts are layer-78 overlays built for the EXL3-TR3 "
             f"checkpoint; they have no meaning on the {variant['label']} target. Use the "
-            "bf16 in-checkpoint draft or an external nvfp4 draft dir.")
+            "native in-checkpoint draft or an external nvfp4 draft dir.")
 
     # 3. a draft inherits the target's quantization --------------------------
     if is_glm and draft == "nvfp4" and cfg.get("DRAFT_QUANTIZATION") != "modelopt_fp4":
@@ -1411,7 +1579,8 @@ def validate(cfg: dict, context=None):
             "the EXL3 path and throws the identical 'capture (m=3)' error as the v20 "
             "rank-sliced bug. Set DRAFT_QUANTIZATION=modelopt_fp4. This is a config trap, "
             "not a bug.")
-    if is_glm and cfg.get("DRAFT_MODEL") and draft in ("tr3-graft", "bf16", "off"):
+    if is_glm and cfg.get("DRAFT_MODEL") and draft in (
+            "tr3-graft", "native", "bf16", "off"):
         warn("draft-model-overrides", ["DRAFT_MODEL", "MTP_DRAFT"],
              "an explicit DRAFT_MODEL takes over draft selection; the MTP draft type is "
              "then only used to decide what happens to the target checkpoint.")
@@ -1427,32 +1596,63 @@ def validate(cfg: dict, context=None):
             "and qualify model-specific calibrated scales.")
 
     # 6. vision on an EXL3 target -------------------------------------------
-    if is_glm and cfg["VISION"] and cfg["MODEL_VARIANT"] == "exl3-tr3":
+    if (is_glm and cfg["VISION"]
+            and cfg["MODEL_VARIANT"].startswith("exl3-tr3")):
         warn("vision-long-context", ["VISION"],
              "EXPERIMENTAL / KNOWN BROKEN AT LONG CONTEXT: VISION=1 on the EXL3-TR3 "
-             "checkpoint corrupts long-context output — measured 32K needle 0/2 with "
-             "degenerate text on BOTH the v20 and pre-v20 bases, while short-prompt and "
-             "vision smoke tests passed 6/6. Safe only for short-prompt image work. The "
-             "long-context probe will fail this configuration by design.")
+             "checkpoint corrupts long-context output. The final v20 turnkey image "
+             "measured 32K needle 0/3 with degenerate text and mean MTP acceptance "
+             "collapsing to 1.25-1.50, while a 5120x2880 screenshot returned 17/18 "
+             "exact details and its multi-turn follow-up was exact. Safe only for "
+             "short-prompt image work. The long-context probe will fail this "
+             "configuration by design.")
     if is_glm and cfg["VISION"] and cfg["MAX_MODEL_LEN"] > 393216:
         warn("vision-kv-pressure", ["VISION", "MAX_MODEL_LEN"],
-             f"vision costs ~1.31 GiB/GPU and raises memory pressure enough that even "
-             f"MAX_MODEL_LEN 384K has failed KV validation (needed 5.7 GiB, had 3.97). At "
-             f"{cfg['MAX_MODEL_LEN']} expect 'To serve at least one request with the "
-             "model's max seq len ... larger than the available KV cache memory' at boot. "
-             "Reducing MAX_MODEL_LEN is the standard remedy.")
+             f"the current vision graft adds ~1.99 GiB/GPU. On the tested DCP4 "
+             f"EXL3-TR3 max-context shape, MAX_MODEL_LEN={cfg['MAX_MODEL_LEN']} and "
+             f"GPU_MEMORY_UTILIZATION=0.975 exposed 564,736 KV tokens and served short "
+             f"requests, while 0.98 exposed 610,560 tokens but left only 37.12 MiB free "
+             f"and OOMed on the first 48 MiB verification allocation. Capacity at boot "
+             f"is not runtime headroom, and neither result makes vision long-context "
+             f"correct. Use <=0.975 on that exact shape; otherwise reduce context or "
+             f"re-qualify memory and retrieval from a cold start.")
     if is_glm and cfg["VISION"] and ctx.get("vision_available") is False:
         warn("vision-unavailable", ["VISION"],
              "vision assets are not on the volume yet; enabling it triggers a ~1 GB "
              "download during the restart.")
 
     # 7. memory / pool sanity ------------------------------------------------
+    if (is_glm and cfg["MODEL_VARIANT"].startswith("exl3-tr3")
+            and cfg["LOAD_FORMAT"] == "instanttensor"
+            and cfg["MAX_MODEL_LEN"] > 520192
+            and cfg["GPU_MEMORY_UTILIZATION"] <= 0.978):
+        warn("instanttensor-context-margin",
+             ["LOAD_FORMAT", "MAX_MODEL_LEN", "GPU_MEMORY_UTILIZATION"],
+             "the exact TP4/DCP2 EXL3 shape at MAX_MODEL_LEN=524288 and "
+             "GPU_MEMORY_UTILIZATION=0.978 failed KV admission on both InstantTensor "
+             "attempts: 9.04 GiB was needed and 9.03 GiB remained. InstantTensor "
+             "loaded ~0.04 GiB/GPU more resident model memory than safetensors. "
+             "MAX_MODEL_LEN=520192 passed four first-attempt boots plus a "
+             "517,179-token five-depth retrieval. Use that measured margin, or "
+             "re-qualify another utilization/context pair without relying on retries.")
     if cfg["GPU_MEMORY_UTILIZATION"] > 0.95 and not cfg["GPU_BLOCKS_OVERRIDE"]:
-        warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
-             f"{cfg['GPU_MEMORY_UTILIZATION']} leaves very little headroom. The memory "
-             "profile varies by a few hundred MiB between boots, so a value that boots "
-             "two times in three is not a value that boots — it is a rollback waiting to "
-             "happen.")
+        if (is_glm and cfg["MODEL_VARIANT"] == "exl3-tr3"
+                and cfg["MAX_MODEL_LEN"] == 520192
+                and cfg["GPU_MEMORY_UTILIZATION"] <= 0.976):
+            warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
+                 f"{cfg['GPU_MEMORY_UTILIZATION']} is high by generic vLLM standards, "
+                 "but this exact DCP2/520,192-token profile is the cross-provider "
+                 "qualified default. RunPod Secure passed the first request, C1-C8 "
+                 "decode, and an exact ~517K five-depth retrieval with this setting; "
+                 "0.978 admitted KV but OOMed on its first 36 MiB transient allocation. "
+                 "A new driver, GPU SKU, loader, graph shape, or vision setting is still "
+                 "a cold-boot and near-maximum retrieval requalification boundary.")
+        else:
+            warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
+                 f"{cfg['GPU_MEMORY_UTILIZATION']} leaves very little headroom. The "
+                 "memory profile varies by a few hundred MiB between boots, so a value "
+                 "that boots two times in three is not a value that boots — it is a "
+                 "rollback waiting to happen.")
     if (is_glm and cfg["MODEL_VARIANT"] == "madeby561-hybrid"
             and cfg["MAX_MODEL_LEN"] >= 524288
             and not cfg["GPU_BLOCKS_OVERRIDE"]):
@@ -1463,14 +1663,20 @@ def validate(cfg: dict, context=None):
              "the proposal's transient allocation. The measured 512K profile pins "
              "2048 blocks. Keep that pin, or re-run the 32K and near-maximum needle "
              "gates before trusting this configuration.")
-    if cfg["GPU_BLOCKS_OVERRIDE"] and cfg["GPU_BLOCKS_OVERRIDE"] * 256 < cfg["MAX_MODEL_LEN"]:
+    logical_tokens_per_block = 64 * int(cfg.get("DCP", "1"))
+    if (cfg["GPU_BLOCKS_OVERRIDE"]
+            and cfg["GPU_BLOCKS_OVERRIDE"] * logical_tokens_per_block
+            < cfg["MAX_MODEL_LEN"]):
         err("pool-smaller-than-context", ["GPU_BLOCKS_OVERRIDE", "MAX_MODEL_LEN"],
-            f"the pinned KV pool is {cfg['GPU_BLOCKS_OVERRIDE']} blocks = "
-            f"{cfg['GPU_BLOCKS_OVERRIDE'] * 256} tokens, smaller than MAX_MODEL_LEN "
+            f"the pinned KV pool is {cfg['GPU_BLOCKS_OVERRIDE']} blocks x 64 tokens "
+            f"x DCP={cfg.get('DCP')} = "
+            f"{cfg['GPU_BLOCKS_OVERRIDE'] * logical_tokens_per_block} tokens, "
+            f"smaller than MAX_MODEL_LEN "
             f"({cfg['MAX_MODEL_LEN']}). vLLM refuses to start when it cannot fit one "
             "max-length request: 'To serve at least one request with the model's max seq "
             "len ... larger than the available KV cache memory'. Raise the override "
-            f"to >= {-(-cfg['MAX_MODEL_LEN'] // 256)} blocks, set it to 0 to let vLLM size "
+            f"to >= {-(-cfg['MAX_MODEL_LEN'] // logical_tokens_per_block)} blocks, "
+            "set it to 0 to let vLLM size "
             "the pool, or lower MAX_MODEL_LEN.")
     if cfg["MAX_NUM_BATCHED_TOKENS"] > cfg["MAX_MODEL_LEN"]:
         warn("chunk-bigger-than-context", ["MAX_NUM_BATCHED_TOKENS", "MAX_MODEL_LEN"],
@@ -1502,10 +1708,10 @@ def validate(cfg: dict, context=None):
         err("dcp-divides-tp", ["DCP", "TENSOR_PARALLEL_SIZE"],
             f"decode context parallel size {cfg['DCP']} must divide the tensor-parallel "
             f"size ({cfg['TENSOR_PARALLEL_SIZE']}).")
-    if is_glm and int(cfg["DCP"]) < 4 and cfg["MAX_MODEL_LEN"] > 262144:
+    if is_glm and int(cfg["DCP"]) == 1 and cfg["MAX_MODEL_LEN"] > 262144:
         warn("dcp-reduces-pool", ["DCP", "MAX_MODEL_LEN"],
-             f"DCP={cfg['DCP']} replicates KV instead of sharding it across the 4 ranks, "
-             f"cutting the usable pool by about {4 // int(cfg['DCP'])}x. "
+             f"DCP={cfg['DCP']} replicates KV instead of sharding it across ranks, "
+             "cutting the usable pool by about 4x on TP4. "
              f"MAX_MODEL_LEN {cfg['MAX_MODEL_LEN']} is unlikely to fit.")
 
     # 9. variant ------------------------------------------------------------

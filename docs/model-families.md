@@ -76,7 +76,7 @@ built-in defaults  <  FAMILY defaults  <  VARIANT defaults  <  startup environme
 ```
 
 The family layer is what "GLM-5.2 wants TP=4 and Qwen3.6 wants TP=1" means.
-The variant layer is what "this GLM checkpoint needs the stock BF16 draft and
+The variant layer is what "this GLM checkpoint needs its native draft and
 an explicitly bounded 512K memory shape" means. Both sit below the environment
 so an operator can still override them from the template, and below the state
 file so the landing page can. `/config` shows the source of every value;
@@ -149,7 +149,7 @@ KV, parsers and tool surface while replacing the target quantizer and draft:
 |---|---|
 | repository | `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid`, revision `68babde…` |
 | quantization | `nvfp4_nf3_hybrid` with the checkpoint's MXFP8 dense/shared-expert overlay |
-| MTP | 3 tokens, in-checkpoint BF16 draft, probabilistic proposals |
+| MTP | 3 tokens, native serialized NVFP4 experts, probabilistic proposals |
 | max context / pool | 524,288 / 2,048 blocks (exactly one maximum-length logical pool) |
 | batch / DCP workspace | 2,048 / 512 MiB |
 | utilization | 0.98, safe only because the pool is explicitly pinned |
@@ -168,6 +168,14 @@ aggregate decode reaches 269.7 tok/s at C8. It retrieved all five needles from
 a 521,277-token haystack. The v19 control measured 2,299 at 8K, 2,192 at 64K
 and 119.2 C1. The mixed-topology Vast host remains a correctness and relative-
 tuning platform, not an absolute-performance proxy.
+
+The published MadeBy561 vision wrapper is not part of this qualified profile.
+With MTP disabled it passed short and 32K text retrieval but recovered only
+1/18 fields from the appliance's 5120x2880 dashboard. A transient correction
+matching the successful Jarrel wrapper's config delegation and load-only name
+mapping reached only 2/18. PP/TG remained within about one percent, as
+expected. This result rules out both MTP and EXL3 expert ordering as complete
+explanations; it does not rule out the simpler vision tasks reported upstream.
 
 ---
 
@@ -195,7 +203,7 @@ Preset choices and why:
 
 | knob | value | reasoning |
 |---|---|---|
-| repo | `nvidia/Qwen3.6-27B-NVFP4` | the vendor-published low-weight development checkpoint |
+| repo | `nvidia/Qwen3.6-27B-NVFP4`, revision `0893e160…` | the vendor-published low-weight development checkpoint, pinned to the current Hub revision audited on 2026-07-28 |
 | `--quantization` | `modelopt` | matches the checkpoint metadata and the quantizer bundled in the pinned image |
 | `TENSOR_PARALLEL_SIZE` | **1** | the point of this profile is an inexpensive single-Blackwell development rental |
 | `MAX_MODEL_LEN` | **32768** | conservative profile default; the upstream architecture supports 262,144 natively, but the full NVFP4 memory envelope still needs measurement |

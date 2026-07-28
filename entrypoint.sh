@@ -607,6 +607,10 @@ trap ':' USR1
 trap 'stop_soul_supervisor; if [ -n "${SRV_PID:-}" ]; then kill -9 -- "-$SRV_PID" 2>/dev/null || true; fi' EXIT
 
 fetch_weights() {
+  _wanted_checkpoint="${MODEL_REPO:-}"
+  if [ -n "${MODEL_REVISION:-}" ]; then
+    _wanted_checkpoint="${MODEL_REPO:-}@${MODEL_REVISION}"
+  fi
   # Which repo do the bytes in this directory actually belong to? A model dir is
   # keyed by name, but MODEL_DIR can be pinned by the template while MODEL_REPO
   # moves with the family — and downloading one model on top of another produces
@@ -623,16 +627,32 @@ fetch_weights() {
       echo "       Point MODEL_DIR somewhere else, or delete that directory first."
       exit 1
     fi
-  elif [ -n "$_complete_repo" ] && [ "$_complete_repo" != "${MODEL_REPO:-}" ]; then
+  elif [ -n "$_complete_repo" ] &&
+       [ "${_complete_repo%%@*}" != "${MODEL_REPO:-}" ]; then
     echo "FATAL: $MODEL_DIR holds '$_complete_repo' but this configuration wants"
     echo "       '${MODEL_REPO:-?}'. Refusing to mix checkpoints in one directory."
     exit 1
+  fi
+  # A local/NFS bind mount is an explicit immutable checkpoint selection. Do
+  # not try to update it to the profile's download revision: that would fail on
+  # a read-only mount and would violate the request to serve these exact bytes.
+  # The repository mismatch checks above still prevent a different model from
+  # being mistaken for this profile.
+  if [ "${MODEL_READ_ONLY:-0}" = "1" ] && [ -f "$MODEL_DIR/config.json" ]; then
+    if [ -n "$_complete_repo" ] &&
+       [ "$_complete_repo" != "$_wanted_checkpoint" ]; then
+      echo ">>> Checkpoint: immutable local marker '$_complete_repo' supersedes"
+      echo ">>>             profile download revision '$_wanted_checkpoint'."
+    else
+      echo ">>> Checkpoint: using immutable local bytes at $MODEL_DIR"
+    fi
+    return 0
   fi
   # Gate on a completion marker, not config.json: small files land early in the
   # parallel download, so config.json existing does not mean the shards made it.
   # snapshot_download resumes/verifies incrementally, so re-running is safe.
   if [ -f "$_complete_marker" ] &&
-     { [ -z "$_complete_repo" ] || [ "$_complete_repo" = "${MODEL_REPO:-}" ]; }; then
+     { [ -z "$_complete_repo" ] || [ "$_complete_repo" = "$_wanted_checkpoint" ]; }; then
     return 0
   fi
   status_update downloading-weights
@@ -646,8 +666,13 @@ fetch_weights() {
   # to be able to reach the hub again, so clear it for the download only.
   HF_HUB_OFFLINE=0 HF_XET_HIGH_PERFORMANCE=1 python3 -c "
 from huggingface_hub import snapshot_download
-snapshot_download('${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}', local_dir='$MODEL_DIR', max_workers=16)"
-  printf '%s\n' "${MODEL_REPO:-}" > "$_complete_marker"
+snapshot_download(
+    '${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}',
+    revision='${MODEL_REVISION:-main}',
+    local_dir='$MODEL_DIR',
+    max_workers=16,
+)"
+  printf '%s\n' "$_wanted_checkpoint" > "$_complete_marker"
   printf '%s' "${MODEL_REPO:-}" > "$MODEL_DIR/.download-repo" 2>/dev/null || true
   boot_note ">>> Weights ready (${MODEL_REPO:-?})."
   return 0
@@ -664,7 +689,7 @@ snapshot_download('${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}', local_d
 #     target byte-identical and measured slightly better on acceptance (MAL 3.548 /
 #     84.9% vs 3.517 / 83.9%). v29 stamps it as a draft at construction and
 #     gives its m=1..3 graph shapes the capturable Trellis plan they require.
-#   MTP78_MODE=off       stock BF16 draft
+#   MTP78_MODE=off       native in-checkpoint draft
 # MTP78_TRELLIS=0 is still honoured as a synonym for off (it is folded into the
 # MTP_DRAFT knob by the config resolver, which also accepts MTP78_MODE directly).
 MTP78_DRAFT_DIR=""
@@ -677,6 +702,37 @@ from huggingface_hub import snapshot_download
 snapshot_download('malaiwah/GLM-5.2-EXL3-TR3-MTP78', allow_patterns=['3bpw-keep0/*'], local_dir='$MODEL_DIR/.mtp78-overlay', max_workers=8)"
 }
 
+prepare_nvfp4_mtp78_draft() {
+  [ "${MTP_DRAFT:-}" = "nvfp4" ] || return 0
+  if [ -f "${DRAFT_MODEL:-}/config.json" ] &&
+     [ -f "${DRAFT_MODEL:-}/model.safetensors.index.json" ]; then
+    echo ">>> MTP78: external NVFP4 draft ready at $DRAFT_MODEL"
+    return 0
+  fi
+  # The Luke checkpoint publishes its MTP layer in two dedicated payloads, so
+  # do not download the other ~400 GiB merely to build a 5.6 GiB draft.  Keep
+  # the partial source and the derived directory outside the target checkpoint:
+  # the same path works after a variant switch and never mutates shared weights.
+  local draft_source="${DRAFT_SOURCE_DIR:-${MODEL_ROOT:-/workspace}/.draft-sources/lukealonso-GLM-5.2-NVFP4}"
+  echo ">>> MTP78: downloading Luke NVFP4 draft payloads only (~5.6 GiB)"
+  mkdir -p "$(dirname "$draft_source")" "$(dirname "$DRAFT_MODEL")"
+  HF_HUB_OFFLINE=0 HF_XET_HIGH_PERFORMANCE=1 python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download(
+    'lukealonso/GLM-5.2-NVFP4',
+    allow_patterns=[
+        'config.json', 'generation_config.json', 'tokenizer.json',
+        'tokenizer_config.json', 'chat_template.jinja',
+        'model.safetensors.index.json', 'model-mtp.safetensors',
+        'model-mtp-inputscales.safetensors',
+    ],
+    local_dir='$draft_source',
+    max_workers=8,
+)"
+  python3 "$SCRIPTS_DIR/build_nvfp4_mtp_draft.py" \
+    "$draft_source" "$DRAFT_MODEL"
+}
+
 prepare_mtp78() {
   MTP78_DRAFT_DIR="$MODEL_DIR/.mtp78-draft"
   # DRAFT_MODEL may be supplied from the environment (or the state file) to point
@@ -686,6 +742,12 @@ prepare_mtp78() {
   # most of the KV that the BF16 fallback draft gives up, while still avoiding
   # _apply_rank_sliced, which is useful for comparing quantization formats.
   if [ -n "${DRAFT_MODEL:-}" ]; then
+    prepare_nvfp4_mtp78_draft
+    if [ ! -f "$DRAFT_MODEL/config.json" ] ||
+       [ ! -f "$DRAFT_MODEL/model.safetensors.index.json" ]; then
+      echo "FATAL: external draft is incomplete: $DRAFT_MODEL"
+      exit 1
+    fi
     echo ">>> Draft: external checkpoint $DRAFT_MODEL (MTP78_MODE=$MTP78_MODE ignored for draft selection)"
     MTP78_MODE=off
   fi
@@ -698,10 +760,10 @@ prepare_mtp78() {
         DRAFT_MODEL="$MTP78_DRAFT_DIR"
         echo ">>> MTP78: trellis draft via --speculative-config override (target untouched)"
       else
-        echo "!!! MTP78: draft build failed — falling back to the in-checkpoint BF16 draft"
+        echo "!!! MTP78: draft build failed — falling back to the native in-checkpoint draft"
       fi
     else
-      echo "!!! MTP78: vLLM patch anchor missing in this image — keeping BF16 draft"
+      echo "!!! MTP78: vLLM patch anchor missing in this image — keeping the native draft"
     fi
   elif [ "$MTP78_MODE" = "graft" ]; then
     if [ ! -f "$MODEL_DIR/.mtp78-grafted" ]; then
@@ -711,18 +773,18 @@ prepare_mtp78() {
         if python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" "$MODEL_DIR/.mtp78-overlay/3bpw-keep0"; then
           echo ">>> MTP78: trellis draft active (grafted in place)"
         else
-          echo "!!! MTP78 graft failed — reverting to BF16 draft"
+          echo "!!! MTP78 graft failed — reverting to the native draft"
           python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert || true
         fi
       else
-        echo "!!! MTP78: vLLM patch anchor missing in this image — keeping BF16 draft"
+        echo "!!! MTP78: vLLM patch anchor missing in this image — keeping the native draft"
       fi
     else
       python3 /opt/scripts/patch_deepseek_mtp.py || true  # image may have been re-pulled
       echo ">>> MTP78: trellis draft already grafted"
     fi
   else
-    echo ">>> MTP78 disabled — stock BF16 draft"
+    echo ">>> MTP78 modification disabled — native in-checkpoint draft"
   fi
   # A checkpoint grafted by an earlier boot must be reverted before override mode
   # can work, otherwise the target still carries the trellis layer 78.
@@ -744,6 +806,25 @@ prepare_mtp78() {
 # needle 0/2 with degenerate text on both the v20 and pre-v20 bases, while
 # short-prompt and vision smoke tests pass 6/6. The config layer warns; the
 # post-restart probe fails it by design.
+install_vision_plugin() {
+  local plugin_dir="$MODEL_DIR/.vision/plugins/glm5v_nf3"
+  local install_dir
+  if [ ! -d "$plugin_dir" ]; then
+    echo "!!! Vision: vLLM plugin source is missing at $plugin_dir"
+    return 1
+  fi
+
+  # pip/setuptools refreshes source-side egg-info even when the package is
+  # already built. That fails when a local/NFS checkpoint is intentionally
+  # mounted read-only, and the suppressed install error otherwise surfaces
+  # later as the misleading "Glm5vForConditionalGeneration is not supported".
+  # Install from a disposable writable copy and avoid network build isolation.
+  install_dir="$(mktemp -d /tmp/glm5v-install.XXXXXX)" || return 1
+  cp -a "$plugin_dir/." "$install_dir/" || return 1
+  rm -rf "$install_dir/build" "$install_dir/glm5v_nf3.egg-info"
+  pip install -q --no-build-isolation --no-deps "$install_dir"
+}
+
 prepare_vision() {
   VISION_REPO="${VISION_REPO:-chronarion/GLM-5.2-Vision-MXFP8-NVFP4-NF3-Hybrid}"
   if [ "${VISION:-0}" = "1" ]; then
@@ -792,7 +873,7 @@ snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
         else
           vision_ok=0
         fi
-        pip install -q "$MODEL_DIR/.vision/plugins/glm5v_nf3" || vision_ok=0
+        install_vision_plugin || vision_ok=0
       fi
       if [ "$vision_ok" = "1" ] && python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" "$MODEL_DIR/.vision" && python3 /opt/scripts/index_add_vision.py "$MODEL_DIR"; then
         echo ">>> Vision: ENABLED (image input active; VISION=0 to disable)"
@@ -810,12 +891,17 @@ snapshot_download('$VISION_REPO', local_dir='$MODEL_DIR/.vision',
       # vLLM then crash-loops until the supervisor gives up. Re-install every boot;
       # it is a ~50 KB local wheel and pip is a no-op when already satisfied.
       if [ -d "$MODEL_DIR/.vision/plugins/glm5v_nf3" ]; then
-        pip install -q "$MODEL_DIR/.vision/plugins/glm5v_nf3" 2>/dev/null || true
-        echo ">>> Vision: already installed (plugin re-registered in this container)"
+        if install_vision_plugin; then
+          echo ">>> Vision: already installed (plugin re-registered in this container)"
+        else
+          echo "FATAL: Vision plugin installation failed."
+          exit 1
+        fi
       else
-        echo "!!! Vision: marker present but $MODEL_DIR/.vision/plugins/glm5v_nf3 is missing."
-        echo "!!! The Glm5v arch will not register. Remove $MODEL_DIR/.vision-enabled to reinstall,"
-        echo "!!! or set VISION=0 to serve text-only."
+        echo "FATAL: Vision marker is present but $MODEL_DIR/.vision/plugins/glm5v_nf3 is missing."
+        echo "       The Glm5v architecture cannot register. Remove $MODEL_DIR/.vision-enabled"
+        echo "       to reinstall, or set VISION=0 to serve text-only."
+        exit 1
       fi
     fi
   elif [ -f "$MODEL_DIR/.vision-enabled" ]; then
@@ -852,17 +938,40 @@ prepare_checkpoint() {
       # Local/NFS deployments can expose a checkpoint directly from their shared
       # Hugging Face cache. Never run graft, vision, or reconciliation writes on
       # that source: a turnkey experiment must not mutate the canonical weights.
-      if [ "${MTP78_MODE:-off}" != "off" ] || [ "${VISION:-0}" = "1" ]; then
-        echo "FATAL: MODEL_READ_ONLY=1 requires MTP78_MODE=off and VISION=0."
-        echo "       Prepare a writable derivative checkpoint for graft or vision."
+      # A complete external draft makes MTP78_MODE irrelevant: prepare_mtp78
+      # validates that separate read-only mount and normalizes the mode to off.
+      # Only reject modes that would mutate the target when no external draft
+      # has been supplied.
+      if { [ "${MTP78_MODE:-off}" != "off" ] && [ -z "${DRAFT_MODEL:-}" ]; }; then
+        echo "FATAL: MODEL_READ_ONLY=1 cannot graft MTP78 into the target."
+        echo "       Supply a complete external DRAFT_MODEL or prepare a writable derivative."
         exit 1
       fi
-      if [ "${MODEL_VARIANT:-exl3-tr3}" = "exl3-tr3" ]; then
+      if [ "${VISION:-0}" = "1" ] && [ ! -f "$MODEL_DIR/.vision-enabled" ]; then
+        echo "FATAL: MODEL_READ_ONLY=1 cannot install vision into an unprepared target."
+        echo "       Mount a derivative containing .vision-enabled, or use a writable copy."
+        exit 1
+      fi
+      if [ "${VISION:-0}" = "1" ]; then
+        install_vision_plugin || {
+          echo "FATAL: read-only vision derivative cannot register its vLLM plugin."
+          exit 1
+        }
+        echo ">>> Vision: read-only derivative plugin registered"
+      fi
+      if [[ "${MODEL_VARIANT:-exl3-tr3}" == exl3-tr3* ]]; then
         python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" \
-          --vision 0 --dry-run --quiet || {
+          --vision "${VISION:-0}" --dry-run --quiet || {
           echo "FATAL: read-only EXL3 checkpoint does not pass reconciliation."
           exit 1
         }
+      fi
+      # An explicit external draft is independent of the immutable target.  It
+      # may itself be a read-only bind mount (local/NFS) or may be assembled in
+      # a separate writable volume (rental).  Validate/prepare it here while
+      # continuing to skip every operation that could touch MODEL_DIR.
+      if [ -n "${DRAFT_MODEL:-}" ]; then
+        prepare_mtp78
       fi
       echo ">>> Checkpoint is read-only; mutation steps skipped."
     else
@@ -931,10 +1040,14 @@ compute_offload() {
     if [ "$CG_LIMIT" != "max" ] && [ "$CG_LIMIT" -lt "$MEM_BYTES" ] 2>/dev/null; then
       MEM_BYTES=$CG_LIMIT
     fi
-    # The connector is constructed once per tensor-parallel worker, and
-    # cpu_bytes_to_use is therefore a PER-WORKER value. Passing the entire
-    # instance allocation to every rank multiplies the requested RAM by TP
-    # (measured live: 4 x 385 GB allocations on a 550 GB rental).
+    # Current native OffloadingConnector interprets cpu_bytes_to_use as the
+    # AGGREGATE cache budget. CPUOffloadingSpec multiplies one worker's block
+    # bytes by world_size before deriving its shared block count; each worker
+    # then allocates only its rank-local slice. Dividing here silently divides
+    # the effective tier by TP (measured live: OFFLOAD_FRACTION=0.5 advertised
+    # 125 GiB but retained only ~31 GiB, so a 71 GiB store stream had no hits).
+    # Keep OFF_BYTES as the physical per-worker estimate for the memlock check
+    # and operator display, but pass OFF_TOTAL_BYTES to the connector.
     OFF_TOTAL_BYTES=$(python3 -c "print(int($MEM_BYTES*$off_fraction))")
     OFFLOAD_RANKS="${TENSOR_PARALLEL_SIZE:-1}"
     [ "$OFFLOAD_RANKS" -gt 0 ] 2>/dev/null || OFFLOAD_RANKS=1
@@ -963,14 +1076,14 @@ compute_offload() {
     fi
   fi
   if [ "$off_fraction" != "0" ]; then
-    OFFLOAD_STATE="$((OFF_TOTAL_BYTES/1073741824)) GiB pinned DRAM total"
+    OFFLOAD_STATE="$((OFF_TOTAL_BYTES/1073741824)) GiB DRAM prefix cache"
     echo ">>> DRAM KV offload: $((OFF_TOTAL_BYTES/1073741824)) GiB total (${off_fraction} of instance RAM allocation),"
-    echo ">>>                    $((OFF_BYTES/1073741824)) GiB per rank x ${OFFLOAD_RANKS} TP workers"
+    echo ">>>                    aggregate connector budget; ~$((OFF_BYTES/1073741824)) GiB physical slice x ${OFFLOAD_RANKS} TP workers"
     # kv_load_failure_policy=recompute: a KV block that cannot be fetched back from
     # the DRAM tier is recomputed instead of failing the request. The vLLM default
     # is "fail", which would turn any offload hiccup into a terminal error — not an
     # acceptable trade for a cache tier that is a pure optimisation.
-    KVT_ARGS=(--kv-transfer-config "{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_load_failure_policy\":\"recompute\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":$OFF_BYTES}}")
+    KVT_ARGS=(--kv-transfer-config "{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_load_failure_policy\":\"recompute\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":$OFF_TOTAL_BYTES}}")
     # OffloadingConnector rejects expandable_segments (VMM can remap pinned KV pages)
     export PYTORCH_CUDA_ALLOC_CONF=""
   else
@@ -987,7 +1100,7 @@ compute_vision_args() {
   VISION_ARGS=()
   if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] && [ "${VISION:-0}" = "1" ] \
      && [ -f "$MODEL_DIR/.vision-enabled" ]; then
-    VISION_ARGS=(--limit-mm-per-prompt "{\"vision_chunk\":${VISION_CHUNKS:-8}}" --trust-remote-code)
+    VISION_ARGS=(--limit-mm-per-prompt "{\"vision_chunk\":${VISION_CHUNKS:-8}}")
   fi
   return 0
 }
@@ -1008,6 +1121,12 @@ export TORCH_CUDA_ARCH_LIST=12.0a FLASHINFER_CUDA_ARCH_LIST=12.0f FLASHINFER_DIS
 export VLLM_ENGINE_READY_TIMEOUT_S=2400
 export VLLM_USE_FLASHINFER_SAMPLER=1
 unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE
+# The base image still carries three historical launcher switches that no
+# pinned vLLM/SparkInfer source reads. Leaving them inherited achieves nothing
+# and makes vLLM report misleading "unknown environment variable" warnings.
+unset VLLM_USE_B12X_PCIE_DMA
+unset VLLM_RTX6K_FUSED_ALLREDUCE_ADD
+unset VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER
 
 refresh_family_runtime_env() {
 if [ "${FAMILY_ENV_BLOCK:-glm52}" = "glm52" ]; then
@@ -1016,7 +1135,6 @@ export VLLM_USE_B12X_MOE=1 VLLM_USE_V2_MODEL_RUNNER=1
 export VLLM_ENABLE_PCIE_ALLREDUCE=1 VLLM_PCIE_ALLREDUCE_BACKEND=b12x
 export VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE=64KB VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
 export VLLM_CPP_AR_1STAGE_NCCL_CUTOFF=56KB VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS=0
-export VLLM_RTX6K_FUSED_ALLREDUCE_ADD=0 VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER=0
 export VLLM_USE_AOT_COMPILE=1 VLLM_USE_MEGA_AOT_ARTIFACT=1
 export VLLM_USE_BREAKABLE_CUDAGRAPH=0 VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
 export VLLM_USE_B12X_MHC=1 B12X_MHC_MAX_TOKENS=16384 VLLM_USE_B12X_WO_PROJECTION=1
@@ -1027,12 +1145,22 @@ export VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE=0 VLLM_B12X_MLA_SPEC_DECODE_MAX_Q=8
 export VLLM_USE_B12X_DCP_A2A=1 VLLM_DCP_A2A_MAX_TOKENS=16 VLLM_DCP_A2A_LARGE_BACKEND=ag_rs
 export VLLM_DCP_GLOBAL_TOPK=1 VLLM_DCP_SHARD_DRAFT=1 VLLM_DCP_QUERY_SPLIT=1
 export VLLM_DCP_TOPK_OWNER_MERGE=1 VLLM_DCP_INDEXER_SHARDS=0
-export VLLM_B12X_MLA_CKV_GATHER=1 VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS=512 VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS=16384
+export VLLM_B12X_MLA_CKV_GATHER=1 VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS=512
+export VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS="${DCP_CKV_GATHER_MAX_TOKENS:-140000}"
 export VLLM_B12X_MLA_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-auto}"
 export VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}"
-export VLLM_DCP_PROJECT_BEFORE_MERGE=1 VLLM_DCP_PROJECT_BEFORE_MERGE_MIN_PREFILL_TOKENS=1024
-export VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1
-export VLLM_USE_B12X_PCIE_DMA="${B12X_PCIE_DMA:-1}"
+# The borrowed-workspace implementation supports TP4/DCP4, but not TP4/DCP2
+# (the latter has 16/32/32 local/input/kernel heads and is rejected by
+# _validate_dcp_prefill_workspace_contract). Keep the fast workspace path for
+# DCP4 and select the supported ordinary gather/project path for DCP1/DCP2.
+if [ "${DCP:-4}" = "4" ]; then
+  export VLLM_DCP_PROJECT_BEFORE_MERGE=1
+  export VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1
+else
+  export VLLM_DCP_PROJECT_BEFORE_MERGE=0
+  export VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=0
+fi
+export VLLM_DCP_PROJECT_BEFORE_MERGE_MIN_PREFILL_TOKENS=1024
 export VLLM_PCIE_DMA_FP8="${F8_DMA:-0}"
 export B12X_PCIE_DMA_FP8="${F8_DMA:-0}"
 export SPARKINFER_PCIE_DMA_FP8="${F8_DMA:-0}"
@@ -1053,7 +1181,11 @@ if [ "${MTP_TOKENS:-3}" = "0" ]; then
 else
   unset VLLM_EXL3_TRELLIS_MIN_M
 fi
-export VLLM_EXL3_TRELLIS_MAX_M=32 VLLM_EXL3_TRELLIS_BLOCK_M=8 VLLM_EXL3_PREFILL_CHUNK=128
+# config.env has already replaced any inherited image value with the resolved
+# self-service value (32 by default). Preserve it here so the validation,
+# warning, EXL3 planner and CUDA-graph ceiling all describe the same window.
+export VLLM_EXL3_TRELLIS_MAX_M="${VLLM_EXL3_TRELLIS_MAX_M:-32}"
+export VLLM_EXL3_TRELLIS_BLOCK_M=8 VLLM_EXL3_PREFILL_CHUNK=128
 export VLLM_MEMORY_PROFILE_INCLUDE_ATTN=1 VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1
 unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 
@@ -1065,7 +1197,9 @@ unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
      [ -x /usr/local/bin/serve-glm52-v19.sh ]; then
     _cal_gpus="$(seq -s, 0 $((TENSOR_PARALLEL_SIZE - 1)))"
     if _cal_env="$(
-      env TP="${TENSOR_PARALLEL_SIZE:-4}" DCP="${DCP:-4}" GPUS="$_cal_gpus" \
+      env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS -u VLLM_DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS \
+        -u PCIE_DMA_MIN_BYTES -u VLLM_PCIE_DMA_MIN_BYTES \
+        TP="${TENSOR_PARALLEL_SIZE:-4}" DCP="${DCP:-4}" GPUS="$_cal_gpus" \
         DCP_QUERY_SPLIT=auto \
         DCP_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-auto}" \
         DCP_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}" \
@@ -1111,9 +1245,8 @@ else
   unset VLLM_EXL3_EXT_PATH VLLM_EXL3_ABI_SHIM VLLM_NVFP4_MLA_SCALES_FILE
   unset VLLM_ENABLE_PCIE_ALLREDUCE VLLM_PCIE_ALLREDUCE_BACKEND
   unset VLLM_CPP_AR_1STAGE_NCCL_CUTOFF VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS
-  unset VLLM_RTX6K_FUSED_ALLREDUCE_ADD VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER
   unset VLLM_DISABLE_SHARED_EXPERTS_STREAM VLLM_DISABLED_KERNELS
-  unset VLLM_USE_B12X_PCIE_DMA VLLM_PCIE_DMA_FP8 B12X_PCIE_DMA_FP8
+  unset VLLM_PCIE_DMA_FP8 B12X_PCIE_DMA_FP8
   unset SPARKINFER_PCIE_DMA_FP8 VLLM_PCIE_DMA_MIN_BYTES
   unset VLLM_B12X_ABSORB_BMM VLLM_NF3_GRID188_DECODE
   unset NCCL_LOCAL_INFERENCE_PATH NCCL_PR2127_PATH VLLM_NCCL_SO_PATH LD_PRELOAD
@@ -1151,6 +1284,21 @@ while IFS='=' read -r _k _v; do
   esac
 done < <(env)
 unset _k _v _n
+}
+
+# A measured model variant may carry a coherent engine-route bundle that is
+# too low-level to expose as twenty independent first-time-user controls.
+# Apply it after the family defaults; explicit TUNE_<NAME> values remain the
+# final layer and can still override every entry for controlled experiments.
+apply_profile_runtime_env() {
+for _assignment in "${PROFILE_RUNTIME_ENV[@]}"; do
+  _n="${_assignment%%=*}"
+  _v="${_assignment#*=}"
+  [ -n "$_n" ] || continue
+  export "$_n=$_v"
+  echo ">>> profile runtime: $_n=$_v"
+done
+unset _assignment _n _v
 }
 
 # API key: VLLM_API_KEY env > persisted key on the volume > freshly generated.
@@ -1254,13 +1402,43 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
     # issuance fails with 'NXDOMAIN during secondary validation' (QC-run find).
     # 2 attempts: transient DNS propagation failures are common on first boot.
     for _try in 1 2; do
-      DESEC_PROPAGATION_TIMEOUT="${DESEC_PROPAGATION_TIMEOUT:-300}" \
-      lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}" \
-        --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN" \
-        --path /workspace/.lego run && break
+      ACME_GUARD_PID=""
+      if [ "$ACME_DNS_PROVIDER" = "desec" ] &&
+         [ -n "${DESEC_DOMAIN:-}" ] &&
+         [ -f "$SCRIPTS_DIR/desec_acme_guard.py" ]; then
+        /opt/venv/bin/python "$SCRIPTS_DIR/desec_acme_guard.py" \
+          --zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN" \
+          --timeout "${DESEC_PROPAGATION_TIMEOUT:-300}" &
+        ACME_GUARD_PID=$!
+      fi
+      if DESEC_PROPAGATION_TIMEOUT="${DESEC_PROPAGATION_TIMEOUT:-300}" \
+         lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}" \
+           --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN" \
+           --path /workspace/.lego run; then
+        [ -z "$ACME_GUARD_PID" ] ||
+          { kill "$ACME_GUARD_PID" 2>/dev/null || true; wait "$ACME_GUARD_PID" 2>/dev/null || true; }
+        break
+      fi
+      [ -z "$ACME_GUARD_PID" ] ||
+        { kill "$ACME_GUARD_PID" 2>/dev/null || true; wait "$ACME_GUARD_PID" 2>/dev/null || true; }
       echo "!!! ACME attempt $_try failed$( [ $_try = 2 ] && echo '; continuing WITHOUT TLS' || echo '; retrying in 30s')"
       sleep 30
     done
+    # lego normally removes its TXT record. If the convergence guard had to
+    # recreate a split RRset, lego's provider cleanup may still see the
+    # original write as absent and leave the repaired copy behind. Remove the
+    # public challenge explicitly; certificate reuse does not need it.
+    if [ "$ACME_DNS_PROVIDER" = "desec" ] &&
+       [ -n "${DESEC_DOMAIN:-}" ] && [ -n "${DESEC_TOKEN:-}" ]; then
+      case "$ACME_DOMAIN" in
+        *."$DESEC_DOMAIN")
+          ACME_SUB="${ACME_DOMAIN%."$DESEC_DOMAIN"}"
+          curl -sf -X DELETE \
+            "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/_acme-challenge.${ACME_SUB}/TXT/" \
+            -H "Authorization: Token ${DESEC_TOKEN}" >/dev/null 2>&1 || true
+          ;;
+      esac
+    fi
   fi
   if [ -f "$CRT" ] && [ -f "$KEY" ]; then
     TLS_ENABLED=1
@@ -1319,16 +1497,40 @@ fi
 # gilded-gnosis fork's cache bug); verify decode tok/s after enabling this.
 unset VLLM_CACHE_DIR
 case "${VLLM_CACHE_ROOT:-}" in
-  ""|/cache/jit*) export VLLM_CACHE_ROOT="$MODEL_DIR/.vllm-cache" ;;
+  ""|/cache/jit*)
+    if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
+      export VLLM_CACHE_ROOT="/cache/vllm"
+    else
+      export VLLM_CACHE_ROOT="$MODEL_DIR/.vllm-cache"
+    fi
+    ;;
 esac
 case "${TRITON_CACHE_DIR:-}" in
-  ""|/cache/jit*) export TRITON_CACHE_DIR="$MODEL_DIR/.vllm-cache/triton" ;;
+  ""|/cache/jit*)
+    if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
+      export TRITON_CACHE_DIR="/cache/triton"
+    else
+      export TRITON_CACHE_DIR="$MODEL_DIR/.vllm-cache/triton"
+    fi
+    ;;
 esac
 case "${TORCH_EXTENSIONS_DIR:-}" in
-  ""|/cache/jit*) export TORCH_EXTENSIONS_DIR="$MODEL_DIR/.vllm-cache/torch_extensions" ;;
+  ""|/cache/jit*)
+    if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
+      export TORCH_EXTENSIONS_DIR="/cache/torch_extensions"
+    else
+      export TORCH_EXTENSIONS_DIR="$MODEL_DIR/.vllm-cache/torch_extensions"
+    fi
+    ;;
 esac
 case "${TORCHINDUCTOR_CACHE_DIR:-}" in
-  ""|/cache/jit*) export TORCHINDUCTOR_CACHE_DIR="$MODEL_DIR/.vllm-cache/torchinductor" ;;
+  ""|/cache/jit*)
+    if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
+      export TORCHINDUCTOR_CACHE_DIR="/cache/torchinductor"
+    else
+      export TORCHINDUCTOR_CACHE_DIR="$MODEL_DIR/.vllm-cache/torchinductor"
+    fi
+    ;;
 esac
 mkdir -p "$VLLM_CACHE_ROOT" "$TRITON_CACHE_DIR" "$TORCH_EXTENSIONS_DIR" \
   "$TORCHINDUCTOR_CACHE_DIR" 2>/dev/null || true
@@ -1397,14 +1599,23 @@ build_spec_args() {
     return 0
   fi
   _SPEC_QUANT=""
+  _DRAFT_MOE_BACKEND="${DRAFT_MOE_BACKEND:-}"
+  if [ -z "$_DRAFT_MOE_BACKEND" ]; then
+    if [ "${DRAFT_QUANTIZATION:-}" = "modelopt_fp4" ]; then
+      _DRAFT_MOE_BACKEND="b12x"
+    else
+      _DRAFT_MOE_BACKEND="triton"
+    fi
+  fi
   if [ -n "${DRAFT_QUANTIZATION:-}" ]; then
     _SPEC_QUANT=",\"quantization\":\"${DRAFT_QUANTIZATION}\""
     echo ">>> Draft quantization: ${DRAFT_QUANTIZATION} (overrides the target's --quantization)"
   fi
   if [ -n "${DRAFT_MODEL:-}" ]; then
-    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"${MTP_DRAFT_SAMPLE_METHOD:-greedy}\"${_SPEC_QUANT}}")
+    echo ">>> Draft MoE backend: $_DRAFT_MOE_BACKEND"
+    SPEC_ARGS=(--speculative-config "{\"model\":\"$DRAFT_MODEL\",\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"${_DRAFT_MOE_BACKEND}\",\"draft_sample_method\":\"${MTP_DRAFT_SAMPLE_METHOD:-greedy}\",\"rejection_sample_method\":\"${MTP_REJECTION_SAMPLE_METHOD:-standard}\"${_SPEC_QUANT}}")
   else
-    SPEC_ARGS=(--speculative-config "{\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"${MTP_DRAFT_SAMPLE_METHOD:-greedy}\"}")
+    SPEC_ARGS=(--speculative-config "{\"method\":\"${SPEC_METHOD:-mtp}\",\"num_speculative_tokens\":${MTP_TOKENS:-3},\"moe_backend\":\"triton\",\"draft_sample_method\":\"${MTP_DRAFT_SAMPLE_METHOD:-greedy}\",\"rejection_sample_method\":\"${MTP_REJECTION_SAMPLE_METHOD:-standard}\"}")
   fi
   return 0
 }
@@ -1484,6 +1695,7 @@ fi
 
 if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   refresh_family_runtime_env
+  apply_profile_runtime_env
   apply_tuning_overrides
   compute_offload
   compute_vision_args
@@ -1497,6 +1709,7 @@ fi
 
 if [ "${SUPERVISOR:-1}" = "0" ]; then
   refresh_family_runtime_env
+  apply_profile_runtime_env
   apply_tuning_overrides
   prepare_checkpoint
   compute_offload
@@ -1637,6 +1850,7 @@ while :; do
   # a self-service apply can change family, DMA mode, DCP or prefetch policy
   # without replacing PID 1.
   refresh_family_runtime_env
+  apply_profile_runtime_env
   apply_tuning_overrides
   prepare_checkpoint
   compute_offload

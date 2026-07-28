@@ -4,18 +4,13 @@
   "dockerEntrypoint": [],
   "dockerStartCmd": [],
   "env": {
-    "DESEC_DOMAIN": "malaiwah.dedyn.io",
-    "DESEC_TOKEN": "{{ RUNPOD_SECRET_desec_token }}",
     "LANDING_PAGE": "1",
     "MODEL_PROFILE": "glm52-exl3",
-    "MTP78_MODE": "graft",
-    "MTP_DRAFT_SAMPLE_METHOD": "greedy",
-    "OFFLOAD_FRACTION": "0",
     "RUNPOD_DIRECT_TLS": "auto",
     "VISION": "0"
   },
   "imageName": "ghcr.io/malaiwah/glm52-exl3-vast:latest",
-  "isPublic": false,
+  "isPublic": true,
   "isServerless": false,
   "name": "Model Turnkey: GLM-5.2 EXL3 (4x RTX PRO 6000)",
   "ports": [
@@ -24,7 +19,7 @@
     "1111/http",
     "22/tcp"
   ],
-  "readme": "Multi-model OpenAI-compatible Pod using MODEL_PROFILE=glm52-exl3. Deploy this profile on exactly 4x NVIDIA RTX PRO 6000 Blackwell 96 GB GPUs. Keep /workspace on a volume of at least 450 GB. For the lower-cost one-GPU Qwen3.6 profile, use runpod-template-qwen36.json. Ports 1111 and 8000 use Runpod managed HTTPS for the dashboard and secure API fallback. When the desec_token Secret is available, port 8443 also provides direct appliance TLS, avoiding Runpod proxy's 100-second limit. Add HF_TOKEN with Runpod Secrets.",
+  "readme": "Multi-model OpenAI-compatible Pod using MODEL_PROFILE=glm52-exl3. Deploy this profile on exactly 4x NVIDIA RTX PRO 6000 Blackwell 96 GB GPUs. Keep /workspace on a volume of at least 450 GB. For the lower-cost one-GPU Qwen3.6 profile, use runpod-template-qwen36.json. Ports 1111 and 8000 use Runpod managed HTTPS for the dashboard and secure API fallback. In a private clone, add DESEC_TOKEN and DESEC_DOMAIN through Runpod Secrets to make port 8443 a direct appliance-TLS route that avoids Runpod proxy's 100-second limit. Add HF_TOKEN with Runpod Secrets.",
   "volumeInGb": 450,
   "volumeMountPath": "/workspace"
 }

@@ -34,6 +34,8 @@ jobs:
       # stay scoped to the family they were measured on.
       - name: model family tests
         run: python3 tests/test_families.py
+      - name: deSEC DNS-01 convergence guard
+        run: python3 tests/test_desec_acme_guard.py
       # Catches "the knob exists but nothing reads it" — the class of defect that
       # was found twice by renting a GPU instead of by running a test.
       - name: knob wiring audit
@@ -44,6 +46,8 @@ jobs:
       # used to spend GPU rental time.
       - name: serving benchmark and needle harness
         run: python3 tests/test_serving_tools.py
+      - name: standalone NVFP4 MTP draft builder
+        run: python3 tests/test_nvfp4_mtp_draft.py
       - name: OpenAI feature qualification harness
         run: python3 tests/test_feature_suite.py
       - name: checkpoint reconciliation
@@ -57,7 +61,7 @@ jobs:
           CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=custom MODEL_ID=Qwen/Qwen3.5-0.8B bash entrypoint.sh | grep -q 'Qwen/Qwen3.5-0.8B'
           python3 -m json.tool runpod-template.json >/dev/null
           python3 -m json.tool runpod-template-qwen36.json >/dev/null
-          python3 -c "import json; ps=[json.load(open(f)) for f in ('runpod-template.json','runpod-template-qwen36.json')]; assert all(p['ports'] == ['8000/http', '8443/tcp', '1111/http', '22/tcp'] and p['volumeMountPath'] == '/workspace' and p['env']['RUNPOD_DIRECT_TLS'] == 'auto' and p['env']['DESEC_TOKEN'].startswith('{{ RUNPOD_SECRET_') and not p['isServerless'] for p in ps); assert [p['env']['MODEL_PROFILE'] for p in ps] == ['glm52-exl3','qwen36-27b-nvfp4']"
+          python3 -c "import json; ps=[json.load(open(f)) for f in ('runpod-template.json','runpod-template-qwen36.json')]; assert all(p['ports'] == ['8000/http', '8443/tcp', '1111/http', '22/tcp'] and p['volumeMountPath'] == '/workspace' and p['env']['RUNPOD_DIRECT_TLS'] == 'auto' and 'DESEC_TOKEN' not in p['env'] and 'DESEC_DOMAIN' not in p['env'] and p['isPublic'] and not p['isServerless'] for p in ps); assert [p['env']['MODEL_PROFILE'] for p in ps] == ['glm52-exl3','qwen36-27b-nvfp4']"
   build:
     # PRs build without pushing, so a broken Dockerfile is caught before main
     runs-on: ubuntu-latest

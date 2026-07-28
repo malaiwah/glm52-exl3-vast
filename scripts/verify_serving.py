@@ -9,7 +9,7 @@ garbage past ~32K tokens:
 
   * nvfp4 KV without calibrated MLA outer scales : needle 0/6 at 505K, GSM8K fine
   * uncalibrated nvfp4 MLA KV on earlier runtimes : long retrieval failed, short passed
-  * vision on the EXL3-TR3 target                : needle 0/2 at 32K, 6/6 short
+  * vision on the EXL3-TR3 target                : needle 0/3 at 32K; 5K image passed
 
 So nothing here reports "healthy" on the strength of /health or a two-line
 completion. A verdict carries `long_context_verified` separately, and the
@@ -70,6 +70,14 @@ def wait_health(base, key, timeout, pid=None, poll=10):
         except Exception:
             time.sleep(poll)
     return False, f"/health did not answer within {timeout}s"
+
+
+def discover_model(base, key):
+    doc = _req(base + "/v1/models", key=key, timeout=60)
+    models = doc.get("data") if isinstance(doc, dict) else None
+    if not models or not models[0].get("id"):
+        raise RuntimeError("/v1/models returned no served model")
+    return models[0]["id"]
 
 
 def _alive(pid):
@@ -220,7 +228,9 @@ def main(argv):
     ap.add_argument("--api-key", default="")
     ap.add_argument("--api-key-env", default="",
                     help="read the API key from this environment variable")
-    ap.add_argument("--model", default="model")
+    ap.add_argument(
+        "--model", default="",
+        help="served model alias; defaults to the first entry from /v1/models")
     ap.add_argument("--out", default="")
     ap.add_argument("--max-model-len", type=int, default=524288)
     ap.add_argument("--needle-tokens", type=int, default=32768)
@@ -252,6 +262,13 @@ def main(argv):
         verdict["reason"] = detail
         return _finish(verdict, args, started)
 
+    if not args.model:
+        try:
+            args.model = discover_model(base, args.api_key)
+        except Exception as e:
+            verdict["reason"] = f"could not discover served model: {e}"
+            return _finish(verdict, args, started)
+
     verdict["short_prompt"] = short_probe(base, args.api_key, args.model)
     if not verdict["short_prompt"]["ok"]:
         verdict["reason"] = "short-prompt checks failed: " + "; ".join(
@@ -280,13 +297,21 @@ def main(argv):
     verdict["long_context_verified"] = bool(lc.get("ok"))
     verdict["ok"] = bool(lc.get("ok"))
     if not lc.get("ok"):
-        verdict["reason"] = (
-            "LONG-CONTEXT PROBE FAILED: retrieved {f}/{t} codes from a ~{n} token "
-            "context{d}. Short prompts passed, which is exactly the signature of the "
-            "known silent-corruption class (for example NVFP4 MLA KV without "
-            "model-calibrated scales, or an unqualified vision/runtime combination)."
-        ).format(f=lc.get("found", 0), t=lc.get("total", 0), n=lc.get("tokens", 0),
-                 d=" — " + lc["degenerate"] if lc.get("degenerate") else "")
+        if "detail" in lc and "found" not in lc:
+            verdict["reason"] = (
+                "LONG-CONTEXT PROBE COULD NOT COMPLETE: " + lc["detail"] +
+                ". This is an execution/admission failure, not evidence of silent "
+                "output corruption; inspect the engine log for the root cause.")
+        else:
+            verdict["reason"] = (
+                "LONG-CONTEXT PROBE FAILED: retrieved {f}/{t} codes from a ~{n} token "
+                "context{d}. Short prompts passed, which is exactly the signature of "
+                "the known silent-corruption class (for example NVFP4 MLA KV without "
+                "model-calibrated scales, or an unqualified vision/runtime "
+                "combination)."
+            ).format(f=lc.get("found", 0), t=lc.get("total", 0),
+                     n=lc.get("tokens", 0),
+                     d=" — " + lc["degenerate"] if lc.get("degenerate") else "")
     else:
         verdict["reason"] = "serving; long-context retrieval verified"
     return _finish(verdict, args, started)

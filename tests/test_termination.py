@@ -447,8 +447,12 @@ def test_state_file_cannot_set_switches(tmp):
         check(f"and the error names {key}", key in raised, raised)
 
         effective, sources, notes = gc.resolve()
+        baseline, baseline_sources, _ = gc.resolve(
+            state_values={}, env_values=gc.load_startup_env())
         check("the whole file is ignored, not just the key",
-              effective["MTP_TOKENS"] == 3 and sources["MTP_TOKENS"] != "file",
+              effective["MTP_TOKENS"] == baseline["MTP_TOKENS"]
+              and sources["MTP_TOKENS"] == baseline_sources["MTP_TOKENS"]
+              and sources["MTP_TOKENS"] != "file",
               f"{effective['MTP_TOKENS']} / {sources['MTP_TOKENS']}")
         check("and the rejection is surfaced as a note",
               any("state file rejected" in n for n in notes), str(notes))

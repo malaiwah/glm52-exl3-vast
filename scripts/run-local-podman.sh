@@ -18,6 +18,13 @@ MODEL_MOUNT_HOST="${MODEL_MOUNT_HOST:-$MODEL_DIR_HOST}"
 MODEL_DIR_CONTAINER="${MODEL_DIR_CONTAINER:-/models/checkpoint-root}"
 DOWNLOAD_MARKER_HOST="${DOWNLOAD_MARKER_HOST:?set DOWNLOAD_MARKER_HOST}"
 HF_CACHE_HOST="${HF_CACHE_HOST:-}"
+DRAFT_MODEL_HOST="${DRAFT_MODEL_HOST:-}"
+DRAFT_MODEL_CONTAINER="${DRAFT_MODEL_CONTAINER:-/models/mtp78-draft}"
+VISION_ASSET_HOST="${VISION_ASSET_HOST:-}"
+VISION_MARKER_HOST="${VISION_MARKER_HOST:-}"
+TOKENIZER_JSON_HOST="${TOKENIZER_JSON_HOST:-}"
+SHARED_MODEL_STORE_HOST="${SHARED_MODEL_STORE_HOST:-}"
+SHARED_MODEL_STORE_CONTAINER="${SHARED_MODEL_STORE_CONTAINER:-$SHARED_MODEL_STORE_HOST}"
 GPU_DEVICES="${GPU_DEVICES:-0,1,2,3}"
 CACHE_VOLUME="${CACHE_VOLUME:-glm52-turnkey-cache}"
 STATE_VOLUME="${STATE_VOLUME:-glm52-turnkey-state}"
@@ -44,6 +51,99 @@ if [ -n "$HF_CACHE_HOST" ]; then
   cache_mounts=(-v "$HF_CACHE_HOST:/root/.cache/huggingface:ro")
 fi
 
+draft_mounts=()
+draft_env=()
+if [ -n "$DRAFT_MODEL_HOST" ]; then
+  [ -f "$DRAFT_MODEL_HOST/config.json" ] &&
+    [ -f "$DRAFT_MODEL_HOST/model.safetensors.index.json" ] || {
+    echo "FATAL: external draft is incomplete: $DRAFT_MODEL_HOST" >&2
+    exit 4
+  }
+  draft_mounts=(-v "$DRAFT_MODEL_HOST:$DRAFT_MODEL_CONTAINER:ro")
+  draft_env=(-e DRAFT_MODEL="$DRAFT_MODEL_CONTAINER")
+fi
+
+vision_mounts=()
+if [ -n "$VISION_ASSET_HOST" ] || [ -n "$VISION_MARKER_HOST" ]; then
+  [ -n "$VISION_ASSET_HOST" ] && [ -n "$VISION_MARKER_HOST" ] || {
+    echo "FATAL: set both VISION_ASSET_HOST and VISION_MARKER_HOST" >&2
+    exit 4
+  }
+  [ -d "$VISION_ASSET_HOST" ] || {
+    echo "FATAL: prepared vision derivative does not exist: $VISION_ASSET_HOST" >&2
+    exit 4
+  }
+  [ -f "$VISION_MARKER_HOST" ] || {
+    echo "FATAL: vision marker does not exist: $VISION_MARKER_HOST" >&2
+    exit 4
+  }
+  vision_mounts=(
+    -v "$VISION_ASSET_HOST:$MODEL_DIR_CONTAINER/.vision:ro"
+    -v "$VISION_MARKER_HOST:$MODEL_DIR_CONTAINER/.vision-enabled:ro"
+  )
+fi
+
+tokenizer_mounts=()
+if [ -n "$TOKENIZER_JSON_HOST" ]; then
+  [ -f "$TOKENIZER_JSON_HOST" ] || {
+    echo "FATAL: tokenizer serialization does not exist: $TOKENIZER_JSON_HOST" >&2
+    exit 4
+  }
+  tokenizer_mounts=(-v "$TOKENIZER_JSON_HOST:$MODEL_DIR_CONTAINER/tokenizer.json:ro")
+fi
+
+shared_store_mounts=()
+if [ -n "$SHARED_MODEL_STORE_HOST" ]; then
+  [ -d "$SHARED_MODEL_STORE_HOST" ] || {
+    echo "FATAL: shared model store does not exist: $SHARED_MODEL_STORE_HOST" >&2
+    exit 4
+  }
+  case "$SHARED_MODEL_STORE_CONTAINER" in
+    /*) ;;
+    *)
+      echo "FATAL: SHARED_MODEL_STORE_CONTAINER must be an absolute path" >&2
+      exit 4
+      ;;
+  esac
+  shared_store_mounts=(-v "$SHARED_MODEL_STORE_HOST:$SHARED_MODEL_STORE_CONTAINER:ro")
+fi
+
+# Advanced runtime A/Bs use the entrypoint's TUNE_<engine-env> convention.
+# Forward every explicitly supplied tuning override without teaching this local
+# launcher a second, inevitably incomplete list of SparkInfer/vLLM variables.
+tuning_env=()
+while IFS='=' read -r tune_name tune_value; do
+  case "$tune_name" in
+    TUNE_[A-Z0-9_]*)
+      tuning_env+=(-e "$tune_name=$tune_value")
+      ;;
+  esac
+done < <(env)
+
+# Profile knobs are optional here. Passing a launcher-side fallback for every
+# one used to pin the historical MadeBy561 shape over whichever variant the
+# operator selected, so local and rental runs silently exercised different
+# configurations. The config resolver owns defaults; this helper forwards only
+# explicit operator overrides.
+config_env=()
+for config_name in \
+  TENSOR_PARALLEL_SIZE DCP MAX_MODEL_LEN MAX_NUM_SEQS \
+  MAX_NUM_BATCHED_TOKENS DCP_PREFILL_WORKSPACE_MIB \
+  GPU_MEMORY_UTILIZATION GPU_BLOCKS_OVERRIDE OFFLOAD_FRACTION \
+  OFFLOAD_IGNORE_MEMLOCK MTP_DRAFT DRAFT_QUANTIZATION MTP_TOKENS \
+  MTP_DRAFT_SAMPLE_METHOD MTP_REJECTION_SAMPLE_METHOD CUDAGRAPH_CAPTURE_SIZES \
+  MAX_CUDAGRAPH_CAPTURE_SIZE VLLM_EXL3_TRELLIS_MAX_M \
+  KV_CACHE_DTYPE LOAD_FORMAT VISION B12X_PCIE_DMA F8_DMA \
+  PCIE_CALIBRATION DCP_CKV_PREFETCH_DEPTH DCP_CKV_GATHER_MAX_TOKENS \
+  DCP_KV_CACHE_INTERLEAVE_SIZE DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS \
+  PCIE_DMA_MIN_BYTES CLAMP_ROPE_TABLES TRANSFORMERS_VERBOSITY
+do
+  if [ -n "${!config_name:-}" ]; then
+    config_env+=(-e "$config_name=${!config_name}")
+  fi
+done
+unset config_name
+
 podman rm -f "$NAME" >/dev/null 2>&1 || true
 podman run -d --replace --restart="${RESTART_POLICY:-unless-stopped}" \
   --name "$NAME" \
@@ -52,7 +152,7 @@ podman run -d --replace --restart="${RESTART_POLICY:-unless-stopped}" \
   --health-start-period 45m \
   --gpus "\"device=${GPU_DEVICES}\"" --ipc=host --network host \
   -e MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}" \
-  -e MODEL_VARIANT="${MODEL_VARIANT:-madeby561-hybrid}" \
+  -e MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3}" \
   -e MODEL_DIR="$MODEL_DIR_CONTAINER" \
   -e MODEL_READ_ONLY=1 \
   -e HF_HUB_OFFLINE=1 \
@@ -67,32 +167,18 @@ podman run -d --replace --restart="${RESTART_POLICY:-unless-stopped}" \
   -e SUPERVISOR="${SUPERVISOR:-1}" \
   -e SOUL_AUTONOMY_LEVEL="${SOUL_AUTONOMY_LEVEL:-0}" \
   -e SOUL_AUTONOMY_MAX_LEVEL="${SOUL_AUTONOMY_MAX_LEVEL:-0}" \
-  -e MAX_MODEL_LEN="${MAX_MODEL_LEN:-524288}" \
-  -e MAX_NUM_SEQS="${MAX_NUM_SEQS:-8}" \
-  -e MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-2048}" \
-  -e DCP_PREFILL_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-512}" \
-  -e GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.98}" \
-  -e GPU_BLOCKS_OVERRIDE="${GPU_BLOCKS_OVERRIDE:-2048}" \
-  -e MTP_DRAFT="${MTP_DRAFT:-bf16}" \
-  -e MTP_TOKENS="${MTP_TOKENS:-3}" \
-  -e MTP_DRAFT_SAMPLE_METHOD="${MTP_DRAFT_SAMPLE_METHOD:-probabilistic}" \
-  -e KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-nvfp4_ds_mla}" \
-  -e LOAD_FORMAT="${LOAD_FORMAT:-safetensors}" \
-  -e VISION="${VISION:-0}" \
-  -e B12X_PCIE_DMA="${B12X_PCIE_DMA:-1}" \
-  -e F8_DMA="${F8_DMA:-ring}" \
-  -e PCIE_CALIBRATION="${PCIE_CALIBRATION:-off}" \
-  -e DCP_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-0}" \
-  -e DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS="${DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS:-8192}" \
-  -e PCIE_DMA_MIN_BYTES="${PCIE_DMA_MIN_BYTES:-393216}" \
-  -e CLAMP_ROPE_TABLES="${CLAMP_ROPE_TABLES:-1}" \
-  ${TUNE_VLLM_DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS:+-e TUNE_VLLM_DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS="$TUNE_VLLM_DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS"} \
-  ${TUNE_VLLM_PCIE_DMA_MIN_BYTES:+-e TUNE_VLLM_PCIE_DMA_MIN_BYTES="$TUNE_VLLM_PCIE_DMA_MIN_BYTES"} \
+  "${config_env[@]}" \
+  "${tuning_env[@]}" \
   -v "$MODEL_MOUNT_HOST:/models/checkpoint-root:ro" \
   -v "$DOWNLOAD_MARKER_HOST:$MODEL_DIR_CONTAINER/.download-complete:ro" \
+  "${vision_mounts[@]}" \
+  "${tokenizer_mounts[@]}" \
+  "${shared_store_mounts[@]}" \
   -v "$CACHE_VOLUME:/cache" \
   -v "$STATE_VOLUME:/state" \
   "${cache_mounts[@]}" \
+  "${draft_mounts[@]}" \
+  "${draft_env[@]}" \
   "$IMAGE"
 
 echo "Launched $NAME from immutable checkpoint $MODEL_DIR_HOST on port $PORT."
