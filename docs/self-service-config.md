@@ -148,9 +148,19 @@ automatically, and clearing it is an error.
 ### `kv-nvfp4-uncalibrated` — error
 KV dtype `nvfp4_ds_mla` requires model-calibrated MLA outer scales. v29 ships
 the GLM-5.2 scale file used by the EXL3 profile, so calibrated NVFP4 KV is its
-default. Uncalibrated earlier experiments silently degenerated at long context
-while short checks passed; other families/variants remain blocked unless their
-registry entry explicitly declares equivalent calibration.
+default. The appliance selects and checksums the artifact itself because its
+entrypoint launches vLLM directly rather than going through the parent image's
+family helper. Uncalibrated earlier experiments silently degenerated at long
+context while short checks passed; other families/variants remain blocked
+unless their registry entry explicitly declares equivalent calibration.
+
+### `kv-dynamic-dtype` — error
+
+`KV_SCALE_MODE=dynamic-token` is an atomic GG v20-r9 record mode, not a generic
+quantization switch. It requires `KV_CACHE_DTYPE=nvfp4_ds_mla`; the entrypoint
+then sets both `KV_FP8_ROPE=1` and `VLLM_NVFP4_MLA_DYNAMIC_SCALE=1` and removes
+the static scale file. It is exposed for controlled A/B work but remains
+non-default until the exact 517K retrieval/degeneration gate passes.
 
 ### `vision-long-context` — warn (blunt)
 `VISION=1` on the EXL3-TR3 checkpoint **corrupts long-context output**: measured
@@ -184,9 +194,8 @@ cold memory plus retrieval requalification for any other shape.
 On the exact TP4/DCP2 EXL3 profile, InstantTensor loaded about 0.04 GiB/GPU
 more resident model memory than safetensors. `MAX_MODEL_LEN=524288` at
 utilization 0.978 then failed KV admission twice (9.04 GiB needed, 9.03 GiB
-available). That earlier v31 shape passed `MAX_MODEL_LEN=520192`; GG v20-r5,
-whose compute path is unchanged in r8, adds safe retained-CUDA-graph
-accounting and exposes 514,944 KV tokens at the
+available). That earlier v31 shape passed `MAX_MODEL_LEN=520192`; GG v20-r5
+and r8 added safe retained-CUDA-graph accounting and exposed 514,944 KV tokens at the
 same utilization. The current `MAX_MODEL_LEN=513536` default passed cold and
 cache-reused boots, the required feature suite, two independent ~510.5K
 five-depth retrievals, and a 507,902 + 4,096 token request. The loader reduced
@@ -397,6 +406,6 @@ This layer is no longer justified only by static substitutions:
 Absolute v20 throughput is confirmed on the all-NODE AIBeast host at 280 W/card:
 2,701 tok/s at 8K, 1,987 at 66K, 121.6 tok/s C1 and 269.7 aggregate at C8.
 Remaining claims stay narrow: InstantTensor is promoted only for the exact
-balanced EXL3 profile and the current 513,536-token GG r8 envelope; other
+balanced EXL3 profile and the inherited 513,536-token r9 candidate envelope; other
 variants retain their own loader choice. GLM vision remains a separate
 short-context experiment rather than part of the text flagship envelope.

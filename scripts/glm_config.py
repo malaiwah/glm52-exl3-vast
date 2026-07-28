@@ -94,6 +94,7 @@ FAMILIES = {
         "own_knobs": ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
                       "MTP_DRAFT_SAMPLE_METHOD",
                       "MTP_REJECTION_SAMPLE_METHOD",
+                      "KV_SCALE_MODE",
                       "VLLM_EXL3_TRELLIS_MAX_M",
                       "DCP_PREFILL_WORKSPACE_MIB", "DCP_CKV_PREFETCH_DEPTH",
                       "DCP_CKV_GATHER_MAX_TOKENS",
@@ -118,6 +119,7 @@ FAMILIES = {
             "GPU_MEMORY_UTILIZATION": 0.96, "GPU_BLOCKS_OVERRIDE": 0,
             "OFFLOAD_FRACTION": 0, "VISION": False,
             "KV_CACHE_DTYPE": "nvfp4_ds_mla",
+            "KV_SCALE_MODE": "static-calibrated",
             "LOAD_FORMAT": "safetensors",
             "MTP_DRAFT_SAMPLE_METHOD": "greedy",
             "SERVED_MODEL_NAME": "GLM-5.2",
@@ -181,7 +183,7 @@ FAMILIES = {
             "path, text-only compiled default, thinking-content normalization, "
             "structured output, tools and preserved multi-turn reasoning were "
             "live-qualified with the full 27B checkpoint on an RTX 5090. MTP is "
-            "opt-in and uses vLLM's current 'mtp' method; GG v20-r8 forces that "
+            "opt-in and uses vLLM's current 'mtp' method; GG v20-r9 forces that "
             "path to eager mode around a FlashInfer frozen-query-shape crash. "
             "GLM-only MLA/DCP/EXL3 settings are removed rather than inherited "
             "from the base image."),
@@ -249,7 +251,7 @@ VARIANTS = {
         "defaults": {
             "DCP": "2",
             # GG v20-r5 profiles the retained CUDA-graph pool before KV
-            # admission; r8 keeps the same compute and memory-planning sources.
+            # admission; r9 keeps that graph-aware memory planner.
             # On the qualified 96 GiB TP4/DCP2 shape this exposes
             # 514,944 KV tokens; 513,536 keeps a measured 1,408-token admission
             # margin while still completing a 507,902 + 4,096 token request.
@@ -563,6 +565,18 @@ KNOBS = [
              "checks passed, so release qualification still requires cold long-context "
              "retrieval.")),
 
+    dict(key="KV_SCALE_MODE", families=("glm52",), type="choice",
+         default="static-calibrated",
+         choices=["static-calibrated", "dynamic-token"],
+         group="Model", scope="engine", label="NVFP4 MLA scale mode",
+         rationale=(
+             "static-calibrated uses the pinned GLM-5.2 per-layer scale artifact "
+             "and the established BF16-RoPE 432-byte record. dynamic-token opts "
+             "into GG v20-r9's paired 368-byte FP8-RoPE record and stores one "
+             "outer scale per token. Dynamic mode improved matched KLD and "
+             "retrieval through 466K upstream, but remains experimental here "
+             "until it passes the appliance's exact 517K gate.")),
+
     dict(key="MTP_DRAFT", families=("glm52",), type="choice", default="tr3-graft", choices=list(DRAFTS),
          group="Speculative decoding", scope="checkpoint", label="MTP draft type",
          aliases=[],
@@ -809,8 +823,8 @@ KNOBS = [
              "change. Safetensors OOMed at the same 514K prefill boundary with both "
              "auto and exact KV pools because the final sparse-indexer allocation "
              "could not obtain a contiguous 352 MiB segment. InstantTensor uses about "
-             "0.04 GiB/GPU more resident model memory. GG v20-r8's unchanged "
-             "r5 compute path additionally "
+             "0.04 GiB/GPU more resident model memory. GG v20-r9's retained "
+             "graph-aware profiler additionally "
              "accounts for retained CUDA graphs, so the qualified balanced "
              "default is 513536 rather than 524288.")),
 
@@ -1421,7 +1435,7 @@ def family_serve_args(cfg: dict):
     if cfg.get("MODEL_FAMILY") in ("qwen36", "custom") and not cfg.get("MULTIMODAL"):
         args += ["--language-model-only"]
     if cfg.get("MODEL_FAMILY") == "qwen36" and cfg.get("MTP_TOKENS", 0) > 0:
-        # GG v20-r8 / FlashInfer freezes q_len_per_req=1 in the compiled
+        # GG v20-r9 / FlashInfer freezes q_len_per_req=1 in the compiled
         # decode wrapper, while Qwen's native MTP2 draft needs q_len=3. The
         # first request otherwise kills the engine. Eager mode is slower but
         # is the live-qualified compatibility path until upstream owns one
@@ -1515,7 +1529,7 @@ def validate(cfg: dict, context=None):
         warn(
             "qwen-mtp-eager",
             ["MTP_TOKENS"],
-            "Qwen native MTP currently forces --enforce-eager on GG v20-r8. "
+            "Qwen native MTP currently forces --enforce-eager on GG v20-r9. "
             "The compiled FlashInfer path freezes q_len_per_req=1 and crashes "
             "when MTP2 requires q_len=3. Eager MTP2 passed the live feature "
             "gate, but it gives up torch.compile/CUDA-graph throughput; keep "
@@ -1630,6 +1644,11 @@ def validate(cfg: dict, context=None):
             "uncalibrated NVFP4 runs silently degenerated at long context while short "
             "quality and feature checks passed. Use fp8 for this variant, or provide "
             "and qualify model-specific calibrated scales.")
+    if is_glm and cfg["KV_SCALE_MODE"] == "dynamic-token" \
+            and cfg["KV_CACHE_DTYPE"] != "nvfp4_ds_mla":
+        err("kv-dynamic-dtype", ["KV_SCALE_MODE", "KV_CACHE_DTYPE"],
+            "Dynamic-token MLA scaling requires KV_CACHE_DTYPE=nvfp4_ds_mla. "
+            "Use static-calibrated for fp8/auto KV, or select the NVFP4 MLA dtype.")
 
     # 6. vision on an EXL3 target -------------------------------------------
     if (is_glm and cfg["VISION"]
@@ -1669,8 +1688,8 @@ def validate(cfg: dict, context=None):
              "GPU_MEMORY_UTILIZATION=0.978 failed KV admission on both InstantTensor "
              "attempts: 9.04 GiB was needed and 9.03 GiB remained. InstantTensor "
              "loaded ~0.04 GiB/GPU more resident model memory than safetensors. "
-             "The earlier v31 image passed MAX_MODEL_LEN=520192, but GG v20-r8's "
-             "unchanged r5 compute path "
+             "The earlier v31 image passed MAX_MODEL_LEN=520192, but GG v20-r9's "
+             "graph-aware memory path "
              "now accounts for a measured 0.81 GiB/GPU retained CUDA-graph pool. "
              "On r5 the safe profiler exposed 514,944 KV tokens; "
              "MAX_MODEL_LEN=513536 passed cold and cache-reused boots, two "
@@ -1683,8 +1702,8 @@ def validate(cfg: dict, context=None):
                 and cfg["GPU_MEMORY_UTILIZATION"] <= 0.976):
             warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
                  f"{cfg['GPU_MEMORY_UTILIZATION']} is high by generic vLLM standards, "
-                 "but this exact DCP2/513,536-token profile is the GG v20-r8 "
-                 "compute-qualified default. AIBeast passed cold and cache-reused starts, "
+                 "but this exact DCP2/513,536-token shape is the r5/r8-qualified "
+                 "default carried into GG v20-r9. AIBeast passed cold and cache-reused starts, "
                  "C1-C8 decode, two ~510.5K five-depth retrievals, and an almost "
                  "exact 512K total request with safe graph accounting enabled. "
                  "The earlier 0.978/520K rental shape admitted KV but OOMed on its "

@@ -54,7 +54,7 @@ def errs(findings):
 # --------------------------------------------------------------------------
 
 def test_glm_release_defaults():
-    section("the GLM GG v20-r8 release defaults")
+    section("the GLM GG v20-r9 release defaults")
     eff, src, _ = resolved(gpus=4)
     check("family defaults to glm52", eff["MODEL_FAMILY"] == "glm52")
     check("TP is 4 on a 4-GPU box, and it is DETECTED not assumed",
@@ -66,13 +66,15 @@ def test_glm_release_defaults():
           eff["MAX_MODEL_LEN"] == 513536)
     check("the lightweight trellis draft uses MTP-5", eff["MTP_TOKENS"] == 5)
     check("calibrated NVFP4 MLA KV", eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla")
+    check("the proven static scale ABI stays the default",
+          eff["KV_SCALE_MODE"] == "static-calibrated")
     check("KV pool is auto-profiled", eff["GPU_BLOCKS_OVERRIDE"] == 0)
     check("the cross-provider runtime margin uses GMU 0.976",
           eff["GPU_MEMORY_UTILIZATION"] == 0.976)
     memory_finding = next(
         f for f in gc.validate(eff) if f["id"] == "gpu-util-high")
     check("the measured default gets the qualified high-utilization warning",
-          "GG v20-r8 compute-qualified default" in memory_finding["message"]
+          "r5/r8-qualified" in memory_finding["message"]
           and "0.978" in memory_finding["message"],
           memory_finding["message"])
     check("the agentic profile reserves half of host DRAM as L2 prefix cache",
@@ -138,15 +140,30 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r8 runtime integration matches the measured launch contract")
+    section("the GG v20-r9 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
     local_runner = open(os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r8 manifest",
-          "sha256:547269db0f9cdb1982432f9b3436eac371d21a3c0daadec7718d81f07739a51e"
+    check("the base image is the pinned GG v20-r9 manifest",
+          "sha256:8246024490670e43af6ccdc3df9c6dd0a084119f4507b7ac35a86f5a1c6c33c3"
           in dockerfile)
+    check("static NVFP4 scaling selects and verifies the reviewed artifact",
+          "KV_SCALE_MODE:-static-calibrated" in entry
+          and "VLLM_NVFP4_MLA_SCALES_FILE" in entry
+          and "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2"
+          in entry and
+          "/opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json"
+          in dockerfile)
+    check("dynamic-token NVFP4 selects the complete paired r9 ABI",
+          "dynamic-token)" in entry
+          and "export KV_FP8_ROPE=1" in entry
+          and "export VLLM_NVFP4_MLA_DYNAMIC_SCALE=1" in entry
+          and "unset VLLM_NVFP4_MLA_SCALES_FILE" in entry)
+    check("adaptive exact indexer folding stays bounded",
+          'SPARKINFER_INDEXER_TWO_LEVEL_FOLD:-auto' in entry
+          and 'SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256' in entry)
     check("deSEC DNS-01 runs the authoritative convergence guard",
           'desec_acme_guard.py"' in entry
           and '--zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN"' in entry
@@ -209,7 +226,7 @@ def test_glm_release_integration():
                 "CUDAGRAPH_CAPTURE_SIZES", "MAX_CUDAGRAPH_CAPTURE_SIZE",
                 "VLLM_EXL3_TRELLIS_MAX_M", "DCP_CKV_GATHER_MAX_TOKENS",
                 "DCP_KV_CACHE_INTERLEAVE_SIZE",
-                "MTP_REJECTION_SAMPLE_METHOD"):
+                "MTP_REJECTION_SAMPLE_METHOD", "KV_SCALE_MODE"):
         check(f"the local runner forwards an explicit {key}",
               key in local_runner and
               'config_env+=(-e "$config_name=${!config_name}")' in local_runner)
@@ -552,6 +569,13 @@ def test_family_coherence_rules():
           "kv-dtype-family" in errs(f))
     msg = [x["message"] for x in f if x["id"] == "kv-dtype-family"][0]
     check("and explains that nvfp4_ds_mla is an MLA layout", "MLA KV layout" in msg, msg)
+    eff, _, _ = resolved(KV_CACHE_DTYPE="fp8", KV_SCALE_MODE="dynamic-token")
+    check("dynamic per-token scaling cannot be paired with fp8 KV",
+          "kv-dynamic-dtype" in errs(gc.validate(eff)))
+    eff, _, _ = resolved(
+        KV_CACHE_DTYPE="nvfp4_ds_mla", KV_SCALE_MODE="dynamic-token")
+    check("the complete dynamic NVFP4 mode is accepted as an experiment",
+          "kv-dynamic-dtype" not in errs(gc.validate(eff)))
     eff, _, _ = resolved("qwen36")
     check("the live-qualified Qwen family no longer emits the untested warning",
           "family-untested" not in ids(gc.validate(eff)))

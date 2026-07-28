@@ -1243,6 +1243,52 @@ export VLLM_MEMORY_PROFILE_INCLUDE_ATTN="${VLLM_MEMORY_PROFILE_INCLUDE_ATTN:-1}"
 export VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS="${VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS:-1}"
 unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 
+# GG v20-r9 has two mutually exclusive NVFP4 MLA record contracts. Our
+# entrypoint bypasses the upstream family helper, so it must select the
+# contract explicitly rather than assuming the parent image exported it.
+# The calibrated file is shipped by the immutable vLLM composition; verify its
+# exact reviewed payload before using it. Dynamic-token mode owns bytes
+# [292,296) in the 368-byte FP8-RoPE record and therefore must not see a static
+# scales file.
+_GLM_NVFP4_SCALE_FILE=/opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json
+_GLM_NVFP4_SCALE_SHA256=efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2
+if [ "${KV_CACHE_DTYPE:-nvfp4_ds_mla}" = "nvfp4_ds_mla" ]; then
+  case "${KV_SCALE_MODE:-static-calibrated}" in
+    dynamic-token)
+      export KV_FP8_ROPE=1
+      export VLLM_NVFP4_MLA_DYNAMIC_SCALE=1
+      unset VLLM_NVFP4_MLA_SCALES_FILE
+      echo ">>> NVFP4 MLA scale mode: dynamic-token (FP8-RoPE 368-byte record)"
+      ;;
+    static-calibrated)
+      export KV_FP8_ROPE=0
+      unset VLLM_NVFP4_MLA_DYNAMIC_SCALE
+      export VLLM_NVFP4_MLA_SCALES_FILE="$_GLM_NVFP4_SCALE_FILE"
+      if [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+        _actual_scale_sha256="$(
+          sha256sum "$VLLM_NVFP4_MLA_SCALES_FILE" 2>/dev/null | awk '{print $1}'
+        )"
+        if [ "$_actual_scale_sha256" != "$_GLM_NVFP4_SCALE_SHA256" ]; then
+          echo "FATAL: the pinned GLM NVFP4 MLA scale artifact is missing or changed:" >&2
+          echo "FATAL: $VLLM_NVFP4_MLA_SCALES_FILE" >&2
+          return 1
+        fi
+        unset _actual_scale_sha256
+      fi
+      echo ">>> NVFP4 MLA scale mode: static-calibrated (verified GLM-5.2 artifact)"
+      ;;
+    *)
+      echo "FATAL: KV_SCALE_MODE must be static-calibrated or dynamic-token." >&2
+      return 1
+      ;;
+  esac
+else
+  unset KV_FP8_ROPE VLLM_NVFP4_MLA_DYNAMIC_SCALE VLLM_NVFP4_MLA_SCALES_FILE
+fi
+export SPARKINFER_INDEXER_TWO_LEVEL_FOLD="${SPARKINFER_INDEXER_TWO_LEVEL_FOLD:-auto}"
+export SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB="${SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256}"
+unset _GLM_NVFP4_SCALE_FILE _GLM_NVFP4_SCALE_SHA256
+
   # v20's calibrator measures the lossless DMA crossover, DCP query split and
   # CKV prefetch overlap before model load, then caches the result by topology.
   # Compressed wire modes remain explicit experiments and the image launcher
@@ -1297,6 +1343,8 @@ else
   # Qwen/custom so a profile switch cannot inherit MLA, EXL3, or custom NCCL
   # behavior merely because the container image was built for GLM.
   unset VLLM_EXL3_EXT_PATH VLLM_EXL3_ABI_SHIM VLLM_NVFP4_MLA_SCALES_FILE
+  unset VLLM_NVFP4_MLA_DYNAMIC_SCALE KV_FP8_ROPE
+  unset SPARKINFER_INDEXER_TWO_LEVEL_FOLD SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB
   unset VLLM_ENABLE_PCIE_ALLREDUCE VLLM_PCIE_ALLREDUCE_BACKEND
   unset VLLM_CPP_AR_1STAGE_NCCL_CUTOFF VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS
   unset VLLM_DISABLE_SHARED_EXPERTS_STREAM VLLM_DISABLED_KERNELS

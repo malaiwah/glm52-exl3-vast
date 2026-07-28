@@ -13,14 +13,15 @@ autonomy level `0` (off). Levels 1–3 are explicitly enabled by environment or
 the token-gated landing page; startup verification and rollback remain
 authoritative.
 
-The appliance now pins **GG v20-r8**. It keeps the qualified r5 compute
-stack—vLLM, SparkInfer, FlashInfer, EXL3, attention, quantization and
-communication sources are unchanged—while adding XGrammar 0.2.5 and opt-in
-DCP-aware LMCache 0.5.2. XGrammar 0.2.5 fixes GLM
-`tool_choice=required` termination; the LMCache helper remains off by default
-and does not replace this appliance's measured native vLLM DRAM prefix tier.
-Upstream currently enables that LMCache helper for its dense/hybrid launchers,
-not the EXL3 launcher.
+The appliance now pins **GG v20-r9**. It retains r8's XGrammar 0.2.5 and
+opt-in DCP-aware LMCache 0.5.2, then adds the paired dynamic-token NVFP4 MLA
+cache ABI and exact adaptive sparse-indexer folding. Dynamic scaling is
+deliberately opt-in here: the flagship profile keeps the reviewed static
+GLM-5.2 scale artifact until r9's dynamic record passes this appliance's exact
+517K retrieval and degeneration gate. XGrammar 0.2.5 fixes GLM
+`tool_choice=required` termination; LMCache remains off by default and does
+not replace this appliance's measured native vLLM DRAM prefix tier. Upstream
+currently enables its LMCache helper for dense/hybrid launchers, not EXL3.
 The provider TLS helper is refreshed to Lego 4.35.2, the latest v4 maintenance
 release. Lego 5 is intentionally deferred because it changes CLI and account
 storage semantics and needs its own certificate-renewal migration test.
@@ -60,7 +61,7 @@ raise `MAX_MODEL_LEN` after measuring headroom. Set `MULTIMODAL=1` to load its
 native vision encoder, or opt into its included MTP module with
 `MTP_TOKENS=2`.
 
-On GG v20-r8 (the same compute path as r5), Qwen MTP2 cannot use the compiled
+On GG v20-r9, Qwen MTP2 cannot use the compiled
 FlashInfer decode wrapper: the
 wrapper freezes `q_len_per_req=1`, while the draft step needs `3`, and the first
 request kills the engine. The appliance therefore adds `--enforce-eager`
@@ -129,10 +130,11 @@ TP4/DCP2/TR3-MTP5 profile and `llm-inference-bench` v0.4.29 protocol.
 All measured systems used four RTX PRO 6000 Blackwell 96 GB cards. Results are
 aggregate output throughput; PP is a cold unique-prefix request, so prefix
 cache hits do not inflate it. AIBeast is the final GG v20-r5 compute image;
-GG r8 retains that exact compute stack. The rental
-rows are the immediately preceding v31 candidate and remain the best measured
-rental estimates until a provider offers four cards on driver 595.45.04 or
-newer for an r8 rerun.
+GG r8 retained that exact compute stack. GG r9 changes the NVFP4/indexer
+sources and is therefore a new qualification boundary. The rental rows are
+the immediately preceding v31 candidate and remain the best measured rental
+estimates until the r9 matrix is complete on a provider with driver 595.45.04
+or newer.
 
 | environment | topology / power cap | PP 8K / 32K / 64K / 128K tok/s | TG C1 / C2 / C4 / C8 tok/s | exact long-context gate |
 |---|---|---:|---:|---|
@@ -188,8 +190,8 @@ target plus draft in 32.4–33.1 seconds, versus 60.5–62.6 seconds for
 warm-page-cache safetensors. The unmodified 524,288-token /
 utilization-0.978 profile failed KV admission twice because 9.04 GiB was
 needed and only 9.03 GiB remained. The earlier v31 image passed at 520,192.
-GG v20-r5, retained unchanged in r8's compute stack, safely accounts for its
-measured 0.81 GiB/GPU retained
+GG v20-r5, retained unchanged in r8's compute stack and preserved by r9's
+graph-aware profiler, safely accounts for its measured 0.81 GiB/GPU retained
 CUDA-graph pool, exposing 514,944 KV tokens at utilization 0.976. The new
 513,536 default leaves a 1,408-token admission margin and passed cold plus
 cache-reused boots, all required API features, two independent 510,534/510,535
@@ -229,15 +231,15 @@ JSON both with and without thinking,
 one automatic tool call, and tool-result continuation. The former
 `tool_choice=required` duplicate-call behavior came from XGrammar's GLM
 structural-tag grammar allowing another tool tag, but no normal trailing text
-or end-of-turn path. GG r8's pinned XGrammar 0.2.5 changes the required grammar
+or end-of-turn path. GG r9 retains r8's pinned XGrammar 0.2.5, whose required grammar
 to permit normal completion after one or more calls while still requiring at
-least one. The probe remains optional until this derived r8 image completes
+least one. The probe remains optional until this derived r9 image completes
 the live appliance gate; `tool_choice=auto` remains release-required.
 
 Thinking plus structured output also crosses an MTP-specific boundary. The
 draft can have proposed several answer tokens before the reasoning-end marker
 activates the grammar. Those pre-mask proposals are allowed to be rejected and
-resampled; on GG r5's vLLM path, retained in r8, XGrammar logged each expected
+resampled; on GG r5's vLLM path, retained through r8, XGrammar logged each expected
 rejection as
 `Failed to advance FSM` at ERROR severity even when the request returned HTTP
 200 with exact schema-valid JSON. The entrypoint applies an idempotent
@@ -248,7 +250,7 @@ matcher. Valid probes still advance the temporary FSM state, and invalid
 serving verifier and feature suite now make strict JSON with thinking a release
 gate rather than inferring correctness from HTTP 200. This complements
 [vLLM #44993](https://github.com/vllm-project/vllm/pull/44993), whose reasoning
-boundary fix is already present in GG r5 and r8.
+boundary fix is already present in GG r5 through r9.
 
 The patched path was live-qualified on the full Qwen3.6-27B checkpoint with
 MTP2: 4/4 concurrent strict-schema requests passed in each of thinking-off,
@@ -299,7 +301,7 @@ not evidence that all peer transport is disabled.
 ## Launch GLM-5.2 on Vast.ai
 
 **[▶ Launch GLM-5.2 on Vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405)**.
-The linked public **Model Turnkey: GLM-5.2 EXL3 — GG v20-r8** template
+The linked public **Model Turnkey: GLM-5.2 EXL3 — GG v20-r9** template
 preconfigures the image, `args` launch mode, ports, 450 GB disk and Blackwell
 host filters.
 Before accepting an offer, verify it is exactly 4x RTX PRO 6000 Blackwell,
@@ -737,11 +739,19 @@ would. Long-context retrieval is verified clean (6/6 at depths to 490K inside a
 > **Why calibrated scales are non-negotiable.** Earlier uncalibrated
 > `nvfp4_ds_mla` experiments failed long needles with degenerate output while
 > short quality, vision, and structured-output checks still passed. The v29
-> runtime now ships the GLM-5.2-specific calibrated MLA outer-scale file and
-> the entrypoint preserves `VLLM_NVFP4_MLA_SCALES_FILE`; the configurator
+> runtime ships the GLM-5.2-specific calibrated MLA outer-scale file and the
+> entrypoint now selects it explicitly and verifies its SHA-256 before exporting
+> `VLLM_NVFP4_MLA_SCALES_FILE`; the configurator
 > refuses this KV dtype for model families without an equivalent calibration.
 > Release qualification still runs cold long-context needles—calibration is
 > not a reason to skip the causal test.
+
+GG v20-r9 also offers `KV_SCALE_MODE=dynamic-token`. That paired mode selects
+the 368-byte FP8-RoPE record, stores an outer scale per token, and cannot be
+combined with the static scale file. Upstream measured matched retrieval
+through 466,493 tokens and a small KLD improvement without a material decode
+change. It remains an experiment here until the exact 517K appliance gate
+passes; `static-calibrated` is the default.
 
 Vision consumed about 1.31 GiB/GPU in an earlier graft and 1.99 GiB/GPU in the
 final v20 qualification. Treat it as a distinct opt-in profile: re-run the
@@ -862,15 +872,19 @@ config matrix (6 runs, 5 hosts, 4 driver families):
   util 0.93. The v29 default instead uses calibrated NVFP4 KV and auto-sizing.
 
 Base runtime image:
-`voipmonitor/vllm@sha256:547269db0f9cdb1982432f9b3436eac371d21a3c0daadec7718d81f07739a51e`
-(pinned GG v20-r8). Its labels record GG base `4247d676`, vLLM EXL3
-integration tree `936ed48` (including
-[PR #190](https://github.com/local-inference-lab/vllm/pull/190)), SparkInfer
-integration tree `f532ec9` (including
-[PR #49](https://github.com/local-inference-lab/sparkinfer/pull/49)), and
-FlashInfer `801d57a`. These compute trees are unchanged from r5. r8 adds
-LMCache `0.5.2+glm52dcp.3` at `9cebd405…` and XGrammar `0.2.5` at
-`2ea71da4…`. It also includes native vLLM support for
+`voipmonitor/vllm@sha256:8246024490670e43af6ccdc3df9c6dd0a084119f4507b7ac35a86f5a1c6c33c3`
+(pinned GG v20-r9). Its labels record GG base `4247d676`, composed vLLM tree
+`34f26c2` (including
+[PR #190](https://github.com/local-inference-lab/vllm/pull/190) and
+[PR #189](https://github.com/local-inference-lab/vllm/pull/189)), composed
+SparkInfer tree `de7739a` (including
+[PR #49](https://github.com/local-inference-lab/sparkinfer/pull/49),
+[PR #86](https://github.com/local-inference-lab/sparkinfer/pull/86), and
+[PR #87](https://github.com/local-inference-lab/sparkinfer/pull/87)), and
+FlashInfer `801d57a`. It retains LMCache `0.5.2+glm52dcp.3` at `9cebd405…`
+and XGrammar `0.2.5` at `2ea71da4…`. The three r9 review heads are pinned by
+immutable release locks but were still open at publication, so this source
+refresh is a complete requalification boundary. It also includes native vLLM support for
 `Qwen3_5ForConditionalGeneration`, ModelOpt/NVFP4, Qwen parsers, and MTP
 speculative decoding.
 

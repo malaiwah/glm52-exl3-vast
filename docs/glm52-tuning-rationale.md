@@ -4,12 +4,13 @@ This is the challenge record for the `glm52-exl3` balanced profile, not a list
 of folklore flags. The parameter decisions were isolated on the July 27 v31
 control (vLLM `0c79e41`, SparkInfer `c3828fd`) using four RTX PRO 6000
 Blackwell cards at 280 W, driver 595.71.05 and CUDA 13.2, then exercised on
-Vast and Runpod. The release candidate pins GG v20-r8
-(`voipmonitor/vllm@sha256:547269db…`, vLLM integration tree `936ed48`,
-SparkInfer tree `f532ec9`). r8 retains r5's compute stack and adds XGrammar
-0.2.5 plus opt-in DCP-aware LMCache, so the performance evidence still maps to
-the same code; a future compute-stack refresh remains a requalification
-boundary rather than retroactively changing the control's evidence.
+Vast and Runpod. The release candidate pins GG v20-r9
+(`voipmonitor/vllm@sha256:82460244…`, vLLM integration tree `34f26c2`,
+SparkInfer tree `de7739a`). r9 retains r8's XGrammar 0.2.5 and opt-in
+DCP-aware LMCache, but adds paired dynamic-token NVFP4 and adaptive exact
+indexer-fold sources. Those source changes are a new requalification boundary;
+the r5/r8 performance evidence remains the control rather than being
+retroactively attributed to r9.
 
 The restored safetensors control started on its first attempt, loaded the
 target in 57.63 seconds and the draft in 0.78 seconds, directly loaded both
@@ -52,7 +53,10 @@ Its exact log is preserved at:
 | TP4 | 1/detected | four local cards and rank-sliced target | model fit and full-card utilization | inter-card traffic | retain, derived from detected GPU count |
 | DCP2 | 1 | balanced production topology | 513,536 logical request envelope, long-prefill gains, stock-like decode, and one 512K-class session | DCP1 decodes faster; DCP4 exposes more context but slows ordinary work | retain balanced profile |
 | DCP `a2a` transport | backend default | measured DCP2 route | correct sharded-query exchange on this fork | collective overhead at small batches | retain |
-| KV dtype `nvfp4_ds_mla` | auto | calibrated GLM scale file is supplied | enough KV capacity for a 513,536 request limit and good decode | quality depends on exact scales; never use uncalibrated | retain |
+| KV dtype `nvfp4_ds_mla` | auto | calibrated GLM scale file is supplied | enough KV capacity for a 513,536 request limit and good decode | quality depends on exact scaling mode; never use uncalibrated | retain |
+| NVFP4 scale mode | uncalibrated unless configured | `static-calibrated`; select and checksum `/opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json` | fixes the prior launcher-bypass gap and keeps the reviewed 432-byte BF16-RoPE record | artifact is GLM-specific; wrong/missing bytes must fail startup | retain default |
+| dynamic-token NVFP4 | off | optional `KV_SCALE_MODE=dynamic-token` selects the paired 368-byte FP8-RoPE record | per-token scales, smaller record, upstream retrieval through 466K and matched KLD improvement | new vLLM/SparkInfer ABI; full 517K gate not yet complete | experiment |
+| adaptive exact indexer fold | `auto`, 256 MiB | retain source default | uses the parallel exact fold only inside a bounded candidate-slab budget and exact streaming carry otherwise | changes transient memory planning versus r8 | retain auto; remeasure capacity |
 | GPU utilization 0.976 | 0.9 | cross-provider admission point with graph profiling | exposes 514,944 KV tokens and preserves the 513,536 request limit with runtime headroom | smaller KV surplus than optimistic accounting; driver changes still require a cold boot | retain |
 | explicit block override | auto | zero lets the corrected profiler size it | InstantTensor exposes 523,776 tokens and retains runtime headroom | an exact 4,064-block pin did not rescue safetensors and increased fragmentation | retain auto |
 | prefix caching | off/model dependent | agentic workloads repeat large histories | avoids re-prefill when a prefix remains resident | KV bookkeeping/memory | retain |
@@ -106,7 +110,9 @@ Rows whose value equals the current source default are still called out.
 | `VLLM_EXL3_PREFILL_BLOCK_M` | 64 | `64`, issue-33/EXL3 planned prefill | another GPU might prefer a different tile | pin measured geometry |
 | `VLLM_EXL3_PREFILL_CHUNK` | 128 | `1`, selected DCP2 issue-33 route | more planner/launch granularity; surprising versus source default | retain only because profile evidence includes it; isolate in future A/B |
 | `VLLM_EXL3_TRELLIS_MAX_M` | 32 | `64` | covers C8×MTP5 query geometry without eager fallback | larger arena/compile surface | retain |
-| `VLLM_NVFP4_MLA_SCALES_FILE` | unset | GLM-calibrated outer-scale JSON | wrong file silently harms quality | retain and checksum |
+| `VLLM_NVFP4_MLA_SCALES_FILE` | unset | reviewed GLM scale JSON, exact SHA-256 verified at boot | avoids the silent uncalibrated path when bypassing the upstream launcher | checkpoint-family-specific artifact | retain static default |
+| `KV_FP8_ROPE` / `VLLM_NVFP4_MLA_DYNAMIC_SCALE` | `0` / `0` | both `1` only for `KV_SCALE_MODE=dynamic-token`; static file unset | selects the complete paired r9 record ABI | partial/mixed configuration is invalid | experiment as one atomic mode |
+| `SPARKINFER_INDEXER_TWO_LEVEL_FOLD` / `_MAX_MIB` | `auto` / `256` | retain | exact parallel fold below budget, exact streaming carry above it | default-on source change needs capacity/perf observation | retain |
 | `VLLM_DISABLED_KERNELS` | empty | disable `MarlinFP8ScaledMMLinearKernel` | removes a generic fallback | retain; checkpoint path is not Marlin |
 | `VLLM_USE_B12X_FP8_GEMM` | false | `1`, SM120 dense/shared path | custom kernel risk | retain with quality/perf gates |
 | `VLLM_USE_B12X_SPARSE_INDEXER` | false | `1`, learned GLM DSA indexer | selector changes can alter deep retrieval | retain; cold maximum needles mandatory |

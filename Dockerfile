@@ -1,18 +1,18 @@
-# GG v20 r8 retains r5's qualified EXL3/Trellis compute stack (vLLM
-# integration tree 936ed48, SparkInfer tree f532ec9) while adding opt-in
-# DCP-aware LMCache and XGrammar 0.2.5's GLM required-tool fix. Because the
-# compute sources are unchanged, the r5 performance/KLD evidence remains the
-# baseline; structured output is still re-gated on this exact image.
-# Pin the immutable July 28 manifest. Every compute-base change remains a
-# requalification boundary for compile-cache identity, memory planning and the
-# 517K gate.
-FROM docker.io/voipmonitor/vllm@sha256:547269db0f9cdb1982432f9b3436eac371d21a3c0daadec7718d81f07739a51e
+# GG v20 r9 adds the paired dynamic-token NVFP4 MLA cache ABI and exact
+# adaptive sparse-indexer folding to r8's XGrammar/LMCache runtime. Dynamic KV
+# scaling remains opt-in in this appliance; the established calibrated static
+# path is the default until r9 passes the full 517K qualification gate.
+# Pin the immutable July 28 manifest. This compute-base change deliberately
+# changes the compile-cache fingerprint and remains a requalification boundary
+# for memory planning, retrieval, degeneration and performance.
+FROM docker.io/voipmonitor/vllm@sha256:8246024490670e43af6ccdc3df9c6dd0a084119f4507b7ac35a86f5a1c6c33c3
 LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai and Runpod" \
       org.opencontainers.image.description="Profile-driven OpenAI endpoint: validated GLM-5.2 EXL3 production defaults plus a low-cost Qwen3.6-27B NVFP4 development profile. Weights auto-download on first boot." \
       ai.malaiwah.evidence="gists: cae272443a 7d5d7e68 f3096ae9 e8a587ad 65bb725e 929d7d8e" \
-      ai.malaiwah.base="voipmonitor/vllm@sha256:547269db0f9cdb1982432f9b3436eac371d21a3c0daadec7718d81f07739a51e"
+      ai.malaiwah.base="voipmonitor/vllm@sha256:8246024490670e43af6ccdc3df9c6dd0a084119f4507b7ac35a86f5a1c6c33c3"
 COPY requirements-soul.lock /opt/requirements-soul.lock
-RUN pip install --no-cache-dir huggingface_hub==1.25.1 hf-xet==1.5.2 dnspython==2.8.0 && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux && rm -rf /var/lib/apt/lists/* \
+RUN echo "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2  /opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json" | sha256sum -c - \
+ && pip install --no-cache-dir huggingface_hub==1.25.1 hf-xet==1.5.2 dnspython==2.8.0 && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && curl -sSL -o /tmp/lego.tgz https://github.com/go-acme/lego/releases/download/v4.35.2/lego_v4.35.2_linux_amd64.tar.gz \
  && echo "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3  /tmp/lego.tgz" | sha256sum -c - \
