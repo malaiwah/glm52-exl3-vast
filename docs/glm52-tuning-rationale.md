@@ -4,9 +4,11 @@ This is the challenge record for the `glm52-exl3` balanced profile, not a list
 of folklore flags. The parameter decisions were isolated on the July 27 v31
 control (vLLM `0c79e41`, SparkInfer `c3828fd`) using four RTX PRO 6000
 Blackwell cards at 280 W, driver 595.71.05 and CUDA 13.2, then exercised on
-Vast and Runpod. The release candidate pins GG v20-r5
-(`voipmonitor/vllm@sha256:7b230b…`, vLLM integration tree `936ed48`,
-SparkInfer tree `f532ec9`); the base refresh remains a requalification
+Vast and Runpod. The release candidate pins GG v20-r8
+(`voipmonitor/vllm@sha256:547269db…`, vLLM integration tree `936ed48`,
+SparkInfer tree `f532ec9`). r8 retains r5's compute stack and adds XGrammar
+0.2.5 plus opt-in DCP-aware LMCache, so the performance evidence still maps to
+the same code; a future compute-stack refresh remains a requalification
 boundary rather than retroactively changing the control's evidence.
 
 The restored safetensors control started on its first attempt, loaded the

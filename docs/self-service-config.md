@@ -184,8 +184,9 @@ cold memory plus retrieval requalification for any other shape.
 On the exact TP4/DCP2 EXL3 profile, InstantTensor loaded about 0.04 GiB/GPU
 more resident model memory than safetensors. `MAX_MODEL_LEN=524288` at
 utilization 0.978 then failed KV admission twice (9.04 GiB needed, 9.03 GiB
-available). That earlier v31 shape passed `MAX_MODEL_LEN=520192`; GG v20-r5
-adds safe retained-CUDA-graph accounting and exposes 514,944 KV tokens at the
+available). That earlier v31 shape passed `MAX_MODEL_LEN=520192`; GG v20-r5,
+whose compute path is unchanged in r8, adds safe retained-CUDA-graph
+accounting and exposes 514,944 KV tokens at the
 same utilization. The current `MAX_MODEL_LEN=513536` default passed cold and
 cache-reused boots, the required feature suite, two independent ~510.5K
 five-depth retrievals, and a 507,902 + 4,096 token request. The loader reduced
@@ -396,6 +397,6 @@ This layer is no longer justified only by static substitutions:
 Absolute v20 throughput is confirmed on the all-NODE AIBeast host at 280 W/card:
 2,701 tok/s at 8K, 1,987 at 66K, 121.6 tok/s C1 and 269.7 aggregate at C8.
 Remaining claims stay narrow: InstantTensor is promoted only for the exact
-balanced EXL3 profile and the current 513,536-token GG r5 envelope; other
+balanced EXL3 profile and the current 513,536-token GG r8 envelope; other
 variants retain their own loader choice. GLM vision remains a separate
 short-context experiment rather than part of the text flagship envelope.
