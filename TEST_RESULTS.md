@@ -1165,8 +1165,9 @@ an older release for which current `pod delete` was unknown; account-side
 legacy `runpodctl remove pod` immediately removed the Pod. The appliance now
 tries both CLI grammars after the two HTTP APIs and passes the key through the
 child environment, which remains available even after secure erase removes
-`~/.runpod/config.toml`. Unit coverage reproduces the exact fallback sequence;
-the GLM cross-provider pass is the live confirmation of the corrected worker.
+`~/.runpod/config.toml`. Unit coverage reproduces the exact fallback sequence.
+Live confirmation of the corrected worker is deferred with the GLM
+cross-provider pass described below.
 
 The runtime selected its documented Marlin fallback for some FP4 weight-only
 components, so these results do not claim a new native-FP4 kernel path. They
@@ -1176,6 +1177,24 @@ CUDA `13.2`: the earlier Vast `590.48.01 / CUDA 13.1` offer still fails closed,
 as does the r580 host that failed NCCL initialization. This one-card result is
 not silently presented as a four-GPU GLM performance qualification; each model
 profile retains its own feature, quality and performance evidence.
+
+### Current-image Runpod GLM pass deferred (2026-07-29)
+
+The planned four-GPU GLM half of this cross-provider exercise was stopped at
+the user's direction because suitable Runpod stock was scarce and cold image
+availability was consuming rental time without reaching the container. Three
+Secure RTX PRO 6000 Blackwell Server Edition allocations exposed neither SSH
+nor container uptime within the 20-minute allowance, including one placement
+requested with the provider's `minDownload=200` control. A final allocation
+was still pulling the GG v20-r9 bootstrap image when the experiment was
+cancelled. No GLM weights were downloaded and no current-image feature,
+quality, or performance claim is made from these attempts.
+
+All four server allocations and the separate Vast OMP client were destroyed,
+and both provider inventories were verified empty. The completed Runpod Qwen
+qualification above remains valid. The earlier v31 Runpod GLM matrix remains
+historical evidence only; qualifying the current r9 turnkey image on Runpod is
+explicitly deferred until suitable four-card stock is available.
 
 ### GG v20-r8 upstream refresh smoke (AIBeast left online)
 
