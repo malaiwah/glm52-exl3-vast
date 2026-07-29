@@ -1009,3 +1009,42 @@ rental before running the feature suite. It must not be cited as GLM quality,
 throughput, required-tool-choice, or full-feature evidence. Both Vast and
 RunPod inventories were verified empty afterward; AIBeast production was not
 restarted or modified.
+
+### GG v20-r9 dynamic-token production qualification (AIBeast)
+
+The r9 appliance image
+`ghcr.io/malaiwah/glm52-exl3-vast:171083b3f89534a4d36f202bf70fb11bd19ce1ea`
+was qualified on four RTX PRO 6000 Blackwell GPUs at 280 W/card, NVIDIA driver
+595.71.05 and CUDA 13.2. The production shape was TP4/DCP2, MTP5, 3,072
+batched tokens, InstantTensor, 513,536 maximum model length, 50% host-DRAM
+prefix offload, dynamic-token `nvfp4_ds_mla` with FP8 RoPE, and vision off.
+
+Two independent prompt-logit comparisons against the BF16 reference each
+reported mean KLD `0.1167701184931591` across 2,047 positions. This is about
+2.3% below D-Rock's reported single-run TR3 value of 0.119525; it is a
+repeatability and relative-divergence result, not proof of semantic equivalence.
+
+The memory ladder found that boot admission alone was insufficient:
+
+| GMU | exposed KV | result |
+|---|---:|---|
+| 0.976 | 677,504 | first real request OOMed on a 36 MiB transient with 25 MiB free |
+| 0.9675 | 623,232 | exact long-context gate plus a live client OOMed on a 108 MiB all-gather with 91 MiB free |
+| 0.9600 | 575,488 | 510,533-token five-depth retrieval passed 5/5; complete feature suite passed |
+| **0.9550** | **532,224** | 510,533-token five-depth retrieval passed 5/5 with no degeneration while ordinary clients queued; about 1 GiB/GPU remained late in prefill |
+
+The final 0.9550 shape also passed tokenization, thinking/no-thinking chat,
+streaming usage, multi-turn preserve-thinking, strict JSON with and without
+thinking, automatic and required tool calls, and tool-result round-trip.
+Observed long-prefill log windows were roughly 1,843–2,765 tok/s, mostly
+2,150–2,458 tok/s. Live decode windows reached 152.3 aggregate tok/s; MTP5
+mean acceptance length ranged with workload and reached 4.74. The complete
+final log contained zero OOMs, tracebacks, engine ERRORs, XGrammar FSM errors,
+or overlap-probe events.
+
+A separate startup failure was traced to the persistent zero-byte
+`sparkinfer_pcie_dma_ext/lock` left by an interrupted PyTorch extension build.
+Rebooting did not clear the volume. Atomically renaming the ownerless sentinel
+unwedged startup immediately; a later clean build created and removed its own
+lock normally. The appliance now performs a bounded, process-aware preflight
+that only quarantines this known sentinel and never touches `.ninja_lock`.

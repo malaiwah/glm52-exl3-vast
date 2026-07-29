@@ -66,16 +66,16 @@ def test_glm_release_defaults():
           eff["MAX_MODEL_LEN"] == 513536)
     check("the lightweight trellis draft uses MTP-5", eff["MTP_TOKENS"] == 5)
     check("calibrated NVFP4 MLA KV", eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla")
-    check("the proven static scale ABI stays the default",
-          eff["KV_SCALE_MODE"] == "static-calibrated")
+    check("the r9-qualified dynamic scale ABI is the flagship default",
+          eff["KV_SCALE_MODE"] == "dynamic-token")
     check("KV pool is auto-profiled", eff["GPU_BLOCKS_OVERRIDE"] == 0)
-    check("the cross-provider runtime margin uses GMU 0.976",
-          eff["GPU_MEMORY_UTILIZATION"] == 0.976)
+    check("the r9 runtime margin uses GMU 0.955",
+          eff["GPU_MEMORY_UTILIZATION"] == 0.955)
     memory_finding = next(
         f for f in gc.validate(eff) if f["id"] == "gpu-util-high")
     check("the measured default gets the qualified high-utilization warning",
-          "r5/r8-qualified" in memory_finding["message"]
-          and "0.978" in memory_finding["message"],
+          "510,533" in memory_finding["message"]
+          and "0.9675" in memory_finding["message"],
           memory_finding["message"])
     check("the agentic profile reserves half of host DRAM as L2 prefix cache",
           eff["OFFLOAD_FRACTION"] == 0.5)

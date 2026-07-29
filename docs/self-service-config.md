@@ -105,7 +105,7 @@ knobs to the model. Summary of the trade each one makes:
 | `F8_DMA`, `PCIE_DMA_MIN_BYTES`, `PCIE_CALIBRATION` | Collective wire format and byte crossover. The family stays lossless/automatic; the MadeBy561 profile pins the 521K-qualified FP8 ring/393,216-byte shape. |
 | `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM default; cross-provider-qualified on v31 and re-gated at each base refresh) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
 | `MAX_MODEL_LEN` | Longest request, and a hard startup gate against available KV. |
-| `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool. The portable DCP2/GMU-0.976 release shape exposed 523,264 logical tokens on Runpod; the value varies with usable VRAM, graphs, driver and loader. A positive value pins a reproducible smaller pool. |
+| `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool. The GG r9 dynamic-token DCP2/GMU-0.955 shape exposed 532,224 logical tokens on AIBeast; the value varies with usable VRAM, graphs, driver and loader. A positive value pins a reproducible smaller pool. |
 | `OFFLOAD_FRACTION` | Host DRAM used as an L2 prefix cache after GPU eviction—not extra active-context capacity. It is passed as one aggregate native-connector budget (vLLM derives the TP worker slices), with `recompute` on miss. At 50% of a 251 GiB host, an evicted 133,504-token prefix reloaded in 0.69s instead of a 52.47s recompute; 50% also retained ~51 GiB host headroom. |
 | `VISION` | Image input vs long-context correctness on EXL3 (see rule 6) and ~1.99 GiB/GPU on the final v20 qualification shape. |
 | `MAX_NUM_SEQS`, `MAX_NUM_BATCHED_TOKENS`, `GPU_MEMORY_UTILIZATION` | Concurrency and prefill chunk against the capture window and against VRAM headroom. |
@@ -159,8 +159,10 @@ unless their registry entry explicitly declares equivalent calibration.
 `KV_SCALE_MODE=dynamic-token` is an atomic GG v20-r9 record mode, not a generic
 quantization switch. It requires `KV_CACHE_DTYPE=nvfp4_ds_mla`; the entrypoint
 then sets both `KV_FP8_ROPE=1` and `VLLM_NVFP4_MLA_DYNAMIC_SCALE=1` and removes
-the static scale file. It is exposed for controlled A/B work but remains
-non-default until the exact 517K retrieval/degeneration gate passes.
+the static scale file. It is the flagship EXL3 default after repeatable KLD
+and two exact 510,533-token
+retrieval/degeneration gates. Other variants retain their independently
+qualified static setting.
 
 ### `vision-long-context` — warn (blunt)
 `VISION=1` on the EXL3-TR3 checkpoint **corrupts long-context output**: measured

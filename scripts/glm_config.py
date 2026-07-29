@@ -258,6 +258,11 @@ VARIANTS = {
             "MAX_MODEL_LEN": 513536,
             "MAX_NUM_BATCHED_TOKENS": 3072,
             "MAX_NUM_SEQS": 8,
+            # GG v20-r9's complete paired ABI stores dynamic outer scales per
+            # token and FP8 RoPE in the 368-byte record. On AIBeast it matched
+            # the BF16 reference at mean KLD 0.116770 in two independent runs,
+            # then passed an exact 510,533-token five-depth retrieval twice.
+            "KV_SCALE_MODE": "dynamic-token",
             "MTP_TOKENS": 5,
             "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
             "DCP_PREFILL_WORKSPACE_MIB": 1024,
@@ -265,13 +270,13 @@ VARIANTS = {
             "DCP_CKV_GATHER_MAX_TOKENS": 140000,
             "DCP_KV_CACHE_INTERLEAVE_SIZE": "1",
             "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": 8192,
-            # AIBeast can run 0.978 because its cards expose about 0.58 GiB
-            # more usable VRAM than the RunPod RTX PRO 6000 WS cards tested
-            # on 2026-07-28.  On RunPod, 0.978 admitted the old 520K KV pool but
-            # left 7.94 MiB free and the first 36 MiB EXL3 transient
-            # allocation killed the engine.  0.976 plus r5's graph-aware
-            # profiler admits 513,536 while restoring portable headroom.
-            "GPU_MEMORY_UTILIZATION": 0.976,
+            # r9 dynamic KV admitted 677,504 tokens at 0.976 but left only
+            # 25 MiB for a 36 MiB transient. 0.9675 also OOMed on a 108 MiB
+            # all-gather during a maximum-context request. 0.955 exposed
+            # 532,224 tokens for the 513,536 request limit, started with
+            # ~1.56 GiB/GPU free, and retained ~1 GiB late in two exact 510.5K
+            # retrievals while ordinary clients queued behind the full session.
+            "GPU_MEMORY_UTILIZATION": 0.955,
             "GPU_BLOCKS_OVERRIDE": 0,
             "LOAD_FORMAT": "instanttensor",
             "OFFLOAD_FRACTION": 0.5,
@@ -573,9 +578,10 @@ KNOBS = [
              "static-calibrated uses the pinned GLM-5.2 per-layer scale artifact "
              "and the established BF16-RoPE 432-byte record. dynamic-token opts "
              "into GG v20-r9's paired 368-byte FP8-RoPE record and stores one "
-             "outer scale per token. Dynamic mode improved matched KLD and "
-             "retrieval through 466K upstream, but remains experimental here "
-             "until it passes the appliance's exact 517K gate.")),
+             "outer scale per token. The flagship EXL3 profile uses dynamic "
+             "mode after two identical KLD runs and two exact 510,533-token "
+             "five-depth retrieval passes on GG v20-r9. Other variants retain "
+             "static-calibrated until independently qualified.")),
 
     dict(key="MTP_DRAFT", families=("glm52",), type="choice", default="tr3-graft", choices=list(DRAFTS),
          group="Speculative decoding", scope="checkpoint", label="MTP draft type",
@@ -1702,12 +1708,13 @@ def validate(cfg: dict, context=None):
                 and cfg["GPU_MEMORY_UTILIZATION"] <= 0.976):
             warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
                  f"{cfg['GPU_MEMORY_UTILIZATION']} is high by generic vLLM standards, "
-                 "but this exact DCP2/513,536-token shape is the r5/r8-qualified "
-                 "default carried into GG v20-r9. AIBeast passed cold and cache-reused starts, "
-                 "C1-C8 decode, two ~510.5K five-depth retrievals, and an almost "
-                 "exact 512K total request with safe graph accounting enabled. "
-                 "The earlier 0.978/520K rental shape admitted KV but OOMed on its "
-                 "first 36 MiB transient allocation. "
+                 "but the GG v20-r9 dynamic-token DCP2/513,536 profile at 0.955 "
+                 "passed cache-reused starts, the complete OpenAI feature suite, "
+                 "and two exact 510,533-token five-depth retrievals on AIBeast. "
+                 "It exposed 532,224 KV tokens and retained about 1 GiB/GPU late "
+                 "in a maximum-context prefill. The 0.9675 candidate exposed more "
+                 "KV but OOMed on a 108 MiB all-gather while a client request "
+                 "overlapped the long-context gate. "
                  "A new driver, GPU SKU, loader, graph shape, or vision setting is still "
                  "a cold-boot and near-maximum retrieval requalification boundary.")
         else:

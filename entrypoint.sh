@@ -1637,6 +1637,14 @@ esac
 mkdir -p "$VLLM_CACHE_ROOT" "$TRITON_CACHE_DIR" "$TORCH_EXTENSIONS_DIR" \
   "$TORCHINDUCTOR_CACHE_DIR" 2>/dev/null || true
 
+recover_sparkinfer_extension_lock() {
+  # A killed build can strand PyTorch's zero-byte FileBaton sentinel on the
+  # persistent cache. The helper waits for a live compiler and only quarantines
+  # the known SparkInfer PCIe DMA sentinel when it is ownerless. It never
+  # removes Ninja's own lock or clears unrelated extensions.
+  bash "$SCRIPTS_DIR/recover_torch_extension_lock.sh" "$TORCH_EXTENSIONS_DIR"
+}
+
 export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
 export HF_HUB_OFFLINE=1
 echo ">>> Listening sockets at boot (expect only vllm on ${PORT:-8000} + vast ssh):"
@@ -2004,6 +2012,14 @@ while :; do
   : > "$SERVE_LOG"
 
   status_update starting-engine
+  if ! recover_sparkinfer_extension_lock; then
+    echo "!!! SparkInfer extension lock preflight did not clear safely; retrying before vLLM launch." >&2
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt "$MAXR" ]; then
+      break
+    fi
+    continue
+  fi
   # Run in a SUBSHELL of this shell, not `setsid bash -c`. A fresh bash only
   # inherits exported variables, and bash cannot export arrays at all — so the
   # old form started vLLM with an empty MODEL_DIR (`vllm serve ""` ->

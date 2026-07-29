@@ -1,7 +1,8 @@
 # GG v20 r9 adds the paired dynamic-token NVFP4 MLA cache ABI and exact
 # adaptive sparse-indexer folding to r8's XGrammar/LMCache runtime. Dynamic KV
-# scaling remains opt-in in this appliance; the established calibrated static
-# path is the default until r9 passes the full 517K qualification gate.
+# scaling is the flagship EXL3 default after repeatable KLD and two exact
+# 510,533-token five-depth retrieval gates; calibrated static remains available
+# for variants that have not independently qualified the dynamic record.
 # Pin the immutable July 28 manifest. This compute-base change deliberately
 # changes the compile-cache fingerprint and remains a requalification boundary
 # for memory planning, retrieval, degeneration and performance.

@@ -15,10 +15,10 @@ authoritative.
 
 The appliance now pins **GG v20-r9**. It retains r8's XGrammar 0.2.5 and
 opt-in DCP-aware LMCache 0.5.2, then adds the paired dynamic-token NVFP4 MLA
-cache ABI and exact adaptive sparse-indexer folding. Dynamic scaling is
-deliberately opt-in here: the flagship profile keeps the reviewed static
-GLM-5.2 scale artifact until r9's dynamic record passes this appliance's exact
-517K retrieval and degeneration gate. XGrammar 0.2.5 fixes GLM
+cache ABI and exact adaptive sparse-indexer folding. The flagship EXL3 profile
+now uses the complete dynamic record after two identical KLD runs and two
+exact 510,533-token five-depth retrieval passes; the reviewed static GLM-5.2
+scale artifact remains available for other variants. XGrammar 0.2.5 fixes GLM
 `tool_choice=required` termination; LMCache remains off by default and does
 not replace this appliance's measured native vLLM DRAM prefix tier. Upstream
 currently enables its LMCache helper for dense/hybrid launchers, not EXL3.
@@ -28,9 +28,10 @@ storage semantics and needs its own certificate-renewal migration test.
 
 The default `glm52-exl3` profile is the flagship production stack:
 BrandonMusic's 3.0-bpw EXL3/TR3 checkpoint (~77 GiB/rank), DCP2, native
-TR3 MTP-5, calibrated `nvfp4_ds_mla` KV, CUDA graphs through C8, and a
-513,536-token request limit. vLLM auto-profiles the KV pool at the
-cross-provider-qualified `GPU_MEMORY_UTILIZATION=0.976`. Half of host DRAM is
+TR3 MTP-5, dynamic-token `nvfp4_ds_mla` KV with FP8 RoPE, CUDA graphs through
+C8, and a 513,536-token request limit. vLLM auto-profiles the KV pool at the
+AIBeast-qualified `GPU_MEMORY_UTILIZATION=0.955`; rentals remain a cold-boot
+requalification boundary. Half of host DRAM is
 available as an L2 prefix cache for repeated agentic prefixes; it does not
 increase active context capacity. Vision remains opt-in because the current
 graft is not long-context text-safe. Weights auto-download on first boot
@@ -112,7 +113,7 @@ speculation shape; it is not merely a different download URL:
 
 | variant | topology / speculation | context and memory | intended use |
 |---|---|---|---|
-| **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 513,536 max, 514,944-token auto NVFP4 KV pool at GMU 0.976, 3,072-token prefill batch, 1 GiB workspace, 50% DRAM prefix tier | balanced flagship; default |
+| **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 513,536 max, 532,224-token dynamic NVFP4 KV pool at GMU 0.955 on AIBeast, 3,072-token prefill batch, 1 GiB workspace, 50% DRAM prefix tier | balanced flagship; default |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
@@ -746,12 +747,13 @@ would. Long-context retrieval is verified clean (6/6 at depths to 490K inside a
 > Release qualification still runs cold long-context needles—calibration is
 > not a reason to skip the causal test.
 
-GG v20-r9 also offers `KV_SCALE_MODE=dynamic-token`. That paired mode selects
+GG v20-r9 offers `KV_SCALE_MODE=dynamic-token`. That paired mode selects
 the 368-byte FP8-RoPE record, stores an outer scale per token, and cannot be
-combined with the static scale file. Upstream measured matched retrieval
-through 466,493 tokens and a small KLD improvement without a material decode
-change. It remains an experiment here until the exact 517K appliance gate
-passes; `static-calibrated` is the default.
+combined with the static scale file. On AIBeast the appliance measured mean KLD
+`0.1167701185` twice across 2,047 positions, then retrieved 5/5 needles without
+degeneration from two exact 510,533-token prompts. It is therefore the flagship
+EXL3 default. `static-calibrated` remains the compatibility choice for variants
+that have not passed the same gate.
 
 Vision consumed about 1.31 GiB/GPU in an earlier graft and 1.99 GiB/GPU in the
 final v20 qualification. Treat it as a distinct opt-in profile: re-run the
