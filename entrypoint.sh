@@ -1558,6 +1558,20 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
       }
     else
       TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY")
+      # Internal appliance clients (SOUL, probes and local diagnostics) must
+      # use TLS too: a TLS-enabled vLLM listener cannot accept loopback HTTP.
+      # Resolve the public certificate hostname to loopback so these clients
+      # keep normal CA + hostname verification without relying on NAT hairpin.
+      case "$ACME_DOMAIN" in
+        ""|*[!A-Za-z0-9.-]*)
+          echo "!!! Unsafe ACME hostname; internal TLS alias was not installed"
+          ;;
+        *)
+          if ! grep -Fq "$ACME_DOMAIN" /etc/hosts 2>/dev/null; then
+            printf '127.0.0.1\t%s\n' "$ACME_DOMAIN" >> /etc/hosts
+          fi
+          ;;
+      esac
     fi
     if [ "$TLS_ENABLED" = "1" ]; then
       echo ">>> TLS enabled: https://$ACME_DOMAIN:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-<mapped-port>}}/v1"

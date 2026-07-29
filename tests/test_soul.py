@@ -163,12 +163,25 @@ class SoulControllerTests(unittest.TestCase):
                     "choices": [{"message": {"content": self.content}}],
                 }).encode()
 
+        requests = []
+
+        def open_response(request, **_kwargs):
+            requests.append(json.loads(request.data))
+            return Response("not SOUL-CANARY-OK")
+
         with mock.patch.object(controller.urllib.request, "urlopen",
-                               return_value=Response("not SOUL-CANARY-OK")):
+                               side_effect=open_response):
             self.assertFalse(controller._cheap_canary(8000, "", "local")["ok"])
+        self.assertEqual(
+            requests[0]["chat_template_kwargs"], {"enable_thinking": False})
         with mock.patch.object(controller.urllib.request, "urlopen",
                                return_value=Response("\nSOUL-CANARY-OK \n")):
             self.assertTrue(controller._cheap_canary(8000, "", "local")["ok"])
+        with mock.patch.object(controller.urllib.request, "urlopen",
+                               return_value=Response(None)):
+            result = controller._cheap_canary(8000, "", "local")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["response"], "")
 
     def test_nanobot_config_disables_dream_and_level_one_shell(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -180,10 +193,38 @@ class SoulControllerTests(unittest.TestCase):
             self.assertFalse(doc["agents"]["defaults"]["dream"]["enabled"])
             self.assertFalse(doc["tools"]["exec"]["enable"])
             self.assertEqual(doc["providers"]["custom"]["apiKey"], "${VLLM_API_KEY}")
+            self.assertEqual(
+                doc["providers"]["custom"]["apiBase"],
+                "http://127.0.0.1:8000/v1")
+            self.assertEqual(
+                doc["modelPresets"]["soul-local"]["maxTokens"], 2400)
             self.assertNotIn("actual-secret", path.read_text())
             controller._nanobot_config(path, root / "workspace", "local-model",
                                        8000, 2, "UTC")
             self.assertTrue(json.loads(path.read_text())["tools"]["exec"]["enable"])
+
+    def test_direct_tls_uses_the_certificate_hostname_on_the_local_port(self):
+        status = {
+            "endpoint": "https://model-123.example.test:45678",
+            "cert": "/workspace/.lego/certificates/model-123.example.test.crt",
+            "keyfile": "/workspace/.lego/certificates/model-123.example.test.key",
+        }
+        self.assertEqual(
+            controller._local_api_base(status, 8000),
+            "https://model-123.example.test:8000")
+        self.assertEqual(
+            controller._local_api_base(
+                {"endpoint": "https://pod-8000.proxy.runpod.net"}, 8000),
+            "http://127.0.0.1:8000")
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "config.json"
+            controller._nanobot_config(
+                path, Path(raw) / "workspace", "local-model", 8000, 1,
+                "UTC", "https://model-123.example.test:8000")
+            doc = json.loads(path.read_text())
+            self.assertEqual(
+                doc["providers"]["custom"]["apiBase"],
+                "https://model-123.example.test:8000/v1")
 
     def test_nanobot_registry_is_shell_only_at_levels_two_and_three(self):
         class Registry:

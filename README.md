@@ -416,6 +416,22 @@ queued subagents from reaching OMP's time-to-first-event timeout while the
 server is otherwise healthy. If you rename the provider in `models.yml`, use
 that same provider id in `maxInFlightRequests`.
 
+Scope the first review as deliberately as the concurrency. In the clean Vast
+composite retest, three broad, tool-using repository reviews remained healthy
+at the server but exhausted their eight-minute client deadlines. Two
+file-attached, no-tool reviews completed in about 90 seconds and returned useful
+reports:
+
+```bash
+omp -p --model "turnkey/<served-model-name>" --thinking off \
+  --no-tools --max-time 5m @README.md @landing.py \
+  "Review only the attached files; prioritize concrete findings."
+```
+
+Use tools for a follow-up after the bounded pass identifies where they add
+value. This keeps a small model reviewing code instead of repeatedly exploring
+the repository while its client clock expires.
+
 The dashboard keeps a short client-side history of prompt/generation
 throughput, running/waiting requests, KV pressure and prefix-cache hits. Boot
 highlights are UTC timestamped so a first-time user can distinguish real

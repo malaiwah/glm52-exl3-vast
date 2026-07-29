@@ -4,6 +4,68 @@ This report records the cost-controlled execution of `TEST_PLAN.md`. Provider
 credentials and generated appliance tokens were kept in process-local
 environment variables and are not included here.
 
+## Secure Vast composite retest — 2026-07-29
+
+A clean `ghcr.io/malaiwah/glm52-exl3-vast:latest` boot at commit `87fd42d`
+repeated the Qwen server + separate OMP client exercise on Vast. The server was
+a verified RTX 5090 host with driver `595.71.05`, CUDA 13.2 compatibility and a
+575 W power ceiling; the client was a low-cost RTX 4060 Ubuntu rental used only
+as a first-user SSH/OMP machine.
+
+- deSEC DNS and Let's Encrypt direct TLS came up automatically. The checkpoint
+  download took 78 seconds; the complete engine, compile and verifier path took
+  about seven minutes from container start.
+- The built-in gate passed health, short answers, structured output with
+  reasoning, and 3/3 retrieval at 32,773 tokens. The independent feature suite
+  then passed bad-key rejection, tokenize, thinking on/off, streaming usage,
+  preserved-thinking multi-turn, structured JSON with thinking, tools and tool
+  continuation, and vision.
+- OMP 17.1.8 discovered the landing-page YAML at its current
+  `~/.omp/agent/models.yml` path, advertised images/tools/reasoning and the
+  196,608-token context correctly, and completed an exact secure-endpoint smoke.
+- SOUL levels 1, 2 and 3 were exercised. Level 1 produced a structured,
+  tool-free journal; level 2 used only the bounded shell tool and correctly
+  identified a marked synthetic OOM as a test artifact; level 3's authenticated
+  exact canary returned `SOUL-CANARY-OK`. The appliance was returned to its
+  shipping level 0 afterward.
+
+The combined secure test exposed one real cross-feature defect: SOUL still used
+plain loopback HTTP after vLLM had become a direct-TLS listener. The controller
+now uses the certificate hostname on the local engine port, and PID 1 maps that
+hostname to loopback. This retains normal CA and hostname validation without a
+provider NAT hairpin. The same pass raised Nanobot's bounded report allowance
+from 1,200 to 2,400 tokens (preventing structured JSON truncation), disables
+thinking for the 16-token exact canary, handles `content: null`, and makes the
+landing listener's TLS 1.2 minimum explicit. A live certificate test rejected
+TLS 1.1 and accepted TLS 1.2 with verification success.
+
+Real OMP load produced 46 successful chat requests with no OOM, preemption,
+traceback or engine error:
+
+| reporting metric | composite result |
+|---|---:|
+| prompt throughput, non-zero mean / median / peak | 2,185 / 2,264 / 3,763 tok/s |
+| aggregate generation, non-zero mean / peak | 44.0 / 153.4 tok/s |
+| maximum running / waiting requests | 3 / 2 |
+| maximum KV use | 96.3% |
+| GPU utilization, 120 two-second samples | 92.8% mean / 100% peak |
+| GPU power | 507.8 W mean / 586.3 W transient peak |
+| GPU temperature | 72 C mean / 79 C peak |
+
+MAL is not applicable: the qualified Qwen profile intentionally runs compiled
+MTP-off decoding. Three broad tool-using OMP reviews respected the configured
+four-request provider ceiling and kept the server healthy, but hit their
+eight-minute client deadline without final reports. Two file-attached,
+no-tool reviews then completed in about 90 seconds. Their findings were useful
+as leads rather than verdicts: human validation rejected several false
+positives and retained the explicit TLS floor hardening.
+
+The two rentals ran for about 43 minutes. Credit moved from approximately
+`$35.3211` to `$34.3461` (about `$0.975`, including the unusually material
+image/checkpoint ingress charge on this host). Both exact instance IDs were
+destroyed, Vast returned an empty instance inventory, and the generated deSEC A
+and ACME TXT records were deleted and verified absent.
+
 ## Artifacts
 
 - Branch: `codex/appliance-live-test`

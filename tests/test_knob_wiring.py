@@ -223,6 +223,8 @@ def main():
     check("credential-bearing pages are never cached or framed",
           'self.send_header("Cache-Control", "no-store")' in landing
           and 'self.send_header("X-Frame-Options", "DENY")' in landing)
+    check("the credential-bearing landing TLS listener requires TLS 1.2+",
+          "ctx.minimum_version = ssl.TLSVersion.TLSv1_2" in landing)
     check("current OMP config path and YAML shape are rendered",
           "~/.omp/agent/models.yml" in landing
           and "~/.pi/agent/models.json" not in landing

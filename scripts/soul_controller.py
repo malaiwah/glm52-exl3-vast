@@ -24,6 +24,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional
@@ -119,6 +120,26 @@ def _http_json(url: str, api_key: str = "", timeout: int = 4,
     except (urllib.error.URLError, OSError) as exc:
         return {"ok": False, "latencyMs": round((time.monotonic() - started) * 1000, 1),
                 "error": sc.redact(str(exc))}
+
+
+def _local_api_base(status: Mapping[str, Any], port: int) -> str:
+    """Return the engine URL reachable from inside the appliance.
+
+    A direct-TLS deployment cannot accept plain HTTP on the vLLM port. PID 1
+    maps the certificate hostname to 127.0.0.1 in /etc/hosts, so internal
+    clients retain normal CA and hostname verification without hairpinning
+    through the provider's public port. Runpod proxy mode has no local
+    certificate and continues to use vLLM's plain loopback listener.
+    """
+    endpoint = str(status.get("endpoint") or "")
+    if status.get("cert") and status.get("keyfile") and endpoint.startswith("https://"):
+        try:
+            hostname = urlparse(endpoint).hostname
+        except ValueError:
+            hostname = None
+        if hostname:
+            return f"https://{hostname}:{port}"
+    return f"http://127.0.0.1:{port}"
 
 
 def _metrics(url: str, api_key: str = "") -> Dict[str, Any]:
@@ -221,10 +242,14 @@ async def _network(status: Mapping[str, Any], port: int) -> Dict[str, Any]:
     tls_port = None
     if endpoint:
         try:
-            from urllib.parse import urlparse
             parsed = urlparse(endpoint)
             host = parsed.hostname or host
             tls_port = parsed.port or (443 if parsed.scheme == "https" else None)
+            if status.get("cert") and status.get("keyfile"):
+                # Direct-TLS appliances map the certificate hostname to
+                # loopback; the provider's published port exists on the host,
+                # not inside the container.
+                tls_port = port
         except ValueError:
             pass
     result: Dict[str, Any] = {"target": host}
@@ -329,7 +354,7 @@ def _configuration_state(root: Path) -> Dict[str, Any]:
 async def collect_snapshot(boot_status_path: Path, port: int, api_key: str) -> Dict[str, Any]:
     boot = _read_json(boot_status_path, {}) or {}
     root = sc.state_dir().parent
-    base = f"http://127.0.0.1:{port}"
+    base = _local_api_base(boot, port)
     snapshot = {
         "schemaVersion": sc.SCHEMA_VERSION,
         "id": _safe_id("snapshot-"),
@@ -479,17 +504,22 @@ class IncidentBook:
 
 
 def _nanobot_config(path: Path, workspace: Path, model: str, port: int,
-                    level: int, timezone: str) -> None:
+                    level: int, timezone: str, api_base: str = "") -> None:
+    api_base = api_base or f"http://127.0.0.1:{port}"
     document = {
         "providers": {
             "custom": {
                 "apiKey": "${VLLM_API_KEY}",
-                "apiBase": f"http://127.0.0.1:{port}/v1",
+                "apiBase": api_base.rstrip("/") + "/v1",
             }
         },
         "modelPresets": {
             "soul-local": {
-                "provider": "custom", "model": model, "maxTokens": 1200,
+                # Snapshot-driven incident reports routinely need 1.5K-2K
+                # tokens. A 1,200-token cap made Nanobot continue the turn and
+                # return only the tail, so otherwise valid JSON was persisted
+                # as an unstructured response.
+                "provider": "custom", "model": model, "maxTokens": 2400,
                 "temperature": 0.1, "reasoningEffort": "none",
             }
         },
@@ -725,22 +755,28 @@ def _active_requests(snapshot: Mapping[str, Any]) -> int:
     return 0
 
 
-def _cheap_canary(port: int, api_key: str, model: str) -> Dict[str, Any]:
+def _cheap_canary(port: int, api_key: str, model: str,
+                  api_base: str = "") -> Dict[str, Any]:
+    api_base = (api_base or f"http://127.0.0.1:{port}").rstrip("/")
     payload = json.dumps({
         "model": model, "messages": [{"role": "user",
                                       "content": "Reply with exactly: SOUL-CANARY-OK"}],
         "max_tokens": 16, "temperature": 0,
+        # Qwen can spend the entire tiny budget in reasoning and return
+        # content=null. The canary tests serving, not reasoning quality.
+        "chat_template_kwargs": {"enable_thinking": False},
     }).encode()
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = "Bearer " + api_key
     started = time.monotonic()
     try:
-        req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions",
+        req = urllib.request.Request(api_base + "/v1/chat/completions",
                                      data=payload, headers=headers)
         with urllib.request.urlopen(req, timeout=30) as response:
             doc = json.loads(response.read(128_000))
-        content = str(doc["choices"][0]["message"]["content"])
+        raw_content = doc["choices"][0]["message"].get("content")
+        content = raw_content if isinstance(raw_content, str) else ""
         ok = content.strip() == "SOUL-CANARY-OK"
         return {"ok": ok, "latencyMs": round((time.monotonic() - started) * 1000, 1),
                 "response": sc.redact(content[:200])}
@@ -750,16 +786,17 @@ def _cheap_canary(port: int, api_key: str, model: str) -> Dict[str, Any]:
 
 def _long_context_probe(port: int, api_key: str, model: str,
                         max_model_len: int, needle_tokens: int,
-                        output: Path) -> Dict[str, Any]:
+                        output: Path, api_base: str = "") -> Dict[str, Any]:
     """Run the existing correctness verifier into SOUL-only evidence.
 
     The output path is never one of PID 1's verifier verdict paths, so this
     probe cannot promote, roll back, restart, or otherwise change engine state.
     """
     script = Path(__file__).with_name("verify_serving.py")
+    api_base = (api_base or f"http://127.0.0.1:{port}").rstrip("/")
     command = [
         sys.executable, str(script),
-        "--base-url", f"http://127.0.0.1:{port}",
+        "--base-url", api_base,
         "--api-key-env", "SOUL_PROBE_API_KEY", "--model", model,
         "--out", str(output), "--max-model-len", str(max_model_len),
         "--needle-tokens", str(needle_tokens), "--timeout", "30",
@@ -1044,14 +1081,17 @@ class SoulController:
         self.bot, self.bot_key = None, None
 
     async def get_bot(self, model: str, config: Mapping[str, Any]):
+        boot = _read_json(self.boot_status, {}) or {}
+        api_base = _local_api_base(boot, self.port)
         key = (model, self.port, config["autonomyLevel"], config["timezone"],
-               self.current_runtime_marker)
+               api_base, self.current_runtime_marker)
         if self.bot is not None and self.bot_key == key:
             return self.bot
         await self.close_bot()
         config_path = self.paths["runtime"] / "nanobot-config.json"
         _nanobot_config(config_path, self.paths["workspace"], model, self.port,
-                        int(config["autonomyLevel"]), str(config["timezone"]))
+                        int(config["autonomyLevel"]), str(config["timezone"]),
+                        api_base)
         soul_source = Path(os.environ.get("SOUL_PROMPT", "/opt/soul/SOUL.md"))
         try:
             shutil.copyfile(soul_source, self.paths["workspace"] / "SOUL.md")
@@ -1117,9 +1157,11 @@ class SoulController:
         if now - self.last_snapshot < int(config["heartbeatIntervalS"]):
             return
         snapshot = await collect_snapshot(self.boot_status, self.port, self.api_key)
+        api_base = _local_api_base(boot, self.port)
         if level == 3 and phase == "serving" and _active_requests(snapshot) == 0:
             if now - self.last_canary >= max(3600, int(config["heartbeatIntervalS"])):
-                snapshot["canary"] = _cheap_canary(self.port, self.api_key, model)
+                snapshot["canary"] = _cheap_canary(
+                    self.port, self.api_key, model, api_base)
                 self.last_canary = now
             apply_mode = str(snapshot.get("applyState", {}).get("mode", ""))
             startup_verdict_in_progress = (
@@ -1141,7 +1183,7 @@ class SoulController:
                     needle_tokens = 32768
                 snapshot["longContextProbe"] = await asyncio.to_thread(
                     _long_context_probe, self.port, self.api_key, model,
-                    max_model_len, needle_tokens, deep_path)
+                    max_model_len, needle_tokens, deep_path, api_base)
                 snapshot["longContextProbeEvidence"] = (
                     "evidence/" + deep_path.name)
                 self.last_deep_probe = now

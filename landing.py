@@ -83,6 +83,10 @@ def ssl_ctx():
         crt, key = st.get("cert", ""), st.get("keyfile", "")
         if crt and key and os.path.isfile(crt):
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            # The page carries capability and API tokens. Set an explicit
+            # protocol floor instead of inheriting a potentially permissive
+            # OpenSSL policy from the rental host.
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             ctx.load_cert_chain(crt, key)
             _ssl_ctx = ctx
     return _ssl_ctx
