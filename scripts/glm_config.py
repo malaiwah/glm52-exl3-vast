@@ -149,17 +149,17 @@ FAMILIES = {
                   "default here has a measurement behind it; see README.md."),
     },
     "qwen36": {
-        "label": "Qwen3.6 27B NVFP4 — low-cost Blackwell development profile",
+        "label": "Qwen3.6 27B NVFP4 Vision — 1x RTX 5090 production profile",
         "tested": True,
         "env_block": "generic",
         "default_variant": "qwen36-nvfp4",
         # nvfp4_ds_mla is an MLA KV layout; it does not exist for this family.
         "kv_dtypes": ["auto", "fp8"],
         "spec_method": "mtp",
-        "own_knobs": ("MULTIMODAL",),
+        "own_knobs": ("MULTIMODAL", "MM_MAX_PIXELS"),
         "defaults": {
             "TENSOR_PARALLEL_SIZE": 1,
-            "MAX_MODEL_LEN": 32768,
+            "MAX_MODEL_LEN": 196608,
             "MODEL_OUTPUT_LIMIT": 8192,
             "MTP_TOKENS": 0,
             "MAX_NUM_SEQS": 4,
@@ -170,20 +170,25 @@ FAMILIES = {
             "KV_CACHE_DTYPE": "auto",
             "LOAD_FORMAT": "safetensors",
             "SERVED_MODEL_NAME": "Qwen3.6-27B",
-            "MULTIMODAL": False,
+            "MULTIMODAL": True,
+            "MM_MAX_PIXELS": 8388608,
         },
         "serve_args": [
             "--load-format", "%(LOAD_FORMAT)s",
+            "--mm-processor-kwargs", '{"max_pixels":%(MM_MAX_PIXELS)s}',
             "--enable-auto-tool-choice",
             "--tool-call-parser", "qwen3_coder",
             "--reasoning-parser", "qwen3",
         ],
         "notes": (
-            "ModelOpt NVFP4 checkpoint sized for one Blackwell GPU. The appliance "
-            "path, text-only compiled default, thinking-content normalization, "
-            "structured output, tools and preserved multi-turn reasoning were "
-            "live-qualified with the full 27B checkpoint on an RTX 5090. MTP is "
-            "opt-in and uses vLLM's current 'mtp' method; GG v20-r9 forces that "
+            "Vision-enabled ModelOpt NVFP4 checkpoint qualified on one 32 GB RTX "
+            "5090 at a 196,608-token request limit, 8,388,608-pixel image cap, "
+            "and checkpoint-selected FP8 KV. The appliance path, compiled default, "
+            "thinking-content normalization, structured output, tools, detailed "
+            "vision, near-maximum retrieval and preserved multi-turn reasoning were "
+            "live-qualified with the full 27B checkpoint. Native MTP is "
+            "slower and reduces usable context on this image; it remains "
+            "opt-in. It uses vLLM's current 'mtp' method; GG v20-r9 forces that "
             "path to eager mode around a FlashInfer frozen-query-shape crash. "
             "GLM-only MLA/DCP/EXL3 settings are removed rather than inherited "
             "from the base image."),
@@ -528,9 +533,22 @@ KNOBS = [
     dict(key="MULTIMODAL", families=("qwen36", "custom"), type="bool", default=True,
          group="Multimodal", scope="engine", label="Load native multimodal encoder",
          rationale=(
-             "When off, passes --language-model-only to save VRAM. Qwen's economical "
-             "profile defaults off; enabling it uses the checkpoint's native vision "
-             "encoder. GLM's grafted vision path remains controlled by VISION.")),
+             "When off, passes --language-model-only to save VRAM. The qualified "
+             "Qwen RTX 5090 profile defaults on and uses the checkpoint's native "
+             "vision encoder. GLM's grafted vision path remains controlled by "
+             "VISION.")),
+
+    dict(key="MM_MAX_PIXELS", families=("qwen36",), type="int",
+         default=8388608, min=262144, max=16777216,
+         group="Multimodal", scope="engine", label="Max image pixels",
+         rationale=(
+             "Caps the pixels sent to Qwen's native vision tower. The checkpoint "
+             "default is 16,777,216, which processes a 5120x2880 screenshot at all "
+             "14.7 MP and OOMed a 32 GB RTX 5090 even after lowering GMU to 0.93. "
+             "8,388,608 is approximately a 4K working image and passed two "
+             "deterministic 5120x2880 dashboard gates, including one after a "
+             "192K prefill. Raising it requires additional transient VRAM and a "
+             "fresh detailed-vision test.")),
 
     dict(key="MAX_MODEL_LEN", type="int", default=524288, min=4096, max=1048576,
          group="Model", scope="engine", label="Max context length",
@@ -1442,12 +1460,15 @@ def family_serve_args(cfg: dict):
         args += ["--quantization-config", variant["quantization_config"]]
     if cfg.get("MODEL_FAMILY") in ("qwen36", "custom") and not cfg.get("MULTIMODAL"):
         args += ["--language-model-only"]
-    if cfg.get("MODEL_FAMILY") == "qwen36" and cfg.get("MTP_TOKENS", 0) > 0:
+    if (
+        cfg.get("MODEL_FAMILY") == "qwen36"
+        and cfg.get("MTP_TOKENS", 0) > 0
+    ):
         # GG v20-r9 / FlashInfer freezes q_len_per_req=1 in the compiled
         # decode wrapper, while Qwen's native MTP2 draft needs q_len=3. The
         # first request otherwise kills the engine. Eager mode is slower but
-        # is the live-qualified compatibility path until upstream owns one
-        # wrapper per draft query length.
+        # is the compatibility path until upstream owns one wrapper per query
+        # length.
         args += ["--enforce-eager"]
     if cfg.get("MODEL_FAMILY") == "custom":
         if cfg.get("QUANTIZATION"):
@@ -1539,9 +1560,11 @@ def validate(cfg: dict, context=None):
             ["MTP_TOKENS"],
             "Qwen native MTP currently forces --enforce-eager on GG v20-r9. "
             "The compiled FlashInfer path freezes q_len_per_req=1 and crashes "
-            "when MTP2 requires q_len=3. Eager MTP2 passed the live feature "
-            "gate, but it gives up torch.compile/CUDA-graph throughput; keep "
-            "MTP_TOKENS=0 for the fast development default.",
+            "when MTP2 requires q_len=3. On one RTX 5090, eager MTP2 reduced "
+            "the measured KV ceiling from 227,161 to about 195,200 tokens and "
+            "decode from 65/110/190 to 46/81/101 tok/s at C1/C2/C4 despite "
+            "74-79% draft acceptance. Keep MTP_TOKENS=0 for the qualified "
+            "compiled default.",
         )
 
     # 0. family coherence ---------------------------------------------------
@@ -1806,7 +1829,7 @@ def validate(cfg: dict, context=None):
              f"{variant['label']}: this template's serve arguments for it are derived, "
              "not measured. Expect to iterate, and expect a "
              f"~{variant['download_gib']} GiB download on the next restart.")
-    if toks == 0:
+    if is_glm and toks == 0:
         warn("spec-off", ["MTP_TOKENS"],
              "speculative decoding disabled; expect roughly 30% lower decode throughput.")
 

@@ -115,11 +115,13 @@ same already-rented machine.
 
 ## Explicit residual tests
 
-The real 27B Qwen NVFP4 profile still needs a one-card performance and memory
-qualification before its conservative 32K default is raised. GLM vision is
-also a separate opt-in feature profile: the current EXL3 graft passes detailed
-short screenshot extraction but fails the mandatory 32K text gate, so it is
-not allowed to borrow the flagship text profile's 520K claim.
+The real 27B Qwen NVFP4 one-card matrix is complete on Vast RTX 5090: 192K
+context, detailed native vision, full API features, throughput, speculation
+controls, and near-maximum retrieval passed. Repeating the final performance
+rows on Runpod remains a provider-comparison task, not a profile blocker. GLM
+vision is still a separate opt-in feature profile: the current EXL3 graft
+passes detailed short screenshot extraction but fails the mandatory 32K text
+gate, so it is not allowed to borrow the flagship text profile's 520K claim.
 
 ## Flagship GLM-5.2 qualification
 

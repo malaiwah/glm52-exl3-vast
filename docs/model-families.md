@@ -133,9 +133,9 @@ an MLA KV layout), `knob-inapplicable` (error), `family-untested` (warn),
 `verify_serving.py` has no family branch and does not import the config
 registry. The needle probe is the gate for **any** model: short prompts remain
 insufficient regardless of architecture, and the probe simply sizes itself
-against whatever `MAX_MODEL_LEN` the family resolved to (512K for GLM, 256K for
-the upstream Qwen model, with a conservative 32K appliance default for the
-NVFP4 profile). A family cannot opt out of being verified.
+against whatever `MAX_MODEL_LEN` the family resolved to (512K for GLM and the
+measured 192K vision-enabled envelope for Qwen NVFP4). A family cannot opt out
+of being verified.
 
 ---
 
@@ -184,10 +184,11 @@ explanations; it does not rule out the simpler vision tasks reported upstream.
 Facts below are from the [model card](https://huggingface.co/Qwen/Qwen3.6-27B);
 quantization details come from the
 [NVIDIA NVFP4 checkpoint card](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4).
-The full 27B profile has completed cold download and checkpoint inspection on a
-live Blackwell host. The same image/profile path was boot-qualified with the
-small Qwen3.5 representative model, including reasoning, tools, vision and MTP.
-The remaining qualification item is a full 27B serving boot and benchmark.
+The full 27B profile completed download, serving, performance, long-context,
+vision, structured-output, tool and speculative-decoding qualification on a
+single RTX 5090 32 GB. The small Qwen3.5 representative remains the economical
+provider-plumbing smoke model; it is no longer the evidence for this profile's
+model behavior.
 
 | | from the model card |
 |---|---|
@@ -203,20 +204,22 @@ Preset choices and why:
 
 | knob | value | reasoning |
 |---|---|---|
-| repo | `nvidia/Qwen3.6-27B-NVFP4`, revision `0893e160…` | the vendor-published low-weight development checkpoint, pinned to the current Hub revision audited on 2026-07-28 |
+| repo | `nvidia/Qwen3.6-27B-NVFP4`, revision `0893e160…` | the vendor-published low-weight checkpoint, pinned to the current Hub revision rechecked on 2026-07-29 |
 | `--quantization` | `modelopt` | matches the checkpoint metadata and the quantizer bundled in the pinned image |
 | `TENSOR_PARALLEL_SIZE` | **1** | the point of this profile is an inexpensive single-Blackwell development rental |
-| `MAX_MODEL_LEN` | **32768** | conservative profile default; the upstream architecture supports 262,144 natively, but the full NVFP4 memory envelope still needs measurement |
-| `MTP_TOKENS` | **0** | opt in only after a full-checkpoint boot; the method, when enabled, is `mtp` |
-| `KV_CACHE_DTYPE` | `auto` | let vLLM choose; `fp8` is offered, `nvfp4_ds_mla` is refused as an MLA layout |
+| `MAX_MODEL_LEN` | **196608** | highest repeatably safe detailed-vision envelope; 200K/208K left only 177/29 MiB after the image and 256K did not leave a safe vision workspace |
+| `MTP_TOKENS` | **0** | compiled MTP-off is faster; eager MTP2 measured 46/81/101 tok/s at C1/C2/C4 versus 68/121/222 without speculation |
+| `KV_CACHE_DTYPE` | `auto` | resolves the checkpoint-declared FP8 E4M3 KV format; `nvfp4_ds_mla` is refused because Qwen is not MLA |
 | `GPU_BLOCKS_OVERRIDE` | 0 | the 2048-block pin is a GLM-specific 512K trick |
-| `GPU_MEMORY_UTILIZATION` | 0.90 | conservative; 0.93 was tuned for the GLM memory profile |
-| parsers | `qwen3` reasoning, `qwen3_coder` tools | both are present in the pinned vLLM and were exercised with the representative Qwen model |
-| multimodal | off by default | `--language-model-only`; opt in after budgeting the vision encoder's VRAM |
+| `GPU_MEMORY_UTILIZATION` | 0.90 | retained about 511 MiB after a 5K vision repetition following the near-maximum prefill; 0.91/0.92 were too tight |
+| `MAX_NUM_BATCHED_TOKENS` | 4096 | delivered 3.7K tok/s at 8K/64K; 8192 cut the profiled KV ceiling to about 168K and could not boot this context |
+| parsers | `qwen3` reasoning, `qwen3_coder` tools | both passed full-checkpoint thinking, preserved multi-turn reasoning, tools, and structured output |
+| multimodal | on, `max_pixels=8388608` | two 5120x2880 dashboard gates passed with 17–18/18 detail recall and image follow-up memory |
 
-The conservative defaults intentionally separate feature-development testing
-from final model qualification. See `TEST_RESULTS.md` for the live evidence and
-the explicit remaining residual.
+At the selected shape, uncached prefill measured 3,704/3,716/2,513 tok/s at
+8K/64K/180K and aggregate decode measured 68.0/120.9/221.6 tok/s at C1/C2/C4.
+The exact 192,290-token five-depth gate passed with no degeneration. See
+`TEST_RESULTS.md` for the complete live evidence and rejected candidates.
 
 ---
 
@@ -299,9 +302,9 @@ reports that a setting had no effect.
 
 ## 8. Remaining qualification
 
-The generic one-GPU path, profile switching, parsers, tools, multimodal input,
-MTP, provider proxying, and GPU visibility handling were exercised live with a
-small Qwen3.5 checkpoint. The exact Qwen3.6-27B NVFP4 checkpoint has completed
-cold download and metadata inspection but still needs a full serving
-performance run. GLM-5.2 is the flagship hardware-qualified profile; custom
+The generic one-GPU provider path remains cheaply smoke-tested with a small
+Qwen3.5 checkpoint. The exact Qwen3.6-27B NVFP4 checkpoint is now qualified on
+one RTX 5090 at the 192K vision-enabled profile. A Runpod repetition of the
+full 27B performance rows remains useful for provider comparison, but is not a
+model-profile blocker. GLM-5.2 remains the four-GPU flagship; custom
 checkpoints remain compatibility-by-vLLM rather than a blanket support claim.

@@ -47,29 +47,51 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 | `MODEL_PROFILE` | intended use | default hardware | download / context |
 |---|---|---|---|
 | `glm52-exl3` | validated GLM-5.2 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 512K |
-| `qwen36-27b-nvfp4` | lower-cost feature development | 1x RTX PRO 6000 Blackwell or RTX 5090 | ~21 GiB / 32K |
+| `qwen36-27b-nvfp4` | vision-enabled, lower-cost production/development | 1x RTX 5090 32 GB | ~21 GiB / 192K |
 | `custom` | another conventional vLLM checkpoint | configurable | conservative 32K defaults |
 
 The Qwen profile serves
 [`nvidia/Qwen3.6-27B-NVFP4`](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4)
 with `--quantization modelopt`, the `qwen3` reasoning parser and
-`qwen3_coder` tool parser. It defaults to text-only mode to preserve VRAM,
-one GPU, no DRAM KV offload, and no speculative decoding as the fast,
-conservative development shape. The full 27B text profile is now
-live-qualified on one RTX 5090 at its conservative 32K default: thinking,
-non-thinking, streaming, preserved multi-turn reasoning, tools, and strict
-structured output all passed. Qwen's native context is 262,144;
-raise `MAX_MODEL_LEN` after measuring headroom. Set `MULTIMODAL=1` to load its
-native vision encoder, or opt into its included MTP module with
-`MTP_TOKENS=2`.
+`qwen3_coder` tool parser. It defaults to its native vision encoder, one GPU,
+192K context, FP8 KV selected from the checkpoint metadata, no DRAM KV
+offload, and compiled MTP-off decoding. The full profile was qualified on one
+575 W RTX 5090 32 GB: thinking/non-thinking, streaming, preserved multi-turn
+reasoning, strict structured outputs, tools/tool-result continuation, a
+192,290-token five-depth retrieval, and two 5120x2880 detailed-vision gates all
+passed.
+
+The upstream architecture supports 262,144 tokens, but 256K is not a safe
+vision-enabled 32 GB appliance target. Text-only attempts approached it; the
+vision encoder needs transient working memory. At 200K and 208K the detailed
+image test survived with only 177 MiB and 29 MiB free respectively, while
+nearby boots OOMed. The selected `GPU_MEMORY_UTILIZATION=0.90`,
+`MAX_MODEL_LEN=196608`, `MAX_NUM_BATCHED_TOKENS=4096`, and 8,388,608-pixel
+image cap retained about 511 MiB after the post-192K vision repetition. An
+8,192-token scheduler batch reduced the profiled KV ceiling to about 168K and
+could not start, so it is not a performance upgrade for this envelope.
+
+| one RTX 5090, GG v20-r9 | measured result |
+|---|---:|
+| uncached PP @8K / 64K / 180K | 3,704 / 3,716 / 2,513 tok/s |
+| aggregate TG C1 / C2 / C4 | 68.0 / 120.9 / 221.6 tok/s |
+| KV pool / maximum request | 205,544 / 196,608 tokens |
+| near-maximum retrieval | 5/5 at 192,290 tokens; no degeneration |
+| 5K dashboard | 17–18/18 details, image follow-up and text regression passed |
+| warm compatible-cache start | about 43 seconds to API readiness |
 
 On GG v20-r9, Qwen MTP2 cannot use the compiled
 FlashInfer decode wrapper: the
 wrapper freezes `q_len_per_req=1`, while the draft step needs `3`, and the first
 request kills the engine. The appliance therefore adds `--enforce-eager`
 automatically when Qwen MTP is enabled. That compatibility path passed the live
-feature gate but gives up torch compilation and CUDA graphs; the fast default
-remains `MTP_TOKENS=0`.
+feature gate but gives up torch compilation and CUDA graphs. It measured only
+46/81/101 tok/s at C1/C2/C4 versus 68/121/222 without MTP, despite healthy
+74–79% draft acceptance and mean acceptance length around 2.5. It also reduces
+usable context. The fast qualified default therefore remains `MTP_TOKENS=0`.
+N-gram speculation hit the same frozen-query-shape class in compiled mode and
+failed its correctness gate in eager mode; EAGLE and DSpark require compatible
+external draft checkpoints that this checkpoint does not publish.
 
 The [Qwen3.6-27B model card](https://huggingface.co/Qwen/Qwen3.6-27B)
 documents the architecture, native context, text-only switch, Qwen parsers,
@@ -79,9 +101,9 @@ name `mtp` (the older `qwen3_next_mtp` alias is deprecated). The
 specifies the ModelOpt loader and 262K serving command. This image's
 [pinned GG source and EXL3 integration](https://github.com/local-inference-lab/vllm/pull/190)
 contains the required Qwen3.5 architecture, parser, speculative method, and
-mixed-precision ModelOpt implementation. The 32K, text-only, single-GPU
-settings here are deliberately conservative development defaults rather than
-a claim that the checkpoint's complete native context has been qualified.
+mixed-precision ModelOpt implementation. The single-GPU 192K vision profile is
+the measured turnkey envelope; 262K remains an upstream model capability, not
+a claim about safe operation on a 32 GB card.
 
 For another checkpoint:
 
@@ -314,21 +336,24 @@ disk/network performance, and actually allocates at least 450 GB. Wait for
 `Application startup complete` and the verification result in the instance
 logs, then use the generated API key and labeled endpoint.
 
-For lower-cost Qwen testing, clone/create a private Vast template using the
-same image, select one compatible Blackwell GPU, allocate at least 80 GB of
-disk, and add:
+For the one-GPU alternative, use
+**[▶ Qwen3.6-27B NVFP4 Vision on Vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=5599457ed801aab011abc890d526e961)**.
+It selects the same credential-free image in Docker `args`/ENTRYPOINT mode,
+one RTX 5090, 100 GB of disk, and `MODEL_PROFILE=qwen36-27b-nvfp4`.
 
-```text
-MODEL_PROFILE=qwen36-27b-nvfp4
-```
+> **Do not select Vast's SSH launch mode.** The appliance starts its own
+> key-only SSH service. Vast SSH mode replaces the image entrypoint, so the
+> dashboard, model download, verifier, and vLLM never start. Use the linked
+> template or an `args` template with no start command. This applies to both
+> the GLM and Qwen profiles.
 
 ## Launch on Runpod
 
 Choose **[▶ GLM-5.2 EXL3 on Runpod](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93)**
 for the four-GPU flagship, or
-**[▶ Qwen3.6-27B NVFP4 on Runpod](https://console.runpod.io/deploy?template=m9j7oh6cv2&ref=4ahycj93)**
-for the lower-cost one-GPU development profile. Both links select public Pod
-templates and include the project referral.
+**[▶ Qwen3.6-27B NVFP4 Vision on Runpod](https://console.runpod.io/deploy?template=m9j7oh6cv2&ref=4ahycj93)**
+for the qualified one-GPU profile. Both links select public Pod templates and
+include the project referral.
 
 This image is a **Runpod Pod** template, not a Serverless worker or Hub
 application. It runs a persistent OpenAI-compatible service and does not
@@ -343,8 +368,8 @@ The checked-in manifests follow Runpod's current
 [Pod template REST schema](https://docs.runpod.io/pods/templates/manage-templates):
 
 - [`runpod-template.json`](runpod-template.json): GLM profile, 450 GB volume.
-- [`runpod-template-qwen36.json`](runpod-template-qwen36.json): lower-cost Qwen
-  profile, 80 GB volume.
+- [`runpod-template-qwen36.json`](runpod-template-qwen36.json): vision-enabled
+  Qwen profile, 100 GB volume.
 
 Publish either credential-free template with:
 
@@ -362,14 +387,14 @@ the same values:
 - **Image:** `ghcr.io/malaiwah/glm52-exl3-vast:latest`; leave Container Start
   Command blank so the image's `ENTRYPOINT` runs.
 - **Compute:** select exactly 4x RTX PRO 6000 Blackwell for the GLM manifest,
-  or one RTX PRO 6000 Blackwell/RTX 5090 for the Qwen manifest. GPU type/count
+  or one RTX 5090 32 GB for the Qwen manifest. GPU type/count
   are selected at Pod deployment and are not fields in the reusable template
   schema. Do not select RTX 4090 or another pre-Blackwell GPU. After Runpod
   assigns the host, confirm driver 595.45.04 or newer in the system logs; its
   REST API's `allowedCudaVersions` currently stops at CUDA 13.0 and cannot
   express this CUDA 13.2 requirement.
 - **Storage:** use a 50 GB container disk; mount at least 450 GB for GLM or
-  80 GB for Qwen at `/workspace`. A volume disk survives stops/restarts but is
+  100 GB for Qwen at `/workspace`. A volume disk survives stops/restarts but is
   deleted with the Pod; use a network volume if weights must survive deletion. See
   [Runpod storage options](https://docs.runpod.io/pods/storage/types).
 - **Ports:** `8000/http`, `8443/tcp`, `1111/http`, `22/tcp`. The dashboard and
@@ -832,14 +857,14 @@ within sampling noise (~±3).
   `--ipc` and `--ulimit` entries are ignored. Port 22 is SSH and port 1111 is
   the landing page.
 - **Profile**: `MODEL_PROFILE=glm52-exl3` (default), or
-  `MODEL_PROFILE=qwen36-27b-nvfp4` for the low-cost development model.
-- **Disk**: >=450 GB for GLM; >=80 GB for Qwen.
+  `MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU vision model.
+- **Disk**: >=450 GB for GLM; >=100 GB for Qwen.
 - **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB) for GLM; one RTX PRO 6000
   Blackwell or RTX 5090 for Qwen.
 - **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
   applicable Hub rate limits), `OFFLOAD_FRACTION`
   (GLM default 0.5 for reusable agentic prefixes), `MTP_TOKENS` (GLM default 5; Qwen
-  default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 524288; Qwen 32768),
+  default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 524288; Qwen 196608),
   `SERVED_MODEL_NAME`,
   `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 = stock BF16 draft),
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
@@ -914,8 +939,9 @@ existing endpoint:
 | `MODEL_DISPLAY_NAME` | profile name | dashboard and provider label |
 | `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working |
 | `TENSOR_PARALLEL_SIZE` | 4 GLM / 1 Qwen | match a supported profile topology |
-| `MAX_MODEL_LEN` | 524288 GLM / 32768 Qwen | change the qualified GLM scheduler/memory shape or increase Qwen context only after measuring VRAM |
-| `MULTIMODAL` | n/a GLM / 0 Qwen | Qwen `1` loads its native vision encoder; GLM vision remains controlled by `VISION` (default 0) |
+| `MAX_MODEL_LEN` | 524288 GLM / 196608 Qwen | change a qualified scheduler/memory envelope only with a fresh near-maximum retrieval and vision gate |
+| `MULTIMODAL` | n/a GLM / 1 Qwen | Qwen `0` saves vision VRAM with `--language-model-only`; GLM vision remains controlled by `VISION` (default 0) |
+| `MM_MAX_PIXELS` | n/a GLM / 8388608 Qwen | cap native image processing near a 4K working image; the 5K detail gate passed at this value |
 | `QUANTIZATION` | custom profile only | vLLM quantizer name such as `modelopt` |
 | `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |
 | `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
@@ -1017,5 +1043,5 @@ on hardware you own.
   firewalling is not possible without NET_ADMIN (not granted on vast).
 - **Disk note**: verify the allocated disk matches the profile. GLM needs at
   least 450 GB for weights, overlays, graft backup, vision and compile cache.
-  Qwen's checkpoint is about 21 GiB; its 80 GB volume leaves room for cache and
+  Qwen's checkpoint is about 21 GiB; its 100 GB volume leaves room for cache and
   experiments.
