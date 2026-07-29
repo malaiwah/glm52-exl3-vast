@@ -337,7 +337,7 @@ disk/network performance, and actually allocates at least 450 GB. Wait for
 logs, then use the generated API key and labeled endpoint.
 
 For the one-GPU alternative, use
-**[▶ Qwen3.6-27B NVFP4 Vision on Vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=5599457ed801aab011abc890d526e961)**.
+**[▶ Qwen3.6-27B NVFP4 Vision on Vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=214d2e120a6718558fa207d4579d4316)**.
 It selects the same credential-free image in Docker `args`/ENTRYPOINT mode,
 one RTX 5090, 100 GB of disk, and `MODEL_PROFILE=qwen36-27b-nvfp4`.
 
