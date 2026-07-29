@@ -988,6 +988,75 @@ verifier, feature-suite, Python and shell tests passed. Per the operator's
 instruction, the patch was **not** loaded into or restarted on AIBeast; its
 production endpoint remained online throughout.
 
+### Qwen3.6-27B NVFP4 one-card qualification (Vast RTX 5090)
+
+The full pinned `nvidia/Qwen3.6-27B-NVFP4` checkpoint at `0893e160…` was
+qualified with the r9-derived turnkey image on Vast instance `46196547`, one
+RTX 5090 32 GB with a 575 W limit. The selected profile is native vision on,
+TP1, `GPU_MEMORY_UTILIZATION=0.90`, `MAX_MODEL_LEN=196608`,
+`MAX_NUM_BATCHED_TOKENS=4096`, `MAX_NUM_SEQS=4`, compiled MTP-off decoding,
+checkpoint-selected FP8 E4M3 KV, and `max_pixels=8388608`.
+
+The context/memory sweep separated "booted once" from a safe appliance
+default:
+
+| candidate | result |
+|---|---|
+| native 262,144 at GMU 0.97 / batch 2,048 | KV admission failed; estimated maximum 249,312 |
+| native 262,144 at GMU 0.98 | still short at about 260,288 and left no credible vision workspace |
+| 221,184 at GMU 0.95 | text and 216K retrieval passed, but full-resolution vision OOMed |
+| 204,800 at GMU 0.91 | detailed 5K vision passed, only 177 MiB remained |
+| 212,992 at GMU 0.92 | detailed 5K vision passed, only 29 MiB remained |
+| **196,608 at GMU 0.90** | repeated vision and near-maximum text passed; about 511 MiB remained after the final image |
+
+The checkpoint processor's 16,777,216-pixel default OOMed on a 5120x2880
+dashboard. Capping it to 8,388,608 pixels retained useful detail: two final
+runs recovered 17–18 of 18 small dashboard facts, remembered the image in a
+follow-up turn, and passed a text-only regression. The second run followed the
+near-maximum prefill, so it also checked that long-context activity did not
+poison the vision/text path.
+
+The selected scheduler produced:
+
+| measurement | result |
+|---|---:|
+| uncached prefill 8K / 64K / 180K | 3,703.6 / 3,716.1 / 2,513.3 tok/s |
+| aggregate decode C1 / C2 / C4 | 68.0 / 120.9 / 221.6 tok/s |
+| KV pool / maximum request | 205,544 / 196,608 tokens |
+| exact near-maximum retrieval | 5/5 depths at 192,290 actual tokens, no degeneration |
+
+The 8,192-token scheduler candidate was not an improvement: its larger
+activation profile left only 5.42 GiB for KV, an estimated 167,776 tokens, and
+failed startup admission for 196,608. A compatible cached restart loaded the
+AOT artifact in 1.04 seconds and reached the API in about 43 seconds including
+model load, graph capture, and multimodal warmup.
+
+The final feature suite passed bad-key rejection, tokenization,
+thinking/non-thinking chat, streamed usage, preserved multi-turn reasoning,
+strict JSON with thinking both off and on, one automatic tool call,
+`tool_choice=required`, tool-result continuation, and native vision. The final
+serve log contained zero engine errors, tracebacks, HTTP 500s, preemptions,
+OOMs, FSM failures, or post-EOS matcher warnings.
+
+Speculative controls were rejected rather than exposed as optimistic defaults:
+
+- eager MTP2 had healthy 74–79% draft acceptance and mean acceptance length
+  around 2.5, but measured only 46/81/101 tok/s at C1/C2/C4 versus
+  68/121/222 compiled without MTP and reduced the context envelope;
+- compiled MTP2 hit the FlashInfer frozen `q_len_per_req=1` wrapper when the
+  verification step needed 3, so the compatibility path must be eager;
+- compiled n-gram hit the same query-shape class and eager n-gram failed its
+  acceptance/correctness gate;
+- EAGLE and DSpark require compatible trained draft checkpoints that this
+  NVIDIA checkpoint does not publish.
+
+The runtime reports mixed ModelOpt NVFP4/FP8/MXFP8 weights and FP8 E4M3 KV.
+It warns that the checkpoint does not publish a separate Q scale and therefore
+uses the K scale/1.0; the five-depth 192K retrieval and degeneration gates are
+the empirical quality evidence for this exact record. It also warns that some
+FP4 weight-only components fall back to Marlin on SM120. Those warnings are
+documented upstream/runtime characteristics, not hidden by the appliance.
+
 ### GG v20-r8 upstream refresh smoke (AIBeast left online)
 
 The published appliance at commit `7b0bc08a16807d6de78ede0e6f8987be4bddd8c6`

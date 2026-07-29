@@ -393,8 +393,11 @@ def test_qwen_preset():
     eff8, src8, _ = resolved("qwen36", gpus=8)
     check("and on an 8-GPU host it uses all 8 rather than leaving 7 idle",
           eff8["TENSOR_PARALLEL_SIZE"] == 8)
-    check("economical profile defaults to a 32K context", eff["MAX_MODEL_LEN"] == 32768)
-    check("MTP is opt-in for the development profile", eff["MTP_TOKENS"] == 0)
+    check("the qualified RTX 5090 profile exposes a 192 Ki-token context",
+          eff["MAX_MODEL_LEN"] == 196608)
+    check("MTP is opt-in for the production profile", eff["MTP_TOKENS"] == 0)
+    check("the qualified GPU utilization is selected",
+          eff["GPU_MEMORY_UTILIZATION"] == 0.90)
     check("KV dtype is auto, not the MLA fp8 default", eff["KV_CACHE_DTYPE"] == "auto")
     check("the KV pool pin is dropped", eff["GPU_BLOCKS_OVERRIDE"] == 0)
     check("variant follows the family", eff["MODEL_VARIANT"] == "qwen36-nvfp4")
@@ -417,8 +420,10 @@ def test_qwen_preset():
     check("the qualified Qwen tool parser is selected",
           "--tool-call-parser qwen3_coder" in line and
           "--enable-auto-tool-choice" in line)
-    check("the economical profile is text-only by default",
-          "--language-model-only" in line)
+    check("the production profile enables its native vision path",
+          "--language-model-only" not in line)
+    check("the profile caps native vision near a 4K working image",
+          '--mm-processor-kwargs {"max_pixels":8388608}' in line, line)
     check("the default compiled Qwen profile does not force eager mode",
           "--enforce-eager" not in line)
     mtp_eff, _, _ = resolved("qwen36", gpus=1, MTP_TOKENS=2)
@@ -496,8 +501,8 @@ def test_inapplicable_knobs():
           out.get("MODEL_FAMILY") == "qwen36", str(out))
     check("a knob left at the new family's own default is NOT pinned",
           "MAX_MODEL_LEN" not in gc.minimize({"MODEL_FAMILY": "qwen36",
-                                              "MAX_MODEL_LEN": 32768}),
-          str(gc.minimize({"MODEL_FAMILY": "qwen36", "MAX_MODEL_LEN": 32768})))
+                                              "MAX_MODEL_LEN": 196608}),
+          str(gc.minimize({"MODEL_FAMILY": "qwen36", "MAX_MODEL_LEN": 196608})))
     check("but an override of it is",
           gc.minimize({"MODEL_FAMILY": "qwen36",
                        "MAX_MODEL_LEN": 131072}).get("MAX_MODEL_LEN") == 131072)
@@ -623,7 +628,7 @@ def test_long_context_gate_is_family_independent():
     check("and the needle probe is the thing that sets it",
           "needle_probe" in src and "long_context_verified" in src)
     # the probe budget follows MAX_MODEL_LEN, which is a family default
-    for fam, expected in (("glm52", 524288), ("qwen36", 32768)):
+    for fam, expected in (("glm52", 524288), ("qwen36", 196608)):
         eff, _, _ = resolved(fam)
         check(f"{fam} probes against its own context ceiling ({expected})",
               eff["MAX_MODEL_LEN"] == expected)

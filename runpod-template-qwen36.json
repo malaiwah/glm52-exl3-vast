@@ -11,14 +11,14 @@
   "imageName": "ghcr.io/malaiwah/glm52-exl3-vast:latest",
   "isPublic": true,
   "isServerless": false,
-  "name": "Model Turnkey: Qwen3.6-27B NVFP4 (1x Blackwell)",
+  "name": "Model Turnkey: Qwen3.6-27B NVFP4 Vision (1x RTX 5090)",
   "ports": [
     "8000/http",
     "8443/tcp",
     "1111/http",
     "22/tcp"
   ],
-  "readme": "Lower-cost development profile for nvidia/Qwen3.6-27B-NVFP4. Deploy on 1x NVIDIA RTX PRO 6000 Blackwell or GeForce RTX 5090. The profile downloads about 21 GiB, defaults to a 32K text-only context, disables DRAM KV offload and MTP until explicitly tested, and mounts persistent storage at /workspace. Ports 1111 and 8000 use Runpod managed HTTPS for the dashboard and secure API fallback. In a private clone, add DESEC_TOKEN and DESEC_DOMAIN through Runpod Secrets to make port 8443 a direct appliance-TLS route that avoids Runpod proxy's 100-second limit.",
-  "volumeInGb": 80,
+  "readme": "Qualified vision-enabled profile for nvidia/Qwen3.6-27B-NVFP4 on 1x GeForce RTX 5090 32 GB. It downloads about 21 GiB and defaults to 192K context, compiled MTP-off decoding, FP8 KV, and an 8.39M-pixel native-vision cap. The full API feature suite, a 192,290-token five-depth retrieval, and two detailed 5120x2880 vision gates passed on Vast. Ports 1111 and 8000 use Runpod managed HTTPS for the dashboard and secure API fallback. In a private clone, add DESEC_TOKEN and DESEC_DOMAIN through Runpod Secrets to make port 8443 a direct appliance-TLS route that avoids Runpod proxy's 100-second limit.",
+  "volumeInGb": 100,
   "volumeMountPath": "/workspace"
 }
