@@ -299,22 +299,23 @@ def engine_state() -> str:
 
 
 SNIPPETS = [
-    ("oh-my-pi / pi", "~/.pi/agent/models.json", """{
-  "providers": {
-    "glm-vast": {
-      "baseUrl": "$ep/v1",
-      "api": "openai-completions",
-      "apiKey": "$key",
-      "models": [
-        {"id": "$model", "name": "$model", "contextWindow": $ctx}
-      ]
-    }
-  }
-}"""),
+    ("Oh My Pi (OMP 17+)", "~/.omp/agent/models.yml", """providers:
+  turnkey:
+    baseUrl: "$ep/v1"
+    api: openai-completions
+    apiKey: "$key"
+    models:
+      - id: "$model"
+        name: "$model"
+        reasoning: true
+        input: $input
+        supportsTools: true
+        contextWindow: $ctx
+        maxTokens: $output"""),
     ("opencode", "opencode.json (project or ~/.config/opencode/)", """{
   "$$schema": "https://opencode.ai/config.json",
   "provider": {
-    "glm-vast": {
+    "turnkey": {
       "npm": "@ai-sdk/openai-compatible",
       "name": "$model",
       "options": {"baseURL": "$ep/v1", "apiKey": "$key"},
@@ -329,15 +330,15 @@ export ANTHROPIC_AUTH_TOKEN="$key"
 export ANTHROPIC_MODEL="$model"
 claude"""),
     ("Codex", "~/.codex/config.toml", """model = "$model"
-model_provider = "glm-vast"
+model_provider = "turnkey"
 
-[model_providers.glm-vast]
+[model_providers.turnkey]
 name = "$model"
 base_url = "$ep/v1"
-env_key = "GLM_API_KEY"
+env_key = "TURNKEY_API_KEY"
 wire_api = "chat"
 
-# then:  export GLM_API_KEY="$key" """),
+# then:  export TURNKEY_API_KEY="$key" """),
 ]
 
 # Shared look. Literal CSS only (no stray $): safe inside plain strings.
@@ -758,6 +759,10 @@ def deployment() -> dict:
     out["title"] = f"{served} turnkey"
     out["context"] = int(eff.get("MAX_MODEL_LEN") or 0)
     out["output"] = int(eff.get("MODEL_OUTPUT_LIMIT") or 8192)
+    is_vision = (bool(eff.get("MULTIMODAL"))
+                 if eff.get("MODEL_FAMILY") == "qwen36"
+                 else bool(eff.get("VISION")))
+    out["input"] = "[text, image]" if is_vision else "[text]"
     out["served_names"] = str(eff.get("SERVED_MODEL_NAME", served)).split()
     ctx = out["context"]
     ctx_s = f"{ctx // 1024}K" if ctx >= 1024 else str(ctx)
@@ -1482,7 +1487,8 @@ def render(secure: bool, tok: str = "") -> bytes:
         for name, where, body in SNIPPETS:
             filled = Template(body).substitute(
                 ep=endpoint, key=key, model=dep["model"] or "model",
-                ctx=dep.get("context") or 32768, output=dep.get("output") or 8192)
+                ctx=dep.get("context") or 32768, output=dep.get("output") or 8192,
+                input=dep.get("input") or "[text]")
             parts.append(f"<details><summary>{html.escape(name)}</summary>"
                          f"<p class=sub><code>{html.escape(where)}</code></p>"
                          f"<pre>{html.escape(filled)}</pre></details>")

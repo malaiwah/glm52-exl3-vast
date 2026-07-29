@@ -87,6 +87,11 @@ INDIRECT = {
         "why": "read by landing.deployment for generated client "
                "configuration and quick-chat max_tokens",
     },
+    "KV_CACHE_MEMORY_BYTES": {
+        "serve_args": True,
+        "why": "read by glm_config.family_serve_args to add the optional "
+               "--kv-cache-memory-bytes override",
+    },
     "VLLM_EXL3_TRELLIS_MAX_M": {
         "entrypoint": True,
         "why": "exported and consumed by entrypoint.sh as an EXL3 kernel env "
@@ -218,6 +223,16 @@ def main():
     check("credential-bearing pages are never cached or framed",
           'self.send_header("Cache-Control", "no-store")' in landing
           and 'self.send_header("X-Frame-Options", "DENY")' in landing)
+    check("current OMP config path and YAML shape are rendered",
+          "~/.omp/agent/models.yml" in landing
+          and "~/.pi/agent/models.json" not in landing
+          and "supportsTools: true" in landing
+          and "maxTokens: $output" in landing)
+    check("client provider ids are model and provider neutral",
+          '"glm-vast"' not in landing and "model_provider = \"glm-vast\"" not in landing)
+    check("boot highlights are timestamped at the source",
+          "printf '[%s] %s\\n'" in entry
+          and "date -u '+%Y-%m-%dT%H:%M:%SZ'" in entry)
 
     print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")
     for name, detail in FAILURES:

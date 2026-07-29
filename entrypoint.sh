@@ -200,7 +200,8 @@ mkdir -p "$GLM_STATE_DIR" "$GLM_RUNTIME_DIR" "$GLM_LOG_DIR" "$GLM_STATE_DIR/fail
 # diagnosed from a rented pod instead of from a log line.
 boot_note() {
   echo "$1"
-  printf '%s\n' "$1" >> "$BOOT_NOTES" 2>/dev/null || true
+  printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$1" \
+    >> "$BOOT_NOTES" 2>/dev/null || true
 }
 rm -f "$RESTART_FLAG" "$VERIFY_FILE" "$TERMINATE_FLAG" "$ENGINE_STOPPED"
 

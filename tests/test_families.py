@@ -434,6 +434,22 @@ def test_qwen_preset():
     check("the configurator explains Qwen MTP's eager-mode tradeoff",
           "qwen-mtp-eager" in ids(mtp_findings),
           str(ids(mtp_findings)))
+    fixed_eff, _, _ = resolved(
+        "qwen36", gpus=1, KV_CACHE_MEMORY_BYTES=5_500_000_000)
+    fixed_args = gc.family_serve_args(fixed_eff)
+    check("a fixed KV byte budget reaches vLLM as two intact argv entries",
+          ["--kv-cache-memory-bytes", "5500000000"] ==
+          fixed_args[fixed_args.index("--kv-cache-memory-bytes"):
+                     fixed_args.index("--kv-cache-memory-bytes") + 2],
+          str(fixed_args))
+    fixed_findings = gc.validate(fixed_eff)
+    check("the configurator explains that fixed KV supersedes GMU sizing",
+          "fixed-kv-cache" in ids(fixed_findings), str(ids(fixed_findings)))
+    conflict_eff, _, _ = resolved(
+        "qwen36", gpus=1, KV_CACHE_MEMORY_BYTES=5_500_000_000,
+        GPU_BLOCKS_OVERRIDE=100)
+    check("fixed KV bytes and a block-count override are rejected together",
+          "fixed-kv-block-conflict" in errs(gc.validate(conflict_eff)))
     check("the generic env block is selected", d["FAMILY_ENV_BLOCK"] == "generic")
     check("spec method uses vLLM's current mtp name", d["SPEC_METHOD"] == "mtp")
     check("the MTP78 apparatus is forced off", d["MTP78_MODE"] == "off")

@@ -89,6 +89,18 @@ feature gate but gives up torch compilation and CUDA graphs. It measured only
 46/81/101 tok/s at C1/C2/C4 versus 68/121/222 without MTP, despite healthy
 74–79% draft acceptance and mean acceptance length around 2.5. It also reduces
 usable context. The fast qualified default therefore remains `MTP_TOKENS=0`.
+The real OMP workload made the memory cost more explicit: with GMU 0.90, MTP2
+failed 192K KV admission, and 172K, 155K and even 64K auto-KV trials OOMed in
+the first substantial eager request because vLLM filled the remaining GMU
+budget with KV. A 64K diagnostic passed after either lowering GMU to 0.85 or
+pinning the equivalent per-GPU pool with
+`KV_CACHE_MEMORY_BYTES=4981753856`. Across 38 OMP reporting intervals the
+fixed-headroom shape averaged 2,656 prompt tok/s, reached 3,520 prompt tok/s,
+and produced MAL 2.606 with 80.3% mean draft acceptance. Aggregate generation
+averaged 22.8 tok/s and peaked at 95.3 while serving up to four requests—still
+materially worse than compiled MTP-off. The fixed-pool knob is therefore an
+advanced diagnostic/workspace control, not part of the Qwen production
+profile.
 N-gram speculation hit the same frozen-query-shape class in compiled mode and
 failed its correctness gate in eager mode; EAGLE and DSpark require compatible
 external draft checkpoints that this checkpoint does not publish.
@@ -346,6 +358,71 @@ one RTX 5090, 100 GB of disk, and `MODEL_PROFILE=qwen36-27b-nvfp4`.
 > dashboard, model download, verifier, and vLLM never start. Use the linked
 > template or an `args` template with no start command. This applies to both
 > the GLM and Qwen profiles.
+
+### Low-cost first run: Qwen + Oh My Pi
+
+The Qwen template is the quickest way to learn the complete appliance flow
+before renting the four-GPU flagship. A live July 29 qualification on a Vast
+RTX 5090 reached the verified API in about six minutes on a well-connected
+host: roughly two minutes for the appliance image, 57 seconds for the 21 GiB
+checkpoint, then model load, compile/autotune and the long-context gate. On a
+different Community host, the image had not completed a single new layer after
+20 minutes; that rental was released. Treat visible completed layers—not an
+advertised network number or an animated `loading` line—as progress, and set a
+cold-start cost deadline before clicking Rent.
+
+For a secure first run, configure `DESEC_TOKEN` in Vast's account environment
+and `DESEC_DOMAIN=yourname.dedyn.io` in a private clone of the template before
+launch. Open the tokenized dashboard from the instance label/logs and wait for:
+
+1. **Weights: ready**
+2. **TLS / DNS: `https://model-<instance-id>.<domain>`**
+3. **Engine: serving**
+4. **Correctness: verified including long context**
+
+If TLS / DNS still says `not configured`, the direct Vast endpoint is plain
+HTTP. Do not send its bearer key over the public Internet. Fix the template and
+relaunch, or use the encrypted SSH-tunnel route documented below.
+
+Install [Oh My Pi](https://github.com/can1357/oh-my-pi), then copy the **Oh My
+Pi (OMP 17+)** YAML shown by the secure landing page:
+
+```bash
+curl -fsSL https://omp.sh/install | sh
+mkdir -p ~/.omp/agent
+$EDITOR ~/.omp/agent/models.yml
+omp models turnkey
+omp --model "turnkey/<served-model-name>"
+```
+
+The current OMP location is `~/.omp/agent/models.yml`; the old
+`~/.pi/agent/models.json` path is not discovered. The generated entry includes
+the appliance's actual context/output limits plus `reasoning`, image and tool
+capabilities, so Qwen does not silently appear text-only or advertise an output
+limit larger than its context.
+
+OMP review workflows can fan out more requests than a one-GPU profile admits.
+Match OMP to this appliance's `MAX_NUM_SEQS=4` while retaining one slot for the
+parent session:
+
+```bash
+omp config set providers.maxInFlightRequests '{"turnkey":4}'
+omp config set task.maxConcurrency 3
+```
+
+The first setting is the hard per-provider HTTP-request ceiling shared by OMP
+processes using that config root; the second bounds child agents. This prevents
+queued subagents from reaching OMP's time-to-first-event timeout while the
+server is otherwise healthy. If you rename the provider in `models.yml`, use
+that same provider id in `maxInFlightRequests`.
+
+The dashboard keeps a short client-side history of prompt/generation
+throughput, running/waiting requests, KV pressure and prefix-cache hits. Boot
+highlights are UTC timestamped so a first-time user can distinguish real
+progress from a stalled pull or warm-up. This capture is the secure Vast
+qualification while OMP was reviewing this repository:
+
+![Qwen3.6 27B Vast dashboard under bounded OMP load](docs/images/qwen36-vast-omp-live-dashboard.png)
 
 ## Launch on Runpod
 
@@ -949,6 +1026,7 @@ existing endpoint:
 | `MIN_NVIDIA_DRIVER_VERSION` | `595.45.04` | raise when a newer CUDA/base image requires it; the gate runs before model download |
 | `ALLOW_UNSUPPORTED_NVIDIA_DRIVER` | `0` | bypass the CUDA 13.2 driver floor only for an intentionally qualified compatibility-package stack |
 | `GPU_BLOCKS_OVERRIDE` | 0 | auto-profile the largest safe KV pool; set a positive block count to pin it |
+| `KV_CACHE_MEMORY_BYTES` | 0 | positive per-GPU byte count fixes KV memory and supersedes GMU for KV sizing; use the profiler's printed value when eager/speculative workspace must not be consumed by auto-KV, and do not combine it with `GPU_BLOCKS_OVERRIDE` |
 | `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host DRAM used as an aggregate L2 prefix cache (not active-context capacity); `0.5` is the measured agentic-workload setting on a 256 GiB host and native vLLM derives the TP worker slices |
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
 | `MTP78_MODE` | `off` (native) | the current Brandon revision contains a native rank-sliced TR3 draft; `graft` and `override` remain experimental compatibility paths. MadeBy561's native draft uses serialized NVFP4 experts. Prefer the `MTP_DRAFT` knob on the config page. |

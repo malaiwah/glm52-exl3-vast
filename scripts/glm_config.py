@@ -837,6 +837,18 @@ KNOBS = [
              "Memory-profile draws vary by a few hundred MiB run to run, so a value "
              "that boots 2 times in 3 is not a value that boots.")),
 
+    dict(key="KV_CACHE_MEMORY_BYTES", type="int", default=0, min=0,
+         max=1000000000000,
+         group="Memory", scope="engine", label="Fixed KV cache bytes (0 = auto)",
+         rationale=(
+             "Advanced escape hatch for separating KV capacity from model/runtime "
+             "headroom. 0 lets vLLM infer KV from GPU_MEMORY_UTILIZATION. A positive "
+             "per-GPU byte count emits --kv-cache-memory-bytes; vLLM then ignores "
+             "GPU_MEMORY_UTILIZATION for KV sizing. This is useful when an eager or "
+             "speculative path needs transient workspace that an auto-filled KV pool "
+             "would consume. Copy the reproducible value printed by vLLM's startup "
+             "memory profiler, then leave a measured safety margin.")),
+
     dict(key="LOAD_FORMAT", type="choice", default="safetensors",
          choices=["safetensors", "instanttensor"],
          group="Memory", scope="engine", label="Weight loader",
@@ -1458,6 +1470,8 @@ def family_serve_args(cfg: dict):
         args = ["--quantization", variant["quantization"]] + args
     if variant.get("quantization_config"):
         args += ["--quantization-config", variant["quantization_config"]]
+    if cfg.get("KV_CACHE_MEMORY_BYTES", 0) > 0:
+        args += ["--kv-cache-memory-bytes", str(cfg["KV_CACHE_MEMORY_BYTES"])]
     if cfg.get("MODEL_FAMILY") in ("qwen36", "custom") and not cfg.get("MULTIMODAL"):
         args += ["--language-model-only"]
     if (
@@ -1709,6 +1723,21 @@ def validate(cfg: dict, context=None):
              "download during the restart.")
 
     # 7. memory / pool sanity ------------------------------------------------
+    fixed_kv = cfg.get("KV_CACHE_MEMORY_BYTES", 0)
+    if fixed_kv and cfg["GPU_BLOCKS_OVERRIDE"]:
+        err("fixed-kv-block-conflict",
+            ["KV_CACHE_MEMORY_BYTES", "GPU_BLOCKS_OVERRIDE"],
+            "Choose one reproducible KV-pool control. --kv-cache-memory-bytes "
+            "already fixes the per-GPU pool; combining it with a block-count "
+            "override is ambiguous and has not been qualified.")
+    elif fixed_kv:
+        warn("fixed-kv-cache",
+             ["KV_CACHE_MEMORY_BYTES", "GPU_MEMORY_UTILIZATION"],
+             f"KV_CACHE_MEMORY_BYTES={fixed_kv} fixes the per-GPU KV allocation. "
+             "vLLM ignores GPU_MEMORY_UTILIZATION for KV sizing when this is set. "
+             "The fixed pool can preserve transient runtime workspace, but it also "
+             "caps context/concurrency and is hardware/model specific; verify its "
+             "reported token capacity and run the near-maximum correctness gate.")
     qualified_r9_512k = (
         is_glm
         and cfg["MODEL_VARIANT"] == "exl3-tr3"
@@ -1726,6 +1755,7 @@ def validate(cfg: dict, context=None):
         and cfg["VLLM_EXL3_TRELLIS_MAX_M"] == 64
         and not cfg["VISION"]
         and not cfg["GPU_BLOCKS_OVERRIDE"]
+        and not fixed_kv
     )
     if (is_glm and cfg["MODEL_VARIANT"].startswith("exl3-tr3")
             and cfg["LOAD_FORMAT"] == "instanttensor"
@@ -1743,7 +1773,8 @@ def validate(cfg: dict, context=None):
              "off exposed 543,488 KV tokens and passed a 521,275-token five-depth "
              "retrieval. Restore that shape or re-qualify this override from a "
              "cold start; do not disable graph accounting.")
-    if cfg["GPU_MEMORY_UTILIZATION"] > 0.95 and not cfg["GPU_BLOCKS_OVERRIDE"]:
+    if (cfg["GPU_MEMORY_UTILIZATION"] > 0.95
+            and not cfg["GPU_BLOCKS_OVERRIDE"] and not fixed_kv):
         if qualified_r9_512k:
             warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
                  f"{cfg['GPU_MEMORY_UTILIZATION']} is high by generic vLLM standards, "
