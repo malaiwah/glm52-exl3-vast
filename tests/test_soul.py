@@ -18,12 +18,14 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(SCRIPTS))
 
 import soul_config as sc  # noqa: E402
 import soul_controller as controller  # noqa: E402
 import secure_erase  # noqa: E402
 import config_cli  # noqa: E402
+import landing  # noqa: E402
 
 
 class SoulConfigTests(unittest.TestCase):
@@ -248,6 +250,20 @@ class SoulControllerTests(unittest.TestCase):
             controller._local_api_base(
                 {"endpoint": "https://pod-8000.proxy.runpod.net"}, 8000),
             "http://127.0.0.1:8000")
+        runpod_status = {**status, "provider": "runpod"}
+        self.assertEqual(
+            controller._local_api_base(runpod_status, 8000),
+            "http://127.0.0.1:8000")
+        self.assertEqual(
+            controller._tls_probe_target(
+                runpod_status, "model-123.example.test", 45678, 8000),
+            ("127.0.0.1", 8443, "model-123.example.test"),
+        )
+        self.assertEqual(
+            controller._tls_probe_target(
+                status, "model-123.example.test", 45678, 8000),
+            ("model-123.example.test", 8000, "model-123.example.test"),
+        )
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "config.json"
             controller._nanobot_config(
@@ -523,6 +539,32 @@ class SoulLandingTests(unittest.TestCase):
             finally:
                 self.stop_landing(proc)
 
+    def test_soul_resolution_failure_returns_degraded_status(self):
+        with mock.patch.object(
+                landing.soul, "resolve",
+                side_effect=ValueError("damaged config")):
+            doc = landing.soul_status()
+        self.assertEqual(doc["state"], "Disabled")
+        self.assertFalse(doc["controllerHealthy"])
+        self.assertEqual(doc["level"], 0)
+        self.assertIn("could not be resolved", doc["configNotes"][0])
+
+    def test_omp_reasoning_capability_follows_effective_serve_argv(self):
+        qwen, _sources, _notes = landing.gc.resolve(
+            state_values={"MODEL_FAMILY": "qwen36"},
+            env_values={"GLM_GPU_COUNT": "1"},
+        )
+        custom, _sources, _notes = landing.gc.resolve(
+            state_values={"MODEL_FAMILY": "custom"},
+            env_values={"GLM_GPU_COUNT": "1", "MODEL_ID": "org/model"},
+        )
+        with mock.patch.object(
+                landing.gc, "resolve", return_value=(qwen, {}, [])):
+            self.assertEqual(landing.deployment()["reasoning"], "true")
+        with mock.patch.object(
+                landing.gc, "resolve", return_value=(custom, {}, [])):
+            self.assertEqual(landing.deployment()["reasoning"], "false")
+
     def test_token_gates_journal_and_ceiling_is_enforced_without_vllm_restart(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -558,6 +600,40 @@ class SoulLandingTests(unittest.TestCase):
                 status = json.loads(urllib.request.urlopen(
                     base + "/soul/status?token=capability", timeout=2).read())
                 self.assertEqual(status["maximumLevel"], 2)
+            finally:
+                self.stop_landing(proc)
+
+    def test_bare_runpod_proxy_url_is_safe_read_only_status(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            proc, base, _env = self.start_landing(root, token="capability")
+            try:
+                status_path = root / "boot.json"
+                status = json.loads(status_path.read_text())
+                status.update({
+                    "endpoint": "https://pod-8000.proxy.runpod.net",
+                    "api_key": "sk-must-not-leak",
+                    "provider": "runpod",
+                })
+                status_path.write_text(json.dumps(status))
+                page = urllib.request.urlopen(base + "/", timeout=2).read().decode()
+                self.assertIn("Read-only status", page)
+                self.assertIn("The appliance is reachable", page)
+                self.assertNotIn("sk-must-not-leak", page)
+                self.assertNotIn('href="/config?token=', page)
+                self.assertNotIn('href="/chat?token=', page)
+                self.assertNotIn('href="/terminate?token=', page)
+                self.assertNotIn("METRIC_NAMES", page)
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(
+                        base + "/?token=incorrect", timeout=2)
+                self.assertEqual(caught.exception.code, 403)
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(base + "/config", timeout=2)
+                self.assertEqual(caught.exception.code, 403)
+                full = urllib.request.urlopen(
+                    base + "/?token=capability", timeout=2).read().decode()
+                self.assertIn("sk-must-not-leak", full)
             finally:
                 self.stop_landing(proc)
 

@@ -41,14 +41,19 @@ def version_tuple(value: str):
     return tuple(parts)
 
 
-def driver_meets_minimum(actual: str, minimum: str):
-    """True only when both versions parse and actual >= minimum."""
+def version_meets_minimum(actual: str, minimum: str):
+    """True only when both dotted versions parse and actual >= minimum."""
     got = version_tuple(actual)
     want = version_tuple(minimum)
     if not got or not want:
         return False
     width = max(len(got), len(want))
     return got + (0,) * (width - len(got)) >= want + (0,) * (width - len(want))
+
+
+def driver_meets_minimum(actual: str, minimum: str):
+    """Backward-compatible name for NVIDIA driver admission checks."""
+    return version_meets_minimum(actual, minimum)
 
 
 def parse_smi(output: str):

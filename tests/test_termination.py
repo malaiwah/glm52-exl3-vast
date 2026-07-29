@@ -243,8 +243,11 @@ def test_runpod_terminate():
     # the CLI fallback, only if the binary happens to exist
     calls = []
 
-    def runner(argv, timeout=120):
+    runner_envs = []
+
+    def runner(argv, timeout=120, env=None):
         calls.append(argv)
+        runner_envs.append(env)
         return 0, "pod removed"
     provider.shutil.which = lambda name: "/usr/local/bin/runpodctl"
     try:
@@ -257,6 +260,33 @@ def test_runpod_terminate():
           and calls[0][1:] == ["pod", "delete", "pod-abc123"], json.dumps(res)[:200])
     check("and it uses delete (terminate), never stop",
           "stop" not in calls[0], str(calls[0]))
+    check("the CLI receives the key in its environment, not argv",
+          runner_envs[0]["RUNPOD_API_KEY"] == "pod-scoped-key"
+          and "pod-scoped-key" not in " ".join(calls[0]), str(calls[0]))
+
+    calls.clear()
+    runner_envs.clear()
+
+    def legacy_runner(argv, timeout=120, env=None):
+        calls.append(argv)
+        runner_envs.append(env)
+        if argv[1:3] == ["pod", "delete"]:
+            return 1, 'unknown command "pod"'
+        return 0, "pod removed"
+    provider.shutil.which = lambda name: "/usr/local/bin/runpodctl"
+    try:
+        t = StubTransport([(403, "no"), (403, "no")])
+        res = p.terminate(t, runner=legacy_runner)
+    finally:
+        provider.shutil.which = real_which
+    check("an older runpodctl falls back from pod delete to remove pod",
+          res["ok"] is True and len(calls) == 2
+          and calls[1][1:] == ["remove", "pod", "pod-abc123"],
+          json.dumps(res)[:300])
+    check("the legacy fallback also receives its key without exposing it",
+          runner_envs[1]["RUNPOD_API_KEY"] == "pod-scoped-key"
+          and all("pod-scoped-key" not in " ".join(call) for call in calls),
+          str(calls))
 
     provider.shutil.which = lambda name: None
     try:
@@ -331,10 +361,11 @@ def test_runpod_probe_and_volume():
     check("vast.ai deliberately has no probe",
           provider.get(VAST_ENV).probe(StubTransport([]))[0] == "unknown")
 
-    # the injected pod key is verified, so nothing should call it suspect
+    # The injected pod key is real but deletion permission varies by deployment.
     src = provider.get(RUNPOD_ENV).key_source()
-    check("the injected pod key is described as verified, not suspect",
-          "verified" in src and "NOT confirmed" not in src, src)
+    check("the injected pod key describes deployment-dependent delete permission",
+          "delete permission varies" in src and "verified to terminate" not in src,
+          src)
     check("and no warning tells the user to go get an account key",
           not any("RUNPOD_TERMINATE_API_KEY" in w
                   for w in provider.get(RUNPOD_ENV).warnings()),
@@ -400,6 +431,23 @@ def test_pid1_env(tmp):
         gc._PID1_ENV = {"TERMINATE_ENABLED": "1"}
         check("the switches are derived from PID 1's environment too",
               gc.switches_from_env()["enabled"] is True)
+        pid1_runtime = os.path.join(tmp, "pid1-worker-run")
+        pid1_state = os.path.join(tmp, "pid1-worker-state")
+        gc._PID1_ENV = {
+            "RUNPOD_POD_ID": "pod-from-pid1",
+            "RUNPOD_API_KEY": "k1",
+            "TERMINATE_ENABLED": "1",
+            "GLM_RUNTIME_DIR": pid1_runtime,
+            "GLM_STATE_DIR": pid1_state,
+        }
+        gc.init_switches(gc._PID1_ENV)
+        transport = StubTransport([(204, "")])
+        doc = terminate_worker.run(
+            {"confirm": "pod-from-pid1", "erase": False},
+            transport=transport, stopper=lambda _pr: (True, "stub"), env=None)
+        check("the detached worker also falls back to PID 1",
+              doc["ok"] is True and len(transport.calls) == 1,
+              json.dumps(doc)[:300])
     finally:
         gc._PID1_ENV = saved
 

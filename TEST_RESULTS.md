@@ -869,6 +869,11 @@ an older driver before downloading weights, unless an operator explicitly sets
 `cuda-compat-13-2` installation. Unit coverage includes the rejected r580/r590
 and accepted r595/r610 branches. Neither rejected rental remains allocated.
 
+This was the conservative admission posture at that point in the chronology.
+The July 29 Runpod Qwen qualification below later promoted the exact
+`590.48.01 / CUDA 13.2` pair and changed admission to test driver and reported
+CUDA together. The earlier Vast `590.48.01 / CUDA 13.1` shape remains rejected.
+
 ## GG v20-r5 AIBeast flagship qualification (2026-07-28)
 
 The final candidate
@@ -1128,6 +1133,49 @@ uses the K scale/1.0; the five-depth 192K retrieval and degeneration gates are
 the empirical quality evidence for this exact record. It also warns that some
 FP4 weight-only components fall back to Marlin on SM120. Those warnings are
 documented upstream/runtime characteristics, not hidden by the appliance.
+
+### Runpod 590.48.01 / CUDA 13.2 compatibility qualification (2026-07-29)
+
+The same Qwen profile was then exercised on a Runpod Secure RTX 5090 pod whose
+`nvidia-smi` reported driver **590.48.01** and CUDA **13.2**. The container had
+`/usr/local/cuda/compat/libcuda.so.1`; the run was intentionally admitted with
+the old override while the pair was still unqualified.
+
+This was not a boot-only smoke:
+
+- the full appliance feature suite passed, including thinking/non-thinking
+  chat, streaming, preserved reasoning, strict structured output, tools and
+  native vision;
+- the 32K verifier retrieved 3/3 needles without degeneration;
+- uncached 8K/32K prefill measured about 2,687/3,885 tok/s and a controlled C1
+  decode measured about 64.8 tok/s;
+- a separate Vast client installed OMP 17.1.8 from scratch and completed a
+  real repository-review workload against the direct deSEC TLS endpoint;
+- SOUL levels 1, 2 and 3 were exercised, including a synthetic incident,
+  journal continuity and a level-3 canary;
+- the authenticated Runpod landing page, proxy fallback, Markdown chat,
+  reasoning stream and client-install controls were exercised live.
+
+The appliance then exercised its destructive teardown path. It stopped vLLM,
+securely erased 199 session files (7.5 MiB; public weights deliberately kept),
+and attempted provider deletion. This Runpod deployment allowed the scoped key
+to read its own Pod but refused both REST deletion (HTTP 403) and GraphQL
+`podTerminate` (HTTP 403, provider code 1010). Its preinstalled `runpodctl` was
+an older release for which current `pod delete` was unknown; account-side
+legacy `runpodctl remove pod` immediately removed the Pod. The appliance now
+tries both CLI grammars after the two HTTP APIs and passes the key through the
+child environment, which remains available even after secure erase removes
+`~/.runpod/config.toml`. Unit coverage reproduces the exact fallback sequence;
+the GLM cross-provider pass is the live confirmation of the corrected worker.
+
+The runtime selected its documented Marlin fallback for some FP4 weight-only
+components, so these results do not claim a new native-FP4 kernel path. They
+do establish the driver/CUDA pair as a supported turnkey configuration. The
+entrypoint admission floor is therefore driver `590.48.01` **and** reported
+CUDA `13.2`: the earlier Vast `590.48.01 / CUDA 13.1` offer still fails closed,
+as does the r580 host that failed NCCL initialization. This one-card result is
+not silently presented as a four-GPU GLM performance qualification; each model
+profile retains its own feature, quality and performance evidence.
 
 ### GG v20-r8 upstream refresh smoke (AIBeast left online)
 

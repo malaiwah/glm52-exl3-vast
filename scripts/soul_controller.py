@@ -39,6 +39,7 @@ UPDATE_COALESCE_S = 900
 LONG_PROBE_COOLDOWN_S = 6 * 3600
 JOURNAL_CONTEXT_LIMIT = 8
 JOURNAL_CONTEXT_SUMMARY_CHARS = 800
+RUNPOD_DIRECT_TLS_PORT = 8443
 _ACTIVE_PROBE_PROCESS: Optional[subprocess.Popen] = None
 JOURNAL_FIELDS = {
     "headline": str,
@@ -127,12 +128,15 @@ def _http_json(url: str, api_key: str = "", timeout: int = 4,
 def _local_api_base(status: Mapping[str, Any], port: int) -> str:
     """Return the engine URL reachable from inside the appliance.
 
-    A direct-TLS deployment cannot accept plain HTTP on the vLLM port. PID 1
-    maps the certificate hostname to 127.0.0.1 in /etc/hosts, so internal
-    clients retain normal CA and hostname verification without hairpinning
-    through the provider's public port. Runpod proxy mode has no local
-    certificate and continues to use vLLM's plain loopback listener.
+    A Vast direct-TLS deployment cannot accept plain HTTP on the vLLM port.
+    PID 1 maps the certificate hostname to 127.0.0.1, so internal clients keep
+    normal CA and hostname verification. Runpod is different: vLLM remains
+    plain HTTP on :8000 for its managed proxy and socat provides a separate TLS
+    listener on :8443. SOUL should always use the plain loopback engine there,
+    regardless of whether the public endpoint selects direct TLS.
     """
+    if status.get("provider") == "runpod":
+        return f"http://127.0.0.1:{port}"
     endpoint = str(status.get("endpoint") or "")
     if status.get("cert") and status.get("keyfile") and endpoint.startswith("https://"):
         try:
@@ -142,6 +146,21 @@ def _local_api_base(status: Mapping[str, Any], port: int) -> str:
         if hostname:
             return f"https://{hostname}:{port}"
     return f"http://127.0.0.1:{port}"
+
+
+def _tls_probe_target(status: Mapping[str, Any], host: str,
+                      published_port: int, engine_port: int) -> tuple[str, int, str]:
+    """Return connect host, port, and TLS server name for a certificate probe."""
+    if status.get("cert") and status.get("keyfile"):
+        if status.get("provider") == "runpod":
+            # The provider-mapped public TCP port does not exist inside the
+            # container. Probe the local socat listener while retaining the
+            # public certificate hostname for SNI and verification.
+            return "127.0.0.1", RUNPOD_DIRECT_TLS_PORT, host
+        # Vast terminates TLS directly in vLLM on its ordinary engine port and
+        # maps the certificate hostname to loopback in /etc/hosts.
+        return host, engine_port, host
+    return host, published_port, host
 
 
 def _metrics(url: str, api_key: str = "") -> Dict[str, Any]:
@@ -247,11 +266,6 @@ async def _network(status: Mapping[str, Any], port: int) -> Dict[str, Any]:
             parsed = urlparse(endpoint)
             host = parsed.hostname or host
             tls_port = parsed.port or (443 if parsed.scheme == "https" else None)
-            if status.get("cert") and status.get("keyfile"):
-                # Direct-TLS appliances map the certificate hostname to
-                # loopback; the provider's published port exists on the host,
-                # not inside the container.
-                tls_port = port
         except ValueError:
             pass
     result: Dict[str, Any] = {"target": host}
@@ -269,15 +283,33 @@ async def _network(status: Mapping[str, Any], port: int) -> Dict[str, Any]:
         result.update({"localTcpOk": False, "localTcpError": str(exc)})
     if endpoint.startswith("https://") and tls_port:
         try:
+            connect_host, connect_port, server_name = _tls_probe_target(
+                status, host, tls_port, port)
             context = ssl.create_default_context()
-            with socket.create_connection((host, tls_port), timeout=5) as sock:
-                with context.wrap_socket(sock, server_hostname=host) as secured:
+            with socket.create_connection(
+                    (connect_host, connect_port), timeout=5) as sock:
+                with context.wrap_socket(
+                        sock, server_hostname=server_name) as secured:
                     cert = secured.getpeercert()
+                    # A TLS-handshake-only probe makes socat open its plain
+                    # backend and then see the client disappear, which it logs
+                    # as `SSL_read(): Connection reset by peer`. Complete one
+                    # bounded HTTP exchange so an ordinary successful probe
+                    # closes cleanly and that log remains useful for real peers.
+                    secured.sendall(
+                        (
+                            "GET /health HTTP/1.1\r\n"
+                            f"Host: {server_name}\r\n"
+                            "Connection: close\r\n\r\n"
+                        ).encode("ascii")
+                    )
+                    response_head = secured.recv(4096).split(b"\r\n", 1)[0]
             expires = ssl.cert_time_to_seconds(cert["notAfter"])
             result["tls"] = {
                 "ok": True, "notAfter": cert.get("notAfter"),
                 "daysRemaining": round((expires - time.time()) / 86400, 1),
                 "subjectAltName": cert.get("subjectAltName", []),
+                "httpStatus": response_head.decode("ascii", "replace")[:120],
             }
         except (OSError, ssl.SSLError, KeyError) as exc:
             result["tls"] = {"ok": False, "error": str(exc)}

@@ -209,11 +209,49 @@ def main():
           "d.reasoning_content??d.reasoning" in landing)
     check("chat sends the accumulated multi-turn history",
           "messages:wireMessages()" in landing and 'MODEL=$model_js, msgs=[]' in landing)
+    check("quick chat prepends a presentation system prompt",
+          'role:"system",content:CHAT_SYSTEM_PROMPT' in landing and
+          "GitHub-flavored Markdown" in landing)
+    check("quick chat safely renders Markdown responses",
+          "function renderMarkdown(source)" in landing and
+          "function escapeHtml(s)" in landing and
+          'rel="noopener noreferrer"' in landing)
+    check("quick chat trims leading model whitespace",
+          "answer.trimStart()" in landing and
+          "reasoning.trimStart()" in landing and
+          "cleanAnswer=answer.trim()" in landing)
+    check("expanded thinking has a scrollable multi-line body",
+          'tbody.className="thinkbody"' in landing and
+          ".thinkbody{" in landing and "white-space:pre-wrap" in landing)
+    check("thinking expands while streaming and collapses only when finished",
+          "think.open=true;reasoning+=thought" in landing and
+          "think.open=false;" in landing and
+          "if(think.open){think.open=false" not in landing)
+    check("thinking follows the newest streamed chunk",
+          "tbody.scrollTop=tbody.scrollHeight" in landing)
+    check("empty answer bubble stays hidden during reasoning",
+          'const out=el("div","msg bot","");out.hidden=true' in landing and
+          "if(d.content){answer+=d.content;out.hidden=false" in landing)
+    check("primary send button becomes the streaming stop control",
+          'sendBtn.textContent=active?"■ Stop":"Send"' in landing and
+          'sendBtn.classList.toggle("stopmode",active)' in landing and
+          "function toggleGeneration(){if(ctrl)ctrl.abort();else send()}" in landing and
+          "sendBtn.onclick=toggleGeneration" in landing and
+          "id=stop" not in landing)
+    check("stopping during reasoning does not promote thinking to the answer",
+          'const finalText=cleanAnswer||(!stopped?cleanReasoning:"")' in landing and
+          "if(stopped&&!cleanAnswer)" in landing and
+          'out.textContent=stopped?"Generation stopped."' in landing)
+    check("quick chat advertises its send keyboard shortcut",
+          '<kbd>Ctrl</kbd> + <kbd>Enter</kbd> sends' in landing and
+          "aria-describedby=sendhint" in landing and
+          'e.ctrlKey&&e.key==="Enter"' in landing)
     check("preserve-thinking is available and defaults off",
           'id=preserve>' in landing and 'id=preserve checked' not in landing)
     check("reasoning-only output remains visible assistant content",
-          "const stopped=ctrl&&ctrl.signal.aborted,finalText=answer||reasoning" in landing
-          and "if(!answer&&reasoning){out.textContent=reasoning" in landing)
+          'const finalText=cleanAnswer||(!stopped?cleanReasoning:"")' in landing
+          and "if(!cleanAnswer&&cleanReasoning){out.hidden=false;" in landing
+          and "out.innerHTML=renderMarkdown(cleanReasoning);think.remove()" in landing)
     check("Runpod proxy HTTPS is treated as a secure landing connection",
           "LANDING_TRUST_PROXY_HTTPS" in landing
           and "or TRUST_PROXY_HTTPS" in landing)
@@ -230,6 +268,18 @@ def main():
           and "~/.pi/agent/models.json" not in landing
           and "supportsTools: true" in landing
           and "maxTokens: $output" in landing)
+    check("client harnesses link official product pages and installers",
+          all(text in landing for text in (
+              "https://omp.sh/",
+              "curl -fsSL https://omp.sh/install | sh",
+              "https://www.anthropic.com/claude-code",
+              "curl -fsSL https://claude.ai/install.sh | bash",
+              "https://developers.openai.com/codex/",
+              "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+              "https://opencode.ai/",
+              "curl -fsSL https://opencode.ai/install | bash",
+              "function copyInstall(b)",
+          )))
     check("client provider ids are model and provider neutral",
           '"glm-vast"' not in landing and "model_provider = \"glm-vast\"" not in landing)
     check("boot highlights are timestamped at the source",

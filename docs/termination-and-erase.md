@@ -50,20 +50,22 @@ set the dashboard label) since long before this feature, and that works.
 
 Two pods were created, exercised and destroyed on 2026-07-26
 (`runpod/base:0.6.2-cuda12.4.1`, SECURE cloud). Everything in this table is
-measured from inside a running pod unless marked otherwise.
+measured from inside a running pod unless marked otherwise. A third Secure pod
+was erased and asked to self-terminate on 2026-07-29; that deployment exposed
+important permission and CLI-version differences recorded below.
 
 | | | how known |
 |---|---|---|
 | identifies the pod | `RUNPOD_POD_ID` | **verified present in PID 1** |
 | credential | `RUNPOD_API_KEY`, injected automatically, pod-scoped | **verified present in PID 1** |
-| **self-termination with the injected key** | `mutation { podTerminate(input:{podId:"<own id>"}) }` → `{"data":{"podTerminate":null}}`; pod gone from `runpodctl pod list` within 20 s | **VERIFIED — it works** |
+| **self-termination with the injected key** | accepted through GraphQL on 2026-07-26; REST returned 403 and GraphQL returned 403/code 1010 on 2026-07-29 | **deployment-dependent** |
 | success shape | `null`. The mutation returns `Void`, so `data.podTerminate: null` *is* success | **verified** |
 | what the pod key may NOT do | account-level reads: `query { myself { id } }` → `{"errors":[{"message":"Unauthorized","path":["myself"]}],"data":{"myself":null}}` | **verified** |
 | what the pod key MAY read | its own pod: `query { pod(input:{podId:"<own id>"}) { id name desiredStatus } }` → the pod | **verified** |
 | auth mechanism | one API key, `Authorization: Bearer <key>` to `https://api.runpod.io/graphql` | verified (runpodctl config + RunPod's SDK) |
 | where the CLI stores it | `~/.runpod/config.toml`, **world-readable (0644)** | verified on a real install |
 | REST terminate | `DELETE https://rest.runpod.io/v1/pods/{podId}`, Bearer, `204` | documented API reference |
-| CLI terminate / stop | `runpodctl pod delete <id>` vs `runpodctl pod stop <id>` — different verbs, different billing | verified from the CLI; **runpodctl is NOT in the base image** |
+| CLI terminate / stop | current `runpodctl pod delete <id>` and legacy `runpodctl remove pod <id>` terminate; stop is different and retains storage billing | both grammars verified; an older CLI was preinstalled in the 2026-07-29 Pod |
 | metadata service | 169.254.169.254 **unreachable** — there is none to fall back on | **verified** |
 
 Sources: [environment variables](https://docs.runpod.io/pods/templates/environment-variables),
@@ -74,14 +76,15 @@ Sources: [environment variables](https://docs.runpod.io/pods/templates/environme
 [runpod-python mutations](https://github.com/runpod/runpod-python/blob/main/runpod/api/mutations/pods.py),
 [runpod-python graphql client](https://github.com/runpod/runpod-python/blob/main/runpod/api/graphql.py).
 
-**The pod-scoped key is scoped, not weak — and the pre-check has to respect
-that.** An earlier revision of this feature probed the credential with
+**The pod-scoped key is scoped, and read permission does not prove delete
+permission.** An earlier revision of this feature probed the credential with
 `query { myself { id } }`. That is exactly the query a pod-scoped key is *not*
-allowed to answer, so the pre-check condemned a credential that could in fact
-terminate the pod, and told the user to go and fetch an account key they did not
-need. The probe now reads **the pod itself**
+allowed to answer, so the pre-check condemned a credential that could terminate
+one measured pod. The probe now reads **the pod itself**
 (`pod(input:{podId:"<id>"})`), which the key is permitted to do and which
-additionally proves the pod id we resolved is the right one. `myself` is only
+additionally proves the pod id we resolved is the right one. It deliberately
+does not promise deletion authority: the 2026-07-29 deployment allowed the read
+but refused both HTTP delete paths. `myself` is only
 used as a fallback when no pod id is known. A `200` carrying
 `{"data":{"pod":null}}` is treated as a *failure* — valid key, wrong pod.
 
@@ -100,23 +103,23 @@ Confirmed present in PID 1: `RUNPOD_API_KEY`, `RUNPOD_POD_ID`,
 `RUNPOD_GPU_COUNT`, `RUNPOD_GPU_NAME`, `RUNPOD_CPU_COUNT`, `RUNPOD_MEM_GB`, and
 `PUBLIC_KEY` (the account's SSH public keys — session evidence, see §4).
 
-**Why no `runpodctl` binary is bundled.** Auth is a plain API key and the
-operation is one HTTP POST; a 13.8 MB static Go binary to make that call would
-be dead weight in an image that already POSTs to vast's API with `urllib`. It is
-also **not present in RunPod's own base image**, so depending on it would have
-been wrong twice. The code still uses it opportunistically as the last of three
-attempts if the image happens to carry it.
+**Why `runpodctl` is a fallback.** Auth is a plain API key and the primary
+operation is one HTTP call. RunPod currently preinstalls the CLI, but the live
+2026-07-29 Pod carried an older grammar: `pod delete` failed as unknown while
+`remove pod` was the compatible spelling. The code therefore uses it only after
+REST and GraphQL, tries both terminate spellings, and passes the key through the
+child environment so secure erase may remove `~/.runpod/config.toml` first.
 
 **Terminate, never stop.** `pod stop` and `pod delete` are different verbs with
 different billing: a stopped pod keeps paying for volume storage. Someone who
 clicks "terminate" means "stop paying". The code only ever deletes, and a test
 asserts the CLI fallback never passes `stop`.
 
-**The ladder.** REST `DELETE` → GraphQL `podTerminate` → `runpodctl pod delete`
-if present. REST and GraphQL are different services, so a key refused by one is
-not necessarily refused by the other, and trying both costs one extra
-round-trip on a path that runs once. A GraphQL `200` carrying an `errors` block
-is **not** treated as success.
+**The ladder.** REST `DELETE` → GraphQL `podTerminate` → current
+`runpodctl pod delete` → legacy `runpodctl remove pod`, if the CLI is present.
+REST and GraphQL are different services, so a key refused by one is not
+necessarily refused by the other. A GraphQL `200` carrying an `errors` block is
+**not** treated as success. No rung ever uses `stop`.
 
 **`RUNPOD_TERMINATE_API_KEY` is still supported**, for the cases the pod key
 cannot cover: a key that is missing or has been altered, or a deployment that
@@ -552,31 +555,30 @@ The live matrix in `TEST_RESULTS.md` covers both provider paths.
 
 ## 7. Untested and unverified
 
-**Verified on live pods (2026-07-26).** Two RunPod pods were created, exercised
-and destroyed: the injected pod-scoped key terminates its own pod through
-GraphQL `podTerminate` (`{"data":{"podTerminate":null}}`, pod gone within 20 s);
+**Verified on live pods (2026-07-26 and 2026-07-29).** RunPod pods were created,
+exercised and destroyed: the injected pod-scoped key terminated one pod through
+GraphQL, while a later Secure deployment allowed its own-pod read but refused
+REST and GraphQL deletion. The latter's older preinstalled runpodctl accepted
+the legacy `remove pod` grammar rather than current `pod delete`;
 `RUNPOD_POD_ID` / `RUNPOD_API_KEY` and the rest are present in PID 1 and absent
 from a fresh SSH session; `myself` is Unauthorized for the pod key while
 `pod(input:{podId})` is allowed; ports must be requested at creation or nothing
-is reachable; `HF_HOME` defaults onto the network volume; `runpodctl` is not in
-the base image; there is no metadata service.
+is reachable; `HF_HOME` defaults onto the network volume; there is no metadata
+service.
 
-**Still untested (cannot be tested without destroying a paid instance from this
-codebase):**
+**Still untested:**
 
-- **This code has never issued a terminate call.** The vast.ai and RunPod paths
-  are exercised only through stubbed transports. The RunPod GraphQL request this
-  code builds is byte-identical in shape to the one that was verified by hand,
-  but it has not itself been sent.
+- The corrected current/legacy CLI ladder has unit coverage and is awaiting a
+  second live appliance-issued termination. The 2026-07-29 appliance worker did
+  stop the engine and securely erase the requested session data, then observed
+  the REST/GraphQL refusals and the old CLI grammar; account-side
+  `runpodctl remove pod` completed deletion immediately afterward.
 - The vast.ai destroy call. High confidence — the entrypoint already uses the
   same two credentials against the same host for the dashboard label — but
   unexercised.
-- The `runpodctl` fallback's behaviour *after* REST and GraphQL have both been
-  refused; it is also moot on the stock image, which has no runpodctl.
-- The full worker sequence against a live supervisor: the
-  `terminate-in-progress` → `engine-stopped` handshake is implemented on both
-  sides, passes `bash -n` and shellcheck, and is driven in tests with a stubbed
-  stopper — but no container has run it end to end.
+- The full corrected worker sequence through a successful provider delete. Its
+  stop and erase stages have run live; the final deletion used the account-side
+  CLI only because the deployed appliance predated the legacy fallback.
 - VRAM zeroing (needs torch and GPUs) and the RAM overwrite under a cgroup
   limit. `drop_caches` is expected to be unavailable in most containers and is
   reported rather than assumed.
@@ -589,9 +591,8 @@ codebase):**
   (§4). The folder's existence is documented; the per-file naming is handled
   defensively and degrades to the size rule, which is also what a user gets on a
   hub version whose layout we guessed wrong.
-- RunPod's REST `DELETE /v1/pods/{podId}` — documented, never called. GraphQL is
-  the path that was actually proven, and it is tried second; if the REST call
-  turns out to be wrong for pod-scoped keys, the ladder still lands on the
-  verified one.
+- RunPod's REST `DELETE /v1/pods/{podId}` is documented and was called live,
+  but the measured pod-scoped key received HTTP 403. An account-key success on
+  that endpoint has not yet been measured from the appliance.
 - Whether a vast.ai instance ever lacks `CONTAINER_API_KEY` (the docs say it is
   always injected).

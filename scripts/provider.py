@@ -40,26 +40,23 @@ RunPod
     schema at https://graphql-spec.runpod.io/ (podTerminate(input:
     PodTerminateInput!) -> Void); endpoint and Bearer header from
     runpod/api/graphql.py.
-  - `runpodctl pod delete <id>` is "delete/terminate a pod by id" and is a
-    DIFFERENT operation from `runpodctl pod stop`, which leaves storage billing.
-    This module always terminates.
-  - The runpodctl binary is NOT bundled: auth is a plain API key and the call is
-    one HTTP POST, so shipping a 13.8 MB static Go binary to make it would be
-    silly when the container already POSTs to vast's API the same way. It is
-    used opportunistically if the image happens to have it.
-  - VERIFIED on a live pod (2026-07-26): the auto-injected pod-scoped
-    RUNPOD_API_KEY DOES terminate its own pod via GraphQL podTerminate, and the
-    pod disappears within ~20 s. The key is scoped, not powerless: it cannot
-    read account-level data (`myself` returns Unauthorized) but it can read and
-    terminate its own pod. RUNPOD_TERMINATE_API_KEY remains supported for the
-    cases the pod key cannot cover (a missing/altered key, or targeting another
-    pod).
+  - Current `runpodctl pod delete <id>` and legacy
+    `runpodctl remove pod <id>` both terminate a pod. They are DIFFERENT from
+    `stop`, which leaves storage billing. This module always terminates.
+  - RunPod currently preinstalls runpodctl in Pods, but deployed versions vary.
+    It is therefore an opportunistic final fallback rather than the primary
+    API path.
+  - MEASURED on live pods: the auto-injected pod-scoped RUNPOD_API_KEY
+    terminated its own pod through GraphQL on 2026-07-26, but REST and GraphQL
+    both refused it on a different Secure deployment on 2026-07-29. The
+    appliance therefore retains the CLI ladder and supports an explicit
+    RUNPOD_TERMINATE_API_KEY for deployments whose scoped key cannot delete.
   - VERIFIED: RunPod injects its variables into PID 1 ONLY. A helper started
     from a new session — an SSH login shell, say — sees none of them, so the
     environment is read through glm_config.effective_env(), which layers this
     process's environment over /proc/1/environ.
-  - VERIFIED: runpodctl is NOT present in the base image, which settles the
-    decision not to depend on it.
+  - VERIFIED on 2026-07-29: a RunPod Secure Pod carried an older runpodctl whose
+    termination spelling was `remove pod`, not the current `pod delete`.
 """
 import json
 import os
@@ -144,10 +141,11 @@ class HttpTransport:
             return None, str(e)
 
 
-def default_runner(argv, timeout=120):
+def default_runner(argv, timeout=120, env=None):
     """Subprocess runner for CLI fallbacks (runpodctl). Injected in tests."""
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
+                           env=env)
         return p.returncode, (p.stdout or "") + (p.stderr or "")
     except Exception as e:
         return None, str(e)
@@ -229,7 +227,7 @@ class VastAI(Provider):
     label = "vast.ai"
     supported = True
     destroys = ["the instance and every disk attached to it",
-                "the downloaded model weights (~332 GB)",
+                "the downloaded model weights",
                 "the persisted API key, TLS certificate and config state"]
     survives = ["nothing on this instance; vast.ai instances have no external volume "
                 "in this template"]
@@ -293,7 +291,7 @@ class RunPod(Provider):
     label = "RunPod"
     supported = True
     destroys = ["the Pod, its container disk and its volume disk (/workspace)",
-                "the downloaded model weights (~332 GB) if they are on the volume disk",
+                "the downloaded model weights if they are on the volume disk",
                 "the persisted API key, TLS certificate and config state"]
     survives = ["a NETWORK volume, if one is attached — RunPod keeps network volumes "
                 "after a Pod is deleted, and it keeps billing for them"]
@@ -322,15 +320,14 @@ class RunPod(Provider):
         if self.env.get("RUNPOD_TERMINATE_API_KEY"):
             return "RUNPOD_TERMINATE_API_KEY (account key supplied by the user)"
         if self.env.get("RUNPOD_API_KEY"):
-            return ("RUNPOD_API_KEY (pod-scoped key injected by RunPod — verified to "
-                    "terminate its own pod)")
+            return ("RUNPOD_API_KEY (pod-scoped key injected by RunPod; delete "
+                    "permission varies by deployment)")
         return ""
 
     GRAPHQL_URL = "https://api.runpod.io/graphql"
-    # VERIFIED ON A LIVE POD (2026-07-26): the injected pod-scoped RUNPOD_API_KEY
-    # terminates its OWN pod. `mutation { podTerminate(input:{podId:"<own id>"}) }`
-    # returned {"data":{"podTerminate":null}} — null IS the success shape, the
-    # mutation returns Void — and the pod left `runpodctl pod list` within 20s.
+    # A live pod accepted this with its injected scoped key on 2026-07-26.
+    # Another Secure pod refused that key on 2026-07-29, so it is one rung in
+    # the ladder rather than a universal permission claim.
     TERMINATE_MUTATION = 'mutation { podTerminate(input: { podId: "%s" }) }'
     # The pre-check must ask a question the POD-SCOPED key is allowed to answer.
     # MEASURED: `query { myself { id } }` returns
@@ -397,7 +394,8 @@ class RunPod(Provider):
                             "another account. Terminating would fail.")
                 except ValueError:
                     pass
-                return "ok", f"the API key can read this pod ({iid}) — it can terminate it"
+                return "ok", (f"the API key can read this pod ({iid}); deletion "
+                              "permission will be checked by the terminate call")
             return "ok", "the API key was accepted by RunPod"
         if status in (401, 403) or '"Unauthorized"' in text:
             return "rejected", (
@@ -469,19 +467,27 @@ class RunPod(Provider):
             # when the GraphQL response actually reported it did not.
             attempts[-1]["graphql_failed"] = True
 
-        # 3. runpodctl, only if this image happens to carry it. Not bundled:
-        #    the call is one HTTP POST and the binary is 13.8 MB.
+        # 3. RunPod currently places runpodctl in Pods. Its command grammar has
+        #    changed over time, so try the documented current form and then the
+        #    retained legacy alias. Secure erase may already have removed
+        #    ~/.runpod/config.toml; pass the key only in the subprocess
+        #    environment, never argv or the attempt log.
         runner = runner or default_runner
         cli = shutil.which("runpodctl")
         if cli:
-            rc, out = runner([cli, "pod", "delete", iid])
-            attempts.append({"method": "runpodctl", "url": redact(f"{cli} pod delete {iid}"),
-                             "status": rc, "body": (out or "")[:400]})
-            if rc == 0:
-                return {"ok": True, "status": rc, "provider": self.name,
-                        "detail": ("Pod deleted via runpodctl (delete = terminate; the "
-                                   "storage stops billing too)."),
-                        "attempts": attempts}
+            cli_env = dict(os.environ)
+            cli_env["RUNPOD_API_KEY"] = key
+            for cli_args in (["pod", "delete", iid], ["remove", "pod", iid]):
+                rc, out = runner([cli, *cli_args], env=cli_env)
+                rendered = " ".join([cli, *cli_args])
+                attempts.append({"method": "runpodctl", "url": redact(rendered),
+                                 "status": rc, "body": (out or "")[:400]})
+                if rc == 0:
+                    return {"ok": True, "status": rc, "provider": self.name,
+                            "detail": ("Pod deleted via runpodctl (%s; delete = "
+                                       "terminate, so volume-disk billing stops too)."
+                                       % " ".join(cli_args[:2])),
+                            "attempts": attempts}
         last = attempts[-1]
         if last.get("graphql_failed"):
             detail = ("RunPod's GraphQL termination call returned HTTP 200 but did "
@@ -514,11 +520,10 @@ def _explain(status, text, provider):
     if status in (401, 403):
         extra = ""
         if provider.name == RUNPOD:
-            extra = (" The pod-scoped key RunPod injects is verified to terminate its "
-                     "own pod, so a refusal here means the key is missing or altered, "
-                     "or this pod id belongs to another account. Supply an account API "
-                     "key as RUNPOD_TERMINATE_API_KEY (Settings -> API Keys), or "
-                     "terminate from the dashboard.")
+            extra = (" RunPod's injected pod-scoped key has deleted its own pod on "
+                     "some deployments and has been refused on others. Supply an "
+                     "account API key as RUNPOD_TERMINATE_API_KEY (Settings -> API "
+                     "Keys), or terminate from the dashboard.")
         return ("The provider REFUSED the credential (HTTP %s). THE INSTANCE IS STILL "
                 "RUNNING AND STILL BILLING — terminate it from the dashboard.%s"
                 % (status, extra))

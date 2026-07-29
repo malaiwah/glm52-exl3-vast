@@ -12,9 +12,58 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 
 import benchmark_serving as bench  # noqa: E402
+import download_progress  # noqa: E402
 import needle_matrix  # noqa: E402
 import offload_prefix_benchmark as offload  # noqa: E402
 import verify_serving as verify  # noqa: E402
+
+
+class DownloadProgressTests(unittest.TestCase):
+    def test_fresh_download_reports_zero_then_crossed_deciles(self):
+        expected = 10 * download_progress.GIB
+        self.assertEqual(
+            download_progress.crossed_milestones(None, 0, expected), [0])
+        self.assertEqual(
+            download_progress.crossed_milestones(0, 3.4 * download_progress.GIB,
+                                                 expected),
+            [10, 20, 30],
+        )
+
+    def test_resumed_download_reports_only_current_decile(self):
+        expected = 20 * download_progress.GIB
+        self.assertEqual(
+            download_progress.crossed_milestones(
+                None, 17 * download_progress.GIB, expected),
+            [80],
+        )
+
+    def test_in_progress_report_never_claims_completion(self):
+        expected = 21 * download_progress.GIB
+        self.assertEqual(
+            download_progress.crossed_milestones(
+                80, 30 * download_progress.GIB, expected),
+            [90],
+        )
+
+    def test_directory_size_tolerates_normal_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with open(os.path.join(directory, "shard"), "wb") as handle:
+                handle.write(b"x" * 17)
+            self.assertEqual(download_progress.directory_bytes(directory), 17)
+
+    def test_milestone_is_newline_record_and_boot_note_is_timestamped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "boot.log")
+            message = download_progress.format_progress(
+                40, 9 * download_progress.GIB, 21)
+            download_progress.append_boot_note(path, message)
+            with open(path, encoding="utf-8") as handle:
+                line = handle.read()
+            self.assertRegex(
+                line,
+                r"^\[20\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ\] "
+                r">>> Download progress: 40% \(9\.0 of ~21 GiB\)\n$",
+            )
 
 
 class BenchmarkTests(unittest.TestCase):

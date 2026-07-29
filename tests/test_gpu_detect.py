@@ -72,17 +72,32 @@ def main():
     check("mixed models are listed, not collapsed to one",
           "," in g.detect({}, "0, GPU-a, NVIDIA H200\n1, GPU-b, NVIDIA A100\n")["name"])
 
-    print("\n=== CUDA 13.2 paired-driver admission ===")
+    print("\n=== qualified driver + CUDA pair admission ===")
     check("the failed Runpod r580 host is rejected",
-          not g.driver_meets_minimum("580.126.09", "595.45.04"))
-    check("the Vast CUDA 13.1 r590 host is rejected",
-          not g.driver_meets_minimum("590.48.01", "595.45.04"))
+          not g.version_meets_minimum("580.126.09", "590.48.01"))
+    check("the qualified Runpod r590 driver is accepted",
+          g.version_meets_minimum("590.48.01", "590.48.01"))
+    check("the old Vast CUDA 13.1 report is rejected",
+          not g.version_meets_minimum("13.1", "13.2"))
+    check("the qualified Runpod CUDA 13.2 report is accepted",
+          g.version_meets_minimum("13.2", "13.2"))
     check("AIBeast r595 is accepted",
-          g.driver_meets_minimum("595.71.05", "595.45.04"))
+          g.driver_meets_minimum("595.71.05", "590.48.01"))
     check("the qualified rental r610 is accepted",
-          g.driver_meets_minimum("610.43.03", "595.45.04"))
+          g.driver_meets_minimum("610.43.03", "590.48.01"))
     check("an unreadable driver never passes open",
-          not g.driver_meets_minimum("unknown", "595.45.04"))
+          not g.driver_meets_minimum("unknown", "590.48.01"))
+    check("an unreadable CUDA report never passes open",
+          not g.version_meets_minimum("unknown", "13.2"))
+    with open(os.path.join(os.path.dirname(HERE), "entrypoint.sh")) as handle:
+        entrypoint = handle.read()
+    check("entrypoint defaults to the qualified driver floor",
+          'MIN_NVIDIA_DRIVER_VERSION="${MIN_NVIDIA_DRIVER_VERSION:-590.48.01}"'
+          in entrypoint)
+    check("entrypoint separately requires the qualified CUDA report",
+          'MIN_NVIDIA_CUDA_VERSION="${MIN_NVIDIA_CUDA_VERSION:-13.2}"'
+          in entrypoint and
+          'version_meets_minimum(sys.argv[3], sys.argv[4])' in entrypoint)
 
     print("\n=== narrowing is explained, never silent ===")
     d = g.detect({"CUDA_VISIBLE_DEVICES": "0,9,1"}, SMI4)

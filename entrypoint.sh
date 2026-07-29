@@ -37,10 +37,13 @@ esac
 export MODEL_PROFILE
 echo "=== vLLM turnkey (profile $MODEL_PROFILE; family $MODEL_FAMILY) ==="
 NVIDIA_DRIVER_VERSION=""
+NVIDIA_CUDA_VERSION=""
 if command -v nvidia-smi >/dev/null 2>&1; then
   GPU_INVENTORY="$(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null || true)"
   printf '%s\n' "$GPU_INVENTORY" | head -4
   NVIDIA_DRIVER_VERSION="$(printf '%s\n' "$GPU_INVENTORY" | head -1 | awk -F',' '{gsub(/^[ \t]+|[ \t]+$/, "", $3); print $3}')"
+  NVIDIA_CUDA_VERSION="$(nvidia-smi 2>/dev/null |
+    sed -n 's/.*CUDA Version: \([0-9][0-9.]*\).*/\1/p' | head -1)"
 fi
 # What can this container ACTUALLY use? nvidia-smi intersected with
 # NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES — see scripts/gpu_detect.py.
@@ -71,27 +74,30 @@ case "$GLM_PROVIDER" in
 esac
 INSTANCE_ID="$(printf '%s' "${CONTAINER_ID:-${RUNPOD_POD_ID:-}}" | tr -cd '[:alnum:]-' | cut -c1-40)"
 echo ">>> GPUs visible to this container: $NGPU${GPU_NAME:+ ($GPU_NAME)}  provider: $PLATFORM"
-# GG v20-r5 is built on CUDA 13.2 and uses PTX JIT/custom collectives that are
-# outside the conservative subset promised by CUDA 13.x minor-version
-# compatibility. NVIDIA pairs CUDA 13.2 GA with Linux driver 595.45.04. In live
-# qualification an r580 Runpod host reached NCCL initialization and failed with
-# "unhandled cuda error"; Vast accurately advertised an r590 host as CUDA 13.1.
-# Reject these shapes before the 309 GiB GLM checkpoint download. Operators
-# deliberately providing cuda-compat-13-2 can bypass this conservative gate.
-MIN_NVIDIA_DRIVER_VERSION="${MIN_NVIDIA_DRIVER_VERSION:-595.45.04}"
+# GG v20 is built on CUDA 13.2 and uses PTX JIT/custom collectives. NVIDIA pairs
+# CUDA 13.2 GA with Linux driver 595.45.04, but the full Qwen profile, feature
+# suite, long-context retrieval, vision, SOUL and real OMP workload also passed
+# on Runpod driver 590.48.01 advertising CUDA 13.2 with cuda-compat present.
+# The pair matters: an earlier 590.48.01 / CUDA 13.1 Vast offer remains outside
+# the supported envelope, as does the r580 Runpod host that failed NCCL init.
+MIN_NVIDIA_DRIVER_VERSION="${MIN_NVIDIA_DRIVER_VERSION:-590.48.01}"
+MIN_NVIDIA_CUDA_VERSION="${MIN_NVIDIA_CUDA_VERSION:-13.2}"
 if [ "${CONFIG_SMOKE:-0}" != "1" ] && [ "$NGPU" -gt 0 ] &&
    [ "${ALLOW_UNSUPPORTED_NVIDIA_DRIVER:-0}" != "1" ]; then
-  if ! python3 - "$NVIDIA_DRIVER_VERSION" "$MIN_NVIDIA_DRIVER_VERSION" "$SCRIPTS_DIR" <<'PY'
+  if ! python3 - "$NVIDIA_DRIVER_VERSION" "$MIN_NVIDIA_DRIVER_VERSION" \
+      "$NVIDIA_CUDA_VERSION" "$MIN_NVIDIA_CUDA_VERSION" "$SCRIPTS_DIR" <<'PY'
 import sys
-sys.path.insert(0, sys.argv[3])
-from gpu_detect import driver_meets_minimum
-raise SystemExit(0 if driver_meets_minimum(sys.argv[1], sys.argv[2]) else 1)
+sys.path.insert(0, sys.argv[5])
+from gpu_detect import version_meets_minimum
+ok = (version_meets_minimum(sys.argv[1], sys.argv[2])
+      and version_meets_minimum(sys.argv[3], sys.argv[4]))
+raise SystemExit(0 if ok else 1)
 PY
   then
-    echo "FATAL: NVIDIA driver ${NVIDIA_DRIVER_VERSION:-unknown} is below the tested CUDA 13.2 floor ${MIN_NVIDIA_DRIVER_VERSION}."
-    echo "FATAL: choose a host advertising CUDA >=13.2 / driver >=${MIN_NVIDIA_DRIVER_VERSION};"
+    echo "FATAL: NVIDIA driver ${NVIDIA_DRIVER_VERSION:-unknown} / CUDA ${NVIDIA_CUDA_VERSION:-unknown} is outside the tested floor."
+    echo "FATAL: choose a host advertising CUDA >=${MIN_NVIDIA_CUDA_VERSION} / driver >=${MIN_NVIDIA_DRIVER_VERSION};"
     echo "FATAL: refusing to download model weights for a host likely to fail during CUDA/NCCL initialization."
-    echo "FATAL: set ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1 only when you intentionally provide a compatible cuda-compat-13-2 stack."
+    echo "FATAL: set ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1 only for a separately qualified compatibility stack."
     exit 1
   fi
 fi
@@ -698,14 +704,45 @@ fetch_weights() {
   # failure inside must therefore be checked explicitly, not left to errexit,
   # or it is silently swallowed and the completion marker below gets written
   # for a download that never actually finished.
-  if ! HF_HUB_OFFLINE=0 HF_XET_HIGH_PERFORMANCE=1 MODEL_REPO="${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}" MODEL_DIR="$MODEL_DIR" python3 -c '
+  # tqdm redraws one terminal line with carriage returns. Runpod and several
+  # Docker log collectors buffer that line until its final newline, making an
+  # active download look stuck. Disable that display and emit durable,
+  # newline-delimited deciles from a small sidecar monitor instead.
+  _download_gib="${MODEL_DOWNLOAD_GIB:-}"
+  if [ -z "$_download_gib" ]; then
+    _download_gib="$(python3 - "$SCRIPTS_DIR" "${MODEL_VARIANT:-}" <<'PY' 2>/dev/null || true
+import sys
+sys.path.insert(0, sys.argv[1])
+import glm_config as gc
+print(gc.VARIANTS.get(sys.argv[2], {}).get("download_gib", 0))
+PY
+)"
+  fi
+  case "$_download_gib" in
+    ""|*[!0-9.]*|*.*.*) _download_gib=0 ;;
+  esac
+  HF_HUB_OFFLINE=0 HF_XET_HIGH_PERFORMANCE=1 HF_HUB_DISABLE_PROGRESS_BARS=1 \
+    MODEL_REPO="${MODEL_REPO:-brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw}" \
+    MODEL_DIR="$MODEL_DIR" python3 -u -c '
 import os
 from huggingface_hub import snapshot_download
-snapshot_download(os.environ["MODEL_REPO"], revision=os.environ.get("MODEL_REVISION") or "main", local_dir=os.environ["MODEL_DIR"], max_workers=16)'
-  then
+snapshot_download(os.environ["MODEL_REPO"], revision=os.environ.get("MODEL_REVISION") or "main", local_dir=os.environ["MODEL_DIR"], max_workers=16)' &
+  _download_pid=$!
+  python3 -u "$SCRIPTS_DIR/download_progress.py" \
+    --pid "$_download_pid" --directory "$MODEL_DIR" \
+    --expected-gib "$_download_gib" --boot-notes "$BOOT_NOTES" &
+  _progress_pid=$!
+  _download_rc=0
+  wait "$_download_pid" || _download_rc=$?
+  # The monitor normally notices the reaped child within five seconds. Stop it
+  # immediately so successful startup is not delayed by a reporting helper.
+  kill "$_progress_pid" 2>/dev/null || true
+  wait "$_progress_pid" 2>/dev/null || true
+  if [ "$_download_rc" -ne 0 ]; then
     echo "!!! weights download failed for ${MODEL_REPO:-?}"
     return 1
   fi
+  boot_note ">>> Download progress: 100% (snapshot verified)"
   printf '%s\n' "$_wanted_checkpoint" > "$_complete_marker"
   printf '%s' "${MODEL_REPO:-}" > "$MODEL_DIR/.download-repo" 2>/dev/null || true
   boot_note ">>> Weights ready (${MODEL_REPO:-?})."

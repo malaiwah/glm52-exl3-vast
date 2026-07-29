@@ -101,6 +101,7 @@ averaged 22.8 tok/s and peaked at 95.3 while serving up to four requests—still
 materially worse than compiled MTP-off. The fixed-pool knob is therefore an
 advanced diagnostic/workspace control, not part of the Qwen production
 profile.
+
 N-gram speculation hit the same frozen-query-shape class in compiled mode and
 failed its correctness gate in eager mode; EAGLE and DSpark require compatible
 external draft checkpoints that this checkpoint does not publish.
@@ -170,7 +171,9 @@ GG r8 retained that exact compute stack. GG r9 changes the NVFP4/indexer
 sources and is therefore a new qualification boundary. The rental rows are
 the immediately preceding v31 candidate and remain the best measured rental
 estimates until the r9 matrix is complete on a provider with driver 595.45.04
-or newer.
+or newer. The later one-card Qwen qualification also supports the exact
+Runpod compatibility pair `590.48.01 / CUDA 13.2`; the pairwise admission
+rule below intentionally does not admit `590.48.01 / CUDA 13.1`.
 
 | environment | topology / power cap | PP 8K / 32K / 64K / 128K tok/s | TG C1 / C2 / C4 / C8 tok/s | exact long-context gate |
 |---|---|---:|---:|---|
@@ -210,14 +213,18 @@ that pass is recorded, these values describe the tested stack rather than the
 future installation.
 
 The current GG image is CUDA 13.2. The appliance therefore fails fast below
-NVIDIA driver **595.45.04**, the driver paired with CUDA 13.2 GA in the
+the qualified pair **NVIDIA driver 590.48.01 and reported CUDA 13.2**, before
+it downloads model weights. Driver 595.45.04 remains the driver paired with
+CUDA 13.2 GA in the
 [official release notes](https://docs.nvidia.com/cuda/archive/13.2.0/cuda-toolkit-release-notes/index.html),
-before it downloads model weights. This conservative floor is intentional: a
-Runpod r580 host failed in NCCL initialization and Vast correctly classified
-an r590 offer as CUDA 13.1. NVIDIA's broader CUDA 13.x minor-compatibility
-promise has feature limitations; this stack uses PTX JIT and custom
-collectives. Set `ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1` only when the operator has
-deliberately provided and validated a suitable `cuda-compat-13-2` stack.
+but the lower pair is no longer speculative: a Runpod Secure RTX 5090 with
+driver 590.48.01, a CUDA 13.2 report and `cuda-compat-13-2` present passed the
+Qwen profile's complete feature suite, vision, long-context retrieval,
+autonomous-appliance checks and a real cross-provider OMP workload. The pair
+requirement remains intentional: a Runpod r580 host failed NCCL initialization
+and Vast classified an earlier r590 offer as CUDA 13.1. Set
+`ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1` only for another separately qualified
+driver/CUDA combination.
 
 #### InstantTensor: qualified flagship loader at full 512K
 
@@ -343,7 +350,7 @@ The linked public **Model Turnkey: GLM-5.2 EXL3 — GG v20-r9** template
 preconfigures the image, `args` launch mode, ports, 450 GB disk and Blackwell
 host filters.
 Before accepting an offer, verify it is exactly 4x RTX PRO 6000 Blackwell,
-advertises **CUDA 13.2 or newer / driver 595.45.04 or newer**, adequate
+advertises **CUDA 13.2 or newer / driver 590.48.01 or newer**, adequate
 disk/network performance, and actually allocates at least 450 GB. Wait for
 `Application startup complete` and the verification result in the instance
 logs, then use the generated API key and labeled endpoint.
@@ -483,7 +490,8 @@ the same values:
   or one RTX 5090 32 GB for the Qwen manifest. GPU type/count
   are selected at Pod deployment and are not fields in the reusable template
   schema. Do not select RTX 4090 or another pre-Blackwell GPU. After Runpod
-  assigns the host, confirm driver 595.45.04 or newer in the system logs; its
+  assigns the host, confirm CUDA 13.2 or newer and driver 590.48.01 or newer in
+  the system logs; its
   REST API's `allowedCudaVersions` currently stops at CUDA 13.0 and cannot
   express this CUDA 13.2 requirement.
 - **Storage:** use a 50 GB container disk; mount at least 450 GB for GLM or
@@ -666,10 +674,11 @@ first. Full design note, provider matrix and cited sources:
   normally injects the instance-scoped `CONTAINER_API_KEY`; an explicitly
   supplied account `VAST_API_KEY` is also supported. An
   unrecognised provider says so and points at the dashboard instead of failing
-  obscurely. On RunPod the pod-scoped key RunPod injects is **verified to
-  terminate its own pod** — no extra credential needed; the page still checks it
-  before you commit, and `RUNPOD_TERMINATE_API_KEY` covers the cases the pod key
-  cannot.
+  obscurely. On RunPod the injected pod-scoped key has terminated its own pod
+  on some deployments and has been refused on another; the appliance therefore
+  tries REST, GraphQL, and both current and legacy `runpodctl` delete commands.
+  `RUNPOD_TERMINATE_API_KEY` supplies an account key when the scoped key lacks
+  delete permission.
 - **Typed confirmation**: you type the instance id, plus an explicit
   acknowledgement checkbox. No single click can destroy anything.
 - **`TERMINATE_DRY_RUN=1`** runs the whole flow and shows the request it would
@@ -678,8 +687,8 @@ first. Full design note, provider matrix and cited sources:
   TLS private key, config state, every log this template writes (prompts
   included), shell history, SSH material, provider/HF credentials, and anything
   you added under the model dir. **The public model weights are deliberately not
-  erased** — the checkpoint is downloadable by anyone, so overwriting 332 GB
-  hides nothing. Optional RAM and VRAM zeroing. Read the limits in the design
+  erased** — the checkpoint is downloadable by anyone, so overwriting the full
+  checkpoint hides nothing. Optional RAM and VRAM zeroing. Read the limits in the design
   note: on SSDs with wear levelling, on overlay filesystems and on network
   volumes an overwrite does not guarantee the old bytes are unreachable, and the
   instance console log in your dashboard is outside our reach entirely.
@@ -690,7 +699,7 @@ first. Full design note, provider matrix and cited sources:
 >    A pod created without them comes up with `ports: null`: the container runs,
 >    but the landing page, the API and even SSH are unreachable, and a running
 >    pod's ports cannot be changed. You would have to destroy it and re-download
->    332 GB. (Measured.)
+>    the checkpoint — ~21 GiB for Qwen or ~309 GiB / 332 GB for GLM. (Measured.)
 > 2. **A network volume survives termination and keeps billing** — and RunPod's
 >    stock environment already points `HF_HOME` at it
 >    (`/runpod-volume/.cache/huggingface/`), so your HF token lands there by
@@ -1049,8 +1058,9 @@ existing endpoint:
 | `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |
 | `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
 | `ALLOW_UNSUPPORTED_GPU` | `0` | bypass the profile GPU-name check; the required visible GPU count still applies |
-| `MIN_NVIDIA_DRIVER_VERSION` | `595.45.04` | raise when a newer CUDA/base image requires it; the gate runs before model download |
-| `ALLOW_UNSUPPORTED_NVIDIA_DRIVER` | `0` | bypass the CUDA 13.2 driver floor only for an intentionally qualified compatibility-package stack |
+| `MIN_NVIDIA_DRIVER_VERSION` | `590.48.01` | lower bound of the qualified driver/CUDA pair; the gate runs before model download |
+| `MIN_NVIDIA_CUDA_VERSION` | `13.2` | reported CUDA capability paired with the driver floor; prevents an r590/CUDA 13.1 host from passing |
+| `ALLOW_UNSUPPORTED_NVIDIA_DRIVER` | `0` | bypass both admission floors only for a separately qualified compatibility stack |
 | `GPU_BLOCKS_OVERRIDE` | 0 | auto-profile the largest safe KV pool; set a positive block count to pin it |
 | `KV_CACHE_MEMORY_BYTES` | 0 | positive per-GPU byte count fixes KV memory and supersedes GMU for KV sizing; use the profiler's printed value when eager/speculative workspace must not be consumed by auto-KV, and do not combine it with `GPU_BLOCKS_OVERRIDE` |
 | `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host DRAM used as an aggregate L2 prefix cache (not active-context capacity); `0.5` is the measured agentic-workload setting on a 256 GiB host and native vLLM derives the TP worker slices |
@@ -1074,7 +1084,7 @@ existing endpoint:
 | `TERMINATE_ENABLED` | `0` | `1` exposes the terminate control on the landing page (startup env only) |
 | `TERMINATE_LOCKED` | `0` | `1` hard-locks termination for the life of the container (startup env only) |
 | `TERMINATE_PROVIDER` | (auto) | force `vastai` or `runpod` when detection fails |
-| `RUNPOD_TERMINATE_API_KEY` | (unset) | RunPod account API key. Not normally needed — the injected pod-scoped key is verified to terminate its own pod — but covers a missing/altered key or targeting another pod |
+| `RUNPOD_TERMINATE_API_KEY` | (unset) | RunPod account API key. Use when the injected pod-scoped key lacks delete permission, is missing/altered, or the target is another pod |
 | `TERMINATE_DRY_RUN` | `0` | `1` prepares the destroy request and does not send it |
 | `TERMINATE_PROBE` | `1` | `0` skips the read-only credential pre-check |
 

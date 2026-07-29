@@ -61,10 +61,13 @@ API_PORT = os.environ.get("LANDING_API_PORT", "8000")
 # Per-connection socket timeout (seconds). A stalled client must not hold the
 # single-threaded accept loop or a handler thread indefinitely.
 LANDING_TIMEOUT = float(os.environ.get("LANDING_TIMEOUT", "30"))
+WEIGHTS_STATE_CACHE_S = 5.0
 
 # Serializes the check-then-spawn sequence in start_termination so two
 # concurrent POSTs cannot both pass the "already in progress" check.
 _terminate_lock = threading.Lock()
+_weights_state_lock = threading.Lock()
+_weights_state_cache = {"directory": "", "sampled": 0.0, "bytes": 0}
 
 
 _ssl_ctx = None
@@ -105,7 +108,19 @@ def soul_status(sanitized=False) -> dict:
     if soul is None:
         return {"state": "Error", "level": 0, "controllerHealthy": False,
                 "latestHeadline": "SOUL support is unavailable"}
-    config, _sources, notes = soul.resolve()
+    try:
+        config, _sources, notes = soul.resolve()
+    except (OSError, TypeError, ValueError) as exc:
+        # The dashboard is the recovery surface for a damaged persistent
+        # volume. A corrupt/unreadable optional SOUL config must not make that
+        # recovery surface return HTTP 500.
+        config = {
+            "autonomyLevel": 0, "requestedLevel": 0, "maximumLevel": 0,
+            "heartbeatIntervalS": 300, "journalIntervalS": 3600,
+            "journalRetentionDays": 90, "evidenceRetentionDays": 7,
+            "maxStateMB": 256, "timezone": "UTC",
+        }
+        notes = [f"SOUL configuration could not be resolved: {exc}"]
     doc = soul.read_json(soul.paths()["status"], {}) or {}
     doc.update({
         "level": config["autonomyLevel"],
@@ -275,13 +290,24 @@ def weights_state() -> str:
     MODEL_DIR = model_dir()
     if os.path.isfile(os.path.join(MODEL_DIR, ".download-complete")):
         return "ready"
-    done = 0
-    for root, _dirs, files in os.walk(MODEL_DIR):
-        for f in files:
-            try:
-                done += os.path.getsize(os.path.join(root, f))
-            except OSError:
-                pass
+    now = time.monotonic()
+    with _weights_state_lock:
+        cached = (
+            _weights_state_cache["directory"] == MODEL_DIR
+            and now - float(_weights_state_cache["sampled"]) < WEIGHTS_STATE_CACHE_S
+        )
+        if cached:
+            done = int(_weights_state_cache["bytes"])
+        else:
+            done = 0
+            for root, _dirs, files in os.walk(MODEL_DIR):
+                for f in files:
+                    try:
+                        done += os.path.getsize(os.path.join(root, f))
+                    except OSError:
+                        pass
+            _weights_state_cache.update(
+                {"directory": MODEL_DIR, "sampled": now, "bytes": done})
     total = ""
     if gc is not None:
         try:
@@ -317,24 +343,11 @@ SNIPPETS = [
     models:
       - id: "$model"
         name: "$model"
-        reasoning: true
+        reasoning: $reasoning
         input: $input
         supportsTools: true
         contextWindow: $ctx
         maxTokens: $output"""),
-    ("opencode", "opencode.json (project or ~/.config/opencode/)", """{
-  "$$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "turnkey": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "$model",
-      "options": {"baseURL": "$ep/v1", "apiKey": "$key"},
-      "models": {
-        "$model": {"name": "$model", "limit": {"context": $ctx, "output": $output}}
-      }
-    }
-  }
-}"""),
     ("Claude Code", "shell (native /v1/messages — Anthropic wire format)", """export ANTHROPIC_BASE_URL="$ep"
 export ANTHROPIC_AUTH_TOKEN="$key"
 export ANTHROPIC_MODEL="$model"
@@ -349,7 +362,39 @@ env_key = "TURNKEY_API_KEY"
 wire_api = "chat"
 
 # then:  export TURNKEY_API_KEY="$key" """),
+    ("opencode", "opencode.json (project or ~/.config/opencode/)", """{
+  "$$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "turnkey": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "$model",
+      "options": {"baseURL": "$ep/v1", "apiKey": "$key"},
+      "models": {
+        "$model": {"name": "$model", "limit": {"context": $ctx, "output": $output}}
+      }
+    }
+  }
+}"""),
 ]
+
+CLIENT_INSTALLS = {
+    "Oh My Pi (OMP 17+)": (
+        "https://omp.sh/",
+        "curl -fsSL https://omp.sh/install | sh",
+    ),
+    "Claude Code": (
+        "https://www.anthropic.com/claude-code",
+        "curl -fsSL https://claude.ai/install.sh | bash",
+    ),
+    "Codex": (
+        "https://developers.openai.com/codex/",
+        "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+    ),
+    "opencode": (
+        "https://opencode.ai/",
+        "curl -fsSL https://opencode.ai/install | bash",
+    ),
+}
 
 # Shared look. Literal CSS only (no stray $): safe inside plain strings.
 STYLE = """<style>
@@ -392,6 +437,9 @@ border:1px solid var(--line);border-radius:8px;padding:.3rem .8rem;cursor:pointe
 button:hover{border-color:var(--accent);color:var(--accent)}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 button.primary:hover{filter:brightness(1.08);color:#fff}
+#send{min-width:5rem;transition:background-color .15s,border-color .15s}
+button.primary.stopmode{background:#dc2626;border-color:#dc2626;color:#fff}
+button.primary.stopmode:hover{background:#b91c1c;border-color:#b91c1c;color:#fff}
 canvas.chart{width:100%;height:96px;display:block}
 .layout{display:grid;gap:1rem;grid-template-columns:minmax(0,1fr)}
 aside.chatpane{display:none}
@@ -406,12 +454,24 @@ aside.chatpane{display:none}
 aside.chatpane h2{margin:0 0 .5rem;font-size:.95rem}
 .chatpane #log{flex:1;overflow-y:auto;min-height:0}
 .msg{max-width:85%;padding:.6rem .9rem;border-radius:14px;margin:.35rem 0;
-white-space:pre-wrap;font-size:.92rem;width:fit-content}
+font-size:.92rem;width:fit-content}
 .msg.you{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#fff;
-margin-left:auto;border-bottom-right-radius:4px}
+margin-left:auto;border-bottom-right-radius:4px;white-space:pre-wrap}
 .msg.bot{background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:4px}
+.msg.bot>:first-child{margin-top:0}.msg.bot>:last-child{margin-bottom:0}
+.msg.bot p{margin:.55rem 0}.msg.bot h1,.msg.bot h2,.msg.bot h3,.msg.bot h4{
+font-size:1em;margin:.85rem 0 .35rem;line-height:1.3}
+.msg.bot ul,.msg.bot ol{margin:.45rem 0;padding-left:1.4rem}
+.msg.bot li{margin:.18rem 0}.msg.bot blockquote{margin:.55rem 0;padding:.1rem .7rem;
+border-left:3px solid var(--accent);color:var(--muted)}
+.msg.bot pre{max-width:100%;white-space:pre;overflow-x:auto}
+.msg.bot pre code{background:none;border:0;padding:0}
 details.think{color:var(--muted);font-size:.8em;margin:.2rem 0;max-width:85%;
 background:none;border:none;padding:0 .3rem}
+details.think summary{font-size:inherit}
+.thinkbody{margin:.35rem 0 .55rem;padding:.55rem .7rem;max-height:14rem;overflow:auto;
+white-space:pre-wrap;overflow-wrap:anywhere;border-left:2px solid var(--line);
+background:var(--bg);border-radius:0 8px 8px 0;line-height:1.45}
 .composer{display:flex;gap:.5rem;align-items:flex-end;padding-top:.5rem;
 border-top:1px solid var(--line)}
 #in{flex:1;font:inherit;background:var(--bg);color:var(--fg);
@@ -433,6 +493,9 @@ padding:1.25rem;color:var(--muted)}
 .composerbar{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.5rem}
 .chatprefs,.composer-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
 .turncount{color:var(--muted);font-size:.7rem}
+.keyhint{color:var(--muted);font-size:.7rem;white-space:nowrap}
+.keyhint kbd{font-family:var(--mono);font-size:.68rem;background:var(--bg);
+border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:.08rem .28rem}
 .thinkbox{position:relative;display:flex;align-items:center;gap:.35rem;color:var(--muted);
 font-size:.73rem;white-space:nowrap;cursor:pointer;user-select:none}
 .thinkbox input{position:absolute;opacity:0;pointer-events:none}
@@ -442,6 +505,12 @@ border-radius:50%;background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.2);
 transition:transform .18s ease}
 .thinkbox input:checked+.switch{background:var(--accent)}
 .thinkbox input:checked+.switch:after{transform:translateX(.8rem)}
+.clientinstall{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.55rem 0}
+.copyline{display:flex;flex:1;min-width:min(100%,18rem)}
+.installcmd{flex:1;min-width:0;font-family:var(--mono);font-size:.78rem;color:var(--fg);
+background:var(--bg);border:1px solid var(--line);border-radius:8px 0 0 8px;
+padding:.38rem .55rem}
+.copyline button{border-left:0;border-radius:0 8px 8px 0}
 @media(max-width:38rem){.composerbar{align-items:flex-start;flex-direction:column}
 .composer-actions{width:100%;justify-content:flex-end}}
 </style>"""
@@ -557,7 +626,7 @@ CHAT_WIDGET = """<div id=log aria-live=polite>
 </div>
 <div class=composer>
  <div class=inputrow>
-  <textarea id=in rows=2 aria-label="Chat message"
+  <textarea id=in rows=2 aria-label="Chat message" aria-describedby=sendhint
    placeholder="Message the model…"></textarea>
   <button id=send class=primary type=button>Send</button>
  </div>
@@ -573,8 +642,8 @@ CHAT_WIDGET = """<div id=log aria-live=polite>
    </label>
   </div>
   <div class=composer-actions>
+   <span class=keyhint id=sendhint><kbd>Ctrl</kbd> + <kbd>Enter</kbd> sends</span>
    <span class=turncount id=turns>New conversation</span>
-   <button id=stop type=button disabled>Stop</button>
    <button id=clear type=button>Clear</button>
   </div>
  </div>
@@ -582,8 +651,79 @@ CHAT_WIDGET = """<div id=log aria-live=polite>
 
 CHAT_JS = """<script>
 const EP=$ep_js, KEY=$key_js, MODEL=$model_js, msgs=[];
+const CHAT_SYSTEM_PROMPT="You are the model behind a first-time-user demo chat. "+
+  "Answer clearly and concisely in GitHub-flavored Markdown. Use short paragraphs, "+
+  "headings only when useful, bullets for lists, and fenced code blocks with language "+
+  "tags. Do not emit raw HTML.";
 const log=document.getElementById("log"), inp=document.getElementById("in");
+const sendBtn=document.getElementById("send"),clearBtn=document.getElementById("clear");
 let ctrl=null;
+function setStreaming(active){
+  sendBtn.textContent=active?"■ Stop":"Send";
+  sendBtn.classList.toggle("stopmode",active);
+  sendBtn.setAttribute("aria-label",active?"Stop generation":"Send message");
+  sendBtn.title=active?"Stop the current generation":"";
+  clearBtn.disabled=active;
+}
+function escapeHtml(s){
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+function inlineMarkdown(s){
+  let x=escapeHtml(s);
+  x=x.replace(/`([^`\\n]+)`/g,function(_,v){return "<code>"+v+"</code>"});
+  x=x.replace(/\\*\\*([^*\\n]+)\\*\\*/g,function(_,v){return "<strong>"+v+"</strong>"});
+  x=x.replace(/__([^_\\n]+)__/g,function(_,v){return "<strong>"+v+"</strong>"});
+  x=x.replace(/(^|[^*])\\*([^*\\n]+)\\*/g,function(_,lead,v){return lead+"<em>"+v+"</em>"});
+  x=x.replace(/\\[([^\\]\\n]+)\\]\\(([^)\\s]+)\\)/g,function(_,label,url){
+    if(!/^https?:\\/\\//i.test(url))return label+" ("+url+")";
+    return '<a href="'+url+'" target="_blank" rel="noopener noreferrer">'+label+"</a>";
+  });
+  return x;
+}
+function renderMarkdown(source){
+  const lines=source.replace(/\\r\\n?/g,"\\n").trim().split("\\n");
+  let html=[],para=[],list=[],listTag="",code=[],codeLang="",inCode=false;
+  function flushPara(){
+    if(para.length){html.push("<p>"+inlineMarkdown(para.join(" ").trim())+"</p>");para=[]}
+  }
+  function flushList(){
+    if(list.length){html.push("<"+listTag+">"+list.map(function(v){
+      return "<li>"+inlineMarkdown(v)+"</li>";
+    }).join("")+"</"+listTag+">");list=[];listTag=""}
+  }
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if(line.startsWith("```")){
+      if(inCode){
+        html.push('<pre><code'+(codeLang?' class="language-'+codeLang+'"':"")+">"+
+          escapeHtml(code.join("\\n"))+"</code></pre>");
+        code=[];codeLang="";inCode=false;
+      }else{
+        flushPara();flushList();codeLang=line.slice(3).trim().replace(/[^a-zA-Z0-9_+-]/g,"");
+        inCode=true;
+      }
+      continue;
+    }
+    if(inCode){code.push(line);continue}
+    if(!line.trim()){flushPara();flushList();continue}
+    const heading=line.match(/^(#{1,4})\\s+(.+)/);
+    if(heading){flushPara();flushList();const n=heading[1].length;
+      html.push("<h"+n+">"+inlineMarkdown(heading[2])+"</h"+n+">");continue}
+    const unordered=line.match(/^\\s*[-*+]\\s+(.+)/);
+    const ordered=line.match(/^\\s*\\d+[.)]\\s+(.+)/);
+    if(unordered||ordered){
+      flushPara();const tag=ordered?"ol":"ul";
+      if(listTag&&listTag!==tag)flushList();listTag=tag;list.push((unordered||ordered)[1]);continue
+    }
+    if(line.startsWith("> ")){flushPara();flushList();
+      html.push("<blockquote>"+inlineMarkdown(line.slice(2))+"</blockquote>");continue}
+    para.push(line.trim());
+  }
+  if(inCode)html.push("<pre><code>"+escapeHtml(code.join("\\n"))+"</code></pre>");
+  flushPara();flushList();
+  return html.join("");
+}
 function el(tag,cls,txt){
   const empty=document.getElementById("chatempty");if(empty)empty.remove();
   const e=document.createElement(tag);if(cls)e.className=cls;
@@ -594,12 +734,12 @@ function emptyState(){
 }
 function wireMessages(){
   const keep=document.getElementById("preserve").checked;
-  return msgs.map(m=>{
+  return [{role:"system",content:CHAT_SYSTEM_PROMPT}].concat(msgs.map(m=>{
     const wire={role:m.role,content:m.content};
     if(keep&&m.role==="assistant"&&m.reasoning&&!m.reasoningOnly)
       wire[m.reasoningField||"reasoning_content"]=m.reasoning;
     return wire;
-  });
+  }));
 }
 function updateTurns(){
   const n=msgs.filter(m=>m.role==="assistant").length;
@@ -609,17 +749,17 @@ async function send(){
   const text=inp.value.trim(); if(!text||ctrl)return;
   inp.value="";inp.style.height="";msgs.push({role:"user",content:text});el("div","msg you",text);
   const think=el("details","think"); think.appendChild(document.createElement("summary")).textContent="thinking…";
-  const tbody=think.appendChild(document.createElement("div"));
-  const out=el("div","msg bot","");
-  ctrl=new AbortController();document.getElementById("stop").disabled=false;
-  document.getElementById("send").disabled=true;
+  const tbody=think.appendChild(document.createElement("div"));tbody.className="thinkbody";
+  const out=el("div","msg bot","");out.hidden=true;
+  ctrl=new AbortController();setStreaming(true);
   let answer="",reasoning="",reasoningField="",failed=false;
   try{
     const r=await fetch(EP+"/v1/chat/completions",{method:"POST",signal:ctrl.signal,
       headers:{"Authorization":"Bearer "+KEY,"Content-Type":"application/json"},
       body:JSON.stringify({model:MODEL,messages:wireMessages(),stream:true,max_tokens:$output,
         chat_template_kwargs:{enable_thinking:document.getElementById("think").checked}})});
-    if(!r.ok){failed=true;out.textContent="HTTP "+r.status+": "+await r.text();return}
+    if(!r.ok){failed=true;out.hidden=false;
+      out.textContent="HTTP "+r.status+": "+await r.text();return}
     const rd=r.body.getReader(), dec=new TextDecoder(); let buf="";
     for(;;){const {done,value}=await rd.read(); if(done)break;
       buf+=dec.decode(value,{stream:true}); const lines=buf.split("\\n"); buf=lines.pop();
@@ -631,36 +771,51 @@ async function send(){
         const thought=d.reasoning_content??d.reasoning;
         if(thought){
           reasoningField=d.reasoning_content!=null?"reasoning_content":"reasoning";
-          reasoning+=thought;tbody.textContent=reasoning;think.open=true
+          think.open=true;reasoning+=thought;tbody.textContent=reasoning.trimStart();
+          tbody.scrollTop=tbody.scrollHeight
         }
-        if(d.content){answer+=d.content;out.textContent=answer;
-          if(think.open){think.open=false;think.querySelector("summary").textContent="thinking ("+reasoning.length+" chars)"}}
+        if(d.content){answer+=d.content;out.hidden=false;
+          out.innerHTML=renderMarkdown(answer.trimStart())}
         log.scrollTop=log.scrollHeight;}}
-  }catch(e){if(e.name!=="AbortError"){failed=true;out.textContent="Request failed. "+e}}
+  }catch(e){if(e.name!=="AbortError"){failed=true;out.hidden=false;
+      out.textContent="Request failed. "+e}}
   finally{
-    const stopped=ctrl&&ctrl.signal.aborted,finalText=answer||reasoning;
-    ctrl=null;document.getElementById("stop").disabled=true;
-    document.getElementById("send").disabled=false;
-    if(!answer&&reasoning){out.textContent=reasoning;think.remove()}
-    else if(!reasoning)think.remove();
-    else think.querySelector("summary").textContent="thinking ("+reasoning.length+" chars)";
-    if(!finalText&&!failed)out.textContent=stopped?"Generation stopped.":"The model returned no text.";
+    const stopped=ctrl&&ctrl.signal.aborted,cleanAnswer=answer.trim(),cleanReasoning=reasoning.trim();
+    const finalText=cleanAnswer||(!stopped?cleanReasoning:"");
+    ctrl=null;setStreaming(false);
+    if(stopped&&!cleanAnswer){
+      if(cleanReasoning){
+        think.open=false;tbody.textContent=cleanReasoning;
+        think.querySelector("summary").textContent="thinking ("+cleanReasoning.length+" chars)";
+      }else think.remove();
+    }
+    else if(!cleanAnswer&&cleanReasoning){out.hidden=false;
+      out.innerHTML=renderMarkdown(cleanReasoning);think.remove()}
+    else if(!cleanReasoning)think.remove();
+    else{
+      think.open=false;
+      out.innerHTML=renderMarkdown(cleanAnswer);
+      tbody.textContent=cleanReasoning;
+      think.querySelector("summary").textContent="thinking ("+cleanReasoning.length+" chars)";
+    }
+    if(!finalText&&!failed){out.hidden=false;
+      out.textContent=stopped?"Generation stopped.":"The model returned no text."}
     if(finalText){
       const preserve=document.getElementById("preserve").checked;
       msgs.push({role:"assistant",content:finalText,
-        reasoning:preserve&&answer?reasoning:"",
+        reasoning:preserve&&cleanAnswer?cleanReasoning:"",
         reasoningField:reasoningField||"reasoning_content",
-        reasoningOnly:!answer&&!!reasoning});
+        reasoningOnly:!cleanAnswer&&!!cleanReasoning});
       updateTurns();
     }
     else if(msgs.length&&msgs[msgs.length-1].role==="user")msgs.pop();
     inp.focus();
   }
 }
-document.getElementById("send").onclick=send;
-document.getElementById("stop").onclick=()=>ctrl&&ctrl.abort();
+function toggleGeneration(){if(ctrl)ctrl.abort();else send()}
+sendBtn.onclick=toggleGeneration;
 document.getElementById("clear").onclick=()=>{msgs.length=0;emptyState();updateTurns();inp.focus()};
-inp.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter")send()});
+inp.addEventListener("keydown",e=>{if(e.ctrlKey&&e.key==="Enter")toggleGeneration()});
 inp.addEventListener("input",()=>{inp.style.height="";inp.style.height=Math.min(inp.scrollHeight,144)+"px"});
 </script>"""
 
@@ -788,12 +943,26 @@ def deployment() -> dict:
                                f" x {out['gpu_name'] or 'GPU'}"))
     out["chips"] = chips
     out["repo"] = gc.derive(eff).get("MODEL_REPO", variant.get("repo", ""))
-    out["tested"] = fam.get("tested", True)
+    out["tested"] = fam.get("tested", False)
+    # Ask the same argv builder PID 1 uses. GLM/Qwen parsers are family flags;
+    # custom parsers are knobs, so inspecting only REASONING_PARSER falsely
+    # labels both built-in profiles as non-reasoning.
+    out["reasoning"] = (
+        "true" if "--reasoning-parser" in gc.family_serve_args(eff) else "false")
     return out
 
 
 def config_enabled() -> bool:
     return gc is not None and bool(TOKEN)
+
+
+def token_valid(tok: str) -> bool:
+    return bool(
+        TOKEN
+        and tok
+        and hmac.compare_digest(
+            tok.encode("utf-8", "replace"), TOKEN.encode("utf-8"))
+    )
 
 
 def verify_last() -> dict:
@@ -1304,8 +1473,8 @@ def render_terminate(tok: str, secure: bool, banner=None, banner_cls="") -> byte
         "logging put them), shell history, SSH material, provider and Hugging Face "
         "credentials, and anything you added under the model dir. "
         "<b>The public model weights are deliberately NOT erased</b> — the checkpoint "
-        "is downloadable by anyone, so overwriting 332 GB hides nothing and would take "
-        "far longer than you have. "
+        "is downloadable by anyone, so overwriting the full checkpoint hides nothing "
+        "and would take far longer than you have. "
         "<b>Limits:</b> on SSDs with wear levelling, on overlay/copy-on-write "
         "filesystems, and on network volumes, an overwrite does not guarantee the old "
         "bytes are unreachable; provider snapshots and the instance console log in "
@@ -1374,7 +1543,7 @@ def start_termination(form) -> tuple:
                 opts.append("--vram")
         try:
             os.makedirs(gc.runtime_dir(), exist_ok=True)
-            logf = open(os.path.join(gc.runtime_dir(), "terminate.log"), "ab")
+            logf = open(os.path.join(gc.runtime_dir(), "terminate.log"), "wb")
             subprocess.Popen(
                 [sys.executable, os.path.join(SCRIPTS_DIR, "terminate_worker.py")] + opts,
                 stdout=logf, stderr=logf, start_new_session=True, close_fds=True)
@@ -1400,15 +1569,25 @@ def render(secure: bool, tok: str = "") -> bytes:
                 f"<div class=v><span class='pill {cls}'></span>"
                 f"<span class={cls}>{html.escape(value)}</span></div></div>")
 
+    authorized = token_valid(tok)
     real0 = st.get("api_key", "")
     dep = deployment()
-    chat_ok = bool(secure and TOKEN and real0 and endpoint and serving)
+    chat_ok = bool(secure and authorized and real0 and endpoint and serving)
     wrap_cls = "wrap wide" if chat_ok else "wrap"
     subtitle = " &middot; ".join(html.escape(c) for c in dep["chips"])
     parts = [page_head(dep["title"]),
              f'<div class="{wrap_cls}"><div class=layout><main>',
              f"<header class=hero><h1><b>{html.escape(dep['model'] or 'vLLM')}</b> "
              f"turnkey</h1><span class=sub>{subtitle}</span></header>",]
+    if TOKEN and not authorized:
+        parts.append(
+            "<div class=card><h3>Read-only status</h3>"
+            "<div class=v>The appliance is reachable.</div>"
+            "<div class=sub>This bare provider-proxy URL intentionally omits API "
+            "credentials and all controls. Open the complete "
+            "<code>&gt;&gt;&gt; Runpod dashboard:</code> URL from the pod logs, or "
+            "append the persisted <code>OPEN_BUTTON_TOKEN</code>, to configure, "
+            "chat, inspect the SOUL journal, or terminate the pod.</div></div>")
     if not dep.get("tested", True):
         parts.append("<div class=card style='border-color:#e5484d'><h3>Residual "
                      "qualification</h3><div class=v>" + html.escape(dep["family"]) +
@@ -1445,7 +1624,7 @@ def render(secure: bool, tok: str = "") -> bytes:
         # appliance has met answered /health and short prompts perfectly.
         head, ok, _detail = correctness()
         parts.append("<div class=grid>" + card("Correctness", head, ok) + "</div>")
-        if config_enabled():
+        if config_enabled() and authorized:
             mode = gc.apply_state().get("mode", "steady")
             note = ("<b>The last change you applied was rolled back</b> — the previous "
                     "known-good configuration is running. " if mode == "rolled-back" else "")
@@ -1462,7 +1641,8 @@ def render(secure: bool, tok: str = "") -> bytes:
     if endpoint:
         ep = html.escape(endpoint, quote=True)
         real = st.get("api_key", "")  # from the root-only status file
-        key = real if (secure and TOKEN and real) else "<paste API key from instance logs>"
+        key = real if (secure and authorized and real) else \
+            "<paste API key from instance logs>"
         tok_esc = html.escape(tok, quote=True)
         parts.append(f'<div class=card><h3>OpenAI-compatible endpoint</h3>'
                      f'<div class=v><a href="{ep}/v1/models"><code>{ep}/v1</code></a></div>'
@@ -1470,7 +1650,7 @@ def render(secure: bool, tok: str = "") -> bytes:
                      f'<a href="{ep}/metrics">Prometheus /metrics</a>')
         if not key.startswith("<"):
             parts.append(f' &middot; <a href="/chat?token={tok_esc}"><b>Quick chat &rarr;</b></a>')
-        if terminate_available():
+        if authorized and terminate_available():
             parts.append(f' &middot; <a href="/terminate?token={tok_esc}">'
                          'Terminate instance</a>')
         parts.append('</div></div>')
@@ -1486,7 +1666,7 @@ def render(secure: bool, tok: str = "") -> bytes:
             }.get(dep.get("provider"), "the container logs, or set "
                                        "<code>VLLM_API_KEY</code> yourself")
             parts.append(f"<p class=sub>The API key is printed in {where}.</p>")
-        if serving:
+        if serving and authorized:
             parts.append(METRICS_SECTION.substitute(
                 ep_js=js_literal(endpoint), key_js=js_literal(key)))
         parts.append("<h2>Client configs</h2>")
@@ -1494,10 +1674,25 @@ def render(secure: bool, tok: str = "") -> bytes:
             filled = Template(body).substitute(
                 ep=endpoint, key=key, model=dep["model"] or "model",
                 ctx=dep.get("context") or 32768, output=dep.get("output") or 8192,
-                input=dep.get("input") or "[text]")
+                input=dep.get("input") or "[text]",
+                reasoning=dep.get("reasoning") or "false")
+            product_url, install_cmd = CLIENT_INSTALLS[name]
             parts.append(f"<details><summary>{html.escape(name)}</summary>"
+                         f'<div class=clientinstall><a href="'
+                         f'{html.escape(product_url, quote=True)}" target=_blank '
+                         f'rel="noopener noreferrer">Product page &nearr;</a>'
+                         f'<span class=copyline><input class=installcmd readonly '
+                         f'aria-label="{html.escape(name, quote=True)} install command" '
+                         f'value="{html.escape(install_cmd, quote=True)}">'
+                         '<button type=button onclick="copyInstall(this)">copy</button>'
+                         "</span></div>"
                          f"<p class=sub><code>{html.escape(where)}</code></p>"
                          f"<pre>{html.escape(filled)}</pre></details>")
+        parts.append(
+            "<script>function copyInstall(b){const i=b.previousElementSibling;"
+            "navigator.clipboard.writeText(i.value).then(function(){"
+            "b.textContent='copied!';setTimeout(function(){b.textContent='copy'},1500)"
+            "})}</script>")
         parts.append(
             '<h2>Quick test <button id=copybtn onclick="copyQT()" '
             'style="vertical-align:middle">copy</button></h2>'
@@ -1506,7 +1701,7 @@ def render(secure: bool, tok: str = "") -> bytes:
             "document.getElementById('qt').textContent.trim()).then(()=>{"
             "const b=document.getElementById('copybtn');b.textContent='copied!';"
             "setTimeout(()=>{b.textContent='copy'},1500)})}</script>")
-        if serving:
+        if serving and authorized:
             parts.append('<h2>Model</h2><div class=card>'
                          '<pre id=modeljson style="max-height:16rem;margin:0;border:none">'
                          'loading /v1/models&hellip;</pre></div>')
@@ -1595,8 +1790,7 @@ class Handler(BaseHTTPRequestHandler):
         if gc is None:
             self.send_error(503, "config editor unavailable (glm_config import failed)")
             return False
-        if not TOKEN or not hmac.compare_digest(tok.encode("utf-8", "replace"),
-                                              TOKEN.encode("utf-8")):
+        if not token_valid(tok):
             self.send_error(403, "the config editor requires OPEN_BUTTON_TOKEN")
             return False
         return True
@@ -1741,10 +1935,17 @@ class Handler(BaseHTTPRequestHandler):
         # Strip CR/LF so a crafted token can never inject header fields into
         # the plain->HTTPS redirect Location below.
         tok = tok.replace("\r", "").replace("\n", "")
-        if TOKEN and not hmac.compare_digest(tok.encode("utf-8", "replace"),
-                                           TOKEN.encode("utf-8")):
-            self.send_error(403, "bad token (use the vast console Open button)")
-            return
+        if TOKEN and not token_valid(tok):
+            # Provider "open port" actions cannot append a capability token.
+            # Let the bare home URL prove that the appliance is alive, but keep
+            # credentials, controls, journals, chat and JSON status private.
+            if url.path != "/" or tok:
+                self.send_error(
+                    403,
+                    "bad token (use the authenticated dashboard URL from startup "
+                    "logs, or open / without a token for read-only status)",
+                )
+                return
         secure = is_secure_connection(self.connection)
         hostport = status().get("https_hostport", "")
         if not secure and ssl_ctx() and hostport:

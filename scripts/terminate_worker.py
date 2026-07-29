@@ -106,13 +106,18 @@ def default_stopper(progress, timeout=STOP_TIMEOUT_S):
 def run(opts, transport=None, runner=None, provider_obj=None, stopper=None,
         progress=None, env=None):
     """-> the final progress document. Never raises."""
-    env = os.environ if env is None else env
-    dry_run = bool(opts.get("dry_run")) or gc.env_flag(env, "TERMINATE_DRY_RUN", False)
+    # A worker launched by a separately restarted landing process may not have
+    # the provider variables RunPod injected into PID 1. Preserve explicit test
+    # environments exactly, but otherwise use the repository-wide PID 1
+    # fallback contract instead of freezing this process's reduced os.environ.
+    runtime_env = gc.effective_env(env)
+    dry_run = bool(opts.get("dry_run")) or gc.env_flag(
+        runtime_env, "TERMINATE_DRY_RUN", False)
     pr = progress or Progress(dry_run=dry_run)
-    p = provider_obj or prov.get(env)
+    p = provider_obj or prov.get(runtime_env)
 
     # ---- gate 1: the switches -------------------------------------------
-    allowed, why = gc.termination_allowed(env)
+    allowed, why = gc.termination_allowed(runtime_env)
     if not allowed:
         return pr.finish(False, why, refused="switch")
 
@@ -164,7 +169,7 @@ def run(opts, transport=None, runner=None, provider_obj=None, stopper=None,
     # Re-check the kill switch: a lock can be thrown mid-flight through the
     # landing-page ratchet. If termination is no longer allowed, clean up the
     # request-stop flag so the supervisor may restart the engine, then bail.
-    allowed, why = gc.termination_allowed(env)
+    allowed, why = gc.termination_allowed(runtime_env)
     if not allowed:
         _clear_request_stop()
         return pr.finish(False, f"termination was refused mid-flight: {why}. "
