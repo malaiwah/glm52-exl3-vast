@@ -351,7 +351,7 @@ one RTX 5090, 100 GB of disk, and `MODEL_PROFILE=qwen36-27b-nvfp4`.
 
 Choose **[▶ GLM-5.2 EXL3 on Runpod](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93)**
 for the four-GPU flagship, or
-**[▶ Qwen3.6-27B NVFP4 Vision on Runpod](https://console.runpod.io/deploy?template=m9j7oh6cv2&ref=4ahycj93)**
+**[▶ Qwen3.6-27B NVFP4 Vision on Runpod](https://console.runpod.io/deploy?template=7ufac3b4zw&ref=4ahycj93)**
 for the qualified one-GPU profile. Both links select public Pod templates and
 include the project referral.
 
