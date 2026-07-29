@@ -17,7 +17,8 @@ The appliance now pins **GG v20-r9**. It retains r8's XGrammar 0.2.5 and
 opt-in DCP-aware LMCache 0.5.2, then adds the paired dynamic-token NVFP4 MLA
 cache ABI and exact adaptive sparse-indexer folding. The flagship EXL3 profile
 now uses the complete dynamic record after two identical KLD runs and two
-exact 510,533-token five-depth retrieval passes; the reviewed static GLM-5.2
+exact 510,533-token five-depth retrieval passes, followed by a full-envelope
+521,275-token pass; the reviewed static GLM-5.2
 scale artifact remains available for other variants. XGrammar 0.2.5 fixes GLM
 `tool_choice=required` termination; LMCache remains off by default and does
 not replace this appliance's measured native vLLM DRAM prefix tier. Upstream
@@ -29,7 +30,7 @@ storage semantics and needs its own certificate-renewal migration test.
 The default `glm52-exl3` profile is the flagship production stack:
 BrandonMusic's 3.0-bpw EXL3/TR3 checkpoint (~77 GiB/rank), DCP2, native
 TR3 MTP-5, dynamic-token `nvfp4_ds_mla` KV with FP8 RoPE, CUDA graphs through
-C8, and a 513,536-token request limit. vLLM auto-profiles the KV pool at the
+C8, and a full 524,288-token request limit. vLLM auto-profiles the KV pool at the
 AIBeast-qualified `GPU_MEMORY_UTILIZATION=0.955`; rentals remain a cold-boot
 requalification boundary. Half of host DRAM is
 available as an L2 prefix cache for repeated agentic prefixes; it does not
@@ -113,7 +114,7 @@ speculation shape; it is not merely a different download URL:
 
 | variant | topology / speculation | context and memory | intended use |
 |---|---|---|---|
-| **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 513,536 max, 532,224-token dynamic NVFP4 KV pool at GMU 0.955 on AIBeast, 3,072-token prefill batch, 1 GiB workspace, 50% DRAM prefix tier | balanced flagship; default |
+| **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 524,288 max, 543,488-token dynamic NVFP4 KV pool at GMU 0.955 on AIBeast, 3,072-token prefill batch, 140,000-token CKV gather, 1 GiB workspace, 50% DRAM prefix tier | balanced flagship; default |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
@@ -184,7 +185,7 @@ promise has feature limitations; this stack uses PTX JIT and custom
 collectives. Set `ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1` only when the operator has
 deliberately provided and validated a suitable `cuda-compat-13-2` stack.
 
-#### InstantTensor: qualified flagship loader with a context margin
+#### InstantTensor: qualified flagship loader at full 512K
 
 InstantTensor is the balanced DCP2 EXL3 profile's measured default. It loaded
 target plus draft in 32.4–33.1 seconds, versus 60.5–62.6 seconds for
@@ -192,11 +193,13 @@ warm-page-cache safetensors. The unmodified 524,288-token /
 utilization-0.978 profile failed KV admission twice because 9.04 GiB was
 needed and only 9.03 GiB remained. The earlier v31 image passed at 520,192.
 GG v20-r5, retained unchanged in r8's compute stack and preserved by r9's
-graph-aware profiler, safely accounts for its measured 0.81 GiB/GPU retained
-CUDA-graph pool, exposing 514,944 KV tokens at utilization 0.976. The new
-513,536 default leaves a 1,408-token admission margin and passed cold plus
-cache-reused boots, all required API features, two independent 510,534/510,535
-five-depth retrievals, and a 507,902-token prompt plus 4,096 generated tokens.
+graph-aware profiler, safely accounts for retained CUDA graphs. The final r9
+dynamic-token shape at utilization 0.955 exposes 543,488 KV tokens. Its
+524,288 default passed cache-reused boots, all required API features, and a
+521,275-token five-depth retrieval with all 5/5 needles found and no
+degeneration. It retained 576 MiB/GPU after that gate. This qualification is
+specific to DCP2, batch 3,072, CKV gather 140,000, vision off, and the
+auto-sized pool.
 
 A seeded same-prompt matrix found no systematic steady-state change:
 
@@ -752,7 +755,8 @@ the 368-byte FP8-RoPE record, stores an outer scale per token, and cannot be
 combined with the static scale file. On AIBeast the appliance measured mean KLD
 `0.1167701185` twice across 2,047 positions, then retrieved 5/5 needles without
 degeneration from two exact 510,533-token prompts. It is therefore the flagship
-EXL3 default. `static-calibrated` remains the compatibility choice for variants
+EXL3 default; the final scheduler also passed at 521,275 tokens.
+`static-calibrated` remains the compatibility choice for variants
 that have not passed the same gate.
 
 Vision consumed about 1.31 GiB/GPU in an earlier graft and 1.99 GiB/GPU in the
@@ -835,7 +839,7 @@ within sampling noise (~±3).
 - **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
   applicable Hub rate limits), `OFFLOAD_FRACTION`
   (GLM default 0.5 for reusable agentic prefixes), `MTP_TOKENS` (GLM default 5; Qwen
-  default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 513536; Qwen 32768),
+  default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 524288; Qwen 32768),
   `SERVED_MODEL_NAME`,
   `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 = stock BF16 draft),
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
@@ -910,7 +914,7 @@ existing endpoint:
 | `MODEL_DISPLAY_NAME` | profile name | dashboard and provider label |
 | `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working |
 | `TENSOR_PARALLEL_SIZE` | 4 GLM / 1 Qwen | match a supported profile topology |
-| `MAX_MODEL_LEN` | 513536 GLM / 32768 Qwen | increase the Qwen development context only after measuring VRAM |
+| `MAX_MODEL_LEN` | 524288 GLM / 32768 Qwen | change the qualified GLM scheduler/memory shape or increase Qwen context only after measuring VRAM |
 | `MULTIMODAL` | n/a GLM / 0 Qwen | Qwen `1` loads its native vision encoder; GLM vision remains controlled by `VISION` (default 0) |
 | `QUANTIZATION` | custom profile only | vLLM quantizer name such as `modelopt` |
 | `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |

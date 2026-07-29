@@ -250,18 +250,18 @@ VARIANTS = {
         "default_draft": "native",
         "defaults": {
             "DCP": "2",
-            # GG v20-r5 profiles the retained CUDA-graph pool before KV
-            # admission; r9 keeps that graph-aware memory planner.
-            # On the qualified 96 GiB TP4/DCP2 shape this exposes
-            # 514,944 KV tokens; 513,536 keeps a measured 1,408-token admission
-            # margin while still completing a 507,902 + 4,096 token request.
-            "MAX_MODEL_LEN": 513536,
+            # GG v20-r9's dynamic-token KV path and exact indexer fold expose
+            # 543,488 KV tokens on the qualified 96 GiB TP4/DCP2 shape at
+            # GMU 0.955. The full binary 512 Ki-token request envelope passed
+            # a 521,275-token five-depth retrieval with runtime headroom.
+            "MAX_MODEL_LEN": 524288,
             "MAX_NUM_BATCHED_TOKENS": 3072,
             "MAX_NUM_SEQS": 8,
             # GG v20-r9's complete paired ABI stores dynamic outer scales per
             # token and FP8 RoPE in the 368-byte record. On AIBeast it matched
             # the BF16 reference at mean KLD 0.116770 in two independent runs,
-            # then passed an exact 510,533-token five-depth retrieval twice.
+            # then passed two exact 510,533-token five-depth retrievals and the
+            # final 521,275-token full-envelope gate.
             "KV_SCALE_MODE": "dynamic-token",
             "MTP_TOKENS": 5,
             "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
@@ -272,10 +272,10 @@ VARIANTS = {
             "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": 8192,
             # r9 dynamic KV admitted 677,504 tokens at 0.976 but left only
             # 25 MiB for a 36 MiB transient. 0.9675 also OOMed on a 108 MiB
-            # all-gather during a maximum-context request. 0.955 exposed
-            # 532,224 tokens for the 513,536 request limit, started with
-            # ~1.56 GiB/GPU free, and retained ~1 GiB late in two exact 510.5K
-            # retrievals while ordinary clients queued behind the full session.
+            # all-gather during a maximum-context request. With the final
+            # 3,072/140K scheduler shape, 0.955 exposed 543,488 tokens for the
+            # 524,288 request limit and retained 576 MiB/GPU after an exact
+            # 521,275-token, five-depth retrieval.
             "GPU_MEMORY_UTILIZATION": 0.955,
             "GPU_BLOCKS_OVERRIDE": 0,
             "LOAD_FORMAT": "instanttensor",
@@ -579,8 +579,9 @@ KNOBS = [
              "and the established BF16-RoPE 432-byte record. dynamic-token opts "
              "into GG v20-r9's paired 368-byte FP8-RoPE record and stores one "
              "outer scale per token. The flagship EXL3 profile uses dynamic "
-             "mode after two identical KLD runs and two exact 510,533-token "
-             "five-depth retrieval passes on GG v20-r9. Other variants retain "
+             "mode after two identical KLD runs, two exact 510,533-token "
+             "retrievals, and a 521,275-token full-envelope pass on GG v20-r9. "
+             "Other variants retain "
              "static-calibrated until independently qualified.")),
 
     dict(key="MTP_DRAFT", families=("glm52",), type="choice", default="tr3-graft", choices=list(DRAFTS),
@@ -830,9 +831,10 @@ KNOBS = [
              "auto and exact KV pools because the final sparse-indexer allocation "
              "could not obtain a contiguous 352 MiB segment. InstantTensor uses about "
              "0.04 GiB/GPU more resident model memory. GG v20-r9's retained "
-             "graph-aware profiler additionally "
-             "accounts for retained CUDA graphs, so the qualified balanced "
-             "default is 513536 rather than 524288.")),
+             "graph-aware profiler additionally accounts for retained CUDA "
+             "graphs. The final r9 dynamic-token shape passed the complete "
+             "524288 envelope at GMU 0.955; larger batches or a larger CKV "
+             "gather ceiling reduced PP and/or KV headroom.")),
 
     dict(key="MODEL_OUTPUT_LIMIT", type="int", default=131072, min=256, max=262144,
          group="Serving", scope="engine", label="Client output limit",
@@ -1684,35 +1686,49 @@ def validate(cfg: dict, context=None):
              "download during the restart.")
 
     # 7. memory / pool sanity ------------------------------------------------
+    qualified_r9_512k = (
+        is_glm
+        and cfg["MODEL_VARIANT"] == "exl3-tr3"
+        and cfg["LOAD_FORMAT"] == "instanttensor"
+        and cfg["DCP"] == "2"
+        and cfg["MAX_MODEL_LEN"] == 524288
+        and cfg["MAX_NUM_BATCHED_TOKENS"] == 3072
+        and cfg["MAX_NUM_SEQS"] == 8
+        and cfg["DCP_CKV_GATHER_MAX_TOKENS"] == 140000
+        and cfg["GPU_MEMORY_UTILIZATION"] == 0.955
+        and cfg["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"
+        and cfg["KV_SCALE_MODE"] == "dynamic-token"
+        and cfg["MTP_TOKENS"] == 5
+        and cfg["MAX_CUDAGRAPH_CAPTURE_SIZE"] == 64
+        and cfg["VLLM_EXL3_TRELLIS_MAX_M"] == 64
+        and not cfg["VISION"]
+        and not cfg["GPU_BLOCKS_OVERRIDE"]
+    )
     if (is_glm and cfg["MODEL_VARIANT"].startswith("exl3-tr3")
             and cfg["LOAD_FORMAT"] == "instanttensor"
-            and cfg["MAX_MODEL_LEN"] > 513536
-            and cfg["GPU_MEMORY_UTILIZATION"] <= 0.978):
+            and cfg["MAX_MODEL_LEN"] >= 524288
+            and cfg["GPU_MEMORY_UTILIZATION"] <= 0.978
+            and not qualified_r9_512k):
         warn("instanttensor-context-margin",
              ["LOAD_FORMAT", "MAX_MODEL_LEN", "GPU_MEMORY_UTILIZATION"],
-             "the exact TP4/DCP2 EXL3 shape at MAX_MODEL_LEN=524288 and "
+             "an earlier TP4/DCP2 EXL3 shape at MAX_MODEL_LEN=524288 and "
              "GPU_MEMORY_UTILIZATION=0.978 failed KV admission on both InstantTensor "
              "attempts: 9.04 GiB was needed and 9.03 GiB remained. InstantTensor "
              "loaded ~0.04 GiB/GPU more resident model memory than safetensors. "
-             "The earlier v31 image passed MAX_MODEL_LEN=520192, but GG v20-r9's "
-             "graph-aware memory path "
-             "now accounts for a measured 0.81 GiB/GPU retained CUDA-graph pool. "
-             "On r5 the safe profiler exposed 514,944 KV tokens; "
-             "MAX_MODEL_LEN=513536 passed cold and cache-reused boots, two "
-             "~510.5K five-depth retrievals, and a 507,902 + 4,096 token request. "
-             "Use that measured margin, or re-qualify another utilization/context "
-             "pair without disabling graph accounting.")
+             "The qualified r9 exception is exact: DCP2, GMU 0.955, batch 3,072, "
+             "CKV gather 140,000, dynamic-token KV, auto-sized pool, and vision "
+             "off exposed 543,488 KV tokens and passed a 521,275-token five-depth "
+             "retrieval. Restore that shape or re-qualify this override from a "
+             "cold start; do not disable graph accounting.")
     if cfg["GPU_MEMORY_UTILIZATION"] > 0.95 and not cfg["GPU_BLOCKS_OVERRIDE"]:
-        if (is_glm and cfg["MODEL_VARIANT"] == "exl3-tr3"
-                and cfg["MAX_MODEL_LEN"] == 513536
-                and cfg["GPU_MEMORY_UTILIZATION"] <= 0.976):
+        if qualified_r9_512k:
             warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
                  f"{cfg['GPU_MEMORY_UTILIZATION']} is high by generic vLLM standards, "
-                 "but the GG v20-r9 dynamic-token DCP2/513,536 profile at 0.955 "
-                 "passed cache-reused starts, the complete OpenAI feature suite, "
-                 "and two exact 510,533-token five-depth retrievals on AIBeast. "
-                 "It exposed 532,224 KV tokens and retained about 1 GiB/GPU late "
-                 "in a maximum-context prefill. The 0.9675 candidate exposed more "
+                 "but the GG v20-r9 dynamic-token DCP2/524,288 profile at 0.955 "
+                 "passed repeated cache-reused starts, the complete OpenAI feature "
+                 "suite, and a 521,275-token five-depth retrieval on AIBeast. "
+                 "It exposed 543,488 KV tokens and retained 576 MiB/GPU after "
+                 "the maximum-context gate. The 0.9675 candidate exposed more "
                  "KV but OOMed on a 108 MiB all-gather while a client request "
                  "overlapped the long-context gate. "
                  "A new driver, GPU SKU, loader, graph shape, or vision setting is still "

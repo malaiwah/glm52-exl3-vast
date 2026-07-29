@@ -1048,3 +1048,36 @@ Rebooting did not clear the volume. Atomically renaming the ownerless sentinel
 unwedged startup immediately; a later clean build created and removed its own
 lock normally. The appliance now performs a bounded, process-aware preflight
 that only quarantines this known sentinel and never touches `.ninja_lock`.
+
+#### Full-512K scheduler and CKV-gather selection (2026-07-29)
+
+The same immutable r9 appliance was retested on AIBeast at GMU 0.955 to
+convert remaining VRAM headroom into a real binary 512K request limit. The
+selected DCP2 shape is `MAX_MODEL_LEN=524288`,
+`MAX_NUM_BATCHED_TOKENS=3072`, and
+`DCP_CKV_GATHER_MAX_TOKENS=140000`. It exposed 543,488 GPU KV tokens.
+
+Matched unique-prefix prefill results favored the existing scheduler:
+
+| candidate | 8K | 64K | 128K | 180K | result |
+|---|---:|---:|---:|---:|---|
+| batch 3,072 / gather 140K | 2,822.8 | 2,634.9 | 2,483.0 | 2,444.1 | selected |
+| batch 3,200 / gather 140K | 2,784.9 | 2,599.3 | 2,457.3 | 2,362.8 | slower at every measured length |
+| batch 3,072 / gather 192K | — | 2,600.4 | 2,461.9 | 2,335.3 | slower despite covering the 180K prompt |
+
+The 3,200-token candidate also reduced exposed KV capacity to 533,248 and
+increased the EXL3 Trellis arena from 1,054.2 to 1,094.2 MiB. The 192K gather
+candidate exposed 539,904 KV tokens and consumed another 56 MiB/GPU. Matched
+decode sweeps did not show a systematic gather-dependent change: the longer
+C8 controls were 284.78 tok/s at 140K and 284.89 tok/s at 192K. Lower
+concurrency varied with MTP acceptance length. Batch 3,200 provided no
+consistent decode gain and its longer C8 result was 253.19 tok/s, so neither
+candidate justified its PP/capacity cost.
+
+The selected shape then passed a 521,275-token prompt in 234.3 seconds,
+retrieving all five needles at 1%, 10%, 50%, 90%, and 99% with no
+degeneration. KV use peaked at 94.1%; 576 MiB/GPU remained after the gate.
+The complete API suite passed on isolated port 18000 and again after
+promotion to production port 8000. Production advertises
+`max_model_len: 524288`; startup and the post-promotion suite contained no
+OOM, worker loss, stale-lock, XGrammar FSM, or engine errors.

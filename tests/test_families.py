@@ -62,8 +62,8 @@ def test_glm_release_defaults():
           f"{eff['TENSOR_PARALLEL_SIZE']} / {src['TENSOR_PARALLEL_SIZE']}")
     check("the balanced profile selects DCP2 on TP4",
           eff["DCP"] == "2" and src["DCP"] == "variant")
-    check("context keeps the measured near-520K runtime margin",
-          eff["MAX_MODEL_LEN"] == 513536)
+    check("context serves the qualified binary 512K envelope",
+          eff["MAX_MODEL_LEN"] == 524288)
     check("the lightweight trellis draft uses MTP-5", eff["MTP_TOKENS"] == 5)
     check("calibrated NVFP4 MLA KV", eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla")
     check("the r9-qualified dynamic scale ABI is the flagship default",
@@ -74,7 +74,7 @@ def test_glm_release_defaults():
     memory_finding = next(
         f for f in gc.validate(eff) if f["id"] == "gpu-util-high")
     check("the measured default gets the qualified high-utilization warning",
-          "510,533" in memory_finding["message"]
+          "521,275" in memory_finding["message"]
           and "0.9675" in memory_finding["message"],
           memory_finding["message"])
     check("the agentic profile reserves half of host DRAM as L2 prefix cache",
@@ -109,7 +109,7 @@ def test_glm_release_defaults():
           "index_topk_pattern" in line and "FFFSSS" in line)
     check("hf_overrides still sets use_index_cache", '"use_index_cache":true' in line)
     check("GLM RoPE tables are clamped to the served context",
-          '"max_position_embeddings":513536' in line)
+          '"max_position_embeddings":524288' in line)
     unclamped, _, _ = resolved(gpus=4, CLAMP_ROPE_TABLES=False)
     check("the pre-clamp control can omit the RoPE override for a clean A/B",
           "max_position_embeddings" not in " ".join(
@@ -533,20 +533,20 @@ def test_rules_are_family_scoped():
         gpus=4, MODEL_VARIANT="exl3-tr3-max-context", VISION=True)
     check("the max-context EXL3 profile cannot evade the vision quality warning",
           "vision-long-context" in ids(gc.validate(eff)))
-    eff, _, _ = resolved(
-        gpus=4, LOAD_FORMAT="instanttensor", MAX_MODEL_LEN=524288)
-    check("InstantTensor warns before retrying the failed 524288 admission shape",
-          "instanttensor-context-margin" in ids(gc.validate(eff)))
-    eff, _, _ = resolved(
-        gpus=4, LOAD_FORMAT="instanttensor", MAX_MODEL_LEN=513536)
-    check("the measured InstantTensor context margin clears its specific warning",
+    eff, _, _ = resolved(gpus=4)
+    check("the exact qualified 524288 InstantTensor shape clears its warning",
           "instanttensor-context-margin" not in ids(gc.validate(eff)))
+    eff, _, _ = resolved(
+        gpus=4, LOAD_FORMAT="instanttensor",
+        MAX_MODEL_LEN=524288, MAX_NUM_BATCHED_TOKENS=3200)
+    check("changing the qualified 524288 scheduler shape requires requalification",
+          "instanttensor-context-margin" in ids(gc.validate(eff)))
     too_small, _, _ = resolved(
-        gpus=4, DCP="2", MAX_MODEL_LEN=513536,
-        GPU_BLOCKS_OVERRIDE=4011)
+        gpus=4, DCP="2", MAX_MODEL_LEN=524288,
+        GPU_BLOCKS_OVERRIDE=4095)
     exact, _, _ = resolved(
-        gpus=4, DCP="2", MAX_MODEL_LEN=513536,
-        GPU_BLOCKS_OVERRIDE=4012)
+        gpus=4, DCP="2", MAX_MODEL_LEN=524288,
+        GPU_BLOCKS_OVERRIDE=4096)
     check("the pool-pin validator accounts for DCP2 logical capacity",
           "pool-smaller-than-context" in errs(gc.validate(too_small))
           and "pool-smaller-than-context" not in errs(gc.validate(exact)))
@@ -623,7 +623,7 @@ def test_long_context_gate_is_family_independent():
     check("and the needle probe is the thing that sets it",
           "needle_probe" in src and "long_context_verified" in src)
     # the probe budget follows MAX_MODEL_LEN, which is a family default
-    for fam, expected in (("glm52", 513536), ("qwen36", 32768)):
+    for fam, expected in (("glm52", 524288), ("qwen36", 32768)):
         eff, _, _ = resolved(fam)
         check(f"{fam} probes against its own context ceiling ({expected})",
               eff["MAX_MODEL_LEN"] == expected)

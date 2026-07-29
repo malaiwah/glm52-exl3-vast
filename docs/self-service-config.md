@@ -105,7 +105,7 @@ knobs to the model. Summary of the trade each one makes:
 | `F8_DMA`, `PCIE_DMA_MIN_BYTES`, `PCIE_CALIBRATION` | Collective wire format and byte crossover. The family stays lossless/automatic; the MadeBy561 profile pins the 521K-qualified FP8 ring/393,216-byte shape. |
 | `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM default; cross-provider-qualified on v31 and re-gated at each base refresh) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
 | `MAX_MODEL_LEN` | Longest request, and a hard startup gate against available KV. |
-| `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool. The GG r9 dynamic-token DCP2/GMU-0.955 shape exposed 532,224 logical tokens on AIBeast; the value varies with usable VRAM, graphs, driver and loader. A positive value pins a reproducible smaller pool. |
+| `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool. The final GG r9 dynamic-token DCP2/GMU-0.955, batch-3,072, gather-140K shape exposed 543,488 logical tokens on AIBeast; the value varies with usable VRAM, graphs, driver and loader. A positive value pins a reproducible smaller pool. |
 | `OFFLOAD_FRACTION` | Host DRAM used as an L2 prefix cache after GPU eviction—not extra active-context capacity. It is passed as one aggregate native-connector budget (vLLM derives the TP worker slices), with `recompute` on miss. At 50% of a 251 GiB host, an evicted 133,504-token prefix reloaded in 0.69s instead of a 52.47s recompute; 50% also retained ~51 GiB host headroom. |
 | `VISION` | Image input vs long-context correctness on EXL3 (see rule 6) and ~1.99 GiB/GPU on the final v20 qualification shape. |
 | `MAX_NUM_SEQS`, `MAX_NUM_BATCHED_TOKENS`, `GPU_MEMORY_UTILIZATION` | Concurrency and prefill chunk against the capture window and against VRAM headroom. |
@@ -160,8 +160,8 @@ unless their registry entry explicitly declares equivalent calibration.
 quantization switch. It requires `KV_CACHE_DTYPE=nvfp4_ds_mla`; the entrypoint
 then sets both `KV_FP8_ROPE=1` and `VLLM_NVFP4_MLA_DYNAMIC_SCALE=1` and removes
 the static scale file. It is the flagship EXL3 default after repeatable KLD
-and two exact 510,533-token
-retrieval/degeneration gates. Other variants retain their independently
+two exact 510,533-token retrieval/degeneration gates, and the final scheduler
+passed a 521,275-token full-envelope gate. Other variants retain their independently
 qualified static setting.
 
 ### `vision-long-context` — warn (blunt)
@@ -194,18 +194,15 @@ cold memory plus retrieval requalification for any other shape.
 
 ### `instanttensor-context-margin` — warn
 On the exact TP4/DCP2 EXL3 profile, InstantTensor loaded about 0.04 GiB/GPU
-more resident model memory than safetensors. `MAX_MODEL_LEN=524288` at
-utilization 0.978 then failed KV admission twice (9.04 GiB needed, 9.03 GiB
-available). That earlier v31 shape passed `MAX_MODEL_LEN=520192`; GG v20-r5
-and r8 added safe retained-CUDA-graph accounting and exposed 514,944 KV tokens at the
-same utilization. The current `MAX_MODEL_LEN=513536` default passed cold and
-cache-reused boots, the required feature suite, two independent ~510.5K
-five-depth retrievals, and a 507,902 + 4,096 token request. The loader reduced
-target+draft load from 60.5–62.6 seconds to 32.4–33.1 seconds. It remains the
-balanced EXL3 default because safetensors failed three near-max runtime
-attempts at the same 514,432-token boundary. This warning protects larger
-overrides rather than disabling safe graph accounting or treating retries as
-success.
+more resident model memory than safetensors. An older
+`MAX_MODEL_LEN=524288`, utilization-0.978 shape failed KV admission twice
+(9.04 GiB needed, 9.03 GiB available). The final r9 dynamic-token shape uses
+utilization 0.955, batch 3,072, CKV gather 140,000, an auto-sized pool, and
+vision off. It exposed 543,488 KV tokens and passed a 521,275-token five-depth
+retrieval at the full 524,288 request limit with 576 MiB/GPU left afterward.
+The warning clears only for that exact qualified shape; changing its loader,
+batch, gather ceiling, memory utilization, pool, or vision posture requires a
+cold-start and near-maximum retrieval requalification.
 
 ### `pool-smaller-than-context` — error
 `GPU_BLOCKS_OVERRIDE * 256 < MAX_MODEL_LEN` cannot start: vLLM refuses when it
@@ -408,6 +405,6 @@ This layer is no longer justified only by static substitutions:
 Absolute v20 throughput is confirmed on the all-NODE AIBeast host at 280 W/card:
 2,701 tok/s at 8K, 1,987 at 66K, 121.6 tok/s C1 and 269.7 aggregate at C8.
 Remaining claims stay narrow: InstantTensor is promoted only for the exact
-balanced EXL3 profile and the inherited 513,536-token r9 candidate envelope; other
+balanced EXL3 profile and the qualified 524,288-token r9 envelope; other
 variants retain their own loader choice. GLM vision remains a separate
 short-context experiment rather than part of the text flagship envelope.
