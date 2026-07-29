@@ -662,7 +662,9 @@ first. Full design note, provider matrix and cited sources:
   to set either is rejected outright, and the landing page can only ever make
   them *more* restrictive — a locked instance cannot be unlocked from the UI, by
   any token, only by restarting the container with different env.
-- **vast.ai and RunPod**, auto-detected (`TERMINATE_PROVIDER` overrides). An
+- **vast.ai and RunPod**, auto-detected (`TERMINATE_PROVIDER` overrides). Vast
+  normally injects the instance-scoped `CONTAINER_API_KEY`; an explicitly
+  supplied account `VAST_API_KEY` is also supported. An
   unrecognised provider says so and points at the dashboard instead of failing
   obscurely. On RunPod the pod-scoped key RunPod injects is **verified to
   terminate its own pod** — no extra credential needed; the page still checks it
@@ -805,6 +807,14 @@ warn-and-proceed, and it degrades rather than fails —
 `kv_load_failure_policy=recompute` means any KV block that cannot be fetched
 back is recomputed instead of erroring the request. Set
 `OFFLOAD_IGNORE_MEMLOCK=0` for conservative disable-instead behaviour.
+
+This is therefore **possible on Vast, but host-dependent rather than
+provider-guaranteed**. The appliance sizes from the container's actual cgroup
+memory limit (not the offer headline), and disables the tier when that budget
+is unusable. Select a high-RAM offer and confirm the boot log's resolved
+aggregate/per-worker capacity. Qwen keeps this off by default until its hybrid
+attention/Gated-DeltaNet connector path passes the same external-hit
+qualification as GLM.
 
 `OFFLOAD_FRACTION` is an aggregate host-RAM budget. In the pinned native vLLM
 connector, `cpu_bytes_to_use` already accounts for the complete TP world and
@@ -1051,7 +1061,7 @@ existing endpoint:
 | `DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS` | `-1` family / `8192` MadeBy561 | `-1` keeps topology calibration; the hybrid pins its measured crossover |
 | `PCIE_DMA_MIN_BYTES` | `-1` family / `393216` MadeBy561 | `-1` keeps topology calibration; the hybrid pins its measured byte crossover |
 | `OPEN_BUTTON_TOKEN` | provider-specific | required to expose the `:1111` config editor; Vast supplies it and Runpod gets a persisted generated token when one is not set |
-| `SOUL_AUTONOMY_LEVEL` | `0` | enable the embedded diagnostic SOUL: observer `1`, shell investigator `2`, or bounded proactive diagnostician `3` |
+| `SOUL_AUTONOMY_LEVEL` | `0` | enable the embedded diagnostic SOUL: Observe `1` (no shell), Investigate `2` (bounded read-only shell), or Verify `3` (idle-only canary and conditional long-context probe) |
 | `SOUL_AUTONOMY_MAX_LEVEL` | `3` | startup-only ceiling for landing-page overrides; invalid values fail closed to `0` |
 | `SOUL_HEARTBEAT_INTERVAL_S` / `SOUL_JOURNAL_INTERVAL_S` | `300` / `3600` | deterministic snapshot and blog-style journal cadence; changing these does not restart vLLM |
 | `VERIFY` | `1` | `0` disables the post-start correctness probe entirely (the page then reports "unverified" and nothing rolls back) |

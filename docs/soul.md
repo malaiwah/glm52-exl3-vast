@@ -8,10 +8,10 @@ It is disabled by default:
 
 | level | behaviour |
 |---|---|
-| `0` | No controller process or proactive LLM calls. The existing direct post-rollback failure explanation remains active. |
-| `1` | Deterministic observation, incident interpretation, and an hourly journal. The Nanobot shell tool is disabled. |
-| `2` | Nanobot may perform bounded, read-only shell investigation. |
-| `3` | Adds bounded inference canaries. It never restarts, rolls back, changes configuration, installs packages, deletes data, or remediates. |
+| `0` — Off | No controller process or proactive LLM calls. The existing direct post-rollback failure explanation remains active. |
+| `1` — Observe | Deterministic snapshots, incident interpretation, and an hourly journal using supplied evidence only. The Nanobot shell tool is disabled. |
+| `2` — Investigate | Everything in level 1, plus bounded, read-only shell investigation when the supplied evidence is insufficient. |
+| `3` — Verify | Everything in level 2, plus an idle-only exact-response canary and a conditional, cooldown-bounded long-context probe. It never restarts, rolls back, changes configuration, installs packages, deletes data, or remediates. |
 
 Startup verification and rollback are always authoritative. SOUL only observes,
 explains, and suggests.
@@ -111,7 +111,12 @@ HTML. Credentials, authorization headers, signed URLs, private keys, and common
 token patterns are redacted before persistence and before LLM submission.
 Agent turns are ephemeral; after each run the controller persists only a short,
 redacted continuity note under the stable journal, incident, or daily session
-key. Raw prompts, commands, and tool output never enter Nanobot session files.
+key. That gives updates and recovery for one incident direct continuity. A
+recovered check receives a new incident id if it later fails again, so every
+analysis also receives a bounded digest of the eight newest redacted journal
+entries. Daily synthesis receives up to 50. This lets Nanobot identify a
+recurring symptom across incident sessions without replaying raw snapshots,
+commands, or tool output into its session files.
 
 Journal records use append-only JSONL. Status and indexes use atomic JSON
 replacement, avoiding SQLite locking assumptions on provider network volumes.

@@ -29,6 +29,16 @@ as a first-user SSH/OMP machine.
   exact canary returned `SOUL-CANARY-OK`. The appliance was returned to its
   shipping level 0 afterward.
 
+A post-run semantic audit found the escalation coherent and useful but exposed
+one continuity gap: incident updates and recovery shared a stable Nanobot
+session, while the same check failing again after recovery received a new
+incident id and could miss the earlier episode. Every analysis now receives a
+bounded digest of the eight newest redacted journal entries; daily synthesis
+continues to receive up to 50. The next composite protocol exercises levels
+1→2→3 early, leaves level 3 active for the rest of the workload, and uses the
+landing page's typed, session-erasing provider termination instead of returning
+SOUL to level 0 before dashboard teardown.
+
 The combined secure test exposed one real cross-feature defect: SOUL still used
 plain loopback HTTP after vLLM had become a direct-TLS listener. The controller
 now uses the certificate hostname on the local engine port, and PID 1 maps that

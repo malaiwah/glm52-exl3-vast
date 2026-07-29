@@ -112,6 +112,38 @@ class SoulConfigTests(unittest.TestCase):
 
 
 class SoulControllerTests(unittest.TestCase):
+    def test_every_analysis_gets_bounded_cross_incident_journal_context(self):
+        entries = [{
+            "timestamp": f"2026-07-29T00:00:0{number}Z",
+            "kind": "incident",
+            "severity": "warning",
+            "headline": f"Repeated failure {number}",
+            "summary": "x" * 1200,
+            "incidentId": f"incident-{number}",
+            "analysisStatus": "complete",
+            "evidenceRefs": ["/must/not/be/replayed"],
+        } for number in range(10)]
+        with mock.patch.object(controller.sc, "read_journal",
+                               return_value=entries[:8]) as read:
+            result = controller._with_journal_context({"snapshot": {"ok": False}})
+        read.assert_called_once_with(limit=controller.JOURNAL_CONTEXT_LIMIT)
+        previous = result["previousJournalEntries"]
+        self.assertEqual(len(previous), 8)
+        self.assertEqual(set(previous[0]), {
+            "timestamp", "kind", "severity", "headline", "summary",
+            "incidentId", "analysisStatus",
+        })
+        self.assertEqual(len(previous[0]["summary"]),
+                         controller.JOURNAL_CONTEXT_SUMMARY_CHARS)
+        self.assertNotIn("evidenceRefs", previous[0])
+
+    def test_explicit_daily_history_is_not_duplicated(self):
+        supplied = [{"headline": "daily"}]
+        with mock.patch.object(controller.sc, "read_journal") as read:
+            result = controller._with_journal_context({"recentJournal": supplied})
+        read.assert_not_called()
+        self.assertEqual(result["recentJournal"], supplied)
+
     def test_incident_requires_two_failures_and_posts_one_recovery(self):
         with tempfile.TemporaryDirectory() as raw:
             book = controller.IncidentBook(Path(raw) / "incidents.json")
@@ -508,6 +540,9 @@ class SoulLandingTests(unittest.TestCase):
                     base + "/soul?token=capability", timeout=2).read().decode()
                 self.assertNotIn("<script>alert(1)</script>", page)
                 self.assertIn("&lt;script&gt;", page)
+                self.assertIn("1 Observe:", page)
+                self.assertIn("2 Investigate:", page)
+                self.assertIn("3 Verify:", page)
                 data = urllib.parse.urlencode({
                     "token": "capability", "autonomyLevel": "3",
                     "heartbeatIntervalS": "60", "journalIntervalS": "600",
@@ -523,6 +558,37 @@ class SoulLandingTests(unittest.TestCase):
                 status = json.loads(urllib.request.urlopen(
                     base + "/soul/status?token=capability", timeout=2).read())
                 self.assertEqual(status["maximumLevel"], 2)
+            finally:
+                self.stop_landing(proc)
+
+    def test_home_has_one_configuration_link_and_no_stray_correctness_detail(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            proc, base, env = self.start_landing(root, token="capability")
+            try:
+                status = json.loads((root / "boot.json").read_text())
+                status.update({
+                    "endpoint": "https://model.example.test:12345",
+                    "api_key": "not-rendered-over-http",
+                })
+                (root / "boot.json").write_text(json.dumps(status))
+                state = Path(env["GLM_STATE_DIR"])
+                (state / "verify-last.json").write_text(json.dumps({
+                    "health": True,
+                    "short_prompt": {"ok": True},
+                    "long_context": {
+                        "attempted": True, "ok": True, "found": 3,
+                        "total": 3, "tokens": 32773,
+                    },
+                    "reason": "STRAY-CORRECTNESS-DETAIL",
+                }))
+                page = urllib.request.urlopen(
+                    base + "/?token=capability", timeout=2).read().decode()
+                self.assertEqual(
+                    page.count('href="/config?token=capability"'), 1)
+                self.assertIn("Change model, draft, context, concurrency", page)
+                self.assertNotIn("<b>Configure &rarr;</b>", page)
+                self.assertNotIn("STRAY-CORRECTNESS-DETAIL", page)
             finally:
                 self.stop_landing(proc)
 

@@ -26,6 +26,9 @@ sequential and are deleted as soon as their evidence is copied.
   in manifests, logs, test artifacts, commits, or shell history.
 - Record every created instance/Pod ID immediately. Terminate rather than stop
   after the final check so storage billing also ends.
+- For the SOUL composite test, launch with `SOUL_AUTONOMY_MAX_LEVEL=3` and
+  `TERMINATE_ENABLED=1`. Exercise levels 1, 2, then 3 early; leave level 3
+  selected for the remaining workload and through the start of teardown.
 
 ## Coverage matrix
 
@@ -59,7 +62,7 @@ sequential and are deleted as soon as their evidence is copied.
 | DNS-01 issuance, challenge cleanup, and trusted certificate | yes | yes | yes |
 | Hybrid Runpod networking (`1111/http`, `8000/http` fallback, `8443/tcp` TLS) | config | — | yes |
 | Runpod long-request SSH-tunnel route | — | — | yes |
-| Teardown and no remaining billable resource | — | yes | yes |
+| Appliance-initiated typed teardown and no remaining billable resource | tests | yes | yes |
 
 ## Live launch profile
 
@@ -110,8 +113,12 @@ same already-rented machine.
    and preserves the API/dashboard keys.
 9. Vision identifies a simple public test image; MTP boots and completes a
    deterministic short prompt without a crash.
-10. The provider resource is terminated and no test instance/Pod or attached
-    billable storage remains.
+10. After all evidence has been copied, leave SOUL at level 3 and use the
+    landing page's token-gated **Terminate instance** flow. Type the exact
+    provider id, acknowledge destruction, select session erase, and let the
+    appliance stop SOUL/the engine, erase bounded session state, and issue the
+    provider destroy call. Verify externally that the instance/Pod is gone,
+    no billable storage remains, and its temporary DNS RRset was deleted.
 
 ## Explicit residual tests
 

@@ -194,8 +194,8 @@ def render_soul(tok, secure, message="", cls="", before="") -> bytes:
                  f"<input type=hidden name=token value='{tok_q}'>"
                  "<label>Level <select name=autonomyLevel>")
     labels = {
-        0: "0 — off", 1: "1 — observer", 2: "2 — investigator",
-        3: "3 — proactive diagnostician",
+        0: "0 — Off", 1: "1 — Observe", 2: "2 — Investigate",
+        3: "3 — Verify",
     }
     for level, label in labels.items():
         selected = " selected" if level == int(config.get("requestedLevel", 0)) else ""
@@ -203,6 +203,12 @@ def render_soul(tok, secure, message="", cls="", before="") -> bytes:
         parts.append(f"<option value={level}{selected}{disabled}>{html.escape(label)}</option>")
     parts.append(
         "</select></label>"
+        "<div class=sub style='margin-top:.5rem'>"
+        "<b>1 Observe:</b> snapshots and journal from supplied evidence; no shell. "
+        "<b>2 Investigate:</b> adds bounded read-only shell checks. "
+        "<b>3 Verify:</b> adds idle-only inference canaries and a conditional "
+        "long-context probe; it still cannot repair, restart, or change configuration."
+        "</div>"
         f"<label> Snapshot interval (seconds) <input name=heartbeatIntervalS type=number "
         f"min=30 max=86400 value='{int(config.get('heartbeatIntervalS', 300))}'></label>"
         f"<label> Journal interval (seconds) <input name=journalIntervalS type=number "
@@ -1437,9 +1443,8 @@ def render(secure: bool, tok: str = "") -> bytes:
         # "Engine: serving" above is a LIVENESS statement. Correctness is a
         # separate card on purpose — every silent-corruption configuration this
         # appliance has met answered /health and short prompts perfectly.
-        head, ok, detail = correctness()
-        parts.append("<div class=grid>" + card("Correctness", head, ok) + "</div>"
-                     f"<p class=sub>{html.escape(detail)}</p>")
+        head, ok, _detail = correctness()
+        parts.append("<div class=grid>" + card("Correctness", head, ok) + "</div>")
         if config_enabled():
             mode = gc.apply_state().get("mode", "steady")
             note = ("<b>The last change you applied was rolled back</b> — the previous "
@@ -1465,9 +1470,6 @@ def render(secure: bool, tok: str = "") -> bytes:
                      f'<a href="{ep}/metrics">Prometheus /metrics</a>')
         if not key.startswith("<"):
             parts.append(f' &middot; <a href="/chat?token={tok_esc}"><b>Quick chat &rarr;</b></a>')
-        if config_enabled():
-            parts.append(f' &middot; <a href="/config?token={tok_esc}">'
-                         '<b>Configure &rarr;</b></a>')
         if terminate_available():
             parts.append(f' &middot; <a href="/terminate?token={tok_esc}">'
                          'Terminate instance</a>')

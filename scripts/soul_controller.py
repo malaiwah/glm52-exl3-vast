@@ -37,6 +37,8 @@ MAX_EVIDENCE_CHARS = 80_000
 RUN_TIMEOUT_S = 600
 UPDATE_COALESCE_S = 900
 LONG_PROBE_COOLDOWN_S = 6 * 3600
+JOURNAL_CONTEXT_LIMIT = 8
+JOURNAL_CONTEXT_SUMMARY_CHARS = 800
 _ACTIVE_PROBE_PROCESS: Optional[subprocess.Popen] = None
 JOURNAL_FIELDS = {
     "headline": str,
@@ -719,6 +721,34 @@ def _prompt(kind: str, level: int, observations: Mapping[str, Any]) -> str:
         json.dumps(sc.redact(observations), ensure_ascii=False)[:180_000])
 
 
+def _with_journal_context(observations: Mapping[str, Any]) -> Dict[str, Any]:
+    """Add bounded cross-session history for recurrence recognition.
+
+    Nanobot's stable session key preserves the previous conclusion within one
+    hourly/daily/incident thread. A recovered incident gets a new id if the
+    same check later fails again, however, so session memory alone cannot
+    identify that recurrence. Give every analysis a small, already-redacted
+    journal digest without replaying raw snapshots, commands, or tool output.
+    """
+    result = dict(observations)
+    if "recentJournal" in result or "previousJournalEntries" in result:
+        return result
+    previous = []
+    for entry in sc.read_journal(limit=JOURNAL_CONTEXT_LIMIT):
+        previous.append(sc.redact({
+            "timestamp": entry.get("timestamp"),
+            "kind": entry.get("kind"),
+            "severity": entry.get("severity"),
+            "headline": str(entry.get("headline", ""))[:160],
+            "summary": str(entry.get("summary", ""))[:JOURNAL_CONTEXT_SUMMARY_CHARS],
+            "incidentId": entry.get("incidentId"),
+            "analysisStatus": entry.get("analysisStatus"),
+        }))
+    if previous:
+        result["previousJournalEntries"] = previous
+    return result
+
+
 class ToolEvidenceHook:
     """Adapter created without importing Nanobot until its venv is active."""
 
@@ -1112,8 +1142,9 @@ class SoulController:
         bot = await self.get_bot(model, {**sc.resolve()[0], "autonomyLevel": level})
         from nanobot.agent.hook import AgentHook
         hook = ToolEvidenceHook(AgentHook).instance
+        prompt_observations = _with_journal_context(observations)
         self.active_agent_task = asyncio.create_task(
-            bot.run(_prompt(kind, level, observations), session_key=session,
+            bot.run(_prompt(kind, level, prompt_observations), session_key=session,
                     hooks=[hook], ephemeral=True))
         try:
             result = await asyncio.wait_for(self.active_agent_task, timeout=RUN_TIMEOUT_S)
