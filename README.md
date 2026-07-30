@@ -1219,8 +1219,21 @@ CONFIG_SMOKE=1 bash scripts/run-local-podman.sh
 
 Set `PREFIX_CACHE_BACKEND=lmcache` only after the r11 LMCache qualification
 described below. A positive `PREFIX_CACHE_DISK_GB` stores bounded derived KV
-under the writable model root; do not point that path into the read-only
-checkpoint.
+under the writable model root. On an owned host, create a dedicated local
+NVMe directory and bind it at the appliance's secure-erase-aware path:
+
+```bash
+mkdir -p /mnt/fast/lmcache/glm52-r11
+export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-r11
+export PREFIX_CACHE_BACKEND=lmcache
+export PREFIX_CACHE_DISK_GB=32
+bash scripts/run-local-podman.sh
+```
+
+The `PREFIX_CACHE_DISK_GB` limit is enforced by LMCache even when the backing
+filesystem is larger. Do not point this path into the read-only checkpoint;
+cached KV may contain session material, and secure termination only provides a
+best-effort erase on flash storage.
 
 </details>
 

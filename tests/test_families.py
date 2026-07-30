@@ -268,6 +268,13 @@ def test_glm_release_integration():
     check("the local runner forwards arbitrary validated TUNE_ overrides",
           "TUNE_[A-Z0-9_]*" in local_runner
           and '"${tuning_env[@]}"' in local_runner)
+    check("the local runner forwards its documented GPU-free config smoke",
+          '-e CONFIG_SMOKE="${CONFIG_SMOKE:-0}"' in local_runner)
+    check("the local runner mounts bounded persistent LMCache below the "
+          "secure-erase-aware workspace",
+          'LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"' in local_runner
+          and '$LMCACHE_DISK_HOST:/workspace/.lmcache:rw' in local_runner
+          and "LMCACHE_DISK_HOST must be an absolute path" in local_runner)
     check("the local runner can compose a read-only vision derivative",
           'VISION_ASSET_HOST="${VISION_ASSET_HOST:-}"' in local_runner
           and '$MODEL_DIR_CONTAINER/.vision:ro' in local_runner

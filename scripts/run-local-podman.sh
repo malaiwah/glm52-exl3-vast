@@ -28,6 +28,7 @@ SHARED_MODEL_STORE_CONTAINER="${SHARED_MODEL_STORE_CONTAINER:-$SHARED_MODEL_STOR
 GPU_DEVICES="${GPU_DEVICES:-0,1,2,3}"
 CACHE_VOLUME="${CACHE_VOLUME:-glm52-turnkey-cache}"
 STATE_VOLUME="${STATE_VOLUME:-glm52-turnkey-state}"
+LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"
 
 [ -d "$MODEL_DIR_HOST" ] || {
   echo "FATAL: checkpoint directory does not exist: $MODEL_DIR_HOST" >&2
@@ -108,6 +109,25 @@ if [ -n "$SHARED_MODEL_STORE_HOST" ]; then
   shared_store_mounts=(-v "$SHARED_MODEL_STORE_HOST:$SHARED_MODEL_STORE_CONTAINER:ro")
 fi
 
+lmcache_mounts=()
+if [ -n "$LMCACHE_DISK_HOST" ]; then
+  case "$LMCACHE_DISK_HOST" in
+    /*) ;;
+    *)
+      echo "FATAL: LMCACHE_DISK_HOST must be an absolute path" >&2
+      exit 4
+      ;;
+  esac
+  [ -d "$LMCACHE_DISK_HOST" ] || {
+    echo "FATAL: LMCache disk directory does not exist: $LMCACHE_DISK_HOST" >&2
+    exit 4
+  }
+  # Keep the persistent tier beneath the appliance workspace. The secure
+  # termination planner already recognizes /workspace/.lmcache as derived,
+  # potentially sensitive KV and erases it on an opted-in teardown.
+  lmcache_mounts=(-v "$LMCACHE_DISK_HOST:/workspace/.lmcache:rw")
+fi
+
 # Advanced runtime A/Bs use the entrypoint's TUNE_<engine-env> convention.
 # Forward every explicitly supplied tuning override without teaching this local
 # launcher a second, inevitably incomplete list of SparkInfer/vLLM variables.
@@ -164,6 +184,7 @@ podman run -d --replace --restart="${RESTART_POLICY:-unless-stopped}" \
   -e SUPERVISOR="${SUPERVISOR:-1}" \
   -e SOUL_AUTONOMY_LEVEL="${SOUL_AUTONOMY_LEVEL:-0}" \
   -e SOUL_AUTONOMY_MAX_LEVEL="${SOUL_AUTONOMY_MAX_LEVEL:-0}" \
+  -e CONFIG_SMOKE="${CONFIG_SMOKE:-0}" \
   "${config_env[@]}" \
   "${tuning_env[@]}" \
   -v "$MODEL_MOUNT_HOST:/models/checkpoint-root:ro" \
@@ -171,6 +192,7 @@ podman run -d --replace --restart="${RESTART_POLICY:-unless-stopped}" \
   "${vision_mounts[@]}" \
   "${tokenizer_mounts[@]}" \
   "${shared_store_mounts[@]}" \
+  "${lmcache_mounts[@]}" \
   -v "$CACHE_VOLUME:/cache" \
   -v "$STATE_VOLUME:/state" \
   "${cache_mounts[@]}" \
