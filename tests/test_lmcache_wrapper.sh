@@ -33,7 +33,7 @@ chmod +x "$tmp/bin/lmcache" "$tmp/bin/curl" "$tmp/model-server"
 run_mode() {
   local mode="$1" port="$2"
   PATH="$tmp/bin:$PATH" \
-  LMCACHE_MODE="$mode" PORT="$port" TP=4 DCP=2 \
+  LMCACHE_MODE="$mode" PORT="$port" GLM_GPU_COUNT=4 DCP=2 \
   LMCACHE_L1_GB=2 LMCACHE_L2_GB=7 LMCACHE_L2_PATH="$tmp/l2" \
   LMCACHE_LOG="$tmp/$mode.log" \
   LMCACHE_TEST_SERVER_ARGS="$tmp/$mode-server.args" \

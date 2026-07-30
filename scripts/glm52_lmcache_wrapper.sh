@@ -28,9 +28,14 @@ case "${DCP:-1}:$chunk" in
 esac
 l1_gb="${LMCACHE_L1_GB:-24}"
 log="${LMCACHE_LOG:-/tmp/lmcache-mp-${service_port}.log}"
+gpu_workers="${LMCACHE_MAX_GPU_WORKERS:-${TENSOR_PARALLEL_SIZE:-${GLM_GPU_COUNT:-${TP:-1}}}}"
+[[ "$gpu_workers" =~ ^[1-9][0-9]*$ ]] || {
+  echo "FATAL: LMCache GPU worker count must be a positive integer: $gpu_workers" >&2
+  exit 2
+}
 
 args=(server --host "$host" --port "$port" --chunk-size "$chunk"
-  --max-gpu-workers "${LMCACHE_MAX_GPU_WORKERS:-${TP:-1}}"
+  --max-gpu-workers "$gpu_workers"
   --max-cpu-workers "${LMCACHE_MAX_CPU_WORKERS:-4}"
   --l1-size-gb "$l1_gb" --l1-init-size-gb "${LMCACHE_L1_INIT_GB:-$l1_gb}"
   --l1-write-ttl-seconds "${LMCACHE_L1_WRITE_TTL:-600}"
@@ -98,7 +103,7 @@ if [[ "$ready" != 1 ]]; then
   stop_children
   exit 1
 fi
-echo ">>> LMCache ready: mode=$mode L1=${l1_gb}GiB chunk=$chunk L2=$l2 metrics=:${metrics_port}"
+echo ">>> LMCache ready: mode=$mode L1=${l1_gb}GiB chunk=$chunk GPU-workers=$gpu_workers L2=$l2 metrics=http://127.0.0.1:${http_port}/metrics"
 
 "$@" --kv-transfer-config "$transfer" &
 model_pid=$!
