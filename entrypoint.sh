@@ -461,8 +461,8 @@ status_update() {
 if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
    && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
   LANDING_TRUST_PROXY_HTTPS="${LANDING_TRUST_PROXY_HTTPS:-0}"
-  if [ "$PLATFORM" = "runpod" ]; then
-    LANDING_TRUST_PROXY_HTTPS=1
+  if [ "$PLATFORM" = "runpod" ] || [ "$PLATFORM" = "jarvislabs" ]; then
+    [ "$PLATFORM" != "runpod" ] || LANDING_TRUST_PROXY_HTTPS=1
     if [ -z "${OPEN_BUTTON_TOKEN:-}" ]; then
       OPEN_BUTTON_TOKEN_FILE="${OPEN_BUTTON_TOKEN_FILE:-/workspace/.model-turnkey-landing-token}"
       mkdir -p "$(dirname "$OPEN_BUTTON_TOKEN_FILE")"
@@ -484,6 +484,8 @@ if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
   echo ">>> Landing page (Open button) live on :1111"
   if [ "$PLATFORM" = "runpod" ]; then
     echo ">>> Runpod dashboard: https://${RUNPOD_POD_ID}-1111.proxy.runpod.net/?token=${OPEN_BUTTON_TOKEN}"
+  elif [ "$PLATFORM" = "jarvislabs" ]; then
+    echo ">>> JarvisLabs dashboard: https://${DYNAMIC_HOST:-${PUBLIC_IPADDR}}:${OPEN_BUTTON_PORT:-1111}/?token=${OPEN_BUTTON_TOKEN}"
   fi
 fi
 

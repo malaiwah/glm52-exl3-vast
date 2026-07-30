@@ -182,6 +182,11 @@ def test_glm_release_integration():
           and 'export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0'
           in entry
           and 'using NCCL/SHM collectives' in entry)
+    check("JarvisLabs gets a persisted generated dashboard token and launch URL",
+          '[ "$PLATFORM" = "runpod" ] || [ "$PLATFORM" = "jarvislabs" ]'
+          in entry
+          and "OPEN_BUTTON_TOKEN_FILE" in entry
+          and ">>> JarvisLabs dashboard:" in entry)
     check("the target/draft trellis minimum is role-aware",
           'if [ "${MTP_TOKENS:-3}" = "0" ]; then' in entry and
           "export VLLM_EXL3_TRELLIS_MIN_M=1" in entry and
