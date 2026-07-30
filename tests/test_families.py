@@ -485,7 +485,8 @@ def test_higher_fidelity_exl3_candidate():
           and eff["DCP_KV_CACHE_INTERLEAVE_SIZE"] == "64"
           and profile_env["VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE"] == "0"
           and profile_env["VLLM_DCP_TOPK_OWNER_MERGE"] == "1"
-          and profile_env["VLLM_DISABLE_SHARED_EXPERTS_STREAM"] == "1")
+          and profile_env["VLLM_DISABLE_SHARED_EXPERTS_STREAM"] == "1"
+          and profile_env["SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB"] == "64")
     check("the profile pins exactly one binary-512K request",
           eff["MAX_MODEL_LEN"] == 524288
           and eff["GPU_BLOCKS_OVERRIDE"] == 2048)
@@ -494,17 +495,18 @@ def test_higher_fidelity_exl3_candidate():
           and eff["MAX_NUM_SEQS"] == 8
           and eff["MAX_CUDAGRAPH_CAPTURE_SIZE"] == 48
           and eff["VLLM_EXL3_TRELLIS_MAX_M"] == 48)
-    check("external prefix tiers stay off to preserve runtime headroom",
-          eff["OFFLOAD_FRACTION"] == 0
-          and eff["PREFIX_CACHE_BACKEND"] == "native"
+    check("the full-context profile selects the qualified 125 GiB LMCache tier",
+          eff["MAX_NUM_BATCHED_TOKENS"] == 2048
+          and eff["OFFLOAD_FRACTION"] == 0.5
+          and eff["PREFIX_CACHE_BACKEND"] == "lmcache"
           and eff["PREFIX_CACHE_DISK_GB"] == 0)
     check("the 522K/API/performance gate promotes the variant",
           "variant-untested" not in ids(gc.validate(eff)))
-    offloaded, _, _ = resolved(
+    unsafe_chunk, _, _ = resolved(
         gpus=4, MODEL_VARIANT="exl3-tr3-3.25bpw",
-        OFFLOAD_FRACTION=0.5, PREFIX_CACHE_BACKEND="lmcache")
-    check("the configurator refuses the measured 512K offload OOM shape",
-          "mixed-325-offload-headroom" in ids(gc.validate(offloaded)))
+        MAX_NUM_BATCHED_TOKENS=3072)
+    check("the configurator refuses the measured 3,072-token offload OOM shape",
+          "mixed-325-offload-headroom" in ids(gc.validate(unsafe_chunk)))
 
 
 def test_qwen_preset():

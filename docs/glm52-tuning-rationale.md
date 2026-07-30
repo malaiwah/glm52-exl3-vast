@@ -92,8 +92,10 @@ mixed 3/4-bit weight layout and memory shape were qualified independently:
 | topology | TP4/DCP4, interleave 64 | model plus native MTP5 fit and exact 524,288-token pool | slower ordinary decode than DCP2 |
 | KV pool | 2,048 blocks | `2,048 × 64 × DCP4 = 524,288`; exact 522,360-token gate passed | one maximum-length request; do not multiply the block count by DCP again |
 | graph/trellis window | 48 | exactly covers `C8 × (1 + MTP5)` | 0.20 GiB/GPU graph pool |
-| offload | disabled | retains ~560 MiB/GPU after first-use JIT; 32K cold prefill passed | repeated evicted prefixes recompute |
-| LMCache | rejected at full shape | short features passed, then first 32K prefill OOMed on a 36 MiB all-reduce after four GPU transfer contexts initialized | use the 3.0-bpw flagship for DRAM/NVMe prefix reuse, or lower 3.25 context/speculation and requalify |
+| prefill/fold workspace | 2,048-token chunk; exact streaming carry above 64 MiB | preserves full GPU KV while bounding the two transient allocations that failed in the older 3,072/256 MiB shape | 128K PP is ~2.0–2.15K tok/s, below the earlier no-offload isolated run |
+| LMCache DRAM | 50% of 251 GiB host RAM (125 GiB aggregate) | 65,024-token evicted prefix restored in 0.508 s versus ~30 s cold; two 128K requests and 520,001/524,012-token boundary prefills passed | ~0.83 GiB/GPU less idle headroom than native; substantial host-RAM budget |
+| native DRAM control | same 125 GiB aggregate | 65,024-token reload in 0.568 s, 2.079 GB transferred in 0.402 s; ~0.83 GiB/GPU more idle VRAM | no released bounded filesystem tier; in-process connector is the rollback control |
+| LMCache filesystem tier | optional 512 GiB hard limit on local RAID0 NVMe | no additional idle-VRAM cost; write-through retained 8.38 GB after the 128K gate, and a cold cache-process restart restored the identical 131,076-token prefix in 1.254 s (6.51 GB/s NVMe→DRAM) | opt-in, local encrypted storage only; derived KV is sensitive and flash erase is best effort |
 | performance | PP 2,407.9/2,262.1 at 32K/128K; TG 128.0 C1 / 285.3 C8 | still clears the appliance's >100 tok/s C1 goal while improving checkpoint KLD | ~3–6% PP, 14% C1, and 26% C8 below the 3.0-bpw control |
 | independent KLD | 0.0927076684 over 2,047 positions | better than the quant author's 0.095971 and the appliance's matched 3.0-bpw 0.1167701185 | one fixed reference window; rerun after any model/KV/runtime change |
 | power at 280 W/card | 271.6 W/GPU prefill; 251.9 W/GPU decode; 272.5 W/GPU exact 522,360-token retrieval | confirms the workload is predominantly power-bound on AIBeast | electrical headroom, clocks and topology affect portability |
@@ -247,6 +249,16 @@ Only changes with a plausible path to a product requirement advance:
    reinforces the decision to keep NVMe opt-in, bounded, observable, and
    subject to a restart-restore gate. DRAM L1 does not traverse that L2 store
    adapter.
+7. Native vLLM filesystem capacity remains unavailable in the released r11
+   image. local-inference-lab/vLLM PR #165 is still open; without its
+   `max_cache_size_bytes`/LRU contract the filesystem tier can grow until
+   `ENOSPC`, so the appliance continues to reject native+disk and uses LMCache
+   for the bounded 512 GiB qualification.
+8. No GG v20-r12 image or prerelease tag was published at qualification time.
+   The likely follow-on work remains in open vLLM PRs #190/#198 and
+   SparkInfer PR #92 (small-row EXL3 execution and repeatable Trellis/activation
+   memory profiling). Those changes may explain the reported ~8% decode gain,
+   but are not a release artifact and are not attributed to r12 yet.
 
 The proposed 4,096-token batch was tested and rejected before benchmarking.
 It created a correctly distinct compile key and compiled normally, but raised

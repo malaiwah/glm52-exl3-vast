@@ -164,7 +164,7 @@ speculation shape; it is not merely a different download URL:
 | variant | topology / speculation | context and memory | intended use |
 |---|---|---|---|
 | **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 524,288 max, 542,208-token cold r11 KV pool at GMU 0.957 on AIBeast, 3,072-token prefill batch, 140,000-token CKV gather, 1 GiB workspace, LMCache over 50% host DRAM | balanced flagship; default |
-| `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-5, probabilistic proposals | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token batch, external prefix offload disabled for runtime headroom | higher fidelity; ~22 GiB larger download and slower than the default |
+| `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-5, probabilistic proposals | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token batch, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
@@ -179,13 +179,25 @@ the 3.0-bpw control that is roughly 3–6% slower prefill, 14% slower C1, and
 over the standard 2,047 positions, versus its independent 3.0-bpw result of
 0.1167701185. The reference bundle contains one window, so a displayed
 standard deviation of zero is structural (`n=1`), not zero model variance.
+The complete active-KV/offload matrix and exact release boundaries are in
+[the 3.25-bpw qualification report](docs/glm52-3.25-offload-qualification.md).
 
-Full context leaves about 560 MiB/GPU after first-use kernel compilation.
-Adding r11 LMCache's four GPU transfer contexts let short API checks pass but
-OOMed the first 32K prefill on a 36 MiB all-reduce allocation. The profile
-therefore sets `OFFLOAD_FRACTION=0`. Lower context/speculation can be traded
-for external prefix caching, but that is a new cold performance and
-near-maximum correctness qualification—not a safe checkbox.
+The original 3,072-token shape was not runtime-safe with LMCache: it booted,
+then OOMed its first 128K request on a 36 MiB mixed-K output conversion. The
+final profile keeps the full 2,048-block GPU pool while lowering the prefill
+chunk to 2,048 and sending sparse-indexer folds above 64 MiB through the exact
+streaming-carry path. With 125 GiB LMCache DRAM it passed two 128K requests,
+then completed 520,001- and 524,012-token prefills. The latter reached 99.3%
+GPU-KV use, leaving only the API/template margin below the 524,288 hard limit.
+
+At the matched 65,024-token eviction gate, native vLLM restored the prefix from
+DRAM in 0.568 s and LMCache in 0.508 s, versus roughly 30 s recomputation.
+Native retained about 0.83 GiB more idle VRAM/GPU, but prompt throughput was
+within run variance. Adding a bounded 512 GiB local-NVMe LMCache tier did not
+change idle VRAM, 128K PP, or MTP acceptance. After a complete engine/cache
+restart, the identical 131,076-token prompt restored from NVMe in 1.254 s;
+LMCache reported 6.51 GB/s NVMe-to-DRAM and 14.7–17.1 GB/s DRAM-to-GPU.
+Filesystem L2 remains opt-in because derived KV may contain session material.
 
 The hybrid's 2,048 chunk is intentional. On v20, a 3,072-token chunk with a 512 MiB
 workspace passed three uncached 32K prefills and a C1/C2/C4/C8 sweep, but
@@ -1263,23 +1275,26 @@ checkpoint. To inspect the exact command without touching GPUs:
 CONFIG_SMOKE=1 bash scripts/run-local-podman.sh
 ```
 
-LMCache DRAM is already selected by the flagship profile. A positive
+LMCache DRAM is selected by both the flagship and qualified 3.25-bpw profiles.
+A positive
 `PREFIX_CACHE_DISK_GB` additionally stores bounded derived KV under the
 writable LMCache mount. On an owned host, create a dedicated local NVMe
 directory and bind it at the appliance's secure-erase-aware path:
 
 ```bash
-mkdir -p /mnt/fast/lmcache/glm52-r11
-export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-r11
+mkdir -p /mnt/fast/lmcache/glm52-3.25-r11
+export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-3.25-r11
 export PREFIX_CACHE_BACKEND=lmcache
-export PREFIX_CACHE_DISK_GB=32
+export PREFIX_CACHE_DISK_GB=512
 bash scripts/run-local-podman.sh
 ```
 
 The `PREFIX_CACHE_DISK_GB` limit is enforced by LMCache even when the backing
 filesystem is larger. Do not point this path into the read-only checkpoint;
 cached KV may contain session material, and secure termination only provides a
-best-effort erase on flash storage.
+best-effort erase on flash storage. The 512 GiB setting needs at least that much
+free local space plus operational margin; AIBeast had 748 GiB free before the
+qualification. The tier does not preallocate its limit.
 
 </details>
 
