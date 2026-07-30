@@ -204,6 +204,13 @@ if not match:
     raise SystemExit(f"missing KLD result in {log_path}")
 summary = json.loads(match.group(1))
 summary["log"] = str(log_path)
+count = int(summary.get("num_windows", summary.get("n", 1)))
+summary["reference_windows"] = count
+if count <= 1:
+    summary["stddev_note"] = (
+        "The reference bundle contains one window; a reported standard "
+        "deviation of 0 is structural (n=1), not evidence of zero model variance."
+    )
 pathlib.Path(sys.argv[2]).write_text(
     json.dumps(summary, indent=2, sort_keys=True) + "\n")
 print(json.dumps(summary, sort_keys=True))

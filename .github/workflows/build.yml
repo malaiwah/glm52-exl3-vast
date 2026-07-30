@@ -44,6 +44,8 @@ jobs:
         run: python3 tests/test_gpu_detect.py
       - name: persistent extension lock recovery
         run: python3 tests/test_extension_lock_recovery.py
+      - name: bounded LMCache process and tier contract
+        run: bash tests/test_lmcache_wrapper.sh
       # Keeps the live qualification instruments trustworthy before they are
       # used to spend GPU rental time.
       - name: serving benchmark and needle harness

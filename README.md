@@ -139,6 +139,18 @@ provider-template default. `exl3-tr3-max-context` trades ordinary-workload
 speed for the largest DCP4 envelope. `madeby561-hybrid` remains the immutable
 v20 production control:
 
+An independent
+[Terminal-Bench 2.1 reproduction on this Brandon EXL3/TR3 checkpoint](https://huggingface.co/brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw/discussions/1)
+reported “69 pass · 15 model fail · 4 infrastructure error”: 78.4% over the
+88 completed trials, or 82.1% after excluding infrastructure errors. Z.ai's
+[original GLM-5.2 model card](https://huggingface.co/zai-org/GLM-5.2) reports
+81.0% with Terminus-2. The quantized run is thus within 2.6 percentage points
+of the vendor score and crosses it on the quality-only denominator. That is
+strong end-to-end evidence that the quant retains the original model's
+agentic capability, but not a controlled quantization-only A/B: serving
+context, runtime, harness state, and error accounting differ, so the two
+percentages must not be called statistically equivalent.
+
 ```text
 MODEL_PROFILE=glm52-exl3
 MODEL_VARIANT=madeby561-hybrid
@@ -331,6 +343,11 @@ idle during any one of them.
 | Runpod Community | not a single stable class | host registry/HF/storage route | 30–90 minutes; enforce a cost deadline |
 | JarvisLabs IN1 VM, image and weights absent | ~24 minutes from measured stages | ~7-minute image pull, ~10-minute HF transfer, 6m57s first successful engine/TLS start | 30 minutes |
 | JarvisLabs IN1 VM, checkpoint/AOT/cert reused | 3m22s | 60-second InstantTensor load, 4.9-second cached compile, graph capture and DRAM tier allocation | 4 minutes |
+
+During post-start verification, one loopback request intentionally calls
+`GET /v1/models` with a known-wrong key. Its `127.0.0.1 ... 401 Unauthorized`
+access-log line is a passing authentication test, not a failed health probe;
+the boot log prints that explanation immediately before the request.
 
 On AIBeast, InstantTensor target loading is normally tens of seconds once the
 files are warm; full readiness still includes memory profiling and graph/JIT
@@ -605,6 +622,17 @@ Docker and a public IP, while the catalog containers do not accept this custom
 image. Jarvis bills by the minute. A pause releases GPU compute but retains
 chargeable storage; destroy the VM when finished.
 
+A managed-container probe was also completed rather than merely inferred from
+the catalog. Its four RTX PRO 6000 GPUs had peer reads/writes between every
+pair, and its 800 GB `/home` volume persisted, but `/workspace` lived on the
+ephemeral root filesystem. The template supplied neither Docker nor Podman,
+disabled user/mount namespaces, and blocked Enroot's OCI whiteout helpers.
+Consequently it cannot run this custom turnkey image reliably today. Use the
+VM launcher below; do not paste the appliance into a stock PyTorch container
+and assume its excellent P2P topology makes the software stack equivalent.
+The container route can become the preferred first-user path if JarvisLabs
+adds custom OCI images or a provider-supported nested runtime.
+
 The qualified IN1 VM reported four same-NUMA `PHB` cards but no CUDA peer
 reads or writes between any pair. The unmodified pre-Jarvis image reached
 model warmup and then failed its SparkInfer DCP all-gather. The current
@@ -614,6 +642,9 @@ That is why this shape passes the full 517K quality gate but trails all-`NODE`
 hosts in the performance table. Driver `595.58.03`, CUDA 13.2, Ubuntu 24.04,
 and the 600 W/card power ceiling are part of the measured result; a different
 Jarvis host remains a fresh topology gate.
+
+<details>
+<summary><b>JarvisLabs full VM + Docker (the measured flagship path)</b></summary>
 
 Create and connect with the current CLI:
 
@@ -658,6 +689,13 @@ bearer key over public HTTP:
 ```bash
 ssh ubuntu@<public-ip> -L 8000:localhost:8000 -L 1111:localhost:1111
 ```
+
+The launcher always creates `/home/turnkey` before binding it to the
+container's `/workspace`. The OCI image is weights-free; the public checkpoint
+downloads into that persistent directory on first boot and is not captured in
+a VM image.
+
+</details>
 
 JarvisLabs does not inject a VM-scoped API key. Appliance self-termination is
 therefore off by default. The provider dashboard is safest; advanced users may
@@ -1148,6 +1186,41 @@ Profile checkpoints:
 The same image drops onto an owned box as a transparent replacement for an
 existing endpoint:
 
+<details>
+<summary><b>AIBeast / owned Linux host + rootless Podman</b></summary>
+
+The checked-in runner preserves the same appliance entrypoint used by rentals.
+Point it at an existing read-only Hugging Face checkpoint, a writable cache,
+and a tiny writable flag directory. No weights are downloaded or mutated:
+
+```bash
+export IMAGE=ghcr.io/malaiwah/glm52-exl3-vast:latest
+export MODEL_DIR_HOST=/mnt/vault/llm/huggingface/\
+models--brandonmusic--GLM-5.2-EXL3-TR3-3.0bpw/snapshots/\
+9297b9f1d53af5c67cffa01e30cc071a1ff7144b
+export DOWNLOAD_MARKER_HOST=/mnt/fast/turnkey-flags/.download-complete
+export CACHE_VOLUME=glm52-turnkey-cache
+export STATE_VOLUME=glm52-turnkey-state
+export PORT=8000
+
+bash scripts/run-local-podman.sh
+```
+
+The runner uses host networking/IPC, passes the NVIDIA and DRI devices,
+mounts the checkpoint read-only, and keeps compilation output outside the
+checkpoint. To inspect the exact command without touching GPUs:
+
+```bash
+CONFIG_SMOKE=1 bash scripts/run-local-podman.sh
+```
+
+Set `PREFIX_CACHE_BACKEND=lmcache` only after the r11 LMCache qualification
+described below. A positive `PREFIX_CACHE_DISK_GB` stores bounded derived KV
+under the writable model root; do not point that path into the read-only
+checkpoint.
+
+</details>
+
 | env | default | why you'd change it |
 |---|---|---|
 | `MODEL_PROFILE` | `glm52-exl3` | select `qwen36-27b-nvfp4` for low-cost testing, or `custom` with `MODEL_ID` |
@@ -1170,6 +1243,8 @@ existing endpoint:
 | `KV_CACHE_MEMORY_BYTES` | 0 | positive per-GPU byte count fixes KV memory and supersedes GMU for KV sizing; use the profiler's printed value when eager/speculative workspace must not be consumed by auto-KV, and do not combine it with `GPU_BLOCKS_OVERRIDE` |
 | `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host DRAM used as an aggregate L2 prefix cache (not active-context capacity); `0.5` is the measured agentic-workload setting on a 256 GiB host and native vLLM derives the TP worker slices |
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
+| `PREFIX_CACHE_BACKEND` | `native` | `native` keeps the measured in-process OffloadingConnector; `lmcache` selects r11's supervised DCP-aware LMCache MP process. Both use `OFFLOAD_FRACTION` for aggregate DRAM and neither enlarges active context. |
+| `PREFIX_CACHE_DISK_GB` | `0` | positive values enable LMCache's native filesystem L2 with this hard GiB limit under `<MODEL_ROOT>/.lmcache`; derived prompt KV may be sensitive, so prefer encrypted local NVMe and enable best-effort secure termination |
 | `MTP78_MODE` | `off` (native) | the current Brandon revision contains a native rank-sliced TR3 draft; `graft` and `override` remain experimental compatibility paths. MadeBy561's native draft uses serialized NVFP4 experts. Prefer the `MTP_DRAFT` knob on the config page. |
 | `MTP_DRAFT_SAMPLE_METHOD` | `probabilistic` GLM | measured MTP-5 proposal mode; `greedy` remains available for controlled A/B tests |
 | `F8_DMA` | `0` family / `ring` MadeBy561 | compressed PCIe collective mode; the hybrid override passed the 521K five-depth gate |
@@ -1243,6 +1318,14 @@ on hardware you own.
   the API key. Each instance gets its own name, stable across reboots — so
   records don't pile up in the zone and certs persist on the volume, reused
   while they have >7 days validity left.
+
+  DNS and ACME are deliberately **not an unbounded startup dependency**. The
+  appliance gives the first registration/issuance attempt 150 seconds, then
+  continues engine startup and retries every five minutes in the background.
+  A successful background retry persists the certificate and reports that one
+  restart/apply is needed to put it on the listener. Tune those bounds with
+  `ACME_ATTEMPT_TIMEOUT_S` and `ACME_BACKGROUND_RETRY_S`; do not make the
+  foreground deadline long enough to hide model-download or engine progress.
 
 - **Other DNS providers** (Cloudflare, DuckDNS, 150+ via lego): set
   `ACME_DOMAIN=model.example.com`, `ACME_DNS_PROVIDER=cloudflare` (any lego

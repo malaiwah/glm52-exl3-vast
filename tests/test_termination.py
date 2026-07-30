@@ -803,6 +803,9 @@ def test_erase_plan(tmp):
     open(os.path.join(root, "etc-ssh", "ssh_host_ed25519_key"), "w").write("HOSTKEY")
     env = erase_env(root)
     os.environ.update(env)
+    lmcache_file = os.path.join(root, "workspace", ".lmcache", "l2", "chunk")
+    os.makedirs(os.path.dirname(lmcache_file), exist_ok=True)
+    open(lmcache_file, "w").write("DERIVED-PROMPT-KV")
     p = secure_erase.Paths(env)
     doc = secure_erase.plan(p)
     chosen = {t["path"] for t in doc["targets"]}
@@ -814,6 +817,8 @@ def test_erase_plan(tmp):
     check("no planned path escapes the sandbox root", not stray, str(stray[:5]))
     check("sshd host keys are taken",
           os.path.join(root, "etc-ssh", "ssh_host_ed25519_key") in chosen)
+    check("LMCache disk tier is taken as sensitive derived KV",
+          lmcache_file in chosen)
 
     check("manifest was found and used", doc["manifest_used"] is True)
     for f in public:
@@ -824,8 +829,9 @@ def test_erase_plan(tmp):
         check(f"user file taken: {os.path.basename(f)}", f in chosen)
     for f in derived:
         check(f"derived artifact kept: {os.path.relpath(f, md)}", f not in chosen)
-    check("groups cover credentials/tls/config-state/logs/history/user-files",
-          {"credentials", "tls", "config-state", "logs", "history", "user-files"}
+    check("groups cover credentials/tls/config-state/cache/logs/history/user-files",
+          {"credentials", "tls", "config-state", "derived-kv-cache",
+           "logs", "history", "user-files"}
           <= set(doc["groups"]), str(doc["groups"]))
     shutil.rmtree(root, ignore_errors=True)
 

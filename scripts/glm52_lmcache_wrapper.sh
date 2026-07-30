@@ -4,7 +4,8 @@ set -Eeuo pipefail
 
 [[ "$#" -gt 0 ]] || { echo "FATAL: LMCache wrapper needs a server command" >&2; exit 2; }
 mode="${LMCACHE_MODE:-off}"
-case "${mode,,}" in
+mode="$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]')"
+case "$mode" in
   off|0) exec "$@" ;;
   ram|memory|1) mode=ram ;;
   disk|ram-disk|memory-disk) mode=disk ;;
