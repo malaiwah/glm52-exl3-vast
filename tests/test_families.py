@@ -54,7 +54,7 @@ def errs(findings):
 # --------------------------------------------------------------------------
 
 def test_glm_release_defaults():
-    section("the GLM GG v20-r9 release defaults")
+    section("the GLM GG v20-r11 qualification defaults")
     eff, src, _ = resolved(gpus=4)
     check("family defaults to glm52", eff["MODEL_FAMILY"] == "glm52")
     check("TP is 4 on a 4-GPU box, and it is DETECTED not assumed",
@@ -140,14 +140,15 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r9 runtime integration matches the measured launch contract")
+    section("the GG v20-r11 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
+    acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
     config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
     local_runner = open(os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r9 manifest",
-          "sha256:8246024490670e43af6ccdc3df9c6dd0a084119f4507b7ac35a86f5a1c6c33c3"
+    check("the base image is the pinned GG v20-r11 manifest",
+          "sha256:eb4ece3757c03e10764f0900a1366ba4ef63c33560052c976d9ae08457482ff2"
           in dockerfile)
     check("static NVFP4 scaling selects and verifies the reviewed artifact",
           "KV_SCALE_MODE:-static-calibrated" in entry
@@ -165,12 +166,15 @@ def test_glm_release_integration():
           'SPARKINFER_INDEXER_TWO_LEVEL_FOLD:-auto' in entry
           and 'SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256' in entry)
     check("deSEC DNS-01 runs the authoritative convergence guard",
-          'desec_acme_guard.py"' in entry
-          and '--zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN"' in entry
-          and 'ACME_GUARD_PID=$!' in entry
-          and '--dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-90s}"'
-          in entry
-          and 'rrsets/_acme-challenge.${ACME_SUB}/TXT/' in entry
+          'acme_retry.sh" --once' in entry
+          and 'acme_retry.sh" --retry' in entry
+          and 'desec_acme_guard.py"' in acme_retry
+          and '--zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN"' in acme_retry
+          and 'guard_pid=$!' in acme_retry
+          and '--dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-45s}"'
+          in acme_retry
+          and 'rrsets/_acme-challenge.${sub}/TXT/' in acme_retry
+          and 'timeout --signal=TERM --kill-after=10' in acme_retry
           and "dnspython==2.8.0" in dockerfile
           and "lego_v4.35.2_linux_amd64.tar.gz" in dockerfile
           and "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3"
