@@ -1685,10 +1685,10 @@ fi
 # the persistent path gives warm restarts for the same immutable stack without
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
-# Both the r13 parity repair and mixed-K EXL3 support change source consumed by
-# Dynamo/Inductor. They are uniform-checkpoint-compatible, but not compatible
-# with compiled objects from the older exl3abi1 source tree.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk5"
+# The r13 parity repair and each mixed-K EXL3 patch version change source
+# consumed by Dynamo/Inductor. They remain uniform-checkpoint-compatible but
+# must never reuse compiled objects from an older patch source tree.
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk6"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2

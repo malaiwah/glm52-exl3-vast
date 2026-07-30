@@ -13,6 +13,24 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(PATCH)
 
 
+class FakeTensor:
+    pass
+
+
+class FakeTorch:
+    Tensor = FakeTensor
+    uint8 = object()
+    allocations = []
+
+    @classmethod
+    def empty(cls, size, *, dtype, device):
+        tensor = FakeTensor()
+        tensor.size = size
+        tensor.dtype = dtype
+        tensor.device = device
+        cls.allocations.append(tensor)
+        return tensor
+
 def fixture_source() -> str:
     return f"""\
 class Fixture:
@@ -41,7 +59,7 @@ class Exl3MixedKPatchTests(unittest.TestCase):
             with mock.patch.object(PATCH, "find_exl3", return_value=target):
                 PATCH.main()
                 first = target.read_text()
-                self.assertIn(PATCH.MARKER_V5, first)
+                self.assertIn(PATCH.MARKER_V6, first)
                 self.assertIn("self.mixed_k_values = tuple(k_values)", first)
                 self.assertIn('"output_expert_map": mix_tier', first)
                 self.assertIn("api.plan_weights(", first)
@@ -56,6 +74,44 @@ class Exl3MixedKPatchTests(unittest.TestCase):
                 self.assertIn("torch.cuda.empty_cache()", first)
                 PATCH.main()
                 self.assertEqual(target.read_text(), first)
+
+    def test_prefill_arena_is_reused_only_at_exact_device_and_capacity(self):
+        FakeTorch.allocations = []
+        namespace = {
+            "torch": FakeTorch,
+            "Exl3MoEMethod": type("Exl3MoEMethod", (), {}),
+        }
+        exec(PATCH.APPEND, namespace)
+        shared_arena = namespace["_mixk_shared_prefill_arena"]
+
+        first, reused = shared_arena(("cuda", 0), 1024)
+        self.assertFalse(reused)
+        same, reused = shared_arena(("cuda", 0), 1024)
+        self.assertIs(same, first)
+        self.assertTrue(reused)
+
+        larger, reused = shared_arena(("cuda", 0), 2048)
+        self.assertFalse(reused)
+        other_device, reused = shared_arena(("cuda", 1), 1024)
+        self.assertFalse(reused)
+        self.assertIsNot(larger, first)
+        self.assertIsNot(other_device, first)
+        same, reused = shared_arena(("cuda", 0), 1024)
+        self.assertIs(same, first)
+        self.assertTrue(reused)
+        self.assertEqual(len(FakeTorch.allocations), 3)
+        with self.assertRaisesRegex(ValueError, "non-empty"):
+            shared_arena(("cuda", 0), 0)
+
+    def test_prefill_pool_does_not_capture_decode_arena(self):
+        self.assertIn(
+            "decode_arena, _ = arena_for([t[\"decode_plan\"] for t in tiers_rt])",
+            PATCH.APPEND,
+        )
+        self.assertIn(
+            "share_across_owners=True",
+            PATCH.APPEND,
+        )
 
     def test_unknown_source_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

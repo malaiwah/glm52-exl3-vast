@@ -247,18 +247,18 @@ def test_glm_release_integration():
           and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
           in entry)
     check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk5"'
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk6"'
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
     check("the r13 EXL3 repairs are immutable and cache-versioned",
           "patch_exl3_parity_abi.py" in dockerfile
           and "patch_exl3_mixk.py" in dockerfile
-          and "44e171a8aea0009e3c786265914c6cf9d8a23ca9b474761aba990adcb7f74440"
+          and "c6ebcdf9e3b6067c6b9972d2abe5b61560e5cf0c0c6352044911f96c235c6c00"
           in dockerfile
           and dockerfile.index("patch_exl3_parity_abi.py")
           < dockerfile.rindex("patch_exl3_mixk.py")
-          and "-turnkey-exl3mixk5" in entry)
+          and "-turnkey-exl3mixk6" in entry)
     check("the local Podman runner does not bypass cache fingerprinting",
           "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
           and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)

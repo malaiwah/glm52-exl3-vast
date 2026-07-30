@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""patch_exl3_mixk.py (v5) — mixed-K (per-expert 3/4 bpw) rank-sliced EXL3 MoE
+"""patch_exl3_mixk.py (v6) — mixed-K (per-expert 3/4 bpw) rank-sliced EXL3 MoE
 for the installed vLLM exl3.py (GG v20 r11-r13).
+
+v6 over v5:
+  * reuses an exact-capacity prefill scratch arena across serialized target and
+    MTP-draft owners instead of retaining one long-lived arena per owner.
 
 v5 over v4:
   * inherits r13's backend-declared minimum capturable Trellis row count
     instead of retaining the pre-r12 literal default of 4.
-
 v4 over v3:
   * supports r13's consolidated ``sparkinfer.moe.fused_moe`` weight/runtime
     planning API while retaining the r11 API as an explicit compatibility
@@ -25,7 +28,7 @@ v3 over v2:
     max_batched from layer.exl3_max_num_batched_tokens like uniform;
   * keeps the v2 mapped top-k-sum fix (route map passed as output_expert_map).
 
-Idempotent + upgradeable: v5 marker short-circuits; any older mixk install is
+Idempotent + upgradeable: v6 marker short-circuits; any older mixk install is
 rebuilt in place from the v1 marker. Backup at exl3.py.orig on first apply.
 """
 
@@ -38,6 +41,7 @@ MARKER_V1 = "# === EXL3-MIXK-PATCH v1 ==="
 MARKER_V3 = "# === EXL3-MIXK-PATCH v3 (shared runtime, aliased arenas) ==="
 MARKER_V4 = "# === EXL3-MIXK-PATCH v4 (r13 consolidated fused-MoE API) ==="
 MARKER_V5 = "# === EXL3-MIXK-PATCH v5 (backend Trellis minimum) ==="
+MARKER_V6 = "# === EXL3-MIXK-PATCH v6 (owner-shared prefill arena) ==="
 
 
 def find_exl3() -> Path:
@@ -87,6 +91,7 @@ E5_NEW = '''        if getattr(layer, "exl3_mixk", None) is not None:
 
 APPEND = (
     MARKER_V1 + "\n" + MARKER_V3 + "\n" + MARKER_V4 + "\n" + MARKER_V5
+    + "\n" + MARKER_V6
 ) + '''
 # Mixed-K rank-sliced EXL3: experts partitioned by native trellis width into
 # K-homogeneous tiers; one sparkinfer trellis_moe Weights per tier per layer;
@@ -97,6 +102,22 @@ APPEND = (
 # sequentially within a layer.
 
 _MIXK_RUNTIMES: dict[tuple, dict] = {}
+_MIXK_SHARED_PREFILL_ARENAS: dict[tuple, torch.Tensor] = {}
+
+
+def _mixk_shared_prefill_arena(
+    device, nbytes: int
+) -> tuple[torch.Tensor, bool]:
+    """Return exact-capacity scratch and whether an existing arena was reused."""
+    if nbytes <= 0:
+        raise ValueError("mixed-K EXL3 scratch arena must be non-empty")
+    key = (device, nbytes)
+    arena = _MIXK_SHARED_PREFILL_ARENAS.get(key)
+    if arena is not None:
+        return arena, True
+    arena = torch.empty(nbytes, dtype=torch.uint8, device=device)
+    _MIXK_SHARED_PREFILL_ARENAS[key] = arena
+    return arena, False
 
 
 def _mixk_prepare_rank_sliced_weights(self, layer) -> None:
@@ -358,10 +379,10 @@ def _mixk_runtime(self, layer, x, topk_ids):
         tiers_rt.append({"k": k, "num_experts": tier_experts,
                          "decode_plan": decode_plan, "prefill_plan": prefill_plan})
 
-    def arena_for(plans):
+    def arena_for(plans, *, share_across_owners=False):
         specs = [p.scratch_specs()[0] for p in plans if p is not None]
         if not specs:
-            return None
+            return None, False
         nbytes = 0
         for spec in specs:
             b = 1
@@ -369,10 +390,18 @@ def _mixk_runtime(self, layer, x, topk_ids):
                 b *= int(dim)
             b *= torch.empty((), dtype=spec.dtype).element_size()
             nbytes = max(nbytes, b)
-        return torch.empty(nbytes, dtype=torch.uint8, device=x.device)
+        if share_across_owners:
+            return _mixk_shared_prefill_arena(x.device, nbytes)
+        return (
+            torch.empty(nbytes, dtype=torch.uint8, device=x.device),
+            False,
+        )
 
-    decode_arena = arena_for([t["decode_plan"] for t in tiers_rt])
-    prefill_arena = arena_for([t["prefill_plan"] for t in tiers_rt])
+    decode_arena, _ = arena_for([t["decode_plan"] for t in tiers_rt])
+    prefill_arena, prefill_arena_reused = arena_for(
+        [t["prefill_plan"] for t in tiers_rt],
+        share_across_owners=True,
+    )
     accum = torch.zeros(
         (max(max_batched_tokens, max_trellis_m), mix["hidden_size"]),
         dtype=torch.float32, device=x.device,
@@ -382,20 +411,25 @@ def _mixk_runtime(self, layer, x, topk_ids):
         "tiers": tiers_rt,
         "decode_arena": decode_arena,
         "prefill_arena": prefill_arena,
+        "prefill_arena_reused": prefill_arena_reused,
         "accum": accum,
         "min_trellis_m": min_trellis_m,
         "max_trellis_m": max_trellis_m,
         "max_batched_tokens": max_batched_tokens,
     }
     _MIXK_RUNTIMES[key] = runtime
-    arena_mib = sum(
-        a.numel() / (1 << 20) for a in (decode_arena, prefill_arena) if a is not None
+    decode_arena_mib = (
+        decode_arena.numel() / (1 << 20) if decode_arena is not None else 0.0
+    )
+    prefill_arena_mib = (
+        prefill_arena.numel() / (1 << 20) if prefill_arena is not None else 0.0
     )
     logger.info(
         "EXL3 mixk runtime: tiers %s, decode window [%d, %d], prefill_m=%d, "
-        "shared arenas %.1f MiB",
+        "decode arena %.1f MiB, prefill arena %.1f MiB "
+        "(owner-shared, reused=%s)",
         mix["signature"], min_trellis_m, max_trellis_m, max_batched_tokens,
-        arena_mib,
+        decode_arena_mib, prefill_arena_mib, prefill_arena_reused,
     )
     return runtime
 
@@ -459,8 +493,8 @@ def main() -> None:
         return
     path = find_exl3()
     src = path.read_text()
-    if MARKER_V5 in src:
-        print(f"already patched (v5): {path}")
+    if MARKER_V6 in src:
+        print(f"already patched (v6): {path}")
         return
     if MARKER_V1 in src:
         # rebuild any older mixk install: keep the in-place E-edits, replace
@@ -469,7 +503,7 @@ def main() -> None:
         path.write_text(src)
         import py_compile
         py_compile.compile(str(path), doraise=True)
-        print(f"upgraded to v5: {path}")
+        print(f"upgraded to v6: {path}")
         return
     missing = [name for name, old in (("E1", E1_OLD), ("E2", E2_OLD),
                                       ("E3", E3_OLD), ("E5", E5_OLD))
@@ -489,7 +523,7 @@ def main() -> None:
     path.write_text(src)
     import py_compile
     py_compile.compile(str(path), doraise=True)
-    print(f"patched {path} (v5, backup at {backup})")
+    print(f"patched {path} (v6, backup at {backup})")
 
 
 if __name__ == "__main__":
