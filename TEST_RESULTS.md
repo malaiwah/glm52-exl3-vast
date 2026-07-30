@@ -1350,3 +1350,9 @@ multiply-gated termination page. deSEC registration and a trusted Let's
 Encrypt certificate worked on the VM's direct public ports. Credential-free
 raw evidence is retained under
 `test-results/jarvislabs-2026-07-30/`.
+
+The final live gate submitted the landing page's secure-erase option, exact
+machine id and permanent-destruction acknowledgement. The worker stopped the
+engine, erased the session and destroyed VM 460920 through JarvisLabs. The CLI
+subsequently reported zero VMs, zero attached File Storage and a $60.0603
+remaining balance; the instance's deSEC A and ACME TXT records were absent.

@@ -605,11 +605,13 @@ from a fresh SSH session; `myself` is Unauthorized for the pod key while
 is reachable; `HF_HOME` defaults onto the network volume; there is no metadata
 service.
 
-**JarvisLabs live qualification is in progress (2026-07-29).** The account
-key's read-only `users/fetch/{machine_id}` route and regional VM selection have
-been exercised. The complete appliance-issued destroy remains the final live
-gate. The credential is account-scoped, so Jarvis self-termination remains an
-explicit opt-in rather than the default.
+**JarvisLabs verified live (2026-07-30).** The account key's read-only
+`users/fetch/{machine_id}` route, regional VM selection, exact-id confirmation,
+session erase and appliance-issued destroy all ran on VM 460920. The VM
+disappeared from `jl list`, account status reported zero VMs and no File
+Storage, and its deSEC A/TXT records were absent afterward. The credential is
+account-scoped, so Jarvis self-termination remains an explicit opt-in rather
+than the default.
 
 **Still untested:**
 
@@ -621,9 +623,6 @@ explicit opt-in rather than the default.
 - The vast.ai destroy call. High confidence — the entrypoint already uses the
   same two credentials against the same host for the dashboard label — but
   unexercised.
-- The full corrected worker sequence through a successful provider delete. Its
-  stop and erase stages have run live; the final deletion used the account-side
-  CLI only because the deployed appliance predated the legacy fallback.
 - VRAM zeroing (needs torch and GPUs) and the RAM overwrite under a cgroup
   limit. `drop_caches` is expected to be unavailable in most containers and is
   reported rather than assumed.
