@@ -4,13 +4,15 @@ This is the challenge record for the `glm52-exl3` balanced profile, not a list
 of folklore flags. The parameter decisions were isolated on the July 27 v31
 control (vLLM `0c79e41`, SparkInfer `c3828fd`) using four RTX PRO 6000
 Blackwell cards at 280 W, driver 595.71.05 and CUDA 13.2, then exercised on
-Vast and Runpod. The current candidate pins GG v20-r11
-(`voipmonitor/vllm@sha256:eb4ece37…`, vLLM
-`0.11.2.dev280+…r11`, LMCache `0.5.2+glm52dcp.4`, XGrammar 0.2.5).
-r11 retains r9's paired dynamic-token NVFP4 and adaptive exact indexer-fold
-sources, and updates the LMCache/DCP transfer stack. The appliance adds a
+Vast and Runpod. The current production profile pins GG v20-r13
+(`voipmonitor/vllm@sha256:02796036…`, vLLM
+`0.11.2.dev280+…r13`, LMCache `0.5.2+glm52dcp.4`, XGrammar 0.2.5).
+r13 retains r9's paired dynamic-token NVFP4 and adaptive exact indexer-fold
+sources, updates the LMCache/DCP transfer stack, and consolidates the
+EXL3/SparkInfer fused-MoE path with repeatable target/draft arena planning.
+The appliance adds a
 hash-pinned parity repair and mixed-K EXL3 support; its compile-cache ABI
-namespace is therefore distinct from both stock r11 and earlier turnkey
+namespace is therefore distinct from both stock r13 and earlier turnkey
 images.
 
 The restored safetensors control started on its first attempt, loaded the
@@ -70,8 +72,8 @@ Its exact log is preserved at:
 | batched tokens 3,072 | model-dependent | direct r9 A/B beat 3,200 at 8K, 64K, 128K, and 180K | best measured PP while keeping activation memory compatible with 524,288 and preserving decode | vLLM emits a generic speculative-slot warning | retain; 3,200 was slower and 4,096 previously failed admission |
 | chunked prefill | on for long contexts | explicit for clarity | bounds activation memory and interleaves work | chunk boundaries add scheduling overhead | retain |
 | async scheduling | often off | v20 EXL3 release constraint is speculative/CKV lifetime safety | avoids unqualified lifetime races | may leave throughput on the table | retain off |
-| graph capture sizes 4..64 step 4 | auto-derived | MTP5 × C8 requires up to 48 query tokens/step | keeps all supported concurrency in captured trellis path | 0.20 GiB/GPU plus 11 s capture | retain |
-| maximum graph size 64 | auto | matches the capture list and trellis maximum | avoids eager fallback through C8/MTP5 | larger graph sets consume memory/start time | retain |
+| graph capture sizes 4..48 step 4 | auto-derived | MTP5 × C8 requires up to 48 query tokens/step | keeps all supported concurrency in captured trellis path | 0.20 GiB/GPU plus capture time | retain |
+| maximum graph size 48 | auto | matches the capture list and trellis maximum | avoids eager fallback through C8/MTP5 without reserving unused rows | larger graph sets consume memory/start time | retain |
 | compilation custom ops `all` | defaults | lets fork kernels remain opaque/fused under Inductor | selected B12X/EXL3 paths compile correctly | makes source-version compatibility important | pin |
 | fused all-reduce + RMS pass | off/automatic | PCIe Blackwell path | reduces a communication boundary | topology-specific; correctness gated | retain |
 | external rank-sliced TR3 draft | no speculation | leaves target byte-identical and saves draft VRAM versus BF16 | restores KV capacity while retaining parity acceptance | extra immutable artifact and compile key | retain |
@@ -93,10 +95,10 @@ mixed 3/4-bit weight layout and memory shape were qualified independently:
 | KV pool | 2,048 blocks | `2,048 × 64 × DCP4 = 524,288`; exact 522,360-token gate passed | one maximum-length request; do not multiply the block count by DCP again |
 | graph/trellis window | 48 | exactly covers `C8 × (1 + MTP5)` | 0.20 GiB/GPU graph pool |
 | prefill/fold workspace | 2,048-token chunk; exact streaming carry above 64 MiB | preserves full GPU KV while bounding the two transient allocations that failed in the older 3,072/256 MiB shape | 128K PP is ~2.0–2.15K tok/s, below the earlier no-offload isolated run |
-| LMCache DRAM | 50% of 251 GiB host RAM (125 GiB aggregate) | 65,024-token evicted prefix restored in 0.508 s versus ~30 s cold; two 128K requests and 520,001/524,012-token boundary prefills passed | ~0.83 GiB/GPU less idle headroom than native; substantial host-RAM budget |
+| LMCache DRAM | 50% of 251 GiB host RAM (125 GiB aggregate) | 65,024-token evicted prefix restored in 0.508 s versus ~30 s cold; final r13 served 277,504 prompt tokens through external transfer and used 35.3 GB L1 during qualification | ~0.83 GiB/GPU less idle headroom than native; substantial host-RAM budget |
 | native DRAM control | same 125 GiB aggregate | 65,024-token reload in 0.568 s, 2.079 GB transferred in 0.402 s; ~0.83 GiB/GPU more idle VRAM | no released bounded filesystem tier; in-process connector is the rollback control |
-| LMCache filesystem tier | optional 512 GiB hard limit on local RAID0 NVMe | no additional idle-VRAM cost; write-through retained 8.38 GB after the 128K gate, and a cold cache-process restart restored the identical 131,076-token prefix in 1.254 s (6.51 GB/s NVMe→DRAM) | opt-in, local encrypted storage only; derived KV is sensitive and flash erase is best effort |
-| performance | PP 2,407.9/2,262.1 at 32K/128K; TG 128.0 C1 / 285.3 C8 | still clears the appliance's >100 tok/s C1 goal while improving checkpoint KLD | ~3–6% PP, 14% C1, and 26% C8 below the 3.0-bpw control |
+| LMCache filesystem tier | optional 512 GiB hard limit on local RAID0 NVMe | no additional idle-VRAM cost; cold restart restored 131,076 tokens in 1.254 s (6.51 GB/s NVMe→DRAM); final r13 completed 19 L2 loads and 548 chunks/rank with zero dropped events | opt-in, local encrypted storage only; derived KV is sensitive and flash erase is best effort |
+| performance | isolated r11: PP 2,407.9/2,262.1 at 32K/128K, TG 128.0 C1 / 285.3 C8; live r13: PP 2,197.1/2,062.8, TG 108.8 C1 / 332.9 C8 | clears the >100 tok/s C1 goal on the production endpoint while improving checkpoint KLD | PP remains below the 2,400 tok/s stretch goal; live traffic makes the r13 row conservative rather than a matched cross-release A/B |
 | independent KLD | 0.0927076684 over 2,047 positions | better than the quant author's 0.095971 and the appliance's matched 3.0-bpw 0.1167701185 | one fixed reference window; rerun after any model/KV/runtime change |
 | power at 280 W/card | 271.6 W/GPU prefill; 251.9 W/GPU decode; 272.5 W/GPU exact 522,360-token retrieval | confirms the workload is predominantly power-bound on AIBeast | electrical headroom, clocks and topology affect portability |
 
@@ -122,16 +124,18 @@ Rows whose value equals the current source default are still called out.
 | `VLLM_USE_FLASHINFER_SAMPLER` | true | `1`, same as fork default | none beyond FlashInfer dependency | pin |
 | `VLLM_USE_AOT_COMPILE` | false | `1` | persistent compiled model reloads in ~1.1 s instead of recompiling | stale/corrupt caches were a historical risk; fingerprint and retrieval gate are mandatory | retain |
 | `VLLM_USE_MEGA_AOT_ARTIFACT` | false | `1` | reconstructs 77 target artifacts and two draft artifacts directly | disk usage and strict software/config fingerprint | retain |
-| compile/autotune cache directories | user cache | immutable-checkpoint-external persistent volume, namespaced by `LOCAL_INFERENCE_CACHE_FINGERPRINT` plus `turnkey-exl3mixk4` | same-stack restart loaded the backbone AOT artifact in 0.55s without corruption or low throughput; old parity/mixed-K source cannot leak in | consumes local SSD; each source/patch ABI cold-compiles a new namespace | retain |
+| compile/autotune cache directories | user cache | immutable-checkpoint-external persistent volume, namespaced by `LOCAL_INFERENCE_CACHE_FINGERPRINT` plus `turnkey-exl3mixk5` | same-stack restart loaded the backbone AOT artifact in 0.55s without corruption or low throughput; old parity/mixed-K source cannot leak in | consumes local SSD; each source/patch ABI cold-compiles a new namespace | retain |
 | `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS` | true | `1`, same as fork default; an explicit expert `0` is honored | accounts the measured ~0.81 GiB/GPU graph high-water before KV allocation | reports less KV than older optimistic behavior | retain on; override requires cold runtime and near-max requalification |
 | `VLLM_MEMORY_PROFILE_INCLUDE_ATTN` | false | `1` | includes persistent DCP/attention resources before sizing KV | lower advertised KV is possible | retain for reliable high-GMU boot |
 | `VLLM_USE_V2_MODEL_RUNNER` | auto | `1`, release-qualified execution path | new runner changes rapidly | retain with pinned image |
 | `VLLM_USE_BREAKABLE_CUDAGRAPH` | false | `0`, same as default | full qualified graph behavior | less flexible dynamic escape | pin |
-| `VLLM_EXL3_EXT_PATH` / `VLLM_EXL3_ABI_SHIM` | unset | explicitly unset; r11 carries the reviewed EXL3 integration in the image | an older external extension cannot be injected as a compatibility shortcut | retain unset |
+| `VLLM_EXL3_EXT_PATH` / `VLLM_EXL3_ABI_SHIM` | unset | explicitly unset; r13 carries the reviewed EXL3 integration in the image | an older external extension cannot be injected as a compatibility shortcut | retain unset |
+| `VLLM_EXL3_TRELLIS_MIN_M` | r13 capability default `1` | leave absent with MTP so the backend owns the same target/draft minimum; explicitly set `1` for MTP-off compatibility | all small target and draft rows remain capturable | forcing a larger value re-enters the eager parity path and can fail capture | retain role-aware auto |
 | `VLLM_EXL3_TRELLIS_BLOCK_M` | 8 | `8`, validated kernel geometry | none versus current default | pin |
 | `VLLM_EXL3_PREFILL_BLOCK_M` | 64 | `64`, issue-33/EXL3 planned prefill | another GPU might prefer a different tile | pin measured geometry |
-| `VLLM_EXL3_PREFILL_CHUNK` | 128 rows in r11 | `128`, matching the r11 row-count contract | covers the target parity window; the former boolean-like value `1` fails r11 memory profiling | source-contract change from older images | retain |
-| `VLLM_EXL3_TRELLIS_MAX_M` | 32 | `64` | covers C8×MTP5 query geometry without eager fallback | larger arena/compile surface | retain |
+| `VLLM_EXL3_PREFILL_CHUNK` | 128 rows in r13 | `128`, matching the r13 row-count contract | covers the target parity window; the former boolean-like value `1` fails memory profiling | source-contract change from older images | retain |
+| `VLLM_EXL3_PREFILL_TRELLIS` | `1` | retain enabled; r13 plans a fixed prefill arena during profiling | mixed-K prefill has no eager fallback and cannot safely allocate its arena mid-serve | disabling it makes the 3.25-bpw variant invalid | retain |
+| `VLLM_EXL3_TRELLIS_MAX_M` | 32 | `48` | exactly covers C8×MTP5 query geometry without eager fallback | larger arena/compile surface than the source default | retain |
 | `VLLM_NVFP4_MLA_SCALES_FILE` | unset | unset for the qualified dynamic-token profile; static mode alone requires the reviewed, hash-verified GLM scale JSON | dynamic mode changes the KV record ABI; static mode is a separate qualification | retain dynamic default; never combine modes |
 | `KV_FP8_ROPE` / `VLLM_NVFP4_MLA_DYNAMIC_SCALE` | `0` / `0` | both `1` only for `KV_SCALE_MODE=dynamic-token`; static file unset | selects the complete paired r9 record ABI | partial/mixed configuration is invalid | experiment as one atomic mode |
 | `SPARKINFER_INDEXER_TWO_LEVEL_FOLD` / `_MAX_MIB` | `auto` / `256` | retain | exact parallel fold below budget, exact streaming carry above it | default-on source change needs capacity/perf observation | retain |
@@ -239,26 +243,36 @@ Only changes with a plausible path to a product requirement advance:
    applied universally. The current Brandon control already passed the
    five-depth 521K gate; a checkpoint-specific policy requires a frozen cold
    discriminator showing a real failure and a no-regression ladder.
-5. r11 remains immutable. Upstream vLLM PR #190 has since moved EXL3 to
-   SparkInfer PR #90's unified fused-W4A16 API. Its runtime, scratch ownership,
-   and compile identity differ from the qualified r11 path, so it belongs in a
-   later image qualification rather than an in-place production patch.
+5. r13 incorporates exact reviewed heads from vLLM PR #190 and SparkInfer
+   PR #92: the unified fused-MoE API, target/draft-owned runtimes, fixed
+   batch-invariant arenas, and exact small-row plans. The PR branches remain
+   open and moving; the appliance pins the released result trees and never
+   follows those branches at runtime. vLLM issue #183 is closed: with the
+   minimum unset, both r13 target and draft planned `[1,48]`, captured without
+   eager parity, and returned all five needles from an exact 522,360-token
+   prompt.
 6. LMCache PR #4211 reports silent native-L2 drops when a multiprocess store
    batch contains mixed object sizes. The qualified GLM workload restored an
    identical 64K prefix from local filesystem L2, but this open upstream bug
    reinforces the decision to keep NVMe opt-in, bounded, observable, and
    subject to a restart-restore gate. DRAM L1 does not traverse that L2 store
    adapter.
-7. Native vLLM filesystem capacity remains unavailable in the released r11
+7. Native vLLM filesystem capacity remains unavailable in the released r13
    image. local-inference-lab/vLLM PR #165 is still open; without its
    `max_cache_size_bytes`/LRU contract the filesystem tier can grow until
    `ENOSPC`, so the appliance continues to reject native+disk and uses LMCache
    for the bounded 512 GiB qualification.
-8. No GG v20-r12 image or prerelease tag was published at qualification time.
-   The likely follow-on work remains in open vLLM PRs #190/#198 and
-   SparkInfer PR #92 (small-row EXL3 execution and repeatable Trellis/activation
-   memory profiling). Those changes may explain the reported ~8% decode gain,
-   but are not a release artifact and are not attributed to r12 yet.
+8. GG v20-r13 is the immutable release boundary. A documentation-only commit
+   landed 12 minutes after publication to correct the stock-r11 comparison:
+   matched MTP0 decode is 44.66 tok/s on stock r11 and 48.61 on r13
+   (`+8.85%`). The image digest and all three composed result trees stayed
+   unchanged.
+9. On the mixed 3.25-bpw shape, MTP3 did not make a 3,072-token prefill plan
+   request-safe: the first request still OOMed on a 36 MiB conversion. At the
+   selected 2,048-token plan, the published r13 MTP3 control is 101.92 tok/s
+   and the live MTP5 production sweep reached 108.8 tok/s at C1 with MAL 4.96.
+   There is no measured reason to trade away MTP5's higher acceptance ceiling,
+   so MTP5/2,048 is the accepted production candidate.
 
 The proposed 4,096-token batch was tested and rejected before benchmarking.
 It created a correctly distinct compile key and compiled normally, but raised

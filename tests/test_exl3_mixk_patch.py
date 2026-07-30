@@ -41,9 +41,17 @@ class Exl3MixedKPatchTests(unittest.TestCase):
             with mock.patch.object(PATCH, "find_exl3", return_value=target):
                 PATCH.main()
                 first = target.read_text()
-                self.assertIn(PATCH.MARKER_V3, first)
+                self.assertIn(PATCH.MARKER_V5, first)
                 self.assertIn("self.mixed_k_values = tuple(k_values)", first)
-                self.assertIn("output_expert_map=mix_tier", first)
+                self.assertIn('"output_expert_map": mix_tier', first)
+                self.assertIn("api.plan_weights(", first)
+                self.assertIn('"experts" if "_load_sparkinfer_fused_moe"', first)
+                self.assertIn("max_batched_tokens = int(", first)
+                self.assertIn("_runtime_owner_token(", first)
+                self.assertIn(
+                    '"VLLM_EXL3_TRELLIS_MIN_M", _DEFAULT_TRELLIS_MIN_M',
+                    first,
+                )
                 self.assertIn("param.exl3_backing = None", first)
                 self.assertIn("torch.cuda.empty_cache()", first)
                 PATCH.main()

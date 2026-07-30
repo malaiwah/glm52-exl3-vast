@@ -1,6 +1,18 @@
 #!/usr/bin/env python3
-"""patch_exl3_mixk.py (v3) — mixed-K (per-expert 3/4 bpw) rank-sliced EXL3 MoE
-for the installed vLLM exl3.py (verdictai glm52-exl3-sparkinfer v20final).
+"""patch_exl3_mixk.py (v5) — mixed-K (per-expert 3/4 bpw) rank-sliced EXL3 MoE
+for the installed vLLM exl3.py (GG v20 r11-r13).
+
+v5 over v4:
+  * inherits r13's backend-declared minimum capturable Trellis row count
+    instead of retaining the pre-r12 literal default of 4.
+
+v4 over v3:
+  * supports r13's consolidated ``sparkinfer.moe.fused_moe`` weight/runtime
+    planning API while retaining the r11 API as an explicit compatibility
+    branch;
+  * keys target and draft arenas by r13's stamped runtime owner;
+  * makes the planned batch capacity invariant, matching r13's fix for
+    mid-serve arena allocation and first-request OOMs.
 
 v3 over v2:
   * runtime cache mirrors the uniform path: module-global, keyed on dims and
@@ -13,7 +25,7 @@ v3 over v2:
     max_batched from layer.exl3_max_num_batched_tokens like uniform;
   * keeps the v2 mapped top-k-sum fix (route map passed as output_expert_map).
 
-Idempotent + upgradeable: v3 marker short-circuits; any older mixk install is
+Idempotent + upgradeable: v5 marker short-circuits; any older mixk install is
 rebuilt in place from the v1 marker. Backup at exl3.py.orig on first apply.
 """
 
@@ -24,6 +36,8 @@ from pathlib import Path
 
 MARKER_V1 = "# === EXL3-MIXK-PATCH v1 ==="
 MARKER_V3 = "# === EXL3-MIXK-PATCH v3 (shared runtime, aliased arenas) ==="
+MARKER_V4 = "# === EXL3-MIXK-PATCH v4 (r13 consolidated fused-MoE API) ==="
+MARKER_V5 = "# === EXL3-MIXK-PATCH v5 (backend Trellis minimum) ==="
 
 
 def find_exl3() -> Path:
@@ -57,11 +71,11 @@ E2_NEW = ('preallocate=rank_sliced and suffix in '
           'else {"suh", "svh", "trellis"}),')
 
 E3_OLD = '''    def _prepare_rank_sliced_weights(self, layer: RoutedExperts) -> None:
-        api = _load_sparkinfer_trellis()'''
+'''
 E3_NEW = '''    def _prepare_rank_sliced_weights(self, layer: RoutedExperts) -> None:
         if getattr(self.quant_config, "mixed_k_values", None):
             return self._prepare_rank_sliced_weights_mixk(layer)
-        api = _load_sparkinfer_trellis()'''
+'''
 
 E5_OLD = '''        runtime = self._rank_sliced_runtime(layer, x, topk_ids)
         m = int(x.shape[0])'''
@@ -71,7 +85,9 @@ E5_NEW = '''        if getattr(layer, "exl3_mixk", None) is not None:
         m = int(x.shape[0])'''
 
 
-APPEND = MARKER_V1 + "\n" + MARKER_V3 + '''
+APPEND = (
+    MARKER_V1 + "\n" + MARKER_V3 + "\n" + MARKER_V4 + "\n" + MARKER_V5
+) + '''
 # Mixed-K rank-sliced EXL3: experts partitioned by native trellis width into
 # K-homogeneous tiers; one sparkinfer trellis_moe Weights per tier per layer;
 # global routing with per-tier route/output expert maps (-1 filtered by the
@@ -84,7 +100,12 @@ _MIXK_RUNTIMES: dict[tuple, dict] = {}
 
 
 def _mixk_prepare_rank_sliced_weights(self, layer) -> None:
-    api = _load_sparkinfer_trellis()
+    consolidated_api = "_load_sparkinfer_fused_moe" in globals()
+    api = (
+        _load_sparkinfer_fused_moe()
+        if consolidated_api
+        else _load_sparkinfer_trellis()
+    )
     num_experts = int(layer.local_num_experts)
     hidden_size = int(layer.exl3_hidden_size)
     intermediate_size = int(layer.exl3_intermediate_size_per_partition)
@@ -158,14 +179,39 @@ def _mixk_prepare_rank_sliced_weights(self, layer) -> None:
         rotations[:, :intermediate_size].copy_(g_svh)
         rotations[:, intermediate_size:2 * intermediate_size].copy_(u_svh)
         rotations[:, 2 * intermediate_size:].copy_(d_suh)
-        weights = api.prepare_weights(
-            w13_k, w2_k,
-            gate_suh=g_suh, up_suh=u_suh,
-            intermediate_rotations=rotations,
-            down_svh=d_svh,
-            codebook="mcg", mcg=marker,
-            tile_config=tile_config,
-        )
+        if consolidated_api:
+            weight_plan = api.plan_weights(
+                quant_modes="w4a16",
+                source_format="exl3_trellis_mcg",
+                activation=layer.activation.value,
+                params_dtype=layer.exl3_params_dtype,
+                num_experts=len(experts),
+                hidden_size=hidden_size,
+                intermediate_size=intermediate_size,
+                w13_layout="w13",
+                trellis_bits=k,
+                trellis_tile_config=tile_config,
+            )
+            weights = api.prepare_weights(
+                plan=weight_plan,
+                params_dtype=layer.exl3_params_dtype,
+                w1_fp4=w13_k,
+                w2_fp4=w2_k,
+                gate_suh=g_suh,
+                up_suh=u_suh,
+                intermediate_rotations=rotations,
+                down_svh=d_svh,
+                trellis_mcg=marker,
+            )
+        else:
+            weights = api.prepare_weights(
+                w13_k, w2_k,
+                gate_suh=g_suh, up_suh=u_suh,
+                intermediate_rotations=rotations,
+                down_svh=d_svh,
+                codebook="mcg", mcg=marker,
+                tile_config=tile_config,
+            )
         route_map = torch.full((num_experts,), -1, dtype=torch.int32, device=device)
         route_map[idx] = torch.arange(len(experts), dtype=torch.int32, device=device)
         tier_entries.append({
@@ -215,7 +261,9 @@ def _mixk_scratch_view(backing: torch.Tensor, spec) -> torch.Tensor:
 
 def _mixk_runtime(self, layer, x, topk_ids):
     mix = layer.exl3_mixk
-    min_trellis_m = _positive_env_int("VLLM_EXL3_TRELLIS_MIN_M", 4)
+    min_trellis_m = _positive_env_int(
+        "VLLM_EXL3_TRELLIS_MIN_M", _DEFAULT_TRELLIS_MIN_M
+    )
     max_trellis_m = _positive_env_int("VLLM_EXL3_TRELLIS_MAX_M", 32)
     block_m = _positive_env_int("VLLM_EXL3_TRELLIS_BLOCK_M", 8)
     prefill_trellis = os.environ.get("VLLM_EXL3_PREFILL_TRELLIS", "1") == "1"
@@ -228,13 +276,17 @@ def _mixk_runtime(self, layer, x, topk_ids):
             "(VLLM_EXL3_PREFILL_TRELLIS=1); the eager parity fallback has no "
             "mixed-K support"
         )
-    max_batched_tokens = max(
-        int(layer.exl3_max_num_batched_tokens),
-        int(x.shape[0]),
-    )
+    # This capacity must not depend on the live batch. r13 fixed the uniform
+    # path after a cache miss above the planned size silently allocated a new
+    # ~1 GiB arena during serving; mixed-K must preserve the same invariant.
+    max_batched_tokens = int(layer.exl3_max_num_batched_tokens)
     topk = int(topk_ids.shape[1])
     key = (
-        _runtime_scope_id(self.quant_config),
+        (
+            _runtime_owner_token(self.quant_config, layer)
+            if "_runtime_owner_token" in globals()
+            else _runtime_scope_id(self.quant_config)
+        ),
         x.device.index,
         x.dtype,
         mix["hidden_size"],
@@ -257,29 +309,50 @@ def _mixk_runtime(self, layer, x, topk_ids):
             "mixed-K EXL3 runtime must be planned during the eager profile "
             "pass before CUDA graph capture"
         )
-    api = _load_sparkinfer_trellis()
+    consolidated_api = "_load_sparkinfer_fused_moe" in globals()
+    api = (
+        _load_sparkinfer_fused_moe()
+        if consolidated_api
+        else _load_sparkinfer_trellis()
+    )
 
-    def make_plan(k, tier_experts, plan_max_tokens, plan_block_m):
-        caps = api.Caps(
-            max_tokens=plan_max_tokens,
-            num_topk=topk,
-            num_experts=tier_experts,
-            hidden_size=mix["hidden_size"],
-            intermediate_size=mix["intermediate_size"],
-            route_num_experts=mix["num_experts"],
-            block_size_m=plan_block_m,
-            trellis_bits=k,
-            tile_config=layer.exl3_trellis_tile_config,
-            input_dtype=x.dtype,
-            device=x.device,
-        )
+    def make_plan(weights, k, tier_experts, plan_max_tokens, plan_block_m):
+        if consolidated_api:
+            caps = api.Caps(
+                max_tokens=plan_max_tokens,
+                num_topk=topk,
+                route_num_experts=mix["num_experts"],
+                device=x.device,
+                weight_plan=weights.plan,
+                quant_mode="w4a16",
+                w4a16_block_size_m=plan_block_m,
+            )
+        else:
+            caps = api.Caps(
+                max_tokens=plan_max_tokens,
+                num_topk=topk,
+                num_experts=tier_experts,
+                hidden_size=mix["hidden_size"],
+                intermediate_size=mix["intermediate_size"],
+                route_num_experts=mix["num_experts"],
+                block_size_m=plan_block_m,
+                trellis_bits=k,
+                tile_config=layer.exl3_trellis_tile_config,
+                input_dtype=x.dtype,
+                device=x.device,
+            )
         return api.plan(caps)
 
     tiers_rt = []
-    for k, tier_experts in mix["signature"]:
-        decode_plan = make_plan(k, tier_experts, max_trellis_m, block_m)
+    for tier, (k, tier_experts) in zip(mix["tiers"], mix["signature"]):
+        decode_plan = make_plan(
+            tier["weights"], k, tier_experts, max_trellis_m, block_m
+        )
         prefill_plan = (
-            make_plan(k, tier_experts, max_batched_tokens, prefill_block_m)
+            make_plan(
+                tier["weights"], k, tier_experts,
+                max_batched_tokens, prefill_block_m,
+            )
             if max_batched_tokens > max_trellis_m else None
         )
         tiers_rt.append({"k": k, "num_experts": tier_experts,
@@ -350,21 +423,23 @@ def _mixk_apply(self, layer, x, topk_weights, topk_ids):
         if plan is None:
             raise RuntimeError("mixed-K EXL3 prefill plan missing for large batch")
         scratch = _mixk_scratch_view(arena, plan.scratch_specs()[0])
-        binding = runtime["api"].bind(
-            plan,
-            scratch=scratch,
-            a=x,
-            weights=mix_tier["weights"],
-            topk_weights=topk_weights,
-            topk_ids=topk_ids,
-            route_expert_map=mix_tier["route_expert_map"],
-            # the w4a16 top-k sum resolves sum_expert_map from
+        bind_kwargs = {
+            "scratch": scratch,
+            "a": x,
+            "topk_weights": topk_weights,
+            "topk_ids": topk_ids,
+            "route_expert_map": mix_tier["route_expert_map"],
+            # The W4A16 top-k sum resolves sum_expert_map from
             # output_expert_map first; bind keys its mapped launch variant on
             # output_expert_map only, so pass the same map to align the
             # preplanned launch with run's requested contract.
-            output_expert_map=mix_tier["route_expert_map"],
-            output=accum if first else None,
-        )
+            "output_expert_map": mix_tier["route_expert_map"],
+            "output": accum if first else None,
+        }
+        bind_kwargs[
+            "experts" if "_load_sparkinfer_fused_moe" in globals() else "weights"
+        ] = mix_tier["weights"]
+        binding = runtime["api"].bind(plan, **bind_kwargs)
         out = runtime["api"].run(binding=binding)
         if not first:
             accum.add_(out)
@@ -384,8 +459,8 @@ def main() -> None:
         return
     path = find_exl3()
     src = path.read_text()
-    if MARKER_V3 in src:
-        print(f"already patched (v3): {path}")
+    if MARKER_V5 in src:
+        print(f"already patched (v5): {path}")
         return
     if MARKER_V1 in src:
         # rebuild any older mixk install: keep the in-place E-edits, replace
@@ -394,7 +469,7 @@ def main() -> None:
         path.write_text(src)
         import py_compile
         py_compile.compile(str(path), doraise=True)
-        print(f"upgraded to v3: {path}")
+        print(f"upgraded to v5: {path}")
         return
     missing = [name for name, old in (("E1", E1_OLD), ("E2", E2_OLD),
                                       ("E3", E3_OLD), ("E5", E5_OLD))
@@ -414,7 +489,7 @@ def main() -> None:
     path.write_text(src)
     import py_compile
     py_compile.compile(str(path), doraise=True)
-    print(f"patched {path} (v3, backup at {backup})")
+    print(f"patched {path} (v5, backup at {backup})")
 
 
 if __name__ == "__main__":

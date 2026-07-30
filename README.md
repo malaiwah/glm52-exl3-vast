@@ -13,13 +13,14 @@ autonomy level `0` (off). Levels 1–3 are explicitly enabled by environment or
 the token-gated landing page; startup verification and rollback remain
 authoritative.
 
-The appliance now pins **GG v20-r11**: vLLM
-`0.11.2.dev280+…r11`, DCP-aware LMCache `0.5.2+glm52dcp.4`, and XGrammar
+The appliance now pins **GG v20-r13**: vLLM
+`0.11.2.dev280+…r13`, DCP-aware LMCache `0.5.2+glm52dcp.4`, and XGrammar
 0.2.5. It retains r9's paired dynamic-token NVFP4 MLA cache ABI and exact
-adaptive sparse-indexer folding, while adding the current LMCache connector
-and transfer-lifetime fixes. The flagship EXL3 profile uses the complete
+adaptive sparse-indexer folding, while consolidating EXL3 on SparkInfer's
+fused-MoE API, fixing target/draft small-row plans and using a repeatable
+post-warmup Trellis arena peak for KV sizing. The flagship EXL3 profile uses the complete
 dynamic record after a reproduced mean KLD of `0.1167701185`, repeated
-near-maximum retrieval gates, and an exact 522,360-token five-depth r11 pass.
+near-maximum retrieval gates, and an exact 522,360-token five-depth pass.
 The reviewed static GLM-5.2 scale artifact remains available for variants
 that have not qualified the dynamic record. XGrammar 0.2.5 fixes GLM
 `tool_choice=required` termination.
@@ -32,7 +33,7 @@ BrandonMusic's 3.0-bpw EXL3/TR3 checkpoint (~77 GiB/rank), DCP2, native
 TR3 MTP-5, dynamic-token `nvfp4_ds_mla` KV with FP8 RoPE, CUDA graphs through
 C8, and a full 524,288-token request limit. vLLM auto-profiles the KV pool at the
 AIBeast-qualified `GPU_MEMORY_UTILIZATION=0.957`; rentals remain a cold-boot
-requalification boundary. Safetensors is the reliable r11 loader. LMCache
+requalification boundary. Safetensors is the reliable loader. LMCache
 manages half of host DRAM as an external prefix tier for repeated agentic
 prefixes; it does not increase active context capacity. A bounded filesystem
 tier is opt-in and must use fast local NVMe—`/mnt/fast/lmcache/...` on
@@ -169,14 +170,25 @@ speculation shape; it is not merely a different download URL:
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
 The mixed 3.25-bpw profile is a qualified quality/performance trade, not a
-new default. On AIBeast/r11 it passed the complete OpenAI feature suite and an
-actual 522,360-token five-depth retrieval with no degeneration. Its isolated
-32K/128K prefill was 2,407.9/2,262.1 tok/s; aggregate decode was 128.0 tok/s
-at C1 and 285.3 at C8, with MTP5 mean acceptance lengths 5.74/5.08. Against
-the 3.0-bpw control that is roughly 3–6% slower prefill, 14% slower C1, and
-26% slower C8. The checkpoint's reported dynamic-NVFP4 KLD is 0.095971 versus
-0.119525 for 3.0 bpw. The appliance independently measured **0.0927076684**
-over the standard 2,047 positions, versus its independent 3.0-bpw result of
+new default. On the original AIBeast/r11 control it passed the complete OpenAI
+feature suite and an actual 522,360-token five-depth retrieval with no
+degeneration. Its isolated 32K/128K prefill was 2,407.9/2,262.1 tok/s;
+aggregate decode was 128.0 tok/s at C1 and 285.3 at C8, with MTP5 mean
+acceptance lengths 5.74/5.08. Against the 3.0-bpw control that is roughly 3–6%
+slower prefill, 14% slower C1, and 26% slower C8.
+
+The final r13 appliance image repeated the full API gate and the same exact
+522,360-token 5/5 retrieval on the production endpoint. With ordinary agent
+traffic sharing the service, unique-prefix PP was 2,197.1/2,062.8 tok/s at
+32K/128K. Aggregate TG was 108.8/173.0/255.0/332.9 tok/s at C1/C2/C4/C8,
+MTP5 mean acceptance length was 4.96/4.81/5.32/5.41, and there were no request
+failures or preemptions. MTP3 did not make the rejected 3,072-token workspace
+shape viable; r13's published 101.92 tok/s MTP3 control does not establish an
+advantage over this production MTP5 result.
+
+The checkpoint's reported dynamic-NVFP4 KLD is 0.095971 versus 0.119525 for
+3.0 bpw. The appliance independently measured **0.0927076684** over the
+standard 2,047 positions, versus its independent 3.0-bpw result of
 0.1167701185. The reference bundle contains one window, so a displayed
 standard deviation of zero is structural (`n=1`), not zero model variance.
 The complete active-KV/offload matrix and exact release boundaries are in
@@ -189,6 +201,10 @@ chunk to 2,048 and sending sparse-indexer folds above 64 MiB through the exact
 streaming-carry path. With 125 GiB LMCache DRAM it passed two 128K requests,
 then completed 520,001- and 524,012-token prefills. The latter reached 99.3%
 GPU-KV use, leaving only the API/template margin below the 524,288 hard limit.
+The r13 production run has already served 277,504 prompt tokens from external
+KV, restored 548 chunks per rank, and completed 19 filesystem-L2 loads with no
+dropped cache events. The bounded local-NVMe directory occupied 33 GiB of its
+512 GiB ceiling after qualification.
 
 At the matched 65,024-token eviction gate, native vLLM restored the prefix from
 DRAM in 0.568 s and LMCache in 0.508 s, versus roughly 30 s recomputation.
@@ -261,7 +277,7 @@ that pass is recorded, these values describe the tested stack rather than the
 future installation. The appliance now puts its persistent vLLM, Triton,
 Torch-extension, and Inductor caches below the base image's immutable
 `LOCAL_INFERENCE_CACHE_FINGERPRINT`: same-stack restarts remain warm, while an
-r9-to-r11 change cannot accidentally execute stale compiled objects.
+r11-to-r13 change cannot accidentally execute stale compiled objects.
 
 The current GG image is CUDA 13.2. The appliance therefore fails fast below
 the qualified pair **NVIDIA driver 590.48.01 and reported CUDA 13.2**, before
@@ -279,7 +295,8 @@ driver/CUDA combination.
 
 #### Safetensors, compiled-cache reuse, and the InstantTensor opt-in
 
-Safetensors is the r11 flagship default. The exact immutable r11 image loaded
+Safetensors remains the flagship default. As a historical cold/warm control,
+the exact immutable r11 image loaded
 all 81 target shards in 91.36 seconds from a warm local store, completed model
 load in 135.08 seconds, and exposed 542,208 logical KV tokens at GMU 0.957.
 It passed the complete OpenAI feature suite and an exact 522,360-token
@@ -411,7 +428,7 @@ not evidence that all peer transport is disabled.
 ## Launch GLM-5.2 on Vast.ai
 
 **[▶ Launch GLM-5.2 on Vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405)**.
-The linked public **Model Turnkey: GLM-5.2 EXL3 — GG v20-r11** template
+The linked public **Model Turnkey: GLM-5.2 EXL3** template
 preconfigures the image, `args` launch mode, ports, 450 GB disk and Blackwell
 host filters.
 Before accepting an offer, verify it is exactly 4x RTX PRO 6000 Blackwell,
@@ -1202,28 +1219,25 @@ config matrix (6 runs, 5 hosts, 4 driver families):
   util 0.93. The v29 default instead uses calibrated NVFP4 KV and auto-sizing.
 
 Base runtime image:
-`voipmonitor/vllm@sha256:eb4ece3757c03e10764f0900a1366ba4ef63c33560052c976d9ae08457482ff2`
-(pinned GG v20-r11). Its labels record vLLM base `4247d676`, composed vLLM
-tree `9502cc7` (including
-[PR #190](https://github.com/local-inference-lab/vllm/pull/190),
-[PR #189](https://github.com/local-inference-lab/vllm/pull/189), and the r11
-LMCache/transfer integration), composed SparkInfer tree `de7739a` (including
-[PR #49](https://github.com/local-inference-lab/sparkinfer/pull/49),
-[PR #86](https://github.com/local-inference-lab/sparkinfer/pull/86), and
-[PR #87](https://github.com/local-inference-lab/sparkinfer/pull/87)), and
+`voipmonitor/vllm@sha256:02796036c96a52fda0919aa260c45c70bc97d8e662a6ae5e614b5f987c20851b`
+(pinned GG v20-r13). Its labels record vLLM base `f978d009`, composed vLLM
+tree `69ba80b9` (including the calibrated NVFP4 path, query-split prefill,
+repeatable activation profiling, and
+[PR #190](https://github.com/local-inference-lab/vllm/pull/190)),
+composed SparkInfer tree `a2ea6083` (including the exact fixed-capacity
+Trellis arena from
+[PR #92](https://github.com/local-inference-lab/sparkinfer/pull/92)), and
 FlashInfer `801d57a`. It composes LMCache `0.5.2+glm52dcp.4` from integration
-tree `175e592` and XGrammar `0.2.5` at `2ea71da4…`. The image-owned EXL3
+tree `a5aa59cc` and XGrammar `0.2.5` at `2ea71da4…`. The image-owned EXL3
 parity and mixed-K patches add another explicit cache/requalification
 boundary. It also includes native vLLM support for
 `Qwen3_5ForConditionalGeneration`, ModelOpt/NVFP4, Qwen parsers, and MTP
 speculative decoding.
 
-Upstream moved again after this immutable image was cut. The open
-[vLLM EXL3 PR #190](https://github.com/local-inference-lab/vllm/pull/190)
-now targets SparkInfer's unified fused-W4A16 interface from
-[SparkInfer PR #90](https://github.com/local-inference-lab/sparkinfer/pull/90),
-instead of r11's separate Trellis surface. That is a future image and full
-requalification boundary, not a patch to apply to a running r11 appliance.
+The r13 image pins exact open-PR heads rather than following their moving
+branches. Its post-release documentation correction changed only the stock-r11
+comparison: matched MTP0 decode is `44.66` tok/s on stock r11 versus `48.61`
+on r13 (`+8.85%`); the registry image and source locks did not change.
 For filesystem cache users,
 [LMCache PR #4211](https://github.com/LMCache/LMCache/pull/4211) documents a
 silent mixed-object-size L2 store failure in its native multiprocess adapter.
@@ -1282,8 +1296,8 @@ writable LMCache mount. On an owned host, create a dedicated local NVMe
 directory and bind it at the appliance's secure-erase-aware path:
 
 ```bash
-mkdir -p /mnt/fast/lmcache/glm52-3.25-r11
-export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-3.25-r11
+mkdir -p /mnt/fast/lmcache/glm52-3.25-r13
+export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-3.25-r13
 export PREFIX_CACHE_BACKEND=lmcache
 export PREFIX_CACHE_DISK_GB=512
 bash scripts/run-local-podman.sh
@@ -1320,7 +1334,7 @@ qualification. The tier does not preallocate its limit.
 | `KV_CACHE_MEMORY_BYTES` | 0 | positive per-GPU byte count fixes KV memory and supersedes GMU for KV sizing; use the profiler's printed value when eager/speculative workspace must not be consumed by auto-KV, and do not combine it with `GPU_BLOCKS_OVERRIDE` |
 | `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host DRAM used as an aggregate L2 prefix cache (not active-context capacity); `0.5` is the measured agentic-workload setting on a 256 GiB host and native vLLM derives the TP worker slices |
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
-| `PREFIX_CACHE_BACKEND` | `lmcache` GLM / `native` other profiles | `lmcache` is the r11-qualified supervised DCP-aware process; `native` keeps the in-process OffloadingConnector rollback control. Both use `OFFLOAD_FRACTION` for aggregate DRAM and neither enlarges active context. |
+| `PREFIX_CACHE_BACKEND` | `lmcache` GLM / `native` other profiles | `lmcache` is the r13-qualified supervised DCP-aware process; `native` keeps the in-process OffloadingConnector rollback control. Both use `OFFLOAD_FRACTION` for aggregate DRAM and neither enlarges active context. |
 | `LMCACHE_L1_INIT_GB` | min(20, configured L1) | initial LMCache DRAM arena; the remaining configured tier grows lazily. Raise only if first-hit allocation latency matters more than model page-in and host-memory headroom. |
 | `PREFIX_CACHE_DISK_GB` | `0` | positive values enable LMCache's native filesystem L2 with this hard GiB limit under `<MODEL_ROOT>/.lmcache`; derived prompt KV may be sensitive, so prefer encrypted local NVMe and enable best-effort secure termination |
 | `MTP78_MODE` | `off` (native) | the current Brandon revision contains a native rank-sliced TR3 draft; `graft` and `override` remain experimental compatibility paths. MadeBy561's native draft uses serialized NVFP4 experts. Prefer the `MTP_DRAFT` knob on the config page. |
