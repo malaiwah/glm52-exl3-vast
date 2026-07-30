@@ -1674,40 +1674,54 @@ fi
 # backbone and the eagle head from scratch — ~100 s of every boot, for ~1.6 GB of
 # artifacts. VLLM_DISABLE_COMPILE_CACHE is NOT set here (that guard belongs to the
 # gilded-gnosis fork's cache bug); verify decode tok/s after enabling this.
+#
+# Do not share compiled objects across GG source stacks. The base image changes
+# LOCAL_INFERENCE_CACHE_FINGERPRINT whenever its composed vLLM/SparkInfer
+# sources change (r9 -> r11 is one such boundary). Keeping the fingerprint in
+# the persistent path gives warm restarts for the same immutable stack without
+# exposing a new stack to stale kernels that can cause corruption or abnormally
+# low throughput.
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}"
+case "$CACHE_NAMESPACE" in
+  *[!A-Za-z0-9_.-]*|"")
+    echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2
+    exit 2
+    ;;
+esac
 unset VLLM_CACHE_DIR
 case "${VLLM_CACHE_ROOT:-}" in
   ""|/cache/jit*)
     if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
-      export VLLM_CACHE_ROOT="/cache/vllm"
+      export VLLM_CACHE_ROOT="/cache/$CACHE_NAMESPACE/vllm"
     else
-      export VLLM_CACHE_ROOT="$MODEL_DIR/.vllm-cache"
+      export VLLM_CACHE_ROOT="$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm"
     fi
     ;;
 esac
 case "${TRITON_CACHE_DIR:-}" in
   ""|/cache/jit*)
     if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
-      export TRITON_CACHE_DIR="/cache/triton"
+      export TRITON_CACHE_DIR="/cache/$CACHE_NAMESPACE/triton"
     else
-      export TRITON_CACHE_DIR="$MODEL_DIR/.vllm-cache/triton"
+      export TRITON_CACHE_DIR="$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/triton"
     fi
     ;;
 esac
 case "${TORCH_EXTENSIONS_DIR:-}" in
   ""|/cache/jit*)
     if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
-      export TORCH_EXTENSIONS_DIR="/cache/torch_extensions"
+      export TORCH_EXTENSIONS_DIR="/cache/$CACHE_NAMESPACE/torch_extensions"
     else
-      export TORCH_EXTENSIONS_DIR="$MODEL_DIR/.vllm-cache/torch_extensions"
+      export TORCH_EXTENSIONS_DIR="$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/torch_extensions"
     fi
     ;;
 esac
 case "${TORCHINDUCTOR_CACHE_DIR:-}" in
   ""|/cache/jit*)
     if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
-      export TORCHINDUCTOR_CACHE_DIR="/cache/torchinductor"
+      export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"
     else
-      export TORCHINDUCTOR_CACHE_DIR="$MODEL_DIR/.vllm-cache/torchinductor"
+      export TORCHINDUCTOR_CACHE_DIR="$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/torchinductor"
     fi
     ;;
 esac

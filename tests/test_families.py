@@ -234,10 +234,17 @@ def test_glm_release_integration():
           "FATAL: Vision marker is present" in entry
           and "FATAL: read-only vision derivative cannot register" in entry)
     check("immutable targets default all compile caches away from the checkpoint",
-          'export VLLM_CACHE_ROOT="/cache/vllm"' in entry
-          and 'export TRITON_CACHE_DIR="/cache/triton"' in entry
-          and 'export TORCH_EXTENSIONS_DIR="/cache/torch_extensions"' in entry
-          and 'export TORCHINDUCTOR_CACHE_DIR="/cache/torchinductor"' in entry)
+          'export VLLM_CACHE_ROOT="/cache/$CACHE_NAMESPACE/vllm"' in entry
+          and 'export TRITON_CACHE_DIR="/cache/$CACHE_NAMESPACE/triton"' in entry
+          and 'export TORCH_EXTENSIONS_DIR="/cache/$CACHE_NAMESPACE/torch_extensions"'
+          in entry
+          and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
+          in entry)
+    check("persistent compile caches are isolated at each runtime fingerprint",
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}"'
+          in entry
+          and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
+          and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
     check("auto profile sentinels do not leak into the calibration helper",
           "env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" in entry
           and "-u PCIE_DMA_MIN_BYTES" in entry)
