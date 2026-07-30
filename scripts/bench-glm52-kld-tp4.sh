@@ -13,12 +13,14 @@ KLD_RUNNER="${KLD_RUNNER:-/mnt/fast/build/rtx6kpro-kld-master/models/glm5.2/gguf
 KLD_PYDEPS="${KLD_PYDEPS:-/mnt/fast/build/kld-pydeps}"
 KLD_OUTPUT_ROOT="${KLD_OUTPUT_ROOT:-/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260729-r9-kld}"
 HF_DATASET_CACHE="${HF_DATASET_CACHE:-/mnt/fast/build/kld-hf-cache}"
-CACHE_ROOT="${CACHE_ROOT:-/mnt/fast/build/kld-cache-r9}"
 EXL3_PY_PATCH="${EXL3_PY_PATCH:-}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-512}"
 EXL3_PREFILL_CHUNK="${EXL3_PREFILL_CHUNK:-128}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-podman}"
+KLD_CACHE_KEY="$(printf '%s\n%s\n' "$IMAGE" "$MODEL_ROOT" |
+  sha256sum | cut -c1-16)"
+CACHE_ROOT="${CACHE_ROOT:-/mnt/fast/build/kld-cache-$KLD_CACHE_KEY}"
 
 case "$CONTAINER_RUNTIME" in
   podman)
@@ -91,6 +93,7 @@ printf '%s\n' \
   "gpu_memory_utilization=$GPU_MEMORY_UTILIZATION" \
   "max_num_batched_tokens=$MAX_NUM_BATCHED_TOKENS" \
   "exl3_prefill_chunk=$EXL3_PREFILL_CHUNK" \
+  "cache_key=$KLD_CACHE_KEY" \
   "container_runtime=$CONTAINER_RUNTIME" \
   >"$OUTPUT_DIR/config.env"
 
