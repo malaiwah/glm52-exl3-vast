@@ -169,7 +169,14 @@ do
 done
 unset config_name
 
-podman rm -f "$NAME" >/dev/null 2>&1 || true
+# LMCache and vLLM both need time to drain background stores and release CUDA
+# workers. Podman's default force-removal grace is only ten seconds, which is
+# too short for a four-GPU GLM process and can leave extension locks or partial
+# L2 records behind. Stop an existing appliance cleanly before replacing it.
+if podman container exists "$NAME"; then
+  podman stop -t "${STOP_TIMEOUT:-120}" "$NAME" >/dev/null 2>&1 || true
+  podman rm -f "$NAME" >/dev/null 2>&1 || true
+fi
 podman run -d --replace --restart="$restart_policy" \
   --name "$NAME" \
   --health-cmd "curl -sf http://localhost:${PORT}/health || exit 1" \

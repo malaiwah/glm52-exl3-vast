@@ -243,10 +243,13 @@ def test_glm_release_integration():
           and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
           in entry)
     check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}"'
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3abi1"'
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
+    check("the r11 EXL3 parity ABI repair is immutable and cache-versioned",
+          "patch_exl3_parity_abi.py" in dockerfile
+          and "-turnkey-exl3abi1" in entry)
     check("the local Podman runner does not bypass cache fingerprinting",
           "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
           and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
@@ -279,6 +282,10 @@ def test_glm_release_integration():
           'LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"' in local_runner
           and '$LMCACHE_DISK_HOST:/workspace/.lmcache:rw' in local_runner
           and "LMCACHE_DISK_HOST must be an absolute path" in local_runner)
+    check("the local runner gives vLLM and LMCache a graceful replacement",
+          'podman container exists "$NAME"' in local_runner
+          and 'podman stop -t "${STOP_TIMEOUT:-120}" "$NAME"' in local_runner
+          and 'podman rm -f "$NAME"' in local_runner)
     check("the local runner can compose a read-only vision derivative",
           'VISION_ASSET_HOST="${VISION_ASSET_HOST:-}"' in local_runner
           and '$MODEL_DIR_CONTAINER/.vision:ro' in local_runner
