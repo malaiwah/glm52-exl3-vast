@@ -29,6 +29,10 @@ GPU_DEVICES="${GPU_DEVICES:-0,1,2,3}"
 CACHE_VOLUME="${CACHE_VOLUME:-glm52-turnkey-cache}"
 STATE_VOLUME="${STATE_VOLUME:-glm52-turnkey-state}"
 LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"
+restart_policy="${RESTART_POLICY:-unless-stopped}"
+if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  restart_policy=no
+fi
 
 [ -d "$MODEL_DIR_HOST" ] || {
   echo "FATAL: checkpoint directory does not exist: $MODEL_DIR_HOST" >&2
@@ -166,7 +170,7 @@ done
 unset config_name
 
 podman rm -f "$NAME" >/dev/null 2>&1 || true
-podman run -d --replace --restart="${RESTART_POLICY:-unless-stopped}" \
+podman run -d --replace --restart="$restart_policy" \
   --name "$NAME" \
   --health-cmd "curl -sf http://localhost:${PORT}/health || exit 1" \
   --health-interval 30s --health-timeout 10s --health-retries 3 \

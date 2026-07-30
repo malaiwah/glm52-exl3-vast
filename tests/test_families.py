@@ -269,7 +269,9 @@ def test_glm_release_integration():
           "TUNE_[A-Z0-9_]*" in local_runner
           and '"${tuning_env[@]}"' in local_runner)
     check("the local runner forwards its documented GPU-free config smoke",
-          '-e CONFIG_SMOKE="${CONFIG_SMOKE:-0}"' in local_runner)
+          '-e CONFIG_SMOKE="${CONFIG_SMOKE:-0}"' in local_runner
+          and 'restart_policy=no' in local_runner
+          and '--restart="$restart_policy"' in local_runner)
     check("the local runner mounts bounded persistent LMCache below the "
           "secure-erase-aware workspace",
           'LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"' in local_runner
