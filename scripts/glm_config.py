@@ -302,7 +302,10 @@ VARIANTS = {
             "VLLM_DCP_TOPK_OWNER_MERGE": "0",
             "VLLM_DISABLE_SHARED_EXPERTS_STREAM": "0",
             "VLLM_EXL3_PREFILL_BLOCK_M": "64",
-            "VLLM_EXL3_PREFILL_CHUNK": "1",
+            # r11 interprets this as a row count, not the old boolean-like
+            # enable flag. Its EXL3 backend default is 128; setting 1 cannot
+            # cover the target parity window and fails during memory profiling.
+            "VLLM_EXL3_PREFILL_CHUNK": "128",
             "VLLM_EXL3_TRELLIS_BLOCK_M": "8",
             "VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD": "1024",
             "VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD": "16",

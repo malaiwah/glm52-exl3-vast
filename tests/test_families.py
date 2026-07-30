@@ -128,7 +128,7 @@ def test_glm_release_defaults():
     for key, expected in (
             ("VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE", "1"),
             ("VLLM_DCP_TOPK_OWNER_MERGE", "0"),
-            ("VLLM_EXL3_PREFILL_CHUNK", "1"),
+            ("VLLM_EXL3_PREFILL_CHUNK", "128"),
             ("VLLM_EXL3_PREFILL_BLOCK_M", "64"),
             ("VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD", "16"),
             ("VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD", "1024")):
