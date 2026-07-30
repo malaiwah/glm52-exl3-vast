@@ -245,6 +245,9 @@ def test_glm_release_integration():
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
+    check("the local Podman runner does not bypass cache fingerprinting",
+          "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
+          and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
     check("auto profile sentinels do not leak into the calibration helper",
           "env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" in entry
           and "-u PCIE_DMA_MIN_BYTES" in entry)
