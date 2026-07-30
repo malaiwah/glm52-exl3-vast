@@ -78,14 +78,27 @@ Inventory captured on 2026-07-30:
   Server or Workstation cards. RunPod Community successfully created Pod
   `4r3db68ea3nwzx`: four RTX PRO 6000 Blackwell Server Edition GPUs, 503 GB
   host RAM, 56 vCPUs, a 1 TB `/workspace` volume, and a `$6.76/hour` GPU rate.
-  It initially runs the r13 turnkey only to download the byte-identical
-  checkpoint while the r14 candidate builds. Its automatic stop deadline is
-  2026-07-31 04:43 UTC. Stop, do not terminate, after qualification so the Pod
-  and volume remain available for follow-up patches without GPU billing.
-- Vast had a `$6.54/hour` CUDA 13.2/driver 595.80 candidate, but only about
-  611 GB disk. The `$4.47/hour` alternative reported driver 580.82.09 and CUDA
-  13.0, the same unsupported envelope in which the appliance previously failed
-  NCCL initialization. RunPod was selected instead.
+  The host actually supplied driver `580.82.07`; the candidate correctly
+  refused it before downloading weights because this is the same unsupported
+  driver line with prior NCCL-failure evidence. The Pod is stopped, not
+  terminated, so its workspace remains available without GPU billing.
+- Vast subsequently exposed a better `$6.57/hour` California offer with driver
+  `610.43.02`, CUDA UMD `13.3`, 600 W/card, PCIe 5, about 9.1 GB/s local disk,
+  940/930 Mb/s network and 600 GB allocated storage. Instance `46335896` is the
+  active `args`/ENTRYPOINT-mode qualification rental. A first CLI attempt,
+  `46335044`, demonstrated the documented SSH-mode trap and is stopped rather
+  than destroyed for follow-up patch work.
+- The r610 `nvidia-smi` header spells the field `CUDA UMD Version`, rather than
+  the historical `CUDA Version`. The compatibility override was needed only
+  because the candidate parser did not recognize that new spelling; direct
+  inspection confirmed PyTorch `2.12.0+cu132` on a CUDA UMD 13.3 driver. The
+  parser fix accepts both header formats and continues to fail closed when
+  neither one is present.
+- All four Vast GPUs report same-NUMA `NODE` topology and a 600 W ceiling, but
+  CUDA peer access is false for every pair. The appliance therefore disabled
+  B12X PCIe DMA and DCP A2A and selected its NCCL/shared-memory fallback before
+  model download. Treat this rental as a compatibility/quality gate, not an
+  AIBeast performance proxy.
 
 Rental topology is a qualification result, not an AIBeast performance proxy.
 Record driver, CUDA report, P2P matrix, NUMA, PCIe width, power ceiling, host

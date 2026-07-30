@@ -73,6 +73,16 @@ def main():
           "," in g.detect({}, "0, GPU-a, NVIDIA H200\n1, GPU-b, NVIDIA A100\n")["name"])
 
     print("\n=== qualified driver + CUDA pair admission ===")
+    check("legacy nvidia-smi CUDA header is parsed",
+          g.parse_cuda_version(
+              "NVIDIA-SMI 595.71.05  Driver Version: 595.71.05  "
+              "CUDA Version: 13.2") == "13.2")
+    check("r610 CUDA UMD header is parsed",
+          g.parse_cuda_version(
+              "NVIDIA-SMI 610.43.02  KMD Version: 610.43.02  "
+              "CUDA UMD Version: 13.3") == "13.3")
+    check("missing CUDA header fails closed",
+          g.parse_cuda_version("NVIDIA-SMI 610.43.02") == "")
     check("the failed Runpod r580 host is rejected",
           not g.version_meets_minimum("580.126.09", "590.48.01"))
     check("the qualified Runpod r590 driver is accepted",

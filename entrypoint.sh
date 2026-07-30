@@ -42,8 +42,11 @@ if command -v nvidia-smi >/dev/null 2>&1; then
   GPU_INVENTORY="$(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null || true)"
   printf '%s\n' "$GPU_INVENTORY" | head -4
   NVIDIA_DRIVER_VERSION="$(printf '%s\n' "$GPU_INVENTORY" | head -1 | awk -F',' '{gsub(/^[ \t]+|[ \t]+$/, "", $3); print $3}')"
-  NVIDIA_CUDA_VERSION="$(nvidia-smi 2>/dev/null |
-    sed -n 's/.*CUDA Version: \([0-9][0-9.]*\).*/\1/p' | head -1)"
+  NVIDIA_CUDA_VERSION="$(nvidia-smi 2>/dev/null | python3 -c "
+import sys
+sys.path.insert(0, '${SCRIPTS_DIR:-/opt/scripts}')
+from gpu_detect import parse_cuda_version
+print(parse_cuda_version(sys.stdin.read()))")"
 fi
 # What can this container ACTUALLY use? nvidia-smi intersected with
 # NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES — see scripts/gpu_detect.py.

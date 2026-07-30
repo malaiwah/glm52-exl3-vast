@@ -26,8 +26,24 @@ are busy serving production traffic.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
+
+
+def parse_cuda_version(output: str):
+    """Extract the CUDA userspace version from old and new nvidia-smi headers.
+
+    Driver r610 renamed ``CUDA Version`` to ``CUDA UMD Version`` and also
+    prints a separate KMD version.  Both header forms describe the maximum CUDA
+    userspace ABI exposed by the installed driver and are valid admission
+    inputs for the CUDA 13.2 image floor.
+    """
+    match = re.search(
+        r"\bCUDA(?:\s+UMD)?\s+Version:\s*([0-9]+(?:\.[0-9]+)*)",
+        output or "",
+    )
+    return match.group(1) if match else ""
 
 
 def version_tuple(value: str):

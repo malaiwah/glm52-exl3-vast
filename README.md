@@ -448,6 +448,22 @@ one RTX 5090, 100 GB of disk, and `MODEL_PROFILE=qwen36-27b-nvfp4`.
 > template or an `args` template with no start command. This applies to both
 > the GLM and Qwen profiles.
 
+For a direct CLI launch, explicitly select that mode by putting an empty
+`--args` at the very end of the command (the Vast CLI otherwise defaults to
+SSH mode):
+
+```bash
+vastai create instance <offer-id> \
+  --image ghcr.io/malaiwah/glm52-exl3-vast:latest \
+  --disk 450 --label glm52-turnkey \
+  --env '-p 22:22 -p 8000:8000 -p 8443:8443 -p 1111:1111 -e MODEL_PROFILE=glm52-exl3' \
+  --cancel-unavail --args ''
+```
+
+`--args` consumes every remaining CLI token, so nothing may follow it. Check
+`image_runtype=args` in `vastai show instance <id> --raw` before waiting for a
+large checkpoint download.
+
 ### Low-cost first run: Qwen + Oh My Pi
 
 The Qwen template is the quickest way to learn the complete appliance flow
