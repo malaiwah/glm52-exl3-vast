@@ -273,12 +273,18 @@ apply_config() {
      [ "${B12X_PCIE_DMA:-1}" = "1" ] &&
      command -v nvidia-smi >/dev/null 2>&1; then
     _p2p_matrix="$(nvidia-smi topo -p2p r 2>/dev/null || true)"
+    # nvidia-smi prints the unsupported status abbreviations again in its
+    # legend. Inspect only actual GPU matrix rows; otherwise every fully
+    # supported host is misclassified because the legend contains NS/CNS/etc.
+    _p2p_matrix_rows="$(
+      grep -E '^[[:space:]]*GPU[0-9]+[[:space:]]' <<<"$_p2p_matrix" || true
+    )"
     if grep -Eq '(^|[[:space:]])(NS|CNS|GNS|TNS)([[:space:]]|$)' \
-         <<<"$_p2p_matrix"; then
+         <<<"$_p2p_matrix_rows"; then
       export B12X_PCIE_DMA=0
       boot_note "WARNING: GPU peer access is unavailable; disabled B12X PCIe DMA and DCP A2A, using NCCL/SHM collectives."
     fi
-    unset _p2p_matrix
+    unset _p2p_matrix _p2p_matrix_rows
   fi
   python3 "$SCRIPTS_DIR/config_cli.py" show || true
   # MODEL_DIR follows the variant unless the template pinned it.

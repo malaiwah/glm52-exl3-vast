@@ -182,6 +182,8 @@ def test_glm_release_integration():
           and "COPY scripts/ /opt/scripts/" in dockerfile)
     check("VMs without CUDA peer access fall back before custom collectives",
           'nvidia-smi topo -p2p r' in entry
+          and "^[[:space:]]*GPU[0-9]+[[:space:]]" in entry
+          and '_p2p_matrix_rows' in entry
           and 'export B12X_PCIE_DMA=0' in entry
           and 'export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0'
           in entry
