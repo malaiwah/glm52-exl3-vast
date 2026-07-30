@@ -403,6 +403,29 @@ def test_madeby561_hybrid():
               "GPU_BLOCKS_OVERRIDE")))
 
 
+def test_higher_fidelity_exl3_candidate():
+    section("the higher-fidelity EXL3 3.25bpw candidate")
+    eff, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3-3.25bpw")
+    derived = gc.derive(eff)
+    check("the candidate pins willfalco's immutable checkpoint",
+          derived["MODEL_REPO"] ==
+          "willfalco/GLM-5.2-EXL3-TR3-3.25bpw"
+          and derived["MODEL_REVISION"] ==
+          "61d2b6b757f6a4ac7098a78d861f2033497532dc")
+    check("layer 78 remains the checkpoint-native rank-sliced Trellis draft",
+          eff["MTP_DRAFT"] == "native"
+          and derived["NATIVE_MTP_FORMAT"] == "exl3-tr3"
+          and derived["MTP78_MODE"] == "off")
+    control, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3")
+    for key in ("DCP", "MTP_TOKENS", "MAX_MODEL_LEN",
+                "MAX_NUM_BATCHED_TOKENS", "GPU_MEMORY_UTILIZATION",
+                "KV_CACHE_DTYPE", "KV_SCALE_MODE"):
+        check(f"the first A/B holds {key} constant",
+              eff[key] == control[key], f"{eff[key]} != {control[key]}")
+    check("the candidate remains visibly unqualified until the live gate",
+          "variant-untested" in ids(gc.validate(eff)))
+
+
 def test_qwen_preset():
     section("the Qwen preset")
     eff, src, _ = resolved("qwen36", gpus=1)
@@ -716,6 +739,7 @@ def main():
         run(test_glm_release_integration)
         run(test_glm_max_context_profile)
         run(test_madeby561_hybrid)
+        run(test_higher_fidelity_exl3_candidate)
         run(test_qwen_preset)
         run(test_custom_profile)
         run(test_inapplicable_knobs)
