@@ -20,7 +20,7 @@ jobs:
         with:
           persist-credentials: false
       - name: shellcheck boot scripts
-        run: shellcheck entrypoint.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh
+        run: shellcheck entrypoint.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh
       - name: validate Python
         run: python3 -m py_compile landing.py scripts/*.py
       # Guards the destructive path: provider detection, the terminate

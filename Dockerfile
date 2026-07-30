@@ -1,16 +1,17 @@
-# GG v20 r9 adds the paired dynamic-token NVFP4 MLA cache ABI and exact
-# adaptive sparse-indexer folding to r8's XGrammar/LMCache runtime. Dynamic KV
+# GG v20 r11 retains r9's paired dynamic-token NVFP4 MLA cache ABI and exact
+# adaptive sparse-indexer folding, and updates the validated LMCache MP stack
+# plus late-transfer cleanup and empty-tools compatibility. Dynamic KV
 # scaling is the flagship EXL3 default after repeatable KLD and two exact
 # 510,533-token five-depth retrieval gates; calibrated static remains available
 # for variants that have not independently qualified the dynamic record.
-# Pin the immutable July 28 manifest. This compute-base change deliberately
+# Pin the immutable July 29 manifest. This compute-base change deliberately
 # changes the compile-cache fingerprint and remains a requalification boundary
 # for memory planning, retrieval, degeneration and performance.
-FROM docker.io/voipmonitor/vllm@sha256:8246024490670e43af6ccdc3df9c6dd0a084119f4507b7ac35a86f5a1c6c33c3
-LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai and Runpod" \
+FROM docker.io/voipmonitor/vllm@sha256:eb4ece3757c03e10764f0900a1366ba4ef63c33560052c976d9ae08457482ff2
+LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai, Runpod, and JarvisLabs" \
       org.opencontainers.image.description="Profile-driven OpenAI endpoint: validated GLM-5.2 EXL3 production defaults plus a low-cost Qwen3.6-27B NVFP4 development profile. Weights auto-download on first boot." \
       ai.malaiwah.evidence="gists: cae272443a 7d5d7e68 f3096ae9 e8a587ad 65bb725e 929d7d8e" \
-      ai.malaiwah.base="voipmonitor/vllm@sha256:8246024490670e43af6ccdc3df9c6dd0a084119f4507b7ac35a86f5a1c6c33c3"
+      ai.malaiwah.base="voipmonitor/vllm@sha256:eb4ece3757c03e10764f0900a1366ba4ef63c33560052c976d9ae08457482ff2"
 COPY requirements-soul.lock /opt/requirements-soul.lock
 RUN echo "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2  /opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json" | sha256sum -c - \
  && pip install --no-cache-dir huggingface_hub==1.25.1 hf-xet==1.5.2 dnspython==2.8.0 && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux && rm -rf /var/lib/apt/lists/* \
@@ -36,6 +37,7 @@ COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # compatibility alias so a stale provider template cannot strand a rental
 # before the landing page is reachable.
 RUN chmod +x /usr/local/bin/model-turnkey-entry.sh /opt/scripts/soul_controller.py /opt/scripts/soul_config.py \
+      /opt/scripts/glm52_lmcache_wrapper.sh /opt/scripts/acme_retry.sh \
  && chmod -R a-w /opt/soul \
  && ln -sf model-turnkey-entry.sh /usr/local/bin/glm52-entry.sh
 EXPOSE 22 8000 8443 1111

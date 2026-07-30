@@ -308,6 +308,9 @@ def plan(paths=None, keep=()):
     _add_tree(targets, os.path.join(p.state_dir, "soul"), "soul-state",
               "SOUL journal, sessions, prompts, snapshots, incidents, logs, command "
               "evidence and runtime workspace", seen)
+    _add_tree(targets, os.path.join(p.workspace, ".lmcache"), "derived-kv-cache",
+              "LMCache filesystem L2; derived prompt KV can contain session material",
+              seen)
 
     # 4. logs — where prompts end up ---------------------------------------
     _add_tree(targets, os.path.join(p.state_dir, "logs"), "logs",

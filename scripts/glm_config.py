@@ -249,6 +249,7 @@ VARIANTS = {
         "revision": "9297b9f1d53af5c67cffa01e30cc071a1ff7144b",
         "dirname": "GLM-5.2-EXL3-TR3-3.0bpw",
         "quantization": "exl3",
+        "native_mtp_format": "exl3-tr3",
         # The pinned July 27 checkpoint serializes layer 78 as the same
         # rank-sliced EXL3/TR3 format as layers 3..77. A separate draft is no
         # longer needed; the old external arm remains selectable for A/Bs.
@@ -331,6 +332,7 @@ VARIANTS = {
         "revision": "9297b9f1d53af5c67cffa01e30cc071a1ff7144b",
         "dirname": "GLM-5.2-EXL3-TR3-3.0bpw",
         "quantization": "exl3",
+        "native_mtp_format": "exl3-tr3",
         "default_draft": "native",
         "defaults": {
             "DCP": "4",
@@ -438,6 +440,24 @@ VARIANTS = {
     },
 }
 
+# The higher-fidelity candidate deliberately inherits the exact scheduler and
+# collective control so its first live comparison changes only the weights.
+VARIANTS["exl3-tr3-3.25bpw"] = {
+    "family": "glm52",
+    "label": "EXL3-TR3 mixed 3.25bpw — higher-fidelity candidate",
+    "repo": "willfalco/GLM-5.2-EXL3-TR3-3.25bpw",
+    "revision": "61d2b6b757f6a4ac7098a78d861f2033497532dc",
+    "dirname": "GLM-5.2-EXL3-TR3-3.25bpw",
+    "quantization": "exl3",
+    "native_mtp_format": "exl3-tr3",
+    "default_draft": "native",
+    "defaults": dict(VARIANTS["exl3-tr3"]["defaults"]),
+    "runtime_env": dict(VARIANTS["exl3-tr3"]["runtime_env"]),
+    "kv_scales_calibrated": True,
+    "download_gib": 316,
+    "tested": False,
+}
+
 # MTP draft types -> the three env knobs the serve path actually consumes.
 # `tr3-graft`   in-place surgery on layer 78 of the target (the ONLY draft with
 #               long-context evidence: needle 6/6 fp8, armC 3/3 at 150/190/250K)
@@ -446,10 +466,9 @@ VARIANTS = {
 DRAFTS = {
     "off":           {"label": "off (no speculative decode)", "mtp78_mode": "off"},
     "native":        {"label": "Native in-checkpoint draft", "mtp78_mode": "off"},
-    # Kept as a backwards-compatible spelling. It is literally BF16 for the
-    # Brandon EXL3 checkpoint, but means the same native path as `native` and
-    # must not be used to describe MadeBy561's serialized NVFP4 experts.
-    "bf16":          {"label": "Native/BF16 in-checkpoint draft (legacy name)",
+    # Kept as a backwards-compatible spelling only. Current EXL3 checkpoints
+    # serialize routed layer-78 experts as Trellis, not BF16.
+    "bf16":          {"label": "Native in-checkpoint draft (legacy “bf16” spelling)",
                       "mtp78_mode": "off"},
     "tr3-graft":     {"label": "EXL3 3bpw trellis, grafted into the target", "mtp78_mode": "graft"},
     "tr3-override":  {"label": "EXL3 3bpw trellis, separate draft dir", "mtp78_mode": "override"},
@@ -602,21 +621,21 @@ KNOBS = [
              "Other variants retain "
              "static-calibrated until independently qualified.")),
 
-    dict(key="MTP_DRAFT", families=("glm52",), type="choice", default="tr3-graft", choices=list(DRAFTS),
+    dict(key="MTP_DRAFT", families=("glm52",), type="choice", default="native", choices=list(DRAFTS),
          group="Speculative decoding", scope="checkpoint", label="MTP draft type",
          aliases=[],
          rationale=(
-             "Which draft model proposes the speculative tokens. On the Brandon EXL3 "
-             "target, native BF16, both EXL3 forms, and Luke NVFP4 accepted "
-             "near-identically (MAL ~3.52, ~84%); that result is target-specific. "
-             "'tr3-graft' (default) swaps Brandon's layer 78 for a 3.0bpw EXL3 "
-             "trellis version in place: 19.3 GB -> 3.7 GB, ~3.8 GB/GPU straight into "
-             "KV, and it has the longest appliance evidence. "
+             "Which draft model proposes the speculative tokens. The pinned Brandon "
+             "checkpoint now stores layer-78 routed experts natively as EXL3/TR3; "
+             "attention, shared experts, eh_proj and norms remain BF16. Native is "
+             "therefore the no-mutation default. Earlier Brandon revisions carried "
+             "a 19.3 GB BF16 layer 78; the graft modes were built for those revisions "
+             "and remain available only for controlled compatibility experiments. "
              "'tr3-override' keeps the target byte-identical and measured slightly "
-             "better on acceptance; v29 supports its separately rank-sliced draft "
-             "graphs. 'native' keeps the checkpoint's own representation: BF16 on "
-             "Brandon, but already serialized NVFP4 experts plus an MXFP8 dense "
-             "overlay on MadeBy561. 'nvfp4' is a separate Luke draft dir that avoids "
+             "better on acceptance on the older checkpoint; v29 supports its "
+             "separately rank-sliced draft graphs. MadeBy561's native path instead "
+             "uses serialized NVFP4 experts plus an MXFP8 dense overlay. 'nvfp4' is "
+             "a separate Luke draft dir that avoids "
              "the rank-sliced path (and must declare its own quantization); it "
              "regressed the measured MadeBy561 native path and is not interchangeable "
              "with it. 'bf16' remains only as a legacy spelling for native. 'off' "
@@ -626,8 +645,8 @@ KNOBS = [
          group="Speculative decoding", scope="engine", label="Speculation depth",
          rationale=(
              "How many tokens the draft proposes per step. 3 is the shipped default. "
-             "The optimum moves with the draft's cost: with Brandon's 19.3 GB BF16 "
-             "native draft, "
+             "The optimum moves with the draft's cost: with the older Brandon "
+             "revision's 19.3 GB BF16 draft, "
              "MTP-5 lost ~22%; with the 3.7 GB trellis draft it WINS (GSM8K n=30: "
              "MTP-2 42.9, MTP-3 51.5, MTP-5 53.4 tok/s). Raising it also raises the "
              "decode query width m = MAX_NUM_SEQS x (1 + MTP_TOKENS), which has to "
@@ -890,6 +909,31 @@ KNOBS = [
              "an evicted 133,504-token prefix in 0.69s instead of 52.47s recomputation "
              "and retained about 51 GiB available on a 251 GiB host. Larger fractions "
              "need equivalent host-headroom validation.")),
+
+    dict(key="PREFIX_CACHE_BACKEND", type="choice", default="native",
+         choices=["native", "lmcache"], group="Memory", scope="engine",
+         label="External prefix-cache backend",
+         rationale=(
+             "native uses vLLM's in-process OffloadingConnector, the established "
+             "turnkey control. lmcache uses GG v20-r11's DCP-aware LMCache MP "
+             "connector. Both treat OFFLOAD_FRACTION as aggregate host-DRAM L1 "
+             "capacity and neither enlarges active GPU KV. LMCache adds independent "
+             "health/metrics, durable L2 support, prefetch and restart-safe cache "
+             "management, but also adds a supervised process and a connector "
+             "boundary. Keep native until the exact model/runtime shape passes the "
+             "evict-and-reload gate; promote LMCache only from measured evidence.")),
+
+    dict(key="PREFIX_CACHE_DISK_GB", type="int", default=0, min=0, max=8192,
+         group="Memory", scope="engine", label="LMCache NVMe limit (GiB)",
+         rationale=(
+             "0 keeps the external prefix tier in DRAM only. A positive value enables "
+             "LMCache's native filesystem L2 with this hard capacity limit under the "
+             "persistent model root. NVMe is slower than DRAM but can retain many "
+             "large agentic prefixes without recomputing them. It stores derived "
+             "prompt KV and therefore can contain sensitive session material: use "
+             "local encrypted storage where possible, enable secure termination, and "
+             "treat erase as best effort because SSD wear levelling and provider "
+             "snapshots are outside the appliance's control.")),
 
     dict(key="VISION", families=("glm52",), type="bool", default=False, group="Multimodal", scope="checkpoint",
          label="Vision (image input) — EXPERIMENTAL on EXL3",
@@ -1516,6 +1560,7 @@ def derive(cfg: dict) -> dict:
         out["MODEL_REVISION"] = variant.get("revision", "")
         out["MODEL_DIRNAME"] = variant["dirname"]
         out["QUANTIZATION"] = variant["quantization"]
+        out["NATIVE_MTP_FORMAT"] = variant.get("native_mtp_format", "")
     out["FAMILY_ENV_BLOCK"] = fam.get("env_block", "generic")
     out["SPEC_METHOD"] = fam.get("spec_method", "mtp")
     out["FAMILY_SERVE_ARGS"] = family_serve_args(cfg)
@@ -1723,6 +1768,24 @@ def validate(cfg: dict, context=None):
              "download during the restart.")
 
     # 7. memory / pool sanity ------------------------------------------------
+    if cfg["PREFIX_CACHE_DISK_GB"] and cfg["PREFIX_CACHE_BACKEND"] != "lmcache":
+        err("disk-cache-needs-lmcache",
+            ["PREFIX_CACHE_DISK_GB", "PREFIX_CACHE_BACKEND"],
+            "The native OffloadingConnector has no filesystem tier. Select "
+            "PREFIX_CACHE_BACKEND=lmcache, or set PREFIX_CACHE_DISK_GB=0.")
+    if cfg["PREFIX_CACHE_DISK_GB"] and not cfg["OFFLOAD_FRACTION"]:
+        err("disk-cache-needs-l1",
+            ["PREFIX_CACHE_DISK_GB", "OFFLOAD_FRACTION"],
+            "LMCache's bounded filesystem L2 is supervised by its DRAM L1 manager. "
+            "Set OFFLOAD_FRACTION above zero before enabling the disk tier.")
+    if cfg["PREFIX_CACHE_DISK_GB"]:
+        warn("disk-cache-sensitive",
+             ["PREFIX_CACHE_DISK_GB", "PREFIX_CACHE_BACKEND"],
+             f"LMCache may retain up to {cfg['PREFIX_CACHE_DISK_GB']} GiB of derived "
+             "prompt KV on persistent storage. This can contain session material. "
+             "Use encrypted local NVMe where possible and start the appliance with "
+             "TERMINATE_ENABLED=1 so its optional secure-erase flow is available. "
+             "Erasure remains best effort on SSDs and provider-managed storage.")
     fixed_kv = cfg.get("KV_CACHE_MEMORY_BYTES", 0)
     if fixed_kv and cfg["GPU_BLOCKS_OVERRIDE"]:
         err("fixed-kv-block-conflict",

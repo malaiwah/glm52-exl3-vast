@@ -369,7 +369,20 @@ def reconcile_chat_template(model_dir, vision_on, log, dry_run=False):
 
 def markers(model_dir, layer78, vision_on, log, dry_run=False):
     """Markers describe reality, they do not decide it."""
-    pairs = [(".mtp78-grafted", layer78 == "trellis", "3bpw-keep0\n"),
+    # `.mtp78-grafted` is an operation journal used only by graft_mtp78.py.
+    # A native checkpoint may also serialize layer 78 as Trellis; calling that
+    # "grafted" makes the next MTP78_MODE=off boot restore stale `.orig` files.
+    # Conversely, a BF16 layer 78 cannot still be a live graft, so an old
+    # operation journal is definitely stale and is safe to remove.
+    graft_journal = os.path.join(model_dir, ".mtp78-grafted")
+    if layer78 != "trellis" and os.path.exists(graft_journal):
+        log(">>> reconcile: stale .mtp78-grafted journal contradicts BF16 weights — removing it")
+        if not dry_run:
+            try:
+                os.remove(graft_journal)
+            except OSError:
+                pass
+    pairs = [(".mtp78-trellis", layer78 == "trellis", "native-or-grafted\n"),
              (".vision-enabled", vision_on, "glm5v\n")]
     for name, want, body in pairs:
         path = os.path.join(model_dir, name)
