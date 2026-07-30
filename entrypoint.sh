@@ -1316,13 +1316,11 @@ if [ "${MODEL_VARIANT:-exl3-tr3}" = "madeby561-hybrid" ]; then
 else
   unset VLLM_B12X_ABSORB_BMM VLLM_NF3_GRID188_DECODE
 fi
-# With MTP active, v29 classifies target and draft independently: the target
-# keeps m=4 while the draft declares MIN_CAPTURABLE_TRELLIS_M=1. A global
-# value would override both roles, so auto is represented by a genuinely
-# absent variable. Without a draft, however, vLLM's memory profiler captures a
-# target-only m=3 graph; the target's automatic minimum of 4 rejects that
-# otherwise valid MTP-off boot. Use the parity-capable minimum only in that
-# target-only mode.
+# r13 stamps target/draft ownership independently and makes m=1 capturable for
+# both roles. Keep the variable absent with MTP so the role-aware backend owns
+# the minimum. The explicit MTP-off value preserves the same m=1 contract for
+# older compatible GG bases and makes that otherwise implicit choice visible
+# in diagnostics.
 if [ "${MTP_TOKENS:-3}" = "0" ]; then
   export VLLM_EXL3_TRELLIS_MIN_M=1
 else
@@ -1687,10 +1685,10 @@ fi
 # the persistent path gives warm restarts for the same immutable stack without
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
-# Both the r11 parity repair and mixed-K EXL3 support change source consumed by
+# Both the r13 parity repair and mixed-K EXL3 support change source consumed by
 # Dynamo/Inductor. They are uniform-checkpoint-compatible, but not compatible
 # with compiled objects from the older exl3abi1 source tree.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk4"
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk5"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2

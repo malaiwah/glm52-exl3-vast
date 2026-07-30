@@ -54,7 +54,7 @@ def errs(findings):
 # --------------------------------------------------------------------------
 
 def test_glm_release_defaults():
-    section("the GLM GG v20-r11 qualification defaults")
+    section("the GLM GG v20-r13 qualification defaults")
     eff, src, _ = resolved(gpus=4)
     check("family defaults to glm52", eff["MODEL_FAMILY"] == "glm52")
     check("TP is 4 on a 4-GPU box, and it is DETECTED not assumed",
@@ -69,7 +69,7 @@ def test_glm_release_defaults():
     check("the r9-qualified dynamic scale ABI is the flagship default",
           eff["KV_SCALE_MODE"] == "dynamic-token")
     check("KV pool is auto-profiled", eff["GPU_BLOCKS_OVERRIDE"] == 0)
-    check("the r11 safetensors runtime margin uses GMU 0.957",
+    check("the qualified safetensors runtime margin uses GMU 0.957",
           eff["GPU_MEMORY_UTILIZATION"] == 0.957)
     memory_finding = next(
         f for f in gc.validate(eff) if f["id"] == "gpu-util-high")
@@ -79,7 +79,7 @@ def test_glm_release_defaults():
           memory_finding["message"])
     check("the agentic profile reserves half of host DRAM as L2 prefix cache",
           eff["OFFLOAD_FRACTION"] == 0.5)
-    check("the qualified r11 profile selects supervised LMCache",
+    check("the qualified profile selects supervised LMCache",
           eff["PREFIX_CACHE_BACKEND"] == "lmcache")
     check("vision is an opt-in feature profile", eff["VISION"] is False)
     check("the measured MTP5 profile uses probabilistic drafting",
@@ -142,7 +142,7 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r11 runtime integration matches the measured launch contract")
+    section("the GG v20-r13 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
@@ -151,8 +151,8 @@ def test_glm_release_integration():
     kld_runner = open(
         os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r11 manifest",
-          "sha256:eb4ece3757c03e10764f0900a1366ba4ef63c33560052c976d9ae08457482ff2"
+    check("the base image is the pinned GG v20-r13 manifest",
+          "sha256:02796036c96a52fda0919aa260c45c70bc97d8e662a6ae5e614b5f987c20851b"
           in dockerfile)
     check("static NVFP4 scaling selects and verifies the reviewed artifact",
           "KV_SCALE_MODE:-static-calibrated" in entry
@@ -247,18 +247,18 @@ def test_glm_release_integration():
           and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
           in entry)
     check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk4"'
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk5"'
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
-    check("the r11 EXL3 repairs are immutable and cache-versioned",
+    check("the r13 EXL3 repairs are immutable and cache-versioned",
           "patch_exl3_parity_abi.py" in dockerfile
           and "patch_exl3_mixk.py" in dockerfile
-          and "c0e6e7838cea034795d8ed79713504b52ee8ed596e5f35e28a59f53947b712a6"
+          and "44e171a8aea0009e3c786265914c6cf9d8a23ca9b474761aba990adcb7f74440"
           in dockerfile
           and dockerfile.index("patch_exl3_parity_abi.py")
           < dockerfile.rindex("patch_exl3_mixk.py")
-          and "-turnkey-exl3mixk4" in entry)
+          and "-turnkey-exl3mixk5" in entry)
     check("the local Podman runner does not bypass cache fingerprinting",
           "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
           and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
