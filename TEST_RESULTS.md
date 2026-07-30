@@ -1289,3 +1289,64 @@ The complete API suite passed on isolated port 18000 and again after
 promotion to production port 8000. Production advertises
 `max_model_len: 524288`; startup and the post-promotion suite contained no
 OOM, worker loss, stale-lock, XGrammar FSM, or engine errors.
+
+### JarvisLabs IN1 flagship qualification (2026-07-30)
+
+The current GG v20-r9 turnkey appliance was qualified on a JarvisLabs full VM
+in IN1 with four RTX PRO 6000 Blackwell Server Edition GPUs, 640 GiB host
+memory, a 500 GB root disk, NVIDIA driver 595.58.03 and reported CUDA 13.2.
+Jarvis exposed a 600 W limit per card and billed this shape at $7.56/hour,
+per minute. Every GPU pair was in the same NUMA node and reported `PHB`, but
+CUDA peer reads and writes were unavailable for every pair. The stock image
+therefore failed during B12X PCIe/DCP CUDA-IPC collective initialization.
+
+The appliance now performs the peer-access check before calibration and falls
+back to NCCL/shared-memory collectives when the advertised GPUs cannot open
+peer mappings. With that provider-neutral safety gate, the same flagship
+profile reached a verified API without changing its model, DCP2, MTP5,
+dynamic-token NVFP4 MLA KV, 524,288-token limit, or 50% DRAM-offload posture.
+The first successful boot took 6m57s after the container started, including a
+fresh DNS-01 certificate; the already-downloaded checkpoint, persisted
+certificate and AOT cache reduced the next engine start to about 3m22s.
+Cold image transfer was about seven minutes and the 309 GiB checkpoint about
+ten minutes on this host.
+
+The OpenAI-compatible feature gate passed authentication rejection,
+tokenization, thinking and non-thinking chat, streamed usage, preserved
+multi-turn reasoning, strict structured output both with and without thinking,
+automatic and required tool calls, duplicate-tool suppression, and tool-result
+continuation. The GLM EXL3 production profile intentionally has vision off, so
+this run makes no Jarvis vision claim.
+
+The canonical `llm-inference-bench` v0.4.29 protocol produced:
+
+| metric | 8K | 32K | 64K | 128K |
+|---|---:|---:|---:|---:|
+| cold prefill (tok/s) | 2,417 | 2,444 | 2,354 | 2,228 |
+
+| zero-context sustained decode | C1 | C2 | C4 | C8 |
+|---|---:|---:|---:|---:|
+| aggregate tok/s | 79.6 | 120.8 | 180.2 | 272.3 |
+
+The canonical run averaged 1,090 W across all four GPUs, peaked at 1,394 W
+against a 2,400 W combined limit, and averaged 93% GPU utilization. Its C1 and
+C8 phases averaged about 946 W and 1,137 W. A separate request/metrics harness
+measured MTP5 mean acceptance lengths of 3.17, 4.48, 3.30 and 2.40 at
+C1/C2/C4/C8 respectively; the aggregate decode rates from that shorter
+256-output-token matrix were 68.7/103.0/129.2/124.1 tok/s.
+
+The exact long-context gate created a 517,177-token prompt and recovered all
+five needles at 1%, 10%, 50%, 90% and 99% in 302.5 seconds without
+degeneration. The endpoint remained healthy. A separate 65,533-token
+prefix-cache experiment measured 27.90s cold, 0.346s as a GPU hit and 0.427s
+after GPU eviction when reloaded from host DRAM. The connector reported
+65,280 external-prefix hit tokens, 4.17 GB loaded in 0.328s, and zero
+allocation failures.
+
+The generated landing token persisted mode 0600 outside the replaced
+container. The unauthenticated page remained read-only, a bad config token
+returned 403, and the valid token unlocked chat, configuration and the
+multiply-gated termination page. deSEC registration and a trusted Let's
+Encrypt certificate worked on the VM's direct public ports. Credential-free
+raw evidence is retained under
+`test-results/jarvislabs-2026-07-30/`.

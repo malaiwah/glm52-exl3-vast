@@ -485,7 +485,7 @@ if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
   if [ "$PLATFORM" = "runpod" ]; then
     echo ">>> Runpod dashboard: https://${RUNPOD_POD_ID}-1111.proxy.runpod.net/?token=${OPEN_BUTTON_TOKEN}"
   elif [ "$PLATFORM" = "jarvislabs" ]; then
-    echo ">>> JarvisLabs dashboard: https://${DYNAMIC_HOST:-${PUBLIC_IPADDR}}:${OPEN_BUTTON_PORT:-1111}/?token=${OPEN_BUTTON_TOKEN}"
+    echo ">>> JarvisLabs dashboard token is ready; the trusted URL is printed after DNS/TLS setup."
   fi
 fi
 
@@ -1678,6 +1678,11 @@ if [ "$PLATFORM" = "runpod" ] && [ "$TLS_ENABLED" != "1" ]; then
   echo "!!! documented in README.md for long generations and large-context requests."
 elif [ "$PLATFORM" = "runpod" ]; then
   echo ">>> Runpod direct-TCP TLS endpoint: ${EP_URL}/v1"
+elif [ "$PLATFORM" = "jarvislabs" ] && [ "$TLS_ENABLED" = "1" ]; then
+  echo ">>> JarvisLabs dashboard: https://${ACME_DOMAIN}:${PUBLIC_DASHBOARD_PORT}/?token=${OPEN_BUTTON_TOKEN}"
+elif [ "$PLATFORM" = "jarvislabs" ]; then
+  echo "!!! JarvisLabs dashboard has no trusted public TLS URL."
+  echo ">>> Use an SSH tunnel, then open: http://localhost:1111/?token=${OPEN_BUTTON_TOKEN}"
 fi
 
 # Egress hygiene: no telemetry; offline mode once weights are local

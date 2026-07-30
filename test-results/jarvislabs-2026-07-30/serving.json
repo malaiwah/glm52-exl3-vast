@@ -1,0 +1,440 @@
+{
+ "schema": 1,
+ "ts": "2026-07-30T00:44:19Z",
+ "base_url": "https://model-460920.malaiwah.dedyn.io:8000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 256,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 1,
+  "prefill_tokens": [
+   8192,
+   65536,
+   131072
+  ],
+  "warmup": 1,
+  "temperature": 1.0,
+  "seed": 29,
+  "prompt_seed": "jarvis-in1"
+ },
+ "metadata": {},
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 3.4036,
+   "request_throughput_rps": 0.2938,
+   "prompt_tokens": 8198,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2408.629,
+   "output_throughput_tok_s": 0.294,
+   "mean_ttft_ms": 3403.091,
+   "p50_ttft_ms": 3403.091,
+   "p95_ttft_ms": 3403.091,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 8198,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 8198,
+     "output_tokens": 1,
+     "elapsed_s": 3.403197,
+     "ttft_ms": 3403.091,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "run"
+    }
+   ],
+   "target_prompt_tokens": 8192
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 27.854,
+   "request_throughput_rps": 0.0359,
+   "prompt_tokens": 65546,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2353.2,
+   "output_throughput_tok_s": 0.036,
+   "mean_ttft_ms": 27853.452,
+   "p50_ttft_ms": 27853.452,
+   "p95_ttft_ms": 27853.452,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 65546,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 65546,
+     "output_tokens": 1,
+     "elapsed_s": 27.853627,
+     "ttft_ms": 27853.452,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 65536
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 58.9924,
+   "request_throughput_rps": 0.017,
+   "prompt_tokens": 131091,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2222.166,
+   "output_throughput_tok_s": 0.017,
+   "mean_ttft_ms": 58991.812,
+   "p50_ttft_ms": 58991.812,
+   "p95_ttft_ms": 58991.812,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 131091,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 131091,
+     "output_tokens": 1,
+     "elapsed_s": 58.992,
+     "ttft_ms": 58991.812,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "a"
+    }
+   ],
+   "target_prompt_tokens": 131072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 3.7258,
+   "request_throughput_rps": 0.2684,
+   "prompt_tokens": 1004,
+   "output_tokens": 256,
+   "prompt_throughput_tok_s": 269.469,
+   "output_throughput_tok_s": 68.709,
+   "mean_ttft_ms": 531.043,
+   "p50_ttft_ms": 531.043,
+   "p95_ttft_ms": 531.043,
+   "mean_tpot_ms": 12.527,
+   "p50_tpot_ms": 12.527,
+   "p95_tpot_ms": 12.527,
+   "mean_itl_ms": 39.435,
+   "metric_prompt_tokens": 1004,
+   "metric_generation_tokens": 256,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 81,
+    "draft_tokens": 405,
+    "accepted_tokens": 176,
+    "mean_acceptance_length": 3.1728,
+    "draft_token_acceptance_rate": 0.4346
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 3.725391,
+     "ttft_ms": 531.043,
+     "tpot_ms": 12.527,
+     "mean_itl_ms": 39.435,
+     "output_head": "echo node valve port pipe seal grid flux chip coil wire vent tube base joint lead link path mark sign sync flow rate loa"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 2,
+   "completed": 2,
+   "failed": 0,
+   "duration_s": 4.9726,
+   "request_throughput_rps": 0.4022,
+   "prompt_tokens": 2008,
+   "output_tokens": 512,
+   "prompt_throughput_tok_s": 403.81,
+   "output_throughput_tok_s": 102.963,
+   "mean_ttft_ms": 612.898,
+   "p50_ttft_ms": 612.898,
+   "p95_ttft_ms": 799.161,
+   "mean_tpot_ms": 16.938,
+   "p50_tpot_ms": 16.938,
+   "p95_tpot_ms": 17.529,
+   "mean_itl_ms": 75.148,
+   "metric_prompt_tokens": 2008,
+   "metric_generation_tokens": 512,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 115,
+    "draft_tokens": 575,
+    "accepted_tokens": 400,
+    "mean_acceptance_length": 4.4783,
+    "draft_token_acceptance_rate": 0.6957
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 4.892654,
+     "ttft_ms": 405.938,
+     "tpot_ms": 17.595,
+     "mean_itl_ms": 78.712,
+     "output_head": "echo wave zero echo wave one echo wave two echo wave three echo wave four echo wave five echo wave six echo wave seven e"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 4.971796,
+     "ttft_ms": 819.857,
+     "tpot_ms": 16.282,
+     "mean_itl_ms": 71.584,
+     "output_head": "echo echo echo echo echo echo echo echo echo echo{\"current_beam\":{\"center_position\":{\"y\":1.6708990244109675,\"z\":1.670899"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 7.9285,
+   "request_throughput_rps": 0.5045,
+   "prompt_tokens": 4016,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 506.527,
+   "output_throughput_tok_s": 129.154,
+   "mean_ttft_ms": 1265.485,
+   "p50_ttft_ms": 1550.276,
+   "p95_ttft_ms": 1550.908,
+   "mean_tpot_ms": 20.473,
+   "p50_tpot_ms": 22.459,
+   "p95_tpot_ms": 24.702,
+   "mean_itl_ms": 68.336,
+   "metric_prompt_tokens": 4016,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 312,
+    "draft_tokens": 1560,
+    "accepted_tokens": 718,
+    "mean_acceptance_length": 3.3013,
+    "draft_token_acceptance_rate": 0.4603
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 7.927784,
+     "ttft_ms": 1550.992,
+     "tpot_ms": 25.007,
+     "mean_itl_ms": 59.043,
+     "output_head": "echo node valve port pipe tank line pump seal coil fan vent tube flow rack grid bulb wire pin chip fuse bulb lamp clip b"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 7.14572,
+     "ttft_ms": 1550.432,
+     "tpot_ms": 21.942,
+     "mean_itl_ms": 63.581,
+     "output_head": "echo next batch valid ready sent done keep flow loop back fed down work### Assistant Response Processing Update\n\nThe pre"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 6.269114,
+     "ttft_ms": 410.394,
+     "tpot_ms": 22.975,
+     "mean_itl_ms": 81.368,
+     "output_head": "echo wave zero echo wave one echo wave two echo wave three echo wave four echo wave five echo wave six echo wave seven e"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 4.601824,
+     "ttft_ms": 1550.12,
+     "tpot_ms": 11.967,
+     "mean_itl_ms": 69.353,
+     "output_head": "telemetry batch 42 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the r"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 16.5033,
+   "request_throughput_rps": 0.4848,
+   "prompt_tokens": 8032,
+   "output_tokens": 2048,
+   "prompt_throughput_tok_s": 486.691,
+   "output_throughput_tok_s": 124.096,
+   "mean_ttft_ms": 1944.412,
+   "p50_ttft_ms": 2023.795,
+   "p95_ttft_ms": 2849.284,
+   "mean_tpot_ms": 43.889,
+   "p50_tpot_ms": 42.862,
+   "p95_tpot_ms": 57.93,
+   "mean_itl_ms": 108.666,
+   "metric_prompt_tokens": 8032,
+   "metric_generation_tokens": 2048,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 854,
+    "draft_tokens": 4270,
+    "accepted_tokens": 1199,
+    "mean_acceptance_length": 2.404,
+    "draft_token_acceptance_rate": 0.2808
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 9.489341,
+     "ttft_ms": 1480.502,
+     "tpot_ms": 31.407,
+     "mean_itl_ms": 135.74,
+     "output_head": "echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo echo "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 14.719756,
+     "ttft_ms": 411.814,
+     "tpot_ms": 56.11,
+     "mean_itl_ms": 110.913,
+     "output_head": "echo node valve port data sync grid pulse latch ferry radar sigma orbit meter delta gamma bloom ember nexus quasar tidal"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 14.222035,
+     "ttft_ms": 1479.918,
+     "tpot_ms": 49.969,
+     "mean_itl_ms": 108.906,
+     "output_head": "echo fade grid halt\nidle join keep loop\nmake next open port\nquit rise sync task\nunit vest walk xray\nyaml zoom arc bind\nc"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 16.501149,
+     "ttft_ms": 1479.215,
+     "tpot_ms": 58.91,
+     "mean_itl_ms": 86.332,
+     "output_head": "echo node valve port data sync flow tick pack read file path load link ping scan test byte bit frame block queue cache m"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 13.667389,
+     "ttft_ms": 2569.043,
+     "tpot_ms": 43.523,
+     "mean_itl_ms": 103.721,
+     "output_head": "echo fade gale hike iron jade keep lime mine nose peak quay rake salt tide undo veto wolf xray yarn zincContinue with a "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 12.850167,
+     "ttft_ms": 3000.183,
+     "tpot_ms": 38.627,
+     "mean_itl_ms": 103.682,
+     "output_head": "echo node wind valid clear\nhalt seed start parse file\nquiet track stop route merge\nevent frame model shift valid\nbrief i"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 10.310209,
+     "ttft_ms": 2567.532,
+     "tpot_ms": 30.363,
+     "mean_itl_ms": 115.557,
+     "output_head": "echo echo echo echo echo echo echo echo echo echo Echo?\n...\nInput accepted. Deterministic string: echo echo echo echo ec"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1004,
+     "output_tokens": 256,
+     "elapsed_s": 13.32815,
+     "ttft_ms": 2567.089,
+     "tpot_ms": 42.2,
+     "mean_itl_ms": 104.474,
+     "output_head": "echo node valve port line seal grid pump chip vent pipe coil tube lens beam rack link path flag byte sync flow gate latc"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

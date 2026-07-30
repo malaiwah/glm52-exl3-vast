@@ -44,6 +44,11 @@ for key in HF_TOKEN DESEC_TOKEN JARVISLABS_API_KEY \
     exit 2
   fi
 done
+if [[ "${TERMINATE_ENABLED:-0}" == "1" &&
+      -z "${JARVISLABS_TERMINATE_API_KEY:-${JARVISLABS_API_KEY:-}}" ]]; then
+  echo "FATAL: TERMINATE_ENABLED=1 requires a JarvisLabs API key." >&2
+  exit 2
+fi
 
 PUBLIC_IP="${PUBLIC_IPADDR:-}"
 if [[ -z "$PUBLIC_IP" ]]; then
@@ -57,6 +62,8 @@ fi
 install -d -m 700 "$WORKSPACE" "$WORKSPACE/.secrets"
 ENV_FILE="$WORKSPACE/.secrets/appliance.env"
 umask 077
+ENV_TMP="$(mktemp "$WORKSPACE/.secrets/appliance.env.tmp.XXXXXX")"
+trap 'rm -f "$ENV_TMP"' EXIT
 {
   printf 'JARVISLABS_MACHINE_ID=%s\n' "$MACHINE_ID"
   printf 'JARVISLABS_REGION=%s\n' "$REGION"
@@ -80,13 +87,12 @@ umask 077
         "$JARVISLABS_TERMINATE_API_KEY"
     elif [[ -n "${JARVISLABS_API_KEY:-}" ]]; then
       printf 'JARVISLABS_API_KEY=%s\n' "$JARVISLABS_API_KEY"
-    else
-      echo "FATAL: TERMINATE_ENABLED=1 requires a JarvisLabs API key." >&2
-      exit 2
     fi
   fi
-} >"$ENV_FILE"
-chmod 600 "$ENV_FILE"
+} >"$ENV_TMP"
+chmod 600 "$ENV_TMP"
+mv -f "$ENV_TMP" "$ENV_FILE"
+trap - EXIT
 
 echo ">>> Pulling $IMAGE"
 sudo docker pull "$IMAGE"
@@ -107,6 +113,11 @@ sudo docker run -d \
   "$IMAGE"
 
 echo ">>> Appliance launched on JarvisLabs VM $MACHINE_ID ($REGION)"
-echo ">>> Dashboard: http://$PUBLIC_IP:1111/ (token appears in the logs)"
-echo ">>> API before TLS: http://$PUBLIC_IP:8000/v1"
 echo ">>> Follow startup: sudo docker logs -f $CONTAINER_NAME"
+if [[ -n "${DESEC_DOMAIN:-}" && -n "${DESEC_TOKEN:-}" ]]; then
+  echo ">>> The logs will print the trusted dashboard and API URLs after DNS/TLS issuance."
+else
+  echo ">>> DNS/TLS is not configured; keep credentials off public HTTP."
+  echo ">>> Secure fallback: ssh -L 8000:localhost:8000 -L 1111:localhost:1111 ubuntu@$PUBLIC_IP"
+  echo ">>> Then open http://localhost:1111/ with the persisted token from the logs."
+fi

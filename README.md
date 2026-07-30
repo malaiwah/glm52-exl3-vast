@@ -1,4 +1,4 @@
-# Model turnkey for Vast.ai and Runpod
+# Model turnkey for Vast.ai, Runpod, and JarvisLabs
 
 One image, coherent profiles for **GLM-5.2**, **Qwen3.6-27B**, and compatible
 vLLM checkpoints. It supplies an authenticated OpenAI-compatible endpoint,
@@ -162,16 +162,16 @@ needle—is not a 512K profile.
 
 #### Performance: compare like with like
 
-The July 28 provider comparison uses the same balanced
+The provider comparison uses the same balanced
 TP4/DCP2/TR3-MTP5 profile and `llm-inference-bench` v0.4.29 protocol.
 All measured systems used four RTX PRO 6000 Blackwell 96 GB cards. Results are
 aggregate output throughput; PP is a cold unique-prefix request, so prefix
 cache hits do not inflate it. AIBeast is the final GG v20-r5 compute image;
 GG r8 retained that exact compute stack. GG r9 changes the NVFP4/indexer
-sources and is therefore a new qualification boundary. The rental rows are
-the immediately preceding v31 candidate and remain the best measured rental
-estimates until the r9 matrix is complete on a provider with driver 595.45.04
-or newer. The later one-card Qwen qualification also supports the exact
+sources and is therefore a new qualification boundary. Vast and Runpod are
+the immediately preceding v31 candidate; JarvisLabs is the July 30 GG r9
+candidate with the appliance's no-P2P fallback. The later one-card Qwen
+qualification also supports the exact
 Runpod compatibility pair `590.48.01 / CUDA 13.2`; the pairwise admission
 rule below intentionally does not admit `590.48.01 / CUDA 13.1`.
 
@@ -180,6 +180,7 @@ rule below intentionally does not admit `590.48.01 / CUDA 13.1`.
 | **AIBeast (owned, GG r5)** | all `NODE`, 280 W/card | 2,853 / 2,749 / 2,658 / 2,504 | 106.7 / 145.6 / 207.9 / 284.5 | 510,535-token document, 5/5 depths |
 | **Vast Community** | all `NODE`, 600 W/card | 3,046 / 2,939 / 2,875 / 2,700 | 78.5 / 140.8 / 210.1 / 330.8 | 517,176 tokens, 5/5 depths |
 | **Runpod Secure** | two `NODE` pairs, cross-pair `SYS`, 600 W/card | 3,554 / 3,449 / 3,357 / 3,114 | 63.0 / 155.8 / 223.1 / 343.5 | 517,176 tokens, 5/5 depths |
+| **JarvisLabs IN1 VM** | all `PHB`, CUDA P2P unavailable, 600 W/card | 2,417 / 2,444 / 2,354 / 2,228 | 79.6 / 120.8 / 180.2 / 272.3 | 517,177 tokens, 5/5 depths |
 | **Runpod Community estimate** | host-dependent, commonly Vast-like | **2,500–3,500 / 2,400–3,400 / 2,300–3,300 / 2,100–3,100** | **55–95 / 125–165 / 185–230 / 280–350** | expected when the same 4x96 GB shape boots; run the gate |
 
 The Runpod Community row is deliberately a planning range, not a benchmark:
@@ -190,17 +191,18 @@ Conversely, its network and storage made cold provisioning much faster.
 
 GPU telemetry, not wall-outlet system power:
 
-| phase | AIBeast GG r5 | Vast Community v31 | Runpod Secure v31 |
-|---|---:|---:|---:|
-| complete canonical run average | 1,056 W | 1,495 W | 1,457 W |
-| zero-context C1 | 1,084 W | 1,241 W | 1,012 W |
-| zero-context C8 | 1,110 W | 1,739 W | 1,743 W |
+| phase | AIBeast GG r5 | Vast Community v31 | Runpod Secure v31 | JarvisLabs GG r9 |
+|---|---:|---:|---:|---:|
+| complete canonical run average | 1,056 W | 1,495 W | 1,457 W | 1,090 W |
+| zero-context C1 | 1,084 W | 1,241 W | 1,012 W | 946 W |
+| zero-context C8 | 1,110 W | 1,739 W | 1,743 W | 1,137 W |
 
 AIBeast remains the efficiency reference: the rental power ceiling improves
 prefill and high-concurrency aggregate throughput, but does not overcome
 communication latency at C1. The measured drivers were **595.71.05 / CUDA
-13.2** on AIBeast, **610.43.03 / CUDA 13.3 compatibility** on Vast, and
-**610.43.02 / CUDA 13.3 compatibility** on Runpod Secure. AIBeast's
+13.2** on AIBeast, **610.43.03 / CUDA 13.3 compatibility** on Vast,
+**610.43.02 / CUDA 13.3 compatibility** on Runpod Secure, and
+**595.58.03 / CUDA 13.2** on JarvisLabs. AIBeast's
 `nvidia-smi` client reported **580.95.05** while the loaded driver reported
 595.71.05.
 
@@ -327,6 +329,8 @@ idle during any one of them.
 | Vast Community, image cached but weights absent | 55 minutes | ~48-minute HF transfer at ~0.9 Gbit/s; post-download engine ~6 minutes | 60–90 minutes |
 | Runpod Secure, image and weights absent | 25m13s | image pull 8m24s, HF transfer 3m35s, load/compile/calibration | 30 minutes |
 | Runpod Community | not a single stable class | host registry/HF/storage route | 30–90 minutes; enforce a cost deadline |
+| JarvisLabs IN1 VM, image and weights absent | ~24 minutes from measured stages | ~7-minute image pull, ~10-minute HF transfer, 6m57s first successful engine/TLS start | 30 minutes |
+| JarvisLabs IN1 VM, checkpoint/AOT/cert reused | 3m22s | 60-second InstantTensor load, 4.9-second cached compile, graph capture and DRAM tier allocation | 4 minutes |
 
 On AIBeast, InstantTensor target loading is normally tens of seconds once the
 files are warm; full readiness still includes memory profiling and graph/JIT
@@ -566,6 +570,103 @@ Connect panel. To force proxy-only API access, remove `8443/tcp` and set
 `RUNPOD_DIRECT_TLS=0`. Port behavior and the 100-second limit are documented in
 [Runpod's expose-ports guide](https://docs.runpod.io/pods/configuration/expose-ports).
 
+## Launch on JarvisLabs
+
+Choose **[▶ RTX PRO 6000 Blackwell VM on JarvisLabs](https://jarvislabs.ai/dashboard/vm)**,
+then select exactly four `RTX-PRO6000` GPUs, at least 500 GB of disk, and the
+current Ubuntu VM image. JarvisLabs' managed Templates page is a fixed
+provider catalog; as of July 2026 its documentation and authenticated
+dashboard expose neither user-published Docker templates nor self-service
+referral links. The direct VM link is therefore the honest launch link—there
+is no template/referral id to append.
+
+The live inventory is visible without renting anything:
+
+```bash
+uv tool install jarvislabs
+jl setup
+jl gpus
+```
+
+JarvisLabs documents the current
+[`jarvislabs` 0.2.x CLI](https://docs.jarvislabs.ai/cli), its separate
+[VM/container template catalog](https://docs.jarvislabs.ai/templates/), the
+[Python SDK/API surface](https://docs.jarvislabs.ai/sdk), the
+[pause/destroy lifecycle](https://docs.jarvislabs.ai/getting_started), and
+[current pricing](https://jarvislabs.ai/pricing). The CLI's `jl gpus --json`
+is the source of truth for stock because availability differs between VM and
+container workloads.
+
+At qualification time, region `IN1` offered a four-card VM and a four-card
+managed container shape. Each RTX PRO 6000 Blackwell has 96 GB VRAM and cost
+`$1.89/GPU-hour` on demand, so the flagship VM was `$7.56/hour`; pricing and
+stock are live values, not promises. Use the VM shape: it provides root-capable
+Docker and a public IP, while the catalog containers do not accept this custom
+image. Jarvis bills by the minute. A pause releases GPU compute but retains
+chargeable storage; destroy the VM when finished.
+
+The qualified IN1 VM reported four same-NUMA `PHB` cards but no CUDA peer
+reads or writes between any pair. The unmodified pre-Jarvis image reached
+model warmup and then failed its SparkInfer DCP all-gather. The current
+appliance detects that capability boundary before calibration, disables B12X
+PCIe DMA/DCP A2A, and serves through the lossless NCCL/shared-memory fallback.
+That is why this shape passes the full 517K quality gate but trails all-`NODE`
+hosts in the performance table. Driver `595.58.03`, CUDA 13.2, Ubuntu 24.04,
+and the 600 W/card power ceiling are part of the measured result; a different
+Jarvis host remains a fresh topology gate.
+
+Create and connect with the current CLI:
+
+```bash
+jl create --gpu RTX-PRO6000 --vm --num-gpus 4 --storage 500 \
+  --region IN1 --name glm52-turnkey --yes
+jl list
+ssh ubuntu@<public-ip>
+```
+
+On the VM, export the numeric id and region shown by `jl list`. Add the two
+optional download/TLS credentials without putting them in a shared script or
+shell history, then run the checked-in launcher:
+
+```bash
+export JARVISLABS_MACHINE_ID=<numeric-id>
+export JARVISLABS_REGION=IN1
+export DESEC_DOMAIN=<your-zone>.dedyn.io
+read -rsp "Hugging Face token (optional): " HF_TOKEN; export HF_TOKEN; echo
+read -rsp "deSEC token (optional): " DESEC_TOKEN; export DESEC_TOKEN; echo
+
+curl -fsSL \
+  https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_vm_bootstrap.sh \
+  | bash
+```
+
+The launcher writes credentials to a mode-0600 env file, stores weights and
+compile caches under persistent `/home/turnkey`, pulls the appliance, and
+starts it with host networking, host IPC, all GPUs, and unlimited memlock.
+Follow first boot with:
+
+```bash
+sudo docker logs -f glm52-turnkey
+```
+
+JarvisLabs VMs expose their public IP directly; there is no managed HTTPS
+proxy. Configure deSEC for trusted TLS on
+`https://model-<machine-id>.<zone>:8000/v1` and the tokenized dashboard on
+`:1111`. Without DNS credentials, use an SSH tunnel rather than sending the
+bearer key over public HTTP:
+
+```bash
+ssh ubuntu@<public-ip> -L 8000:localhost:8000 -L 1111:localhost:1111
+```
+
+JarvisLabs does not inject a VM-scoped API key. Appliance self-termination is
+therefore off by default. The provider dashboard is safest; advanced users may
+set `TERMINATE_ENABLED=1` and
+`JARVISLABS_TERMINATE_API_KEY` before launching, understanding that this is an
+account-scoped credential. The landing page identifies that distinction,
+requires the exact VM id plus acknowledgement, and issues a destroy—not a
+pause—after the optional session erase.
+
 ## Why this exists
 
 The inspiration for this turnkey was the **July 2026 OpenAI / Hugging Face
@@ -650,9 +751,9 @@ Full design note: [docs/self-service-config.md](docs/self-service-config.md).
 > reports **Correctness** separately from **Engine**. If the probe did not run,
 > it says "long context UNVERIFIED"; it never claims health it did not measure.
 
-Requires `OPEN_BUTTON_TOKEN` in the template environment on Vast. Runpod
-generates and persists a token automatically when none is supplied. Without a
-token, the editor is not exposed.
+Requires `OPEN_BUTTON_TOKEN` in the template environment on Vast. Runpod and
+JarvisLabs generate and persist a token automatically when none is supplied.
+Without a token, the editor is not exposed.
 
 ## Terminate + session erase (opt-in, off by default)
 
@@ -670,7 +771,8 @@ first. Full design note, provider matrix and cited sources:
   to set either is rejected outright, and the landing page can only ever make
   them *more* restrictive — a locked instance cannot be unlocked from the UI, by
   any token, only by restarting the container with different env.
-- **vast.ai and RunPod**, auto-detected (`TERMINATE_PROVIDER` overrides). Vast
+- **vast.ai, RunPod, and JarvisLabs**, auto-detected (`TERMINATE_PROVIDER`
+  overrides). Vast
   normally injects the instance-scoped `CONTAINER_API_KEY`; an explicitly
   supplied account `VAST_API_KEY` is also supported. An
   unrecognised provider says so and points at the dashboard instead of failing
@@ -678,7 +780,10 @@ first. Full design note, provider matrix and cited sources:
   on some deployments and has been refused on another; the appliance therefore
   tries REST, GraphQL, and both current and legacy `runpodctl` delete commands.
   `RUNPOD_TERMINATE_API_KEY` supplies an account key when the scoped key lacks
-  delete permission.
+  delete permission. JarvisLabs VMs provide no instance-scoped key; opt-in
+  self-termination requires the numeric machine id, region, and a deliberately
+  supplied account key, and the confirmation page warns about that broader
+  credential.
 - **Typed confirmation**: you type the instance id, plus an explicit
   acknowledgement checkbox. No single click can destroy anything.
 - **`TERMINATE_DRY_RUN=1`** runs the whole flow and shows the request it would
@@ -1070,7 +1175,7 @@ existing endpoint:
 | `F8_DMA` | `0` family / `ring` MadeBy561 | compressed PCIe collective mode; the hybrid override passed the 521K five-depth gate |
 | `DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS` | `-1` family / `8192` MadeBy561 | `-1` keeps topology calibration; the hybrid pins its measured crossover |
 | `PCIE_DMA_MIN_BYTES` | `-1` family / `393216` MadeBy561 | `-1` keeps topology calibration; the hybrid pins its measured byte crossover |
-| `OPEN_BUTTON_TOKEN` | provider-specific | required to expose the `:1111` config editor; Vast supplies it and Runpod gets a persisted generated token when one is not set |
+| `OPEN_BUTTON_TOKEN` | provider-specific | required to expose the `:1111` config editor; Vast supplies it and Runpod/JarvisLabs get a persisted generated token when one is not set |
 | `SOUL_AUTONOMY_LEVEL` | `0` | enable the embedded diagnostic SOUL: Observe `1` (no shell), Investigate `2` (bounded read-only shell), or Verify `3` (idle-only canary and conditional long-context probe) |
 | `SOUL_AUTONOMY_MAX_LEVEL` | `3` | startup-only ceiling for landing-page overrides; invalid values fail closed to `0` |
 | `SOUL_HEARTBEAT_INTERVAL_S` / `SOUL_JOURNAL_INTERVAL_S` | `300` / `3600` | deterministic snapshot and blog-style journal cadence; changing these does not restart vLLM |
@@ -1083,8 +1188,10 @@ existing endpoint:
 | `CONFIG_SMOKE` | `0` | `1` resolves the config, prints the argv and exits without downloading or touching a GPU |
 | `TERMINATE_ENABLED` | `0` | `1` exposes the terminate control on the landing page (startup env only) |
 | `TERMINATE_LOCKED` | `0` | `1` hard-locks termination for the life of the container (startup env only) |
-| `TERMINATE_PROVIDER` | (auto) | force `vastai` or `runpod` when detection fails |
+| `TERMINATE_PROVIDER` | (auto) | force `vastai`, `runpod`, or `jarvislabs` when detection fails |
 | `RUNPOD_TERMINATE_API_KEY` | (unset) | RunPod account API key. Use when the injected pod-scoped key lacks delete permission, is missing/altered, or the target is another pod |
+| `JARVISLABS_MACHINE_ID` / `JARVISLABS_REGION` | launcher-provided | numeric VM id and `IN1`, `IN2`, or `EU1`; identify the VM and select its lifecycle backend |
+| `JARVISLABS_TERMINATE_API_KEY` | (unset) | opt-in JarvisLabs account key for appliance self-destroy; unlike Vast's injected key, it is not scoped to one VM |
 | `TERMINATE_DRY_RUN` | `0` | `1` prepares the destroy request and does not send it |
 | `TERMINATE_PROBE` | `1` | `0` skips the read-only credential pre-check |
 

@@ -1585,10 +1585,10 @@ def render(secure: bool, tok: str = "") -> bytes:
             "<div class=card><h3>Read-only status</h3>"
             "<div class=v>The appliance is reachable.</div>"
             "<div class=sub>This bare provider-proxy URL intentionally omits API "
-            "credentials and all controls. Open the complete "
-            "<code>&gt;&gt;&gt; Runpod dashboard:</code> URL from the pod logs, or "
+            "credentials and all controls. Open the complete tokenized dashboard "
+            "URL printed in the appliance logs, or "
             "append the persisted <code>OPEN_BUTTON_TOKEN</code>, to configure, "
-            "chat, inspect the SOUL journal, or terminate the pod.</div></div>")
+            "chat, inspect the SOUL journal, or terminate the instance.</div></div>")
     if not dep.get("tested", True):
         parts.append("<div class=card style='border-color:#e5484d'><h3>Residual "
                      "qualification</h3><div class=v>" + html.escape(dep["family"]) +

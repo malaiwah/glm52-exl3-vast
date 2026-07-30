@@ -564,26 +564,31 @@ only in a log nobody can read.
 
 ### Provider-specific behavior retained by the entrypoint
 
-The shared entrypoint now detects and normalizes both providers. The remaining
+The shared entrypoint now detects and normalizes all three providers. The remaining
 intentional differences are:
 
 1. **The ready-label update** (`PUT console.vast.ai/api/v0/instances/...`) is
-   Vast-specific and conditional on Vast's injected credentials. Runpod has no
-   equivalent label API.
-2. **`/workspace` as the volume root** is correct on both, but for
+   Vast-specific and conditional on Vast's injected credentials. Runpod and
+   JarvisLabs have no equivalent label API.
+2. **`/workspace` as the volume root** is correct on all three, but for
    different reasons — on RunPod it is the volume-disk mount point, and if a
    *network* volume is attached it replaces that mount, which means the 332 GB
    download lands on shared, billed-separately storage that survives the pod.
+   On the JarvisLabs VM launcher, `/workspace` is a bind mount from persistent
+   `/home/turnkey` on the VM disk.
 3. **`--ulimit memlock` / `--ipc=host`** are passed as Vast Docker options.
    RunPod's UI does not expose arbitrary Docker flags, so DRAM KV offload runs
    under the Pod's limits; the entrypoint's measured-capacity check and
-   warn-and-proceed default still apply.
+   warn-and-proceed default still apply. The JarvisLabs full-VM launcher passes
+   both flags directly to Docker.
 4. **Connectivity defaults differ.** Runpod always gets managed HTTPS URLs for
    the dashboard and fallback API. When deSEC credentials are present, the
    appliance additionally publishes direct TLS on mapped port 8443. Vast uses
-   the same deSEC pattern on its mapped API port.
+   the same deSEC pattern on its mapped API port. JarvisLabs VMs expose a public
+   IP directly and use deSEC TLS on ports 8000/1111; without DNS credentials,
+   the documented secure fallback is an SSH tunnel.
 
-The live matrix in `TEST_RESULTS.md` covers both provider paths.
+The live matrix in `TEST_RESULTS.md` covers all qualified provider paths.
 
 ---
 
@@ -599,6 +604,12 @@ from a fresh SSH session; `myself` is Unauthorized for the pod key while
 `pod(input:{podId})` is allowed; ports must be requested at creation or nothing
 is reachable; `HF_HOME` defaults onto the network volume; there is no metadata
 service.
+
+**JarvisLabs live qualification is in progress (2026-07-29).** The account
+key's read-only `users/fetch/{machine_id}` route and regional VM selection have
+been exercised. The complete appliance-issued destroy remains the final live
+gate. The credential is account-scoped, so Jarvis self-termination remains an
+explicit opt-in rather than the default.
 
 **Still untested:**
 

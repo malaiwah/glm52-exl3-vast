@@ -186,7 +186,9 @@ def test_glm_release_integration():
           '[ "$PLATFORM" = "runpod" ] || [ "$PLATFORM" = "jarvislabs" ]'
           in entry
           and "OPEN_BUTTON_TOKEN_FILE" in entry
-          and ">>> JarvisLabs dashboard:" in entry)
+          and 'https://${ACME_DOMAIN}:${PUBLIC_DASHBOARD_PORT}/?token=${OPEN_BUTTON_TOKEN}'
+          in entry
+          and "Use an SSH tunnel, then open:" in entry)
     check("the target/draft trellis minimum is role-aware",
           'if [ "${MTP_TOKENS:-3}" = "0" ]; then' in entry and
           "export VLLM_EXL3_TRELLIS_MIN_M=1" in entry and

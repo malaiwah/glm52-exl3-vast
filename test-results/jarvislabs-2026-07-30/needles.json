@@ -1,0 +1,47 @@
+{
+ "schema": 1,
+ "ts": "2026-07-30T00:58:25Z",
+ "base_url": "https://model-460920.malaiwah.dedyn.io:8000",
+ "model": "GLM-5.2",
+ "max_model_len": 524288,
+ "reserve_tokens": 4096,
+ "requested_sizes": [
+  516096
+ ],
+ "tested_sizes": [
+  516096
+ ],
+ "depths": [
+  0.01,
+  0.1,
+  0.5,
+  0.9,
+  0.99
+ ],
+ "seeds": [
+  20260730
+ ],
+ "probes": [
+  {
+   "attempted": true,
+   "seed": 20260730,
+   "target_tokens": 516096,
+   "tokens": 517177,
+   "tokens_exact": true,
+   "depths": [
+    0.01,
+    0.1,
+    0.5,
+    0.9,
+    0.99
+   ],
+   "found": 5,
+   "total": 5,
+   "degenerate": "",
+   "answer_head": "Kyoto: YVF-5165\nReykjavik: TFB-7539\nValparaiso: TUB-3822\nOuagadougou: TLU-9205\nTrondheim: QMC-9489",
+   "ok": true,
+   "duration_s": 302.457
+  }
+ ],
+ "ok": true
+}

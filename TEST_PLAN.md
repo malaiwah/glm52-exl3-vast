@@ -18,51 +18,54 @@ sequential and are deleted as soon as their evidence is copied.
   termination deadline where supported.
 - Use a 60 GB local disk on Vast and a 50 GB container disk plus 20 GB
   `/workspace` volume on Runpod for the smoke profile. Allocate at least
-  450 GB for the GLM checkpoint and evidence.
+  450 GB for the GLM checkpoint and evidence; use at least a 500 GB full VM
+  disk on JarvisLabs because the appliance image, 309 GiB checkpoint, compile
+  caches, and evidence share one filesystem.
 - Use `Qwen/Qwen3.5-0.8B` through the `custom` profile with an 8K context. Its
   small download keeps the live test short while exercising the Qwen3.5
   architecture supported by the pinned vLLM runtime.
 - Store API keys only in process environment variables. Never put credentials
   in manifests, logs, test artifacts, commits, or shell history.
-- Record every created instance/Pod ID immediately. Terminate rather than stop
-  after the final check so storage billing also ends.
+- Record every created instance/Pod/VM ID immediately. Terminate or destroy
+  rather than stop/pause after the final check so storage billing also ends.
 - For the SOUL composite test, launch with `SOUL_AUTONOMY_MAX_LEVEL=3` and
   `TERMINATE_ENABLED=1`. Exercise levels 1, 2, then 3 early; leave level 3
   selected for the remaining workload and through the start of teardown.
 
 ## Coverage matrix
 
-| area | local / build | Vast live | Runpod live |
-|---|---:|---:|---:|
-| Bash, Python, workflow, JSON, Docker build | yes | image pull | image pull |
-| GLM, Qwen 27B, and custom profile resolution | yes | custom | custom |
-| Qwen 27B architecture/quant/MTP metadata guard | yes | yes | — |
-| Provider detection and generated endpoint | — | yes | yes |
-| GPU count/name guard | fixtures | yes | yes |
-| Key-only SSH and port forwarding | config lint | yes | yes |
-| Weight download and checkpoint-specific marker | fixtures | yes | yes |
-| Persistent API key, dashboard token, compile/model cache | — | restart | restart |
-| Dashboard boot status and model-neutral snippets | render tests | yes | yes |
-| Dashboard token rejection and accepted view | handler tests | yes | yes |
-| API authentication (`401` without key, success with key) | — | yes | yes |
-| `/health`, `/v1/models`, chat, streaming, usage details | — | yes | yes |
-| Qwen reasoning and automatic tool-call parser | — | yes, full 27B | yes |
-| Qwen text-only mode | — | yes, full 27B | yes |
-| Native Qwen vision mode | — | one provider | one provider if time remains |
-| Qwen MTP speculative decoding | config | eager MTP2 passed; compiled path rejected | one provider if time remains |
-| GLM v31 InstantTensor cold boot and AOT-cache reuse | config | yes | yes |
-| GLM feature suite at production scale, including strict JSON with thinking | harness | yes | yes |
-| GLM cold prefill and sustained C1/C2/C4/C8 decode | harness | yes | yes |
-| Per-phase GPU power and power-limit telemetry | harness | yes | yes |
-| Exact ~517K five-depth needle and degeneration gate | harness | yes | yes |
-| Supervisor recovery after terminating the engine child | — | yes | yes |
-| Vast readiness label | — | yes | — |
-| Runpod HTTPS proxy and dashboard URL | — | — | yes |
-| deSEC RRset create/update/delete and authoritative propagation | — | yes | yes |
-| DNS-01 issuance, challenge cleanup, and trusted certificate | yes | yes | yes |
-| Hybrid Runpod networking (`1111/http`, `8000/http` fallback, `8443/tcp` TLS) | config | — | yes |
-| Runpod long-request SSH-tunnel route | — | — | yes |
-| Appliance-initiated typed teardown and no remaining billable resource | tests | yes | yes |
+| area | local / build | Vast live | Runpod live | JarvisLabs live |
+|---|---:|---:|---:|---:|
+| Bash, Python, workflow, JSON, Docker build | yes | image pull | image pull | image pull |
+| GLM, Qwen 27B, and custom profile resolution | yes | custom | custom | flagship |
+| Qwen 27B architecture/quant/MTP metadata guard | yes | yes | — | — |
+| Provider detection and generated endpoint | — | yes | yes | yes |
+| GPU count/name guard | fixtures | yes | yes | yes |
+| Key-only SSH and port forwarding | config lint | yes | yes | yes |
+| Weight download and checkpoint-specific marker | fixtures | yes | yes | yes |
+| Persistent API key, dashboard token, compile/model cache | — | restart | restart | restart |
+| Dashboard boot status and model-neutral snippets | render tests | yes | yes | yes |
+| Dashboard token rejection and accepted view | handler tests | yes | yes | yes |
+| API authentication (`401` without key, success with key) | — | yes | yes | yes |
+| `/health`, `/v1/models`, chat, streaming, usage details | — | yes | yes | yes |
+| Qwen reasoning and automatic tool-call parser | — | yes, full 27B | yes | — |
+| Qwen text-only mode | — | yes, full 27B | yes | — |
+| Native Qwen vision mode | — | one provider | one provider if time remains | — |
+| Qwen MTP speculative decoding | config | eager MTP2 passed; compiled path rejected | one provider if time remains | — |
+| GLM InstantTensor cold boot and AOT-cache reuse | config | yes | yes | yes |
+| GLM feature suite at production scale, including strict JSON with thinking | harness | yes | yes | yes |
+| GLM cold prefill and sustained C1/C2/C4/C8 decode | harness | yes | yes | yes |
+| Per-phase GPU power and power-limit telemetry | harness | yes | yes | yes |
+| Exact ~517K five-depth needle and degeneration gate | harness | yes | yes | yes |
+| Supervisor recovery after terminating the engine child | — | yes | yes | yes |
+| Vast readiness label | — | yes | — | — |
+| Runpod HTTPS proxy and dashboard URL | — | — | yes | — |
+| JarvisLabs direct-IP VM bootstrap and NCCL fallback | shell lint | — | — | yes |
+| deSEC RRset create/update/delete and authoritative propagation | — | yes | yes | yes |
+| DNS-01 issuance, challenge cleanup, and trusted certificate | yes | yes | yes | yes |
+| Hybrid Runpod networking (`1111/http`, `8000/http` fallback, `8443/tcp` TLS) | config | — | yes | — |
+| Direct TLS plus SSH-tunnel fallback | config | yes | yes | yes |
+| Appliance-initiated typed teardown and no remaining billable resource | tests | yes | yes | yes |
 
 ## Live launch profile
 
@@ -172,8 +175,8 @@ Execute in this order so a failure cannot contaminate later conclusions:
    repeat the winning v20 image on AIBeast before claiming absolute production
    throughput.
 9. Destroy the rental, delete its DNS record and temporary credentials, verify
-   zero Vast/Runpod resources, and retain only bounded, credential-free JSON
-   evidence.
+   zero Vast/Runpod/JarvisLabs resources, and retain only bounded,
+   credential-free JSON evidence.
 
 Release goals on an all-NODE 4x96 GB host are at least 2,500 prompt tokens/s,
 100 C1 output tokens/s, useful aggregate scaling through C8, one usable

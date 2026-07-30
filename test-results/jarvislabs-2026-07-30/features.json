@@ -1,0 +1,93 @@
+{
+ "schema": 1,
+ "ts": "2026-07-30T00:43:44Z",
+ "base_url": "https://model-460920.malaiwah.dedyn.io:8000",
+ "model": "GLM-5.2",
+ "vision_requested": false,
+ "checks": [
+  {
+   "name": "auth-rejects-bad-key",
+   "ok": true,
+   "required": true,
+   "detail": "HTTP 401; authentication configured=True"
+  },
+  {
+   "name": "tokenize",
+   "ok": true,
+   "required": true,
+   "detail": "count=3"
+  },
+  {
+   "name": "chat-no-thinking",
+   "ok": true,
+   "required": true,
+   "detail": "BANANA-OK"
+  },
+  {
+   "name": "chat-thinking-visible",
+   "ok": true,
+   "required": true,
+   "detail": "19 * 20 = 380\n19 * 3 = 57\n380 + 57 = 437\n\nThe result is 437.",
+   "reasoning_field": true
+  },
+  {
+   "name": "streaming-with-usage",
+   "ok": true,
+   "required": true,
+   "detail": "STREAM-OK",
+   "completion_tokens": 4
+  },
+  {
+   "name": "multi-turn-preserve-thinking",
+   "ok": true,
+   "required": true,
+   "detail": "You asked me to remember the code **COBALT-731**.",
+   "preserved_reasoning": true
+  },
+  {
+   "name": "structured-json",
+   "ok": true,
+   "required": true,
+   "detail": "{\"answer\": 42}"
+  },
+  {
+   "name": "structured-json-thinking",
+   "ok": true,
+   "required": true,
+   "detail": "{\"answer\": 42}",
+   "reasoning_field": true
+  },
+  {
+   "name": "tool-call",
+   "ok": true,
+   "required": true,
+   "detail": "[{\"id\": \"chatcmpl-tool-9ea7ba61e0be7f74\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"city\\\": \\\"Montreal\\\"}\"}}]"
+  },
+  {
+   "name": "tool-call-single",
+   "ok": true,
+   "required": true,
+   "detail": "calls=1, unique=1"
+  },
+  {
+   "name": "tool-choice-required",
+   "ok": true,
+   "required": false,
+   "detail": "calls=1"
+  },
+  {
+   "name": "tool-result-round-trip",
+   "ok": true,
+   "required": true,
+   "detail": "The current weather in Montreal is **17\u00b0C**. It looks like a comfortable temperature! Is there anything else you'd like to know?"
+  },
+  {
+   "name": "vision-red-image",
+   "ok": true,
+   "required": true,
+   "detail": "skipped: vision disabled",
+   "skipped": true
+  }
+ ],
+ "ok": true
+}
