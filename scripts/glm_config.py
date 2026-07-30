@@ -446,8 +446,10 @@ VARIANTS = {
 # The higher-fidelity mixed-K checkpoint needs DCP4 to fit its 315.9 GiB
 # payload, native MTP5 and one full binary-512K request on four 96 GiB cards.
 # Its exact r11 gate deliberately pins the KV pool: the auto pool can consume
-# first-request workspace, while LMCache's four CUDA transfer contexts remove
-# the remaining all-reduce margin.
+# first-request workspace.  The final offload qualification also lowers the
+# prefill chunk and the exact-fold workspace budget so LMCache's four CUDA
+# transfer contexts do not consume the last all-reduce/output-conversion
+# margin.
 VARIANTS["exl3-tr3-3.25bpw"] = {
     "family": "glm52",
     "label": "EXL3-TR3 mixed 3.25bpw — higher-fidelity 512K",
@@ -466,7 +468,7 @@ VARIANTS["exl3-tr3-3.25bpw"] = {
 VARIANTS["exl3-tr3-3.25bpw"]["defaults"].update({
     "DCP": "4",
     "MAX_MODEL_LEN": 524288,
-    "MAX_NUM_BATCHED_TOKENS": 3072,
+    "MAX_NUM_BATCHED_TOKENS": 2048,
     "MAX_NUM_SEQS": 8,
     "MTP_TOKENS": 5,
     "DCP_CKV_PREFETCH_DEPTH": "0",
@@ -476,8 +478,8 @@ VARIANTS["exl3-tr3-3.25bpw"]["defaults"].update({
     "GPU_MEMORY_UTILIZATION": 0.957,
     # 2,048 * 64 * DCP4 = exactly 524,288 logical tokens.
     "GPU_BLOCKS_OVERRIDE": 2048,
-    "OFFLOAD_FRACTION": 0,
-    "PREFIX_CACHE_BACKEND": "native",
+    "OFFLOAD_FRACTION": 0.5,
+    "PREFIX_CACHE_BACKEND": "lmcache",
     "PREFIX_CACHE_DISK_GB": 0,
     "PCIE_CALIBRATION": "off",
     "MAX_CUDAGRAPH_CAPTURE_SIZE": 48,
@@ -496,6 +498,12 @@ VARIANTS["exl3-tr3-3.25bpw"]["runtime_env"].update({
     "VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE": "0",
     "VLLM_DCP_TOPK_OWNER_MERGE": "1",
     "VLLM_DISABLE_SHARED_EXPERTS_STREAM": "1",
+    # At 3,072 tokens and the source-default 256 MiB budget, the first 128K
+    # request could OOM after a successful boot.  A 2,048-token chunk plus the
+    # exact streaming-carry path above 64 MiB passed two 128K requests and
+    # 520,001/524,012-token boundary prefills with 125 GiB LMCache DRAM and a
+    # bounded 512 GiB filesystem tier.
+    "SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB": "64",
 })
 
 # MTP draft types -> the three env knobs the serve path actually consumes.
@@ -1906,16 +1914,16 @@ def validate(cfg: dict, context=None):
             and cfg["MAX_MODEL_LEN"] >= 524288
             and cfg["GPU_BLOCKS_OVERRIDE"] >= 2048
             and cfg["MTP_TOKENS"] >= 5
-            and cfg["OFFLOAD_FRACTION"] > 0):
+            and cfg["OFFLOAD_FRACTION"] > 0
+            and cfg["MAX_NUM_BATCHED_TOKENS"] > 2048):
         err("mixed-325-offload-headroom",
             ["MODEL_VARIANT", "MAX_MODEL_LEN", "GPU_BLOCKS_OVERRIDE",
-             "MTP_TOKENS", "OFFLOAD_FRACTION"],
-            "the qualified 3.25bpw DCP4/MTP5 512K profile needs its remaining "
-            "runtime VRAM. With LMCache over 50% DRAM, short API checks passed "
-            "but the first 32K prefill OOMed when a PCIe all-reduce requested "
-            "36 MiB. Keep OFFLOAD_FRACTION=0 for this exact full-context shape, "
-            "or lower context/speculation and re-run cold prefill plus the "
-            "near-maximum retrieval gate.")
+             "MTP_TOKENS", "OFFLOAD_FRACTION", "MAX_NUM_BATCHED_TOKENS"],
+            "the qualified 3.25bpw DCP4/MTP5 512K offload profile uses a "
+            "2,048-token prefill chunk and a 64 MiB sparse-fold budget. The older "
+            "3,072-token shape OOMed its first 128K request after a successful "
+            "boot. Keep MAX_NUM_BATCHED_TOKENS<=2048 for full-context offload, "
+            "or re-run the cold 128K and near-maximum request gates.")
     logical_tokens_per_block = 64 * int(cfg.get("DCP", "1"))
     if (cfg["GPU_BLOCKS_OVERRIDE"]
             and cfg["GPU_BLOCKS_OVERRIDE"] * logical_tokens_per_block
