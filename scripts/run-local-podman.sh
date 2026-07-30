@@ -86,21 +86,21 @@ draft_mounts=()
 # stale /models/mtp78-draft value from an older image revision.
 draft_env=(-e DRAFT_MODEL=)
 if [ -n "$DRAFT_MODEL_HOST" ]; then
-  [ -f "$DRAFT_MODEL_HOST/config.json" ] &&
-    [ -f "$DRAFT_MODEL_HOST/model.safetensors.index.json" ] || {
+  if [ ! -f "$DRAFT_MODEL_HOST/config.json" ] ||
+      [ ! -f "$DRAFT_MODEL_HOST/model.safetensors.index.json" ]; then
     echo "FATAL: external draft is incomplete: $DRAFT_MODEL_HOST" >&2
     exit 4
-  }
+  fi
   draft_mounts=(-v "$DRAFT_MODEL_HOST:$DRAFT_MODEL_CONTAINER:ro")
   draft_env=(-e DRAFT_MODEL="$DRAFT_MODEL_CONTAINER")
 fi
 
 vision_mounts=()
 if [ -n "$VISION_ASSET_HOST" ] || [ -n "$VISION_MARKER_HOST" ]; then
-  [ -n "$VISION_ASSET_HOST" ] && [ -n "$VISION_MARKER_HOST" ] || {
+  if [ -z "$VISION_ASSET_HOST" ] || [ -z "$VISION_MARKER_HOST" ]; then
     echo "FATAL: set both VISION_ASSET_HOST and VISION_MARKER_HOST" >&2
     exit 4
-  }
+  fi
   [ -d "$VISION_ASSET_HOST" ] || {
     echo "FATAL: prepared vision derivative does not exist: $VISION_ASSET_HOST" >&2
     exit 4
