@@ -168,12 +168,20 @@ def test_glm_release_integration():
           'desec_acme_guard.py"' in entry
           and '--zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN"' in entry
           and 'ACME_GUARD_PID=$!' in entry
+          and '--dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-90s}"'
+          in entry
           and 'rrsets/_acme-challenge.${ACME_SUB}/TXT/' in entry
           and "dnspython==2.8.0" in dockerfile
           and "lego_v4.35.2_linux_amd64.tar.gz" in dockerfile
           and "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3"
           in dockerfile
           and "COPY scripts/ /opt/scripts/" in dockerfile)
+    check("VMs without CUDA peer access fall back before custom collectives",
+          'nvidia-smi topo -p2p r' in entry
+          and 'export B12X_PCIE_DMA=0' in entry
+          and 'export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0'
+          in entry
+          and 'using NCCL/SHM collectives' in entry)
     check("the target/draft trellis minimum is role-aware",
           'if [ "${MTP_TOKENS:-3}" = "0" ]; then' in entry and
           "export VLLM_EXL3_TRELLIS_MIN_M=1" in entry and

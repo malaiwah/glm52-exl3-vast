@@ -57,6 +57,18 @@ RunPod
     process's environment over /proc/1/environ.
   - VERIFIED on 2026-07-29: a RunPod Secure Pod carried an older runpodctl whose
     termination spelling was `remove pod`, not the current `pod delete`.
+
+JarvisLabs
+  - The current `jarvislabs` 0.2.x SDK/CLI manages instances through regional
+    HTTPS backends. `jl destroy <machine_id>` resolves the instance region and
+    POSTs `templates/vm/destroy?machine_id=<id>` for a VM.
+    https://docs.jarvislabs.ai/cli
+  - JarvisLabs VMs do not inject an instance-scoped API credential into nested
+    Docker containers. The launcher must pass JARVISLABS_MACHINE_ID and
+    JARVISLABS_REGION; self-termination additionally requires an account key in
+    JARVISLABS_TERMINATE_API_KEY (or JARVISLABS_API_KEY/JL_API_KEY).
+  - Pause stops compute billing but retains chargeable storage. Destroy removes
+    the VM and its disk. https://docs.jarvislabs.ai/getting_started
 """
 import json
 import os
@@ -72,6 +84,7 @@ import glm_config as gc  # noqa: E402
 
 VAST = "vastai"
 RUNPOD = "runpod"
+JARVISLABS = "jarvislabs"
 UNKNOWN = "unknown"
 
 DESTRUCTIVE_METHODS = ("DELETE", "POST", "PUT", "PATCH")
@@ -189,7 +202,8 @@ class Provider:
                 "This image could not identify the cloud provider it is running on, "
                 "so it cannot terminate the instance for you. Terminate it from your "
                 "provider's dashboard instead — that is the only way to stop billing. "
-                "If you know the provider, set TERMINATE_PROVIDER=vastai|runpod.")
+                "If you know the provider, set "
+                "TERMINATE_PROVIDER=vastai|runpod|jarvislabs.")
         if not self.instance_id():
             return False, f"{self.label}: the instance id is not in the environment"
         if not self.valid_instance_id():
@@ -500,11 +514,157 @@ class RunPod(Provider):
                 "detail": detail, "attempts": attempts}
 
 
+class JarvisLabs(Provider):
+    name = JARVISLABS
+    label = "JarvisLabs"
+    supported = True
+    destroys = ["the VM and its complete persistent disk (/home included)",
+                "the downloaded model weights",
+                "the persisted API key, TLS certificate and config state"]
+    survives = ["a separately attached JarvisLabs File Storage filesystem, if one "
+                "is attached; delete that filesystem separately when it is no "
+                "longer needed"]
+    billing = ("This does a DESTROY, not a pause. JarvisLabs pauses release compute "
+               "but retain persistent storage billing; destroy permanently removes "
+               "the VM disk and stops its instance storage charge.")
+    docs = "https://docs.jarvislabs.ai/getting_started"
+
+    REGION_BASE_URLS = {
+        "IN1": "https://backendc.jarvislabs.net",
+        "INDIA-CHENNAI-01": "https://backendc.jarvislabs.net",
+        "IN2": "https://backendn.jarvislabs.net",
+        "INDIA-NOIDA-01": "https://backendn.jarvislabs.net",
+        "EU1": "https://backendeu.jarvislabs.net",
+        "EUROPE-01": "https://backendeu.jarvislabs.net",
+    }
+    FETCH_BASE_URL = "https://backendn.jarvislabs.net"
+
+    def instance_id(self):
+        return (self.env.get("JARVISLABS_MACHINE_ID") or "").strip()
+
+    def valid_instance_id(self):
+        return bool(re.fullmatch(r"[0-9]+", self.instance_id()))
+
+    def api_key(self):
+        return (self.env.get("JARVISLABS_TERMINATE_API_KEY")
+                or self.env.get("JARVISLABS_API_KEY")
+                or self.env.get("JL_API_KEY") or "").strip()
+
+    def key_source(self):
+        if self.env.get("JARVISLABS_TERMINATE_API_KEY"):
+            return "JARVISLABS_TERMINATE_API_KEY (account key supplied by the user)"
+        if self.env.get("JARVISLABS_API_KEY"):
+            return "JARVISLABS_API_KEY (account key supplied by the user)"
+        if self.env.get("JL_API_KEY"):
+            return "JL_API_KEY (JarvisLabs CLI/SDK account key supplied by the user)"
+        return ""
+
+    def region(self):
+        return (self.env.get("JARVISLABS_REGION") or "").strip().upper()
+
+    def base_url(self):
+        return self.REGION_BASE_URLS.get(self.region(), "")
+
+    def ready(self):
+        ok, reason = super().ready()
+        if not ok:
+            return ok, reason
+        if not self.base_url():
+            return False, (
+                "JarvisLabs: JARVISLABS_REGION must be one of IN1, IN2, or EU1 "
+                "so the destroy request reaches the VM's regional backend")
+        return True, "ready"
+
+    def warnings(self):
+        return [
+            "JarvisLabs does not inject a VM-scoped deletion credential. "
+            "Self-termination uses the account key explicitly supplied to this "
+            "appliance; leave termination disabled and use the dashboard if you "
+            "do not want that credential on the rented host."
+        ]
+
+    def probe(self, transport):
+        if not self.api_key():
+            return "rejected", "no JarvisLabs API key is available in this VM"
+        if not self.instance_id() or not self.valid_instance_id():
+            return "rejected", "the JarvisLabs machine id is missing or invalid"
+        url = f"{self.FETCH_BASE_URL}/users/fetch/{self.instance_id()}"
+        status, text = transport(
+            "GET", url,
+            {"Authorization": "Bearer " + self.api_key(),
+             "Accept": "application/json"},
+            destructive=False)
+        text = text or ""
+        if status == 200:
+            try:
+                payload = json.loads(text)
+            except ValueError:
+                payload = None
+            instance = payload.get("instance") if isinstance(payload, dict) else None
+            if isinstance(instance, dict):
+                returned = str(instance.get("machine_id", ""))
+                if returned == self.instance_id():
+                    return "ok", (
+                        f"the API key can read this JarvisLabs VM "
+                        f"({self.instance_id()})")
+            return "rejected", (
+                "JarvisLabs accepted the credential but did not return this VM; "
+                "the machine id, account, or region may be wrong")
+        if status in (401, 403):
+            return "rejected", (
+                "JarvisLabs REFUSED this API key (HTTP %s). Terminating will "
+                "fail; supply a current account key or use the dashboard."
+                % status)
+        if status == 404:
+            return "rejected", (
+                f"JarvisLabs returned no VM for machine id {self.instance_id()}")
+        return "unknown", f"the credential check was inconclusive (HTTP {status})"
+
+    def terminate(self, transport, runner=None):
+        ok, reason = self.ready()
+        if not ok:
+            return {"ok": False, "status": None, "provider": self.name,
+                    "detail": reason, "attempts": []}
+        iid = self.instance_id()
+        url = f"{self.base_url()}/templates/vm/destroy?machine_id={iid}"
+        status, text = transport(
+            "POST", url,
+            {"Authorization": "Bearer " + self.api_key(),
+             "Accept": "application/json"},
+            destructive=True)
+        attempt = {"method": "POST", "url": redact(url), "status": status,
+                   "body": (text or "")[:400]}
+        accepted = status in (200, 204) or status == 0
+        if accepted and status != 0 and text:
+            try:
+                payload = json.loads(text)
+            except ValueError:
+                payload = None
+            if isinstance(payload, dict):
+                declared = payload.get("success")
+                if declared is False or str(declared).lower() == "false":
+                    accepted = False
+        return {
+            "ok": accepted,
+            "status": status,
+            "provider": self.name,
+            "detail": _explain(status, text, self) if accepted else (
+                "JarvisLabs did not accept the destroy request. THE VM MAY STILL "
+                "BE RUNNING AND BILLING — check the dashboard."),
+            "attempts": [attempt],
+        }
+
+
 class UnknownProvider(Provider):
     pass
 
 
-PROVIDERS = {VAST: VastAI, RUNPOD: RunPod, UNKNOWN: UnknownProvider}
+PROVIDERS = {
+    VAST: VastAI,
+    RUNPOD: RunPod,
+    JARVISLABS: JarvisLabs,
+    UNKNOWN: UnknownProvider,
+}
 
 
 def _explain(status, text, provider):
@@ -551,6 +711,8 @@ def detect(env=None):
     override = (env.get("TERMINATE_PROVIDER") or "").strip().lower()
     if override:
         return override if override in PROVIDERS else UNKNOWN
+    if env.get("JARVISLABS_MACHINE_ID"):
+        return JARVISLABS
     if env.get("RUNPOD_POD_ID"):
         return RUNPOD
     if env.get("CONTAINER_ID") and env.get("CONTAINER_API_KEY"):
@@ -571,7 +733,10 @@ def detection_evidence(env=None):
     """What the detector saw — shown on the confirmation screen so a user can
     tell a misdetection from a missing credential."""
     env = gc.effective_env(env)
-    keys = ("TERMINATE_PROVIDER", "RUNPOD_POD_ID", "RUNPOD_API_KEY",
+    keys = ("TERMINATE_PROVIDER", "JARVISLABS_MACHINE_ID",
+            "JARVISLABS_REGION", "JARVISLABS_API_KEY",
+            "JARVISLABS_TERMINATE_API_KEY", "JL_API_KEY",
+            "RUNPOD_POD_ID", "RUNPOD_API_KEY",
             "RUNPOD_TERMINATE_API_KEY", "CONTAINER_ID", "CONTAINER_API_KEY",
             "VAST_API_KEY", "PUBLIC_IPADDR", "RUNPOD_DC_ID", "RUNPOD_GPU_NAME",
             "RUNPOD_POD_HOSTNAME", "RUNPOD_VOLUME_ID")
@@ -580,7 +745,8 @@ def detection_evidence(env=None):
         v = env.get(k)
         if not v:
             continue
-        out[k] = v if not k.endswith(("API_KEY",)) else f"set ({len(v)} chars)"
+        out[k] = v if not k.endswith(("API_KEY",)) and k != "JL_API_KEY" \
+            else f"set ({len(v)} chars)"
     ports = sorted(k for k in env if k.startswith(("VAST_TCP_PORT_", "RUNPOD_TCP_PORT_")))
     if ports:
         out["port_vars"] = ", ".join(ports[:6])

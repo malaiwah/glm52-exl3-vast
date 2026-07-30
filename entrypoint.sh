@@ -70,9 +70,12 @@ except Exception: print('unknown')" 2>/dev/null || echo unknown)
 case "$GLM_PROVIDER" in
   vastai) PLATFORM=vast ;;
   runpod) PLATFORM=runpod ;;
+  jarvislabs) PLATFORM=jarvislabs ;;
   *) PLATFORM=generic ;;
 esac
-INSTANCE_ID="$(printf '%s' "${CONTAINER_ID:-${RUNPOD_POD_ID:-}}" | tr -cd '[:alnum:]-' | cut -c1-40)"
+INSTANCE_ID="$(printf '%s' \
+  "${JARVISLABS_MACHINE_ID:-${CONTAINER_ID:-${RUNPOD_POD_ID:-}}}" |
+  tr -cd '[:alnum:]-' | cut -c1-40)"
 echo ">>> GPUs visible to this container: $NGPU${GPU_NAME:+ ($GPU_NAME)}  provider: $PLATFORM"
 # GG v20 is built on CUDA 13.2 and uses PTX JIT/custom collectives. NVIDIA pairs
 # CUDA 13.2 GA with Linux driver 595.45.04, but the full Qwen profile, feature
@@ -258,6 +261,23 @@ apply_config() {
       echo "!!! config: no known-good configuration to fall back to — starting anyway."
       echo "!!! The findings above are measured failure modes; expect them."
     fi
+  fi
+  # SparkInfer's PCIe DMA and B12X DCP A2A channels exchange CUDA IPC handles.
+  # Some otherwise attractive VM offers expose all cards under one PHB but
+  # disable peer reads/writes in the hypervisor. On those hosts the overlap
+  # calibrator cannot merely choose a conservative crossover: every custom
+  # channel fails cudaIpcOpenMemHandle. Detect that hard capability boundary
+  # before calibration and retain vLLM's NCCL/SHM fallbacks.
+  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] &&
+     [ "${B12X_PCIE_DMA:-1}" = "1" ] &&
+     command -v nvidia-smi >/dev/null 2>&1; then
+    _p2p_matrix="$(nvidia-smi topo -p2p r 2>/dev/null || true)"
+    if grep -Eq '(^|[[:space:]])(NS|CNS|GNS|TNS)([[:space:]]|$)' \
+         <<<"$_p2p_matrix"; then
+      export B12X_PCIE_DMA=0
+      boot_note "WARNING: GPU peer access is unavailable; disabled B12X PCIe DMA and DCP A2A, using NCCL/SHM collectives."
+    fi
+    unset _p2p_matrix
   fi
   python3 "$SCRIPTS_DIR/config_cli.py" show || true
   # MODEL_DIR follows the variant unless the template pinned it.
@@ -1219,7 +1239,13 @@ refresh_family_runtime_env() {
 if [ "${FAMILY_ENV_BLOCK:-glm52}" = "glm52" ]; then
 export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_SPARSE_INDEXER=1
 export VLLM_USE_B12X_MOE=1 VLLM_USE_V2_MODEL_RUNNER=1
-export VLLM_ENABLE_PCIE_ALLREDUCE=1 VLLM_PCIE_ALLREDUCE_BACKEND=b12x
+if [ "${B12X_PCIE_DMA:-1}" = "1" ]; then
+  export VLLM_ENABLE_PCIE_ALLREDUCE=1 VLLM_PCIE_ALLREDUCE_BACKEND=b12x
+  export VLLM_USE_B12X_DCP_A2A=1
+else
+  export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0
+  unset VLLM_PCIE_ALLREDUCE_BACKEND
+fi
 export VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE=64KB VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
 export VLLM_CPP_AR_1STAGE_NCCL_CUTOFF=56KB VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS=0
 export VLLM_USE_AOT_COMPILE=1 VLLM_USE_MEGA_AOT_ARTIFACT=1
@@ -1229,7 +1255,7 @@ export B12X_MLA_SM120_UNIFIED=1 B12X_DENSE_SPLITK_TURBO=1
 export B12X_W4A16_TC_DECODE=1 B12X_W4A8_TINY_DECODE=1 B12X_MOE_FORCE_A16=1
 export VLLM_DISABLE_SHARED_EXPERTS_STREAM=1 VLLM_DISABLED_KERNELS=MarlinFP8ScaledMMLinearKernel
 export VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE=0 VLLM_B12X_MLA_SPEC_DECODE_MAX_Q=8
-export VLLM_USE_B12X_DCP_A2A=1 VLLM_DCP_A2A_MAX_TOKENS=16 VLLM_DCP_A2A_LARGE_BACKEND=ag_rs
+export VLLM_DCP_A2A_MAX_TOKENS=16 VLLM_DCP_A2A_LARGE_BACKEND=ag_rs
 export VLLM_DCP_GLOBAL_TOPK=1 VLLM_DCP_SHARD_DRAFT=1 VLLM_DCP_QUERY_SPLIT=1
 export VLLM_DCP_TOPK_OWNER_MERGE=1 VLLM_DCP_INDEXER_SHARDS=0
 export VLLM_B12X_MLA_CKV_GATHER=1 VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS=512
@@ -1492,6 +1518,8 @@ current_public_ip() {
   printf '%s' "${live_ip:-${PUBLIC_IPADDR:-${RUNPOD_PUBLIC_IP:-}}}"
 }
 PUBLIC_IP_CURRENT="$(current_public_ip)"
+PUBLIC_API_PORT="${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-${JARVISLABS_PUBLIC_PORT_8000:-${PORT:-8000}}}}"
+PUBLIC_DASHBOARD_PORT="${VAST_TCP_PORT_1111:-${JARVISLABS_PUBLIC_PORT_1111:-1111}}"
 
 # Runpod's HTTP proxy terminates TLS and forwards plain HTTP to the container.
 # App-level TLS is only appropriate on the separately exposed direct TCP port.
@@ -1518,7 +1546,7 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${DESEC_TOKEN:-}" ] &&
       -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json" \
       -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"${MYIP}\"]}]" >/dev/null \
       && export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN \
-      && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-<mapped-port>}}/v1" \
+      && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${PUBLIC_API_PORT}/v1" \
       || echo "!!! deSEC registration failed (HTTP error — check DESEC_TOKEN/DESEC_DOMAIN); continuing without auto-DNS"
   fi
 fi
@@ -1543,6 +1571,7 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
     # 2 attempts: transient DNS propagation failures are common on first boot.
     for _try in 1 2; do
       ACME_GUARD_PID=""
+      LEGO_PROPAGATION_ARGS=()
       if [ "$ACME_DNS_PROVIDER" = "desec" ] &&
          [ -n "${DESEC_DOMAIN:-}" ] &&
          [ -f "$SCRIPTS_DIR/desec_acme_guard.py" ]; then
@@ -1550,11 +1579,18 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
           --zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN" \
           --timeout "${DESEC_PROPAGATION_TIMEOUT:-300}" &
         ACME_GUARD_PID=$!
+        # The guard continuously repairs and verifies the authoritative RRset.
+        # lego's independent authoritative check can cache the first NXDOMAIN
+        # it sees and then wait its full timeout even after both deSEC servers
+        # agree. A bounded fixed wait lets the guard converge before ACME
+        # validation without paying that stale-negative five-minute penalty.
+        LEGO_PROPAGATION_ARGS=(
+          --dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-90s}")
       fi
       if DESEC_PROPAGATION_TIMEOUT="${DESEC_PROPAGATION_TIMEOUT:-300}" \
          lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}" \
            --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN" \
-           --path /workspace/.lego run; then
+           "${LEGO_PROPAGATION_ARGS[@]}" --path /workspace/.lego run; then
         [ -z "$ACME_GUARD_PID" ] ||
           { kill "$ACME_GUARD_PID" 2>/dev/null || true; wait "$ACME_GUARD_PID" 2>/dev/null || true; }
         break
@@ -1611,24 +1647,24 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
       esac
     fi
     if [ "$TLS_ENABLED" = "1" ]; then
-      echo ">>> TLS enabled: https://$ACME_DOMAIN:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-<mapped-port>}}/v1"
+      echo ">>> TLS enabled: https://$ACME_DOMAIN:${PUBLIC_API_PORT}/v1"
     fi
   fi
 fi
 
 # Feed the final endpoint/TLS picture to the landing page's status file
 if [ "$TLS_ENABLED" = "1" ]; then
-  EP_URL="https://${ACME_DOMAIN}:${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-8443}}"
+  EP_URL="https://${ACME_DOMAIN}:${PUBLIC_API_PORT}"
   TLS_STATE="https://${ACME_DOMAIN}"
   if [ "$PLATFORM" != "runpod" ]; then
-    HTTPS_HOSTPORT="${ACME_DOMAIN}:${VAST_TCP_PORT_1111:-1111}"
+    HTTPS_HOSTPORT="${ACME_DOMAIN}:${PUBLIC_DASHBOARD_PORT}"
   fi
   CERT_PATH="$CRT" KEY_PATH="$KEY"
 elif [ "$PLATFORM" = "runpod" ]; then
   EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
   TLS_STATE="https:// managed by Runpod proxy"
 else
-  EP_URL="http://${PUBLIC_IP_CURRENT:-localhost}:${VAST_TCP_PORT_8000:-8000}"
+  EP_URL="http://${PUBLIC_IP_CURRENT:-localhost}:${PUBLIC_API_PORT}"
 fi
 LOCAL_SCHEME="http"
 [ "$TLS_ENABLED" = "1" ] && [ "$PLATFORM" != "runpod" ] && LOCAL_SCHEME="https"

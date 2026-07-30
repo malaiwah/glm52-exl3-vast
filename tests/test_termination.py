@@ -130,6 +130,9 @@ def test_detection():
           provider.detect({"VAST_TCP_PORT_8000": "40001"}) == provider.VAST)
     check("RunPod from RUNPOD_POD_ID",
           provider.detect({"RUNPOD_POD_ID": "abc"}) == provider.RUNPOD)
+    check("JarvisLabs from JARVISLABS_MACHINE_ID",
+          provider.detect({"JARVISLABS_MACHINE_ID": "460920"})
+          == provider.JARVISLABS)
     check("bare environment is unknown", provider.detect({}) == provider.UNKNOWN)
     check("manual override wins over the environment",
           provider.detect({"TERMINATE_PROVIDER": "runpod", "CONTAINER_ID": "1",
@@ -149,6 +152,14 @@ def test_detection():
     })
     check("GraphQL punctuation is refused in a Runpod pod id",
           bad_runpod.ready()[0] is False and "invalid format" in bad_runpod.ready()[1])
+    bad_jarvis = provider.get({
+        "JARVISLABS_MACHINE_ID": "../460920",
+        "JARVISLABS_REGION": "IN1",
+        "JARVISLABS_API_KEY": "k",
+    })
+    check("a malformed JarvisLabs machine id is not actionable",
+          bad_jarvis.ready()[0] is False
+          and "invalid format" in bad_jarvis.ready()[1])
     no_calls = StubTransport([])
     bad_runpod.terminate(no_calls)
     check("an invalid provider id cannot reach the transport", no_calls.calls == [])
@@ -175,6 +186,11 @@ def test_unknown_provider_degrades():
 
 VAST_ENV = {"CONTAINER_ID": "9876543", "CONTAINER_API_KEY": "vast-key"}
 RUNPOD_ENV = {"RUNPOD_POD_ID": "pod-abc123", "RUNPOD_API_KEY": "pod-scoped-key"}
+JARVIS_ENV = {
+    "JARVISLABS_MACHINE_ID": "460920",
+    "JARVISLABS_REGION": "IN1",
+    "JARVISLABS_API_KEY": "jarvis-account-key",
+}
 
 
 def test_vast_terminate():
@@ -407,6 +423,54 @@ def test_runpod_probe_and_volume():
     check("stop-vs-terminate is explicit in the billing copy",
           "not a stop" in provider.RunPod.billing
           and "KEEPS CHARGING" in provider.RunPod.billing, provider.RunPod.billing)
+
+
+def test_jarvislabs_terminate_and_probe():
+    section("JarvisLabs terminate and probe (stubbed)")
+    p = provider.get(JARVIS_ENV)
+    check("JarvisLabs provider is ready with id, region, and account key",
+          p.ready() == (True, "ready"), str(p.ready()))
+    check("IN1 resolves to the current Chennai backend",
+          p.base_url() == "https://backendc.jarvislabs.net", p.base_url())
+
+    t = StubTransport([(
+        200,
+        '{"success":true,"instance":{"machine_id":460920,"status":"Running"}}',
+    )])
+    state, detail = p.probe(t)
+    check("read-only probe recognizes this VM",
+          state == "ok" and "460920" in detail, f"{state}: {detail}")
+    check("probe uses GET and is explicitly non-destructive",
+          t.calls[0]["method"] == "GET"
+          and t.calls[0]["url"]
+          == "https://backendn.jarvislabs.net/users/fetch/460920"
+          and t.calls[0]["destructive"] is False,
+          str(t.calls))
+
+    t = StubTransport([(200, '{"success":true}')])
+    res = p.terminate(t)
+    check("JarvisLabs reports destroy accepted", res["ok"] is True, json.dumps(res))
+    check("destroy POSTs to the VM's regional SDK endpoint",
+          t.calls[0]["method"] == "POST"
+          and t.calls[0]["url"]
+          == "https://backendc.jarvislabs.net/templates/vm/destroy?machine_id=460920",
+          str(t.calls))
+    check("destroy is armed and uses bearer auth",
+          t.calls[0]["destructive"] is True
+          and t.calls[0]["auth"] == "Bearer jarvis-account-key",
+          str(t.calls))
+
+    rejected = provider.get(dict(JARVIS_ENV, JARVISLABS_REGION="moon"))
+    check("unknown JarvisLabs region fails closed",
+          rejected.ready()[0] is False and "IN1, IN2, or EU1" in rejected.ready()[1],
+          str(rejected.ready()))
+    missing_key = provider.get({
+        "JARVISLABS_MACHINE_ID": "460920",
+        "JARVISLABS_REGION": "IN1",
+    })
+    check("JarvisLabs self-termination requires an explicitly supplied key",
+          missing_key.ready()[0] is False and "credential" in missing_key.ready()[1],
+          str(missing_key.ready()))
 
 
 def test_pid1_env(tmp):
@@ -1029,6 +1093,7 @@ def main():
         _run(test_vast_terminate)
         _run(test_runpod_terminate)
         _run(test_runpod_probe_and_volume)
+        _run(test_jarvislabs_terminate_and_probe)
         _run(test_pid1_env, tmp)
         _run(test_failure_reporting)
         _run(test_switch_defaults, tmp)

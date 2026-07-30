@@ -1438,7 +1438,8 @@ def render_terminate(tok: str, secure: bool, banner=None, banner_cls="") -> byte
             "it will not try to destroy anything. <b>Terminate from your provider's "
             "dashboard</b> — that is what actually stops the billing.</p>"
             "<p class=sub>If you know the provider, relaunch with "
-            "<code>TERMINATE_PROVIDER=vastai</code> or <code>=runpod</code>.</p>"
+            "<code>TERMINATE_PROVIDER=vastai</code>, <code>=runpod</code>, "
+            "or <code>=jarvislabs</code>.</p>"
             "<details><summary>what the detector saw</summary><pre>%s</pre></details>"
             "</div>" % html.escape(json.dumps(ev, indent=1)))
         parts.append("</div></body></html>")
@@ -1663,6 +1664,7 @@ def render(secure: bool, tok: str = "") -> bytes:
                           "open this page with the token from the pod environment "
                           "(<code>OPEN_BUTTON_TOKEN</code>) &mdash; it is shown here "
                           "once the token check passes",
+                "jarvislabs": "the VM's <code>docker logs glm52-turnkey</code> output",
             }.get(dep.get("provider"), "the container logs, or set "
                                        "<code>VLLM_API_KEY</code> yourself")
             parts.append(f"<p class=sub>The API key is printed in {where}.</p>")

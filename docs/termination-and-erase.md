@@ -144,9 +144,43 @@ logs. When `RUNPOD_VOLUME_ID` is set the confirmation page says all of this in a
 red banner, including that the volume itself must be deleted from the dashboard
 to stop its charges.
 
+### JarvisLabs — SDK contract plus live VM qualification
+
+JarvisLabs exposes its current API through the `jarvislabs` 0.2.x Python SDK
+and `jl` CLI rather than a separately documented raw REST reference. The
+appliance follows that published client contract exactly.
+
+| | |
+|---|---|
+| identifies the VM | `JARVISLABS_MACHINE_ID`, supplied by the VM launcher |
+| region | `JARVISLABS_REGION=IN1|IN2|EU1`, supplied by the launcher |
+| credential | an account key explicitly supplied as `JARVISLABS_TERMINATE_API_KEY`, `JARVISLABS_API_KEY`, or `JL_API_KEY` |
+| read-only probe | `GET https://backendn.jarvislabs.net/users/fetch/{machine_id}` |
+| destroy | `POST https://<regional-backend>/templates/vm/destroy?machine_id={machine_id}` |
+| pause vs destroy | pause releases compute but retains chargeable storage; **this control destroys** |
+
+Sources: [current CLI reference](https://docs.jarvislabs.ai/cli),
+[instance lifecycle](https://docs.jarvislabs.ai/getting_started), and the
+installed open-source `jarvislabs` 0.2.x SDK (`Instances.destroy`,
+`_lifecycle_endpoint`, and `REGION_URLS`).
+
+JarvisLabs VMs do not inject a VM-scoped API key into a Docker container. This
+is an important security difference from Vast and RunPod: self-termination
+requires placing an account credential on the rented VM. The public launch
+instructions therefore leave `TERMINATE_ENABLED=0` and recommend the provider
+dashboard. Users who deliberately opt in pass the three variables above; the
+landing page warns that the credential is account-scoped before offering the
+multiply-gated destroy flow.
+
+The region is mandatory and fails closed because JarvisLabs uses distinct
+Chennai (`backendc`), Noida (`backendn`), and Europe (`backendeu`) lifecycle
+backends. The read-only probe verifies that the account key can see the exact
+machine id before the destructive request is armed.
+
 ### Unknown provider
 
-Detection order: `TERMINATE_PROVIDER` override → `RUNPOD_POD_ID` →
+Detection order: `TERMINATE_PROVIDER` override → `JARVISLABS_MACHINE_ID` →
+`RUNPOD_POD_ID` →
 `CONTAINER_ID`+`CONTAINER_API_KEY` → any `VAST_TCP_PORT_*` → unknown. An
 unrecognised environment does not fail obscurely: `/terminate` renders a page
 that says *termination is not supported here, terminate from your provider's

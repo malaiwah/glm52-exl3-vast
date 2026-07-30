@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This repository builds a Docker appliance for serving GLM-5.2, Qwen3.6-27B, and compatible custom checkpoints through vLLM on Vast.ai or Runpod. It provides an authenticated OpenAI-compatible API, persistent model/cache storage, a management dashboard, optional TLS and SSH, automatic verification/rollback, provider-aware termination, and an opt-in Nanobot-based diagnostic controller (SOUL).
+This repository builds a Docker appliance for serving GLM-5.2, Qwen3.6-27B, and compatible custom checkpoints through vLLM on Vast.ai, Runpod, or JarvisLabs. It provides an authenticated OpenAI-compatible API, persistent model/cache storage, a management dashboard, optional TLS and SSH, automatic verification/rollback, provider-aware termination, and an opt-in Nanobot-based diagnostic controller (SOUL).
 
 The checked-in profiles are coherent configurations, not model-name aliases. Do not change only `MODEL_ID`/`MODEL_DIR` for a model that needs different quantization, topology, parser, attention, speculation, or vision settings; add or update a family/profile in `scripts/glm_config.py`.
 
@@ -36,7 +36,7 @@ Configuration is data-driven. `FAMILIES`, `VARIANTS`, `KNOBS`, and validation ru
 Run from the repository root. CI uses these exact checks:
 
 ```bash
-shellcheck entrypoint.sh
+shellcheck entrypoint.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh
 python3 -m py_compile landing.py scripts/*.py
 python3 tests/test_termination.py
 python3 tests/test_families.py
@@ -98,6 +98,7 @@ Commit both dependency files together. The Docker build installs the lock with `
 - `Dockerfile`: pinned vLLM/CUDA base, isolated SOUL environment, copied runtime files, exposed ports, and entrypoint.
 - `requirements-soul.in`, `requirements-soul.lock`: direct and hash-locked SOUL dependencies.
 - `runpod-template.json`, `runpod-template-qwen36.json`: checked-in Pod profiles; keep their ports, volume mount, and model profile coherent with runtime behavior.
+- `scripts/jarvislabs_vm_bootstrap.sh`: full-VM launcher for JarvisLabs, whose managed template catalog does not accept a user Docker image.
 - `.github/workflows/build.yml`: canonical local QA command list and image build/publish behavior.
 - `TEST_PLAN.md`, `TEST_RESULTS.md`: manual paid-provider qualification matrix and observed hardware results; do not treat local tests as GPU qualification.
 
@@ -112,7 +113,7 @@ Commit both dependency files together. The Docker build installs the lock with `
 
 ## Testing & QA
 
-Tests use the Python standard library (`unittest`, `unittest.mock`, and some procedural `check()` harnesses), not pytest. Follow the flat `tests/test_*.py` layout and run the affected module directly. Use `tempfile.TemporaryDirectory`, injected environment/path objects, stub HTTP transports, and mocked subprocesses; tests must not contact Vast.ai/Runpod, mutate real checkpoints, erase host files, or require `nvidia-smi`.
+Tests use the Python standard library (`unittest`, `unittest.mock`, and some procedural `check()` harnesses), not pytest. Follow the flat `tests/test_*.py` layout and run the affected module directly. Use `tempfile.TemporaryDirectory`, injected environment/path objects, stub HTTP transports, and mocked subprocesses; tests must not contact Vast.ai, Runpod, or JarvisLabs, mutate real checkpoints, erase host files, or require `nvidia-smi`.
 
 For every change:
 
