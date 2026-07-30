@@ -181,6 +181,7 @@ if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
 else
   MODEL_ROOT="${MODEL_ROOT:-/workspace}"
 fi
+mkdir -p "$MODEL_ROOT"
 export GLM_STATE_DIR="${GLM_STATE_DIR:-$MODEL_ROOT/.glm-config}"
 export GLM_RUNTIME_DIR="${GLM_RUNTIME_DIR:-/tmp/glm-runtime}"
 GLM_LOG_DIR="$GLM_STATE_DIR/logs"
@@ -272,12 +273,18 @@ apply_config() {
      [ "${B12X_PCIE_DMA:-1}" = "1" ] &&
      command -v nvidia-smi >/dev/null 2>&1; then
     _p2p_matrix="$(nvidia-smi topo -p2p r 2>/dev/null || true)"
+    # nvidia-smi prints the unsupported status abbreviations again in its
+    # legend. Inspect only actual GPU matrix rows; otherwise every fully
+    # supported host is misclassified because the legend contains NS/CNS/etc.
+    _p2p_matrix_rows="$(
+      grep -E '^[[:space:]]*GPU[0-9]+[[:space:]]' <<<"$_p2p_matrix" || true
+    )"
     if grep -Eq '(^|[[:space:]])(NS|CNS|GNS|TNS)([[:space:]]|$)' \
-         <<<"$_p2p_matrix"; then
+         <<<"$_p2p_matrix_rows"; then
       export B12X_PCIE_DMA=0
       boot_note "WARNING: GPU peer access is unavailable; disabled B12X PCIe DMA and DCP A2A, using NCCL/SHM collectives."
     fi
-    unset _p2p_matrix
+    unset _p2p_matrix _p2p_matrix_rows
   fi
   python3 "$SCRIPTS_DIR/config_cli.py" show || true
   # MODEL_DIR follows the variant unless the template pinned it.
@@ -877,13 +884,17 @@ prepare_mtp78() {
       echo ">>> MTP78: trellis draft already grafted"
     fi
   else
-    echo ">>> MTP78 modification disabled — native in-checkpoint draft"
+    echo ">>> MTP78 modification disabled — native in-checkpoint draft (${NATIVE_MTP_FORMAT:-checkpoint format})"
   fi
   # A checkpoint grafted by an earlier boot must be reverted before override mode
   # can work, otherwise the target still carries the trellis layer 78.
-  if [ "$MTP78_MODE" != "graft" ] && [ -f "$MODEL_DIR/.mtp78-grafted" ]; then
+  if [ "$MTP78_MODE" != "graft" ] && [ -f "$MODEL_DIR/.mtp78-grafted" ] &&
+     [ "${NATIVE_MTP_FORMAT:-}" != "exl3-tr3" ]; then
     echo ">>> Reverting a previous in-place graft (MTP78_MODE=$MTP78_MODE)"
     python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert || true
+  elif [ "$MTP78_MODE" != "graft" ] &&
+       [ "${NATIVE_MTP_FORMAT:-}" = "exl3-tr3" ]; then
+    echo ">>> Native checkpoint already carries EXL3-TR3 layer-78 experts; no graft/revert required"
   fi
   return 0
 }
@@ -1138,7 +1149,9 @@ PY
 KVT_ARGS=()
 compute_offload() {
   KVT_ARGS=()
+  export LMCACHE_MODE=off
   local off_fraction="${OFFLOAD_FRACTION:-0}"
+  local cache_backend="${PREFIX_CACHE_BACKEND:-native}"
   if [ "$off_fraction" != "0" ] && [ ! -r /proc/meminfo ]; then
     echo ">>> DRAM KV offload sizing skipped: /proc/meminfo is unavailable on this smoke host"
     off_fraction=0
@@ -1185,16 +1198,35 @@ compute_offload() {
     fi
   fi
   if [ "$off_fraction" != "0" ]; then
-    OFFLOAD_STATE="$((OFF_TOTAL_BYTES/1073741824)) GiB DRAM prefix cache"
-    echo ">>> DRAM KV offload: $((OFF_TOTAL_BYTES/1073741824)) GiB total (${off_fraction} of instance RAM allocation),"
-    echo ">>>                    aggregate connector budget; ~$((OFF_BYTES/1073741824)) GiB physical slice x ${OFFLOAD_RANKS} TP workers"
-    # kv_load_failure_policy=recompute: a KV block that cannot be fetched back from
-    # the DRAM tier is recomputed instead of failing the request. The vLLM default
-    # is "fail", which would turn any offload hiccup into a terminal error — not an
-    # acceptable trade for a cache tier that is a pure optimisation.
-    KVT_ARGS=(--kv-transfer-config "{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_load_failure_policy\":\"recompute\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":$OFF_TOTAL_BYTES}}")
-    # OffloadingConnector rejects expandable_segments (VMM can remap pinned KV pages)
-    export PYTORCH_CUDA_ALLOC_CONF=""
+    if [ "$cache_backend" = "lmcache" ]; then
+      export LMCACHE_L1_GB="$((OFF_TOTAL_BYTES/1073741824))"
+      [ "$LMCACHE_L1_GB" -gt 0 ] || export LMCACHE_L1_GB=1
+      export LMCACHE_L2_GB="${PREFIX_CACHE_DISK_GB:-0}"
+      if [ "$LMCACHE_L2_GB" -gt 0 ] 2>/dev/null; then
+        export LMCACHE_MODE=disk
+        export LMCACHE_L2_PATH="${LMCACHE_L2_PATH:-$MODEL_ROOT/.lmcache/l2}"
+        OFFLOAD_STATE="LMCache ${LMCACHE_L1_GB} GiB DRAM + ${LMCACHE_L2_GB} GiB NVMe"
+        echo ">>> LMCache prefix tier: ${LMCACHE_L1_GB} GiB aggregate DRAM + ${LMCACHE_L2_GB} GiB bounded NVMe"
+        echo "!!! Cached KV can contain session material. Enable secure termination; disk erase is best effort."
+      else
+        export LMCACHE_MODE=ram
+        OFFLOAD_STATE="LMCache ${LMCACHE_L1_GB} GiB DRAM"
+        echo ">>> LMCache prefix tier: ${LMCACHE_L1_GB} GiB aggregate DRAM (no disk tier)"
+      fi
+      # The r11 helper rejects CUDA VMM/expandable segments for its pinned pages.
+      export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False
+    else
+      OFFLOAD_STATE="$((OFF_TOTAL_BYTES/1073741824)) GiB native DRAM prefix cache"
+      echo ">>> Native DRAM KV offload: $((OFF_TOTAL_BYTES/1073741824)) GiB total (${off_fraction} of instance RAM allocation),"
+      echo ">>>                          aggregate connector budget; ~$((OFF_BYTES/1073741824)) GiB physical slice x ${OFFLOAD_RANKS} TP workers"
+      # kv_load_failure_policy=recompute: a KV block that cannot be fetched back from
+      # the DRAM tier is recomputed instead of failing the request. The vLLM default
+      # is "fail", which would turn any offload hiccup into a terminal error — not an
+      # acceptable trade for a cache tier that is a pure optimisation.
+      KVT_ARGS=(--kv-transfer-config "{\"kv_connector\":\"OffloadingConnector\",\"kv_role\":\"kv_both\",\"kv_load_failure_policy\":\"recompute\",\"kv_connector_extra_config\":{\"cpu_bytes_to_use\":$OFF_TOTAL_BYTES}}")
+      # OffloadingConnector rejects expandable_segments (VMM can remap pinned KV pages)
+      export PYTORCH_CUDA_ALLOC_CONF=""
+    fi
   else
     OFFLOAD_STATE="off"
     export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -1227,7 +1259,7 @@ compute_vision_args() {
 export CUDA_DEVICE_MAX_CONNECTIONS=32 CUTE_DSL_ARCH=sm_120a OMP_NUM_THREADS=16
 export SAFETENSORS_FAST_GPU=1 NCCL_IB_DISABLE=1 NCCL_P2P_LEVEL=SYS NCCL_PROTO=LL,LL128,Simple
 export TORCH_CUDA_ARCH_LIST=12.0a FLASHINFER_CUDA_ARCH_LIST=12.0f FLASHINFER_DISABLE_VERSION_CHECK=1
-export VLLM_ENGINE_READY_TIMEOUT_S=2400
+export VLLM_ENGINE_READY_TIMEOUT_S=3600
 export VLLM_USE_FLASHINFER_SAMPLER=1
 unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE
 # The base image still carries three historical launcher switches that no
@@ -1539,17 +1571,17 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${DESEC_TOKEN:-}" ] &&
    [ "${CONFIG_SMOKE:-0}" != "1" ]; then
   SUB="model-${INSTANCE_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
   MYIP="$PUBLIC_IP_CURRENT"
+  export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN
   if [ -z "$MYIP" ]; then
-    echo "!!! Could not determine public IP; skipping deSEC auto-DNS"
+    echo "!!! Could not determine public IP; deSEC/ACME will retry in the background"
   else
     # ttl 3600 = deSEC's account minimum; lower values are rejected with HTTP 400
     echo ">>> Registering ${SUB}.${DESEC_DOMAIN} -> ${MYIP} via deSEC"
     curl -sf -X PUT "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/" \
       -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json" \
       -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"${MYIP}\"]}]" >/dev/null \
-      && export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN \
       && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${PUBLIC_API_PORT}/v1" \
-      || echo "!!! deSEC registration failed (HTTP error — check DESEC_TOKEN/DESEC_DOMAIN); continuing without auto-DNS"
+      || echo "!!! deSEC registration failed; continuing startup and retrying in the background"
   fi
 fi
 
@@ -1558,64 +1590,20 @@ TLS_ENABLED=0
 if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
    [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null &&
    [ "${CONFIG_SMOKE:-0}" != "1" ]; then
-  CRT="/workspace/.lego/certificates/${ACME_DOMAIN}.crt"
-  KEY="/workspace/.lego/certificates/${ACME_DOMAIN}.key"
-  # /workspace persists across reboots: reuse a cert with >7 days left instead of
+  CRT="$MODEL_ROOT/.lego/certificates/${ACME_DOMAIN}.crt"
+  KEY="$MODEL_ROOT/.lego/certificates/${ACME_DOMAIN}.key"
+  # MODEL_ROOT persists across reboots: reuse a cert with >7 days left instead of
   # re-issuing every boot (LE duplicate-cert limit is 5/week; a reboot loop burns it)
   if [ -f "$CRT" ] && [ -f "$KEY" ] &&
      openssl x509 -checkend 604800 -noout -in "$CRT" >/dev/null 2>&1; then
     echo ">>> Reusing persisted cert for $ACME_DOMAIN (>7 days validity left)"
   else
-    echo ">>> Issuing LetsEncrypt cert for $ACME_DOMAIN via DNS-01 ($ACME_DNS_PROVIDER)"
-    # DESEC_PROPAGATION_TIMEOUT: LE multi-perspective validation checks from
-    # several vantage points; deSEC anycast can lag >60s — without the wait,
-    # issuance fails with 'NXDOMAIN during secondary validation' (QC-run find).
-    # 2 attempts: transient DNS propagation failures are common on first boot.
-    for _try in 1 2; do
-      ACME_GUARD_PID=""
-      LEGO_PROPAGATION_ARGS=()
-      if [ "$ACME_DNS_PROVIDER" = "desec" ] &&
-         [ -n "${DESEC_DOMAIN:-}" ] &&
-         [ -f "$SCRIPTS_DIR/desec_acme_guard.py" ]; then
-        /opt/venv/bin/python "$SCRIPTS_DIR/desec_acme_guard.py" \
-          --zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN" \
-          --timeout "${DESEC_PROPAGATION_TIMEOUT:-300}" &
-        ACME_GUARD_PID=$!
-        # The guard continuously repairs and verifies the authoritative RRset.
-        # lego's independent authoritative check can cache the first NXDOMAIN
-        # it sees and then wait its full timeout even after both deSEC servers
-        # agree. A bounded fixed wait lets the guard converge before ACME
-        # validation without paying that stale-negative five-minute penalty.
-        LEGO_PROPAGATION_ARGS=(
-          --dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-90s}")
-      fi
-      if DESEC_PROPAGATION_TIMEOUT="${DESEC_PROPAGATION_TIMEOUT:-300}" \
-         lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}" \
-           --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN" \
-           "${LEGO_PROPAGATION_ARGS[@]}" --path /workspace/.lego run; then
-        [ -z "$ACME_GUARD_PID" ] ||
-          { kill "$ACME_GUARD_PID" 2>/dev/null || true; wait "$ACME_GUARD_PID" 2>/dev/null || true; }
-        break
-      fi
-      [ -z "$ACME_GUARD_PID" ] ||
-        { kill "$ACME_GUARD_PID" 2>/dev/null || true; wait "$ACME_GUARD_PID" 2>/dev/null || true; }
-      echo "!!! ACME attempt $_try failed$( [ $_try = 2 ] && echo '; continuing WITHOUT TLS' || echo '; retrying in 30s')"
-      sleep 30
-    done
-    # lego normally removes its TXT record. If the convergence guard had to
-    # recreate a split RRset, lego's provider cleanup may still see the
-    # original write as absent and leave the repaired copy behind. Remove the
-    # public challenge explicitly; certificate reuse does not need it.
-    if [ "$ACME_DNS_PROVIDER" = "desec" ] &&
-       [ -n "${DESEC_DOMAIN:-}" ] && [ -n "${DESEC_TOKEN:-}" ]; then
-      case "$ACME_DOMAIN" in
-        *."$DESEC_DOMAIN")
-          ACME_SUB="${ACME_DOMAIN%."$DESEC_DOMAIN"}"
-          curl -sf -X DELETE \
-            "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/_acme-challenge.${ACME_SUB}/TXT/" \
-            -H "Authorization: Token ${DESEC_TOKEN}" >/dev/null 2>&1 || true
-          ;;
-      esac
+    echo ">>> ACME/deSEC gets one bounded foreground attempt; serving is not held by later retries."
+    export ACME_PUBLIC_IP="$PUBLIC_IP_CURRENT" SCRIPTS_DIR MODEL_ROOT
+    if ! bash "$SCRIPTS_DIR/acme_retry.sh" --once; then
+      echo "!!! TLS is not ready; continuing appliance startup now."
+      echo "!!! ACME/deSEC will retry every ${ACME_BACKGROUND_RETRY_S:-300}s in the background."
+      bash "$SCRIPTS_DIR/acme_retry.sh" --retry &
     fi
   fi
   if [ -f "$CRT" ] && [ -f "$KEY" ]; then
@@ -1692,40 +1680,57 @@ fi
 # backbone and the eagle head from scratch — ~100 s of every boot, for ~1.6 GB of
 # artifacts. VLLM_DISABLE_COMPILE_CACHE is NOT set here (that guard belongs to the
 # gilded-gnosis fork's cache bug); verify decode tok/s after enabling this.
+#
+# Do not share compiled objects across GG source stacks. The base image changes
+# LOCAL_INFERENCE_CACHE_FINGERPRINT whenever its composed vLLM/SparkInfer
+# sources change (r9 -> r11 is one such boundary). Keeping the fingerprint in
+# the persistent path gives warm restarts for the same immutable stack without
+# exposing a new stack to stale kernels that can cause corruption or abnormally
+# low throughput.
+# Both the r11 parity repair and mixed-K EXL3 support change source consumed by
+# Dynamo/Inductor. They are uniform-checkpoint-compatible, but not compatible
+# with compiled objects from the older exl3abi1 source tree.
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk4"
+case "$CACHE_NAMESPACE" in
+  *[!A-Za-z0-9_.-]*|"")
+    echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2
+    exit 2
+    ;;
+esac
 unset VLLM_CACHE_DIR
 case "${VLLM_CACHE_ROOT:-}" in
   ""|/cache/jit*)
     if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
-      export VLLM_CACHE_ROOT="/cache/vllm"
+      export VLLM_CACHE_ROOT="/cache/$CACHE_NAMESPACE/vllm"
     else
-      export VLLM_CACHE_ROOT="$MODEL_DIR/.vllm-cache"
+      export VLLM_CACHE_ROOT="$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm"
     fi
     ;;
 esac
 case "${TRITON_CACHE_DIR:-}" in
   ""|/cache/jit*)
     if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
-      export TRITON_CACHE_DIR="/cache/triton"
+      export TRITON_CACHE_DIR="/cache/$CACHE_NAMESPACE/triton"
     else
-      export TRITON_CACHE_DIR="$MODEL_DIR/.vllm-cache/triton"
+      export TRITON_CACHE_DIR="$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/triton"
     fi
     ;;
 esac
 case "${TORCH_EXTENSIONS_DIR:-}" in
   ""|/cache/jit*)
     if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
-      export TORCH_EXTENSIONS_DIR="/cache/torch_extensions"
+      export TORCH_EXTENSIONS_DIR="/cache/$CACHE_NAMESPACE/torch_extensions"
     else
-      export TORCH_EXTENSIONS_DIR="$MODEL_DIR/.vllm-cache/torch_extensions"
+      export TORCH_EXTENSIONS_DIR="$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/torch_extensions"
     fi
     ;;
 esac
 case "${TORCHINDUCTOR_CACHE_DIR:-}" in
   ""|/cache/jit*)
     if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
-      export TORCHINDUCTOR_CACHE_DIR="/cache/torchinductor"
+      export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"
     else
-      export TORCHINDUCTOR_CACHE_DIR="$MODEL_DIR/.vllm-cache/torchinductor"
+      export TORCHINDUCTOR_CACHE_DIR="$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/torchinductor"
     fi
     ;;
 esac
@@ -1888,6 +1893,9 @@ _SERVE_CMD=(vllm serve "$MODEL_DIR" \
   ${VISION_ARGS[@]+"${VISION_ARGS[@]}"} \
   ${BLOCKS_ARGS[@]+"${BLOCKS_ARGS[@]}"} ${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"} \
   "${TLS_ARGS[@]}" "${SPEC_ARGS[@]}" "${KVT_ARGS[@]}")
+if [ "${LMCACHE_MODE:-off}" != "off" ]; then
+  _SERVE_CMD=(bash "$SCRIPTS_DIR/glm52_lmcache_wrapper.sh" "${_SERVE_CMD[@]}")
+fi
 # SERVE_PRINT_ONLY: show the exact argv and return, for CONFIG_SMOKE. Printing
 # the ARRAY rather than a reconstructed string is the point — it is the same
 # array the engine gets, quoting and all.
@@ -1989,12 +1997,16 @@ start_verifier() {
     _skip_lc=(--skip-long-context)
   fi
   read -r -a _names <<< "${SERVED_MODEL_NAME:-model}"
+  if [ "${AUTH:-key}" != "none" ]; then
+    echo ">>> Verification: one intentional bad-key GET /v1/models will log 401 from 127.0.0.1."
+    echo ">>> That 401 proves authentication rejects an invalid credential; it is expected."
+  fi
   python3 "$SCRIPTS_DIR/verify_serving.py" \
     --base-url "$LOCAL_BASE" --api-key "${VLLM_API_KEY:-}" --model "${_names[0]}" \
     --out "$VERIFY_FILE" --pid "$SRV_PID" \
     --max-model-len "${MAX_MODEL_LEN:-524288}" \
     --needle-tokens "${VERIFY_NEEDLE_TOKENS:-32768}" \
-    --timeout "${VERIFY_HEALTH_TIMEOUT_S:-2400}" \
+    --timeout "${VERIFY_HEALTH_TIMEOUT_S:-3600}" \
     ${_skip_lc[@]+"${_skip_lc[@]}"} >/dev/null 2>&1 &
   VERIFY_PID=$!
   return 0

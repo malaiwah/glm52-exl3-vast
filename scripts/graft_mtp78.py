@@ -29,7 +29,7 @@ if "--revert" in sys.argv:
     marker = os.path.join(model_dir, ".mtp78-grafted")
     if os.path.exists(marker):
         os.remove(marker)
-    print("MTP78 graft reverted to BF16 draft.")
+    print("MTP78 graft reverted to the checkpoint's pre-graft draft format.")
     sys.exit(0)
 
 overlay_dir = sys.argv[2]

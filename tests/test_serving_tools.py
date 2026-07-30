@@ -216,6 +216,24 @@ class OffloadBenchmarkTests(unittest.TestCase):
             {"vllm:kv_offload_load_bytes": 1})
         self.assertEqual(result["kv_offload_load_bytes"], 0)
 
+    def test_lmcache_external_hit_does_not_require_native_byte_metrics(self):
+        evidence = offload.connector_hit_evidence({
+            "external_prefix_hit_tokens": 131072,
+            "kv_offload_load_bytes": 0,
+        })
+        self.assertTrue(evidence["external_hit_observed"])
+        self.assertFalse(evidence["native_load_bytes_observed"])
+        self.assertTrue(evidence["dram_hit_observed"])
+
+    def test_native_hit_retains_both_evidence_signals(self):
+        evidence = offload.connector_hit_evidence({
+            "external_prefix_hit_tokens": 131072,
+            "kv_offload_load_bytes": 2_000_000_000,
+        })
+        self.assertTrue(evidence["external_hit_observed"])
+        self.assertTrue(evidence["native_load_bytes_observed"])
+        self.assertTrue(evidence["dram_hit_observed"])
+
 
 class NeedleTests(unittest.TestCase):
     def test_verifier_discovers_the_served_model_alias(self):

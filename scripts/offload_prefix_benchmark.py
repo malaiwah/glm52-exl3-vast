@@ -70,6 +70,16 @@ def metric_summary(before, after):
     return out
 
 
+def connector_hit_evidence(metrics):
+    external = bool(metrics.get("external_prefix_hit_tokens", 0) > 0)
+    native_bytes = bool(metrics.get("kv_offload_load_bytes", 0) > 0)
+    return {
+        "external_hit_observed": external,
+        "native_load_bytes_observed": native_bytes,
+        "dram_hit_observed": external,
+    }
+
+
 def run_request(base, key, model, prompt, prompt_tokens, output_tokens, timeout,
                 insecure):
     before = bench.get_metrics(base, key, insecure)
@@ -158,13 +168,14 @@ def main(argv=None):
                   doc["dram_reload"]]
         doc["ok"] = all(
             stage.get("request", {}).get("ok") for stage in stages)
-        # A healthy request matrix is distinct from proving a DRAM hit.  Keep
-        # that evidence explicit so a connector that silently stores nothing
-        # cannot be promoted on latency alone.
+        # A healthy request matrix is distinct from proving an external hit.
+        # vLLM's connector-level counter applies to both the native
+        # OffloadingConnector and LMCache. Native additionally exports
+        # kv_offload_load_bytes; LMCache deliberately does not, so requiring
+        # that native-only counter produces a false negative despite a
+        # chunk-aligned external hit.
         reload_metrics = doc["dram_reload"].get("metrics", {})
-        doc["dram_hit_observed"] = bool(
-            reload_metrics.get("external_prefix_hit_tokens", 0) > 0
-            and reload_metrics.get("kv_offload_load_bytes", 0) > 0)
+        doc.update(connector_hit_evidence(reload_metrics))
         write_result(args.out, doc)
     except Exception as error:
         doc["fatal_error"] = f"{type(error).__name__}: {error}"

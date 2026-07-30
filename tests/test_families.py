@@ -54,7 +54,7 @@ def errs(findings):
 # --------------------------------------------------------------------------
 
 def test_glm_release_defaults():
-    section("the GLM GG v20-r9 release defaults")
+    section("the GLM GG v20-r11 qualification defaults")
     eff, src, _ = resolved(gpus=4)
     check("family defaults to glm52", eff["MODEL_FAMILY"] == "glm52")
     check("TP is 4 on a 4-GPU box, and it is DETECTED not assumed",
@@ -69,16 +69,18 @@ def test_glm_release_defaults():
     check("the r9-qualified dynamic scale ABI is the flagship default",
           eff["KV_SCALE_MODE"] == "dynamic-token")
     check("KV pool is auto-profiled", eff["GPU_BLOCKS_OVERRIDE"] == 0)
-    check("the r9 runtime margin uses GMU 0.955",
-          eff["GPU_MEMORY_UTILIZATION"] == 0.955)
+    check("the r11 safetensors runtime margin uses GMU 0.957",
+          eff["GPU_MEMORY_UTILIZATION"] == 0.957)
     memory_finding = next(
         f for f in gc.validate(eff) if f["id"] == "gpu-util-high")
     check("the measured default gets the qualified high-utilization warning",
-          "521,275" in memory_finding["message"]
-          and "0.9675" in memory_finding["message"],
+          "522,360" in memory_finding["message"]
+          and "safetensors" in memory_finding["message"],
           memory_finding["message"])
     check("the agentic profile reserves half of host DRAM as L2 prefix cache",
           eff["OFFLOAD_FRACTION"] == 0.5)
+    check("the qualified r11 profile selects supervised LMCache",
+          eff["PREFIX_CACHE_BACKEND"] == "lmcache")
     check("vision is an opt-in feature profile", eff["VISION"] is False)
     check("the measured MTP5 profile uses probabilistic drafting",
           eff["MTP_DRAFT_SAMPLE_METHOD"] == "probabilistic")
@@ -100,7 +102,7 @@ def test_glm_release_defaults():
                  "--dcp-kv-cache-interleave-size 1",
                  "--attention-backend B12X_MLA_SPARSE",
                  "--moe-backend b12x",
-                 "--load-format instanttensor",
+                 "--load-format safetensors",
                  "--enable-auto-tool-choice",
                  "--tool-call-parser glm47",
                  "--reasoning-parser glm45"):
@@ -128,7 +130,7 @@ def test_glm_release_defaults():
     for key, expected in (
             ("VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE", "1"),
             ("VLLM_DCP_TOPK_OWNER_MERGE", "0"),
-            ("VLLM_EXL3_PREFILL_CHUNK", "1"),
+            ("VLLM_EXL3_PREFILL_CHUNK", "128"),
             ("VLLM_EXL3_PREFILL_BLOCK_M", "64"),
             ("VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD", "16"),
             ("VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD", "1024")):
@@ -140,14 +142,17 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r9 runtime integration matches the measured launch contract")
+    section("the GG v20-r11 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
+    acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
     config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
     local_runner = open(os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
+    kld_runner = open(
+        os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r9 manifest",
-          "sha256:8246024490670e43af6ccdc3df9c6dd0a084119f4507b7ac35a86f5a1c6c33c3"
+    check("the base image is the pinned GG v20-r11 manifest",
+          "sha256:eb4ece3757c03e10764f0900a1366ba4ef63c33560052c976d9ae08457482ff2"
           in dockerfile)
     check("static NVFP4 scaling selects and verifies the reviewed artifact",
           "KV_SCALE_MODE:-static-calibrated" in entry
@@ -165,12 +170,15 @@ def test_glm_release_integration():
           'SPARKINFER_INDEXER_TWO_LEVEL_FOLD:-auto' in entry
           and 'SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256' in entry)
     check("deSEC DNS-01 runs the authoritative convergence guard",
-          'desec_acme_guard.py"' in entry
-          and '--zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN"' in entry
-          and 'ACME_GUARD_PID=$!' in entry
-          and '--dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-90s}"'
-          in entry
-          and 'rrsets/_acme-challenge.${ACME_SUB}/TXT/' in entry
+          'acme_retry.sh" --once' in entry
+          and 'acme_retry.sh" --retry' in entry
+          and 'desec_acme_guard.py"' in acme_retry
+          and '--zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN"' in acme_retry
+          and 'guard_pid=$!' in acme_retry
+          and '--dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-45s}"'
+          in acme_retry
+          and 'rrsets/_acme-challenge.${sub}/TXT/' in acme_retry
+          and 'timeout --signal=TERM --kill-after=10' in acme_retry
           and "dnspython==2.8.0" in dockerfile
           and "lego_v4.35.2_linux_amd64.tar.gz" in dockerfile
           and "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3"
@@ -178,6 +186,8 @@ def test_glm_release_integration():
           and "COPY scripts/ /opt/scripts/" in dockerfile)
     check("VMs without CUDA peer access fall back before custom collectives",
           'nvidia-smi topo -p2p r' in entry
+          and "^[[:space:]]*GPU[0-9]+[[:space:]]" in entry
+          and '_p2p_matrix_rows' in entry
           and 'export B12X_PCIE_DMA=0' in entry
           and 'export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0'
           in entry
@@ -214,7 +224,7 @@ def test_glm_release_integration():
     check("safetensors remains the architecture-level fallback",
           gc.family("glm52")["defaults"]["LOAD_FORMAT"] == "safetensors")
     check("the balanced profile promotes the near-max-qualified loader",
-          resolved(gpus=4)[0]["LOAD_FORMAT"] == "instanttensor")
+          resolved(gpus=4)[0]["LOAD_FORMAT"] == "safetensors")
     check("local shared checkpoints have an explicit immutable mode",
           'if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then' in entry
           and "Checkpoint is read-only; mutation steps skipped." in entry)
@@ -230,14 +240,34 @@ def test_glm_release_integration():
           "FATAL: Vision marker is present" in entry
           and "FATAL: read-only vision derivative cannot register" in entry)
     check("immutable targets default all compile caches away from the checkpoint",
-          'export VLLM_CACHE_ROOT="/cache/vllm"' in entry
-          and 'export TRITON_CACHE_DIR="/cache/triton"' in entry
-          and 'export TORCH_EXTENSIONS_DIR="/cache/torch_extensions"' in entry
-          and 'export TORCHINDUCTOR_CACHE_DIR="/cache/torchinductor"' in entry)
+          'export VLLM_CACHE_ROOT="/cache/$CACHE_NAMESPACE/vllm"' in entry
+          and 'export TRITON_CACHE_DIR="/cache/$CACHE_NAMESPACE/triton"' in entry
+          and 'export TORCH_EXTENSIONS_DIR="/cache/$CACHE_NAMESPACE/torch_extensions"'
+          in entry
+          and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
+          in entry)
+    check("persistent compile caches are isolated at each runtime fingerprint",
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk4"'
+          in entry
+          and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
+          and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
+    check("the r11 EXL3 repairs are immutable and cache-versioned",
+          "patch_exl3_parity_abi.py" in dockerfile
+          and "patch_exl3_mixk.py" in dockerfile
+          and "c0e6e7838cea034795d8ed79713504b52ee8ed596e5f35e28a59f53947b712a6"
+          in dockerfile
+          and dockerfile.index("patch_exl3_parity_abi.py")
+          < dockerfile.rindex("patch_exl3_mixk.py")
+          and "-turnkey-exl3mixk4" in entry)
+    check("the local Podman runner does not bypass cache fingerprinting",
+          "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
+          and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
     check("auto profile sentinels do not leak into the calibration helper",
           "env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" in entry
           and "-u PCIE_DMA_MIN_BYTES" in entry)
     for key in ("OFFLOAD_FRACTION", "OFFLOAD_IGNORE_MEMLOCK",
+                "KV_CACHE_MEMORY_BYTES",
+                "LMCACHE_L1_INIT_GB",
                 "CUDAGRAPH_CAPTURE_SIZES", "MAX_CUDAGRAPH_CAPTURE_SIZE",
                 "VLLM_EXL3_TRELLIS_MAX_M", "DCP_CKV_GATHER_MAX_TOKENS",
                 "DCP_KV_CACHE_INTERLEAVE_SIZE",
@@ -254,6 +284,23 @@ def test_glm_release_integration():
     check("the local runner forwards arbitrary validated TUNE_ overrides",
           "TUNE_[A-Z0-9_]*" in local_runner
           and '"${tuning_env[@]}"' in local_runner)
+    check("the local runner forwards its documented GPU-free config smoke",
+          '-e CONFIG_SMOKE="${CONFIG_SMOKE:-0}"' in local_runner
+          and 'restart_policy=no' in local_runner
+          and '--restart="$restart_policy"' in local_runner)
+    check("the local runner mounts bounded persistent LMCache below the "
+          "secure-erase-aware workspace",
+          'LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"' in local_runner
+          and '$LMCACHE_DISK_HOST:/workspace/.lmcache:rw' in local_runner
+          and "LMCACHE_DISK_HOST must be an absolute path" in local_runner)
+    check("the local runner gives vLLM and LMCache a graceful replacement",
+          'podman container exists "$NAME"' in local_runner
+          and 'podman stop -t "${STOP_TIMEOUT:-120}" "$NAME"' in local_runner
+          and 'podman rm -f "$NAME"' in local_runner)
+    check("a native local run clears any draft path baked into the image",
+          'draft_env=(-e DRAFT_MODEL=)' in local_runner
+          and 'draft_env=(-e DRAFT_MODEL="$DRAFT_MODEL_CONTAINER")'
+          in local_runner)
     check("the local runner can compose a read-only vision derivative",
           'VISION_ASSET_HOST="${VISION_ASSET_HOST:-}"' in local_runner
           and '$MODEL_DIR_CONTAINER/.vision:ro' in local_runner
@@ -268,6 +315,21 @@ def test_glm_release_integration():
           and 'SHARED_MODEL_STORE_CONTAINER="${SHARED_MODEL_STORE_CONTAINER:-$SHARED_MODEL_STORE_HOST}"'
           in local_runner
           and "SHARED_MODEL_STORE_CONTAINER must be an absolute path" in local_runner)
+    check("Hugging Face snapshot symlinks retain their sibling blob store",
+          '*/models--*/snapshots/*)' in local_runner
+          and 'hf_model_root="${MODEL_DIR_HOST%%/snapshots/*}"' in local_runner
+          and 'MODEL_MOUNT_CONTAINER=/models/hf-checkpoint' in local_runner
+          and '$MODEL_MOUNT_HOST:$MODEL_MOUNT_CONTAINER:ro' in local_runner)
+    check("the KLD runner also preserves Hugging Face snapshot symlinks",
+          '*/models--*/snapshots/*)' in kld_runner
+          and 'MODEL_MOUNT_ROOT="$hf_model_root"' in kld_runner
+          and 'MODEL_CONTAINER_ROOT="/models/hf-checkpoint/$hf_snapshot_relative"'
+          in kld_runner
+          and '$MODEL_MOUNT_ROOT:$MODEL_MOUNT_CONTAINER:ro' in kld_runner)
+    check("the KLD protocol can retain DCP4 for a mixed checkpoint that needs it",
+          'KLD_DCP="${KLD_DCP:-1}"' in kld_runner
+          and '"dcp=$KLD_DCP"' in kld_runner
+          and '\\"decode_context_parallel_size\\":$KLD_DCP' in kld_runner)
     check("an external draft is compatible with an immutable target",
           '[ "${MTP78_MODE:-off}" != "off" ] && [ -z "${DRAFT_MODEL:-}" ]'
           in entry)
@@ -397,6 +459,52 @@ def test_madeby561_hybrid():
           and all(overridden_src[k] == "file" for k in (
               "MAX_NUM_BATCHED_TOKENS", "GPU_MEMORY_UTILIZATION",
               "GPU_BLOCKS_OVERRIDE")))
+
+
+def test_higher_fidelity_exl3_candidate():
+    section("the higher-fidelity EXL3 3.25bpw candidate")
+    eff, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3-3.25bpw")
+    derived = gc.derive(eff)
+    check("the candidate pins willfalco's immutable checkpoint",
+          derived["MODEL_REPO"] ==
+          "willfalco/GLM-5.2-EXL3-TR3-3.25bpw"
+          and derived["MODEL_REVISION"] ==
+          "61d2b6b757f6a4ac7098a78d861f2033497532dc")
+    check("layer 78 remains the checkpoint-native rank-sliced Trellis draft",
+          eff["MTP_DRAFT"] == "native"
+          and derived["NATIVE_MTP_FORMAT"] == "exl3-tr3"
+          and derived["MTP78_MODE"] == "off")
+    profile_env = dict(item.split("=", 1)
+                       for item in derived["PROFILE_RUNTIME_ENV"])
+    check("mixed-K preparation uses the qualified allocator contract",
+          profile_env["PYTORCH_CUDA_ALLOC_CONF"] ==
+          "expandable_segments:True"
+          and profile_env["SAFETENSORS_FAST_GPU"] == "1")
+    check("the qualified mixed-K profile selects DCP4 routes",
+          eff["DCP"] == "4"
+          and eff["DCP_KV_CACHE_INTERLEAVE_SIZE"] == "64"
+          and profile_env["VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE"] == "0"
+          and profile_env["VLLM_DCP_TOPK_OWNER_MERGE"] == "1"
+          and profile_env["VLLM_DISABLE_SHARED_EXPERTS_STREAM"] == "1")
+    check("the profile pins exactly one binary-512K request",
+          eff["MAX_MODEL_LEN"] == 524288
+          and eff["GPU_BLOCKS_OVERRIDE"] == 2048)
+    check("MTP5 and C8 remain inside the measured capture window",
+          eff["MTP_TOKENS"] == 5
+          and eff["MAX_NUM_SEQS"] == 8
+          and eff["MAX_CUDAGRAPH_CAPTURE_SIZE"] == 48
+          and eff["VLLM_EXL3_TRELLIS_MAX_M"] == 48)
+    check("external prefix tiers stay off to preserve runtime headroom",
+          eff["OFFLOAD_FRACTION"] == 0
+          and eff["PREFIX_CACHE_BACKEND"] == "native"
+          and eff["PREFIX_CACHE_DISK_GB"] == 0)
+    check("the 522K/API/performance gate promotes the variant",
+          "variant-untested" not in ids(gc.validate(eff)))
+    offloaded, _, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-3.25bpw",
+        OFFLOAD_FRACTION=0.5, PREFIX_CACHE_BACKEND="lmcache")
+    check("the configurator refuses the measured 512K offload OOM shape",
+          "mixed-325-offload-headroom" in ids(gc.validate(offloaded)))
 
 
 def test_qwen_preset():
@@ -570,7 +678,7 @@ def test_rules_are_family_scoped():
     check("the max-context EXL3 profile cannot evade the vision quality warning",
           "vision-long-context" in ids(gc.validate(eff)))
     eff, _, _ = resolved(gpus=4)
-    check("the exact qualified 524288 InstantTensor shape clears its warning",
+    check("the exact qualified r11 safetensors shape clears the old loader warning",
           "instanttensor-context-margin" not in ids(gc.validate(eff)))
     eff, _, _ = resolved(
         gpus=4, LOAD_FORMAT="instanttensor",
@@ -712,6 +820,7 @@ def main():
         run(test_glm_release_integration)
         run(test_glm_max_context_profile)
         run(test_madeby561_hybrid)
+        run(test_higher_fidelity_exl3_candidate)
         run(test_qwen_preset)
         run(test_custom_profile)
         run(test_inapplicable_knobs)

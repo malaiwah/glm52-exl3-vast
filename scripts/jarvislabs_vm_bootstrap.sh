@@ -36,8 +36,23 @@ if ! sudo -n true 2>/dev/null; then
   exit 2
 fi
 
+PASSTHROUGH_KEYS=(
+  MODEL_VARIANT MODEL_ID MODEL_DISPLAY_NAME SERVED_MODEL_NAME
+  TENSOR_PARALLEL_SIZE MAX_MODEL_LEN MAX_NUM_SEQS MAX_NUM_BATCHED_TOKENS
+  GPU_MEMORY_UTILIZATION KV_CACHE_MEMORY_BYTES GPU_BLOCKS_OVERRIDE
+  KV_CACHE_DTYPE KV_SCALE_MODE MTP_DRAFT MTP_TOKENS
+  MTP_DRAFT_SAMPLE_METHOD MTP_REJECTION_SAMPLE_METHOD
+  DCP DCP_CKV_GATHER_MAX_TOKENS DCP_CKV_PREFETCH_DEPTH
+  DCP_KV_CACHE_INTERLEAVE_SIZE DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS
+  DCP_PREFILL_WORKSPACE_MIB LOAD_FORMAT OFFLOAD_FRACTION
+  OFFLOAD_IGNORE_MEMLOCK PREFIX_CACHE_BACKEND PREFIX_CACHE_DISK_GB
+  VISION VISION_CHUNKS FEATURE_TEST_LEVEL
+  ACME_ATTEMPT_TIMEOUT_S ACME_BACKGROUND_RETRY_S
+)
+
 for key in HF_TOKEN DESEC_TOKEN JARVISLABS_API_KEY \
-           JARVISLABS_TERMINATE_API_KEY VLLM_API_KEY; do
+           JARVISLABS_TERMINATE_API_KEY VLLM_API_KEY \
+           "${PASSTHROUGH_KEYS[@]}"; do
   value="${!key:-}"
   if [[ "$value" == *$'\n'* || "$value" == *$'\r'* ]]; then
     echo "FATAL: $key contains a newline and cannot be written to a Docker env file." >&2
@@ -69,13 +84,17 @@ trap 'rm -f "$ENV_TMP"' EXIT
   printf 'JARVISLABS_REGION=%s\n' "$REGION"
   printf 'PUBLIC_IPADDR=%s\n' "$PUBLIC_IP"
   printf 'MODEL_PROFILE=%s\n' "$PROFILE"
-  printf 'MODEL_DISPLAY_NAME=%s\n' \
-    "${MODEL_DISPLAY_NAME:-GLM-5.2 JarvisLabs}"
+  printf 'MODEL_DISPLAY_NAME=%s\n' "${MODEL_DISPLAY_NAME:-GLM-5.2 JarvisLabs}"
   printf 'LANDING_PAGE=1\n'
   printf 'OPEN_BUTTON_PORT=1111\n'
   printf 'DESEC_DOMAIN=%s\n' "${DESEC_DOMAIN:-}"
   printf 'TERMINATE_ENABLED=%s\n' "${TERMINATE_ENABLED:-0}"
   for key in HF_TOKEN DESEC_TOKEN VLLM_API_KEY; do
+    value="${!key:-}"
+    [[ -z "$value" ]] || printf '%s=%s\n' "$key" "$value"
+  done
+  for key in "${PASSTHROUGH_KEYS[@]}"; do
+    [[ "$key" == MODEL_DISPLAY_NAME ]] && continue
     value="${!key:-}"
     [[ -z "$value" ]] || printf '%s=%s\n' "$key" "$value"
   done

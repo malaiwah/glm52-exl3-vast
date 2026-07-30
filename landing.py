@@ -25,6 +25,7 @@ import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from string import Template
 from urllib.parse import parse_qs, urlparse
 
@@ -529,14 +530,17 @@ METRICS_SECTION = Template("""
    <i style="background:var(--busy)"></i>waiting</div></div>
  <div class=card><h3>KV cache used <span class=chartv id=v2></span></h3>
    <canvas class=chart id=c2></canvas></div>
- <div class=card><h3>Prefix-cache hit rate <span class=chartv id=v3></span></h3>
+ <div class=card><h3>GPU prefix hit rate <span class=chartv id=v3></span></h3>
    <canvas class=chart id=c3></canvas></div>
+ <div class=card><h3>External prefix hit rate <span class=chartv id=v4></span></h3>
+   <canvas class=chart id=c4></canvas>
+   <div class=legend>DRAM / bounded NVMe tier after GPU eviction</div></div>
 </div>
 <script>
 (function(){
 var EP=$ep_js, KEY=$key_js;
 var HDRS = KEY.charAt(0)==="<" ? {} : {"Authorization":"Bearer "+KEY};
-var N=100, S={gen:[],pro:[],run:[],wai:[],kv:[],hit:[]};
+var N=100, S={gen:[],pro:[],run:[],wai:[],kv:[],hit:[],ext:[]};
 var prev=null, prevT=0;
 fetch(EP+"/v1/models",{headers:HDRS}).then(function(r){return r.json()}).then(function(j){
   document.getElementById("modeljson").textContent=JSON.stringify(j,null,2);
@@ -596,6 +600,9 @@ function tick(){
       var dq=v["vllm:prefix_cache_queries_total"]-prev["vllm:prefix_cache_queries_total"];
       var dh=v["vllm:prefix_cache_hits_total"]-prev["vllm:prefix_cache_hits_total"];
       push(S.hit,dq>0?100*dh/dq:last(S.hit));
+      var eq=v["vllm:external_prefix_cache_queries_total"]-prev["vllm:external_prefix_cache_queries_total"];
+      var eh=v["vllm:external_prefix_cache_hits_total"]-prev["vllm:external_prefix_cache_hits_total"];
+      push(S.ext,eq>0?100*eh/eq:last(S.ext));
     }
     push(S.run,v["vllm:num_requests_running"]||0);
     push(S.wai,v["vllm:num_requests_waiting"]||0);
@@ -606,10 +613,12 @@ function tick(){
     draw("c1",[S.run,S.wai],[A,B]);
     draw("c2",[S.kv],[A]);
     draw("c3",[S.hit],[A2]);
+    draw("c4",[S.ext],[B]);
     document.getElementById("v0").textContent=S.gen.length?fmt(last(S.gen))+" tok/s":"";
     document.getElementById("v1").textContent=last(S.run)+" / "+last(S.wai);
     document.getElementById("v2").textContent=S.kv.length?last(S.kv).toFixed(1)+"%":"";
     document.getElementById("v3").textContent=S.hit.length?last(S.hit).toFixed(0)+"%":"";
+    document.getElementById("v4").textContent=S.ext.length?last(S.ext).toFixed(0)+"%":"";
   }).catch(function(){}).then(function(){setTimeout(tick,3000)});
 }
 tick();
@@ -1737,6 +1746,16 @@ class DualProtocolServer(ThreadingHTTPServer):
     # alive indefinitely; each accepted socket gets a recv timeout below.
     daemon_threads = True
     timeout = LANDING_TIMEOUT
+
+    def server_bind(self):
+        # HTTPServer.server_bind performs a reverse-DNS lookup merely to fill
+        # server_name. Provider DNS can be absent or temporarily unhealthy
+        # during first boot, and that lookup otherwise stalls the dashboard
+        # before it has opened its socket.
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
 
     def get_request(self):
         sock, addr = self.socket.accept()

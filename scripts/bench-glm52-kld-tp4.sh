@@ -8,16 +8,57 @@ IMAGE="${IMAGE:?set IMAGE to the immutable candidate image}"
 RUN_NAME="${RUN_NAME:?set RUN_NAME, for example r9-dynamic-run1}"
 SCALE_MODE="${SCALE_MODE:-dynamic-token}"
 MODEL_ROOT="${MODEL_ROOT:-/mnt/fast/models/GLM-5.2-EXL3-TR3-3.0bpw}"
+MODEL_MOUNT_ROOT="$MODEL_ROOT"
+MODEL_MOUNT_CONTAINER=/models/checkpoint-root
+MODEL_CONTAINER_ROOT=/models/checkpoint-root
 REFERENCE_ROOT="${REFERENCE_ROOT:-/mnt/vault/llm/speculator/kld-ref/reference-logits}"
 KLD_RUNNER="${KLD_RUNNER:-/mnt/fast/build/rtx6kpro-kld-master/models/glm5.2/gguf-bf16-kld-2026-07-08/scripts/prefill_kld_fallback.py}"
 KLD_PYDEPS="${KLD_PYDEPS:-/mnt/fast/build/kld-pydeps}"
 KLD_OUTPUT_ROOT="${KLD_OUTPUT_ROOT:-/mnt/vault/llm/vllm+lmcache/turnkey-qualification/20260729-r9-kld}"
 HF_DATASET_CACHE="${HF_DATASET_CACHE:-/mnt/fast/build/kld-hf-cache}"
-CACHE_ROOT="${CACHE_ROOT:-/mnt/fast/build/kld-cache-r9}"
 EXL3_PY_PATCH="${EXL3_PY_PATCH:-}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
+KLD_DCP="${KLD_DCP:-1}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-512}"
 EXL3_PREFILL_CHUNK="${EXL3_PREFILL_CHUNK:-128}"
+LOAD_FORMAT="${LOAD_FORMAT:-safetensors}"
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-podman}"
+KLD_CACHE_KEY="$(printf '%s\n%s\n' "$IMAGE" "$MODEL_ROOT" |
+  sha256sum | cut -c1-16)"
+CACHE_ROOT="${CACHE_ROOT:-/mnt/fast/build/kld-cache-$KLD_CACHE_KEY}"
+
+# Hugging Face snapshots contain relative links into ../../blobs. Binding only
+# the revision directory makes a complete host checkpoint look empty inside
+# the container. Preserve the repository root and point the runner back at the
+# selected immutable snapshot.
+case "$MODEL_ROOT" in
+  */models--*/snapshots/*)
+    hf_model_root="${MODEL_ROOT%%/snapshots/*}"
+    hf_snapshot_relative="${MODEL_ROOT#"$hf_model_root"/}"
+    if [ -d "$hf_model_root/blobs" ]; then
+      MODEL_MOUNT_ROOT="$hf_model_root"
+      MODEL_MOUNT_CONTAINER=/models/hf-checkpoint
+      MODEL_CONTAINER_ROOT="/models/hf-checkpoint/$hf_snapshot_relative"
+    fi
+    ;;
+esac
+
+case "$CONTAINER_RUNTIME" in
+  podman)
+    RUNTIME=(podman)
+    ;;
+  docker)
+    if docker info >/dev/null 2>&1; then
+      RUNTIME=(docker)
+    else
+      RUNTIME=(sudo docker)
+    fi
+    ;;
+  *)
+    echo "CONTAINER_RUNTIME must be podman or docker" >&2
+    exit 2
+    ;;
+esac
 
 case "$SCALE_MODE" in
   uncalibrated-static)
@@ -56,7 +97,7 @@ chmod 700 "$OUTPUT_DIR"
 
 PATTERN=FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS
 HF_OVERRIDES="{\"use_index_cache\":true,\"index_topk_pattern\":\"$PATTERN\"}"
-LLM_EXTRA='{"decode_context_parallel_size":1,"moe_backend":"b12x","enforce_eager":true}'
+LLM_EXTRA="{\"decode_context_parallel_size\":$KLD_DCP,\"moe_backend\":\"b12x\",\"enforce_eager\":true}"
 
 printf '%s\n' \
   "image=$IMAGE" \
@@ -64,7 +105,7 @@ printf '%s\n' \
   "model=$MODEL_ROOT" \
   "reference=$REFERENCE_ROOT" \
   "tp=4" \
-  "dcp=1" \
+  "dcp=$KLD_DCP" \
   "mtp=0" \
   "kv_cache_dtype=nvfp4_ds_mla" \
   "kv_fp8_rope=$KV_FP8_ROPE" \
@@ -73,21 +114,28 @@ printf '%s\n' \
   "gpu_memory_utilization=$GPU_MEMORY_UTILIZATION" \
   "max_num_batched_tokens=$MAX_NUM_BATCHED_TOKENS" \
   "exl3_prefill_chunk=$EXL3_PREFILL_CHUNK" \
+  "load_format=$LOAD_FORMAT" \
+  "cache_key=$KLD_CACHE_KEY" \
+  "container_runtime=$CONTAINER_RUNTIME" \
   >"$OUTPUT_DIR/config.env"
 
 container_name="glm52-kld-${RUN_NAME//[^A-Za-z0-9_.-]/-}"
-podman rm -f "$container_name" >/dev/null 2>&1 || true
+"${RUNTIME[@]}" rm -f "$container_name" >/dev/null 2>&1 || true
 
 GPU_DEVICE_ARGS=()
-for gpu_device in /dev/nvidia0 /dev/nvidia1 /dev/nvidia2 /dev/nvidia3 \
-                  /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia-uvm \
-                  /dev/nvidia-uvm-tools /dev/dri/card0 /dev/dri/card1 \
-                  /dev/dri/card2 /dev/dri/card3 /dev/dri/renderD128 \
-                  /dev/dri/renderD129 /dev/dri/renderD130 /dev/dri/renderD131; do
-  if [ -e "$gpu_device" ]; then
-    GPU_DEVICE_ARGS+=(--device "$gpu_device")
-  fi
-done
+if [[ "$CONTAINER_RUNTIME" == docker ]]; then
+  GPU_DEVICE_ARGS=(--gpus all)
+else
+  for gpu_device in /dev/nvidia0 /dev/nvidia1 /dev/nvidia2 /dev/nvidia3 \
+                    /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia-uvm \
+                    /dev/nvidia-uvm-tools /dev/dri/card0 /dev/dri/card1 \
+                    /dev/dri/card2 /dev/dri/card3 /dev/dri/renderD128 \
+                    /dev/dri/renderD129 /dev/dri/renderD130 /dev/dri/renderD131; do
+    if [ -e "$gpu_device" ]; then
+      GPU_DEVICE_ARGS+=(--device "$gpu_device")
+    fi
+  done
+fi
 
 PATCH_MOUNT_ARGS=()
 if [ -n "$EXL3_PY_PATCH" ]; then
@@ -100,7 +148,7 @@ if [ -n "$EXL3_PY_PATCH" ]; then
   )
 fi
 
-podman run --rm --name "$container_name" \
+"${RUNTIME[@]}" run --rm --name "$container_name" \
   "${GPU_DEVICE_ARGS[@]}" \
   "${PATCH_MOUNT_ARGS[@]}" \
   --ipc=host \
@@ -108,7 +156,7 @@ podman run --rm --name "$container_name" \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
   --ulimit nofile=1048576:1048576 \
-  -v "$MODEL_ROOT:/models/checkpoint-root:ro" \
+  -v "$MODEL_MOUNT_ROOT:$MODEL_MOUNT_CONTAINER:ro" \
   -v "$REFERENCE_ROOT:/kld/ref:ro" \
   -v "$KLD_RUNNER:/kld/prefill_kld_fallback.py:ro" \
   -v "$KLD_PYDEPS:/kld-pydeps:ro" \
@@ -171,8 +219,8 @@ podman run --rm --name "$container_name" \
   -lc "set -euo pipefail
 unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 python3 /kld/prefill_kld_fallback.py \
-  --model /models/checkpoint-root \
-  --tokenizer /models/checkpoint-root \
+  --model '$MODEL_CONTAINER_ROOT' \
+  --tokenizer '$MODEL_CONTAINER_ROOT' \
   --reference-logits /kld/ref \
   --context-length 2048 \
   --stride 512 \
@@ -181,7 +229,7 @@ python3 /kld/prefill_kld_fallback.py \
   --gpu-memory-utilization '$GPU_MEMORY_UTILIZATION' \
   --dtype bfloat16 \
   --kv-cache-dtype nvfp4_ds_mla \
-  --load-format instanttensor \
+  --load-format '$LOAD_FORMAT' \
   --max-model-len 4096 \
   --max-num-batched-tokens '$MAX_NUM_BATCHED_TOKENS' \
   --max-num-seqs 1 \
@@ -204,6 +252,13 @@ if not match:
     raise SystemExit(f"missing KLD result in {log_path}")
 summary = json.loads(match.group(1))
 summary["log"] = str(log_path)
+count = int(summary.get("num_windows", summary.get("n", 1)))
+summary["reference_windows"] = count
+if count <= 1:
+    summary["stddev_note"] = (
+        "The reference bundle contains one window; a reported standard "
+        "deviation of 0 is structural (n=1), not evidence of zero model variance."
+    )
 pathlib.Path(sys.argv[2]).write_text(
     json.dumps(summary, indent=2, sort_keys=True) + "\n")
 print(json.dumps(summary, sort_keys=True))

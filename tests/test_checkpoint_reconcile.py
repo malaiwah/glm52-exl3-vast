@@ -171,6 +171,8 @@ class ReconcileTests(unittest.TestCase):
                 read_text(os.path.join(directory, "chat_template.jinja")),
                 "vision")
             self.assertTrue(os.path.exists(
+                os.path.join(directory, ".mtp78-trellis")))
+            self.assertFalse(os.path.exists(
                 os.path.join(directory, ".mtp78-grafted")))
             self.assertTrue(os.path.exists(
                 os.path.join(directory, ".vision-enabled")))

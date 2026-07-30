@@ -96,17 +96,19 @@ knobs to the model. Summary of the trade each one makes:
 
 | knob | trades |
 |---|---|
-| `MODEL_VARIANT` | EXL3-TR3 (provider default), the measured MadeBy561 MXFP8/NVFP4/NF3 hybrid, the legacy experimental NVFP4 checkpoint, or a family-specific development target. A variant may supply a coherent draft/memory preset; switching costs a full re-download. |
+| `MODEL_VARIANT` | EXL3-TR3 (provider default), the qualified mixed 3.25-bpw higher-fidelity option, the measured MadeBy561 MXFP8/NVFP4/NF3 hybrid, the legacy experimental NVFP4 checkpoint, or a family-specific development target. A variant supplies a coherent draft/memory preset; switching costs a full re-download. The 3.25-bpw full-512K preset disables external prefix offload because LMCache exhausted its measured runtime headroom. |
 | `MTP_DRAFT` | `native` uses the checkpoint's own draft (rank-sliced TR3 in the pinned Brandon revision; serialized NVFP4 experts in MadeBy561). `tr3-graft`, `tr3-override`, external `nvfp4`, legacy `bf16`, and `off` remain controlled compatibility/experiment paths. |
 | `MTP_TOKENS` | Depth of speculation. With the cheap trellis draft MTP-5 beats MTP-3 (53.4 vs 51.5 tok/s); with the 19.3 GB BF16 draft it lost 22%. Also widens the decode query width. |
 | `MTP_DRAFT_SAMPLE_METHOD` | The measured GLM profiles use `probabilistic`; `greedy` remains explicitly overridable for matched A/B work. |
-| `DCP` | The balanced Brandon default uses DCP2 for ordinary prefill/decode while retaining a verified ~517K request. DCP4 is the maximum-context variant; DCP1 prioritizes low-concurrency decode but cannot expose the same context envelope. |
+| `DCP` | The balanced Brandon default uses DCP2 for ordinary prefill/decode while retaining a verified ~522K request. DCP4 serves the measured maximum-context and mixed 3.25-bpw variants; DCP1 prioritizes low-concurrency decode but cannot expose the same context envelope. |
 | `DCP_CKV_PREFETCH_DEPTH`, `DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS` | Topology overlap and the context crossover for query splitting. `auto`/`-1` retain calibration; the MadeBy561 profile pins the measured 0/8,192 shape. |
 | `F8_DMA`, `PCIE_DMA_MIN_BYTES`, `PCIE_CALIBRATION` | Collective wire format and byte crossover. The family stays lossless/automatic; the MadeBy561 profile pins the 521K-qualified FP8 ring/393,216-byte shape. |
 | `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM default; cross-provider-qualified on v31 and re-gated at each base refresh) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
 | `MAX_MODEL_LEN` | Longest request, and a hard startup gate against available KV. |
-| `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool. The final GG r9 dynamic-token DCP2/GMU-0.955, batch-3,072, gather-140K shape exposed 543,488 logical tokens on AIBeast; the value varies with usable VRAM, graphs, driver and loader. A positive value pins a reproducible smaller pool. |
+| `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool. The final r11 safetensors/DCP2/LMCache/GMU-0.957, batch-3,072, gather-140K shape exposed 542,208 logical tokens on its cold AIBeast boot and 553,472 on the same-stack warm restart; the value varies with usable VRAM, graphs, driver and loader. A positive value pins a reproducible smaller pool. On the measured MLA stack logical capacity is `blocks × 64 × DCP`; DCP4 therefore needs 2,048 blocks—not 8,192—for exactly 524,288 tokens. |
 | `OFFLOAD_FRACTION` | Host DRAM used as an L2 prefix cache after GPU eviction—not extra active-context capacity. It is passed as one aggregate native-connector budget (vLLM derives the TP worker slices), with `recompute` on miss. At 50% of a 251 GiB host, an evicted 133,504-token prefix reloaded in 0.69s instead of a 52.47s recompute; 50% also retained ~51 GiB host headroom. |
+| `PREFIX_CACHE_BACKEND` | The GLM flagship selects r11's supervised DCP-aware `lmcache` connector after its DRAM/restart gates; `native` is the measured in-process rollback. The same DRAM fraction applies. |
+| `PREFIX_CACHE_DISK_GB` | 0 is DRAM-only. A positive value enables LMCache's native filesystem L2 and hard-bounds it to that many GiB. It retains derived prompt KV on disk, so use encrypted local NVMe where available (`/mnt/fast/lmcache/...` on AIBeast), never NFS, and make best-effort secure termination available at startup. |
 | `VISION` | Image input vs long-context correctness on EXL3 (see rule 6) and ~1.99 GiB/GPU on the final v20 qualification shape. |
 | `MAX_NUM_SEQS`, `MAX_NUM_BATCHED_TOKENS`, `GPU_MEMORY_UTILIZATION` | Concurrency and prefill chunk against the capture window and against VRAM headroom. |
 | `MAX_CUDAGRAPH_CAPTURE_SIZE`, `CUDAGRAPH_CAPTURE_SIZES`, `VLLM_EXL3_TRELLIS_MAX_M` | The three ceilings that must move together to serve more streams. |
@@ -156,12 +158,13 @@ unless their registry entry explicitly declares equivalent calibration.
 
 ### `kv-dynamic-dtype` — error
 
-`KV_SCALE_MODE=dynamic-token` is an atomic GG v20-r9 record mode, not a generic
+`KV_SCALE_MODE=dynamic-token` is the atomic record mode introduced in GG
+v20-r9 and retained in r11, not a generic
 quantization switch. It requires `KV_CACHE_DTYPE=nvfp4_ds_mla`; the entrypoint
 then sets both `KV_FP8_ROPE=1` and `VLLM_NVFP4_MLA_DYNAMIC_SCALE=1` and removes
 the static scale file. It is the flagship EXL3 default after repeatable KLD
-two exact 510,533-token retrieval/degeneration gates, and the final scheduler
-passed a 521,275-token full-envelope gate. Other variants retain their independently
+two exact 510,533-token retrieval/degeneration gates, the r9 521,275-token
+gate, and the r11 522,360-token gate. Other variants retain their independently
 qualified static setting.
 
 ### `vision-long-context` — warn (blunt)
@@ -193,19 +196,18 @@ allocation. Boot-time KV admission is not runtime headroom. The warning above
 cold memory plus retrieval requalification for any other shape.
 
 ### `instanttensor-context-margin` — warn
-On the exact TP4/DCP2 EXL3 profile, InstantTensor loaded about 0.04 GiB/GPU
-more resident model memory than safetensors. An older
+InstantTensor is an explicit experiment on r11. It loaded about 0.04 GiB/GPU
+more resident model memory than safetensors in an older TP4/DCP2 run, and an
+older
 `MAX_MODEL_LEN=524288`, utilization-0.978 shape failed KV admission twice
-(9.04 GiB needed, 9.03 GiB available). The final r9 dynamic-token shape uses
-utilization 0.955, batch 3,072, CKV gather 140,000, an auto-sized pool, and
-vision off. It exposed 543,488 KV tokens and passed a 521,275-token five-depth
-retrieval at the full 524,288 request limit with 576 MiB/GPU left afterward.
-The warning clears only for that exact qualified shape; changing its loader,
-batch, gather ceiling, memory utilization, pool, or vision posture requires a
-cold-start and near-maximum retrieval requalification.
+(9.04 GiB needed, 9.03 GiB available). Later InstantTensor attempts stalled
+before GPU allocation. The r11 production profile therefore uses safetensors
+at utilization 0.957; it passed an exact 522,360-token five-depth retrieval.
+Any InstantTensor override requires its own cold-start, performance and
+near-maximum retrieval qualification.
 
 ### `pool-smaller-than-context` — error
-`GPU_BLOCKS_OVERRIDE * 256 < MAX_MODEL_LEN` cannot start: vLLM refuses when it
+`GPU_BLOCKS_OVERRIDE × 64 × DCP < MAX_MODEL_LEN` cannot start: vLLM refuses when it
 cannot fit one max-length request. Reducing `MAX_MODEL_LEN` is the standard
 remedy for the whole family of `To serve at least one request with the model's
 max seq len ... larger than the available KV cache memory` failures; so is
@@ -404,7 +406,7 @@ This layer is no longer justified only by static substitutions:
 
 Absolute v20 throughput is confirmed on the all-NODE AIBeast host at 280 W/card:
 2,701 tok/s at 8K, 1,987 at 66K, 121.6 tok/s C1 and 269.7 aggregate at C8.
-Remaining claims stay narrow: InstantTensor is promoted only for the exact
-balanced EXL3 profile and the qualified 524,288-token r9 envelope; other
-variants retain their own loader choice. GLM vision remains a separate
+Remaining claims stay narrow: safetensors is promoted for the exact balanced
+r11 EXL3 profile and qualified 524,288-token envelope; other variants retain
+their own loader choice. GLM vision remains a separate
 short-context experiment rather than part of the text flagship envelope.

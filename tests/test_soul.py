@@ -450,6 +450,7 @@ class SoulWiringTests(unittest.TestCase):
     def test_image_and_pid1_keep_soul_isolated_from_vllm(self):
         dockerfile = (ROOT / "Dockerfile").read_text()
         entrypoint = (ROOT / "entrypoint.sh").read_text()
+        landing = (ROOT / "landing.py").read_text()
         self.assertIn("/opt/nanobot-venv/bin/pip", dockerfile)
         self.assertIn("--require-hashes", dockerfile)
         self.assertIn("diff -u /tmp/vllm-packages.before", dockerfile)
@@ -459,6 +460,7 @@ class SoulWiringTests(unittest.TestCase):
         self.assertIn("stop_soul_supervisor\n      kill_server_tree", entrypoint)
         self.assertIn("SOUL: queued rollback evidence", entrypoint)
         self.assertIn("analyze_failure.py", entrypoint)
+        self.assertIn("TCPServer.server_bind(self)", landing)
 
 
 class SoulLandingTests(unittest.TestCase):

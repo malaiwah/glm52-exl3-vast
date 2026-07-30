@@ -15,7 +15,8 @@ NAME="${NAME:-glm52-turnkey}"
 PORT="${PORT:-8000}"
 MODEL_DIR_HOST="${MODEL_DIR_HOST:?set MODEL_DIR_HOST to the prepared checkpoint}"
 MODEL_MOUNT_HOST="${MODEL_MOUNT_HOST:-$MODEL_DIR_HOST}"
-MODEL_DIR_CONTAINER="${MODEL_DIR_CONTAINER:-/models/checkpoint-root}"
+MODEL_MOUNT_CONTAINER="${MODEL_MOUNT_CONTAINER:-/models/checkpoint-root}"
+MODEL_DIR_CONTAINER="${MODEL_DIR_CONTAINER:-$MODEL_MOUNT_CONTAINER}"
 DOWNLOAD_MARKER_HOST="${DOWNLOAD_MARKER_HOST:?set DOWNLOAD_MARKER_HOST}"
 HF_CACHE_HOST="${HF_CACHE_HOST:-}"
 DRAFT_MODEL_HOST="${DRAFT_MODEL_HOST:-}"
@@ -28,6 +29,34 @@ SHARED_MODEL_STORE_CONTAINER="${SHARED_MODEL_STORE_CONTAINER:-$SHARED_MODEL_STOR
 GPU_DEVICES="${GPU_DEVICES:-0,1,2,3}"
 CACHE_VOLUME="${CACHE_VOLUME:-glm52-turnkey-cache}"
 STATE_VOLUME="${STATE_VOLUME:-glm52-turnkey-state}"
+LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"
+restart_policy="${RESTART_POLICY:-unless-stopped}"
+if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  restart_policy=no
+fi
+
+# A Hugging Face snapshot is normally a directory of relative symlinks into
+# ../../blobs. Binding only snapshots/<revision> makes those targets disappear
+# inside the container even though every file resolves correctly on the host.
+# When the caller supplied the simple/default mount contract, recognize that
+# layout and bind the immutable model repository root instead. Explicit
+# MODEL_MOUNT_* settings remain authoritative for nonstandard stores.
+if [ "$MODEL_MOUNT_HOST" = "$MODEL_DIR_HOST" ] &&
+   [ "$MODEL_MOUNT_CONTAINER" = "/models/checkpoint-root" ] &&
+   [ "$MODEL_DIR_CONTAINER" = "$MODEL_MOUNT_CONTAINER" ]; then
+  case "$MODEL_DIR_HOST" in
+    */models--*/snapshots/*)
+      hf_model_root="${MODEL_DIR_HOST%%/snapshots/*}"
+      hf_snapshot_relative="${MODEL_DIR_HOST#"$hf_model_root"/}"
+      if [ -d "$hf_model_root/blobs" ]; then
+        MODEL_MOUNT_HOST="$hf_model_root"
+        MODEL_MOUNT_CONTAINER=/models/hf-checkpoint
+        MODEL_DIR_CONTAINER="$MODEL_MOUNT_CONTAINER/$hf_snapshot_relative"
+        echo ">>> local runner: preserving Hugging Face snapshot symlinks via $MODEL_MOUNT_CONTAINER" >&2
+      fi
+      ;;
+  esac
+fi
 
 [ -d "$MODEL_DIR_HOST" ] || {
   echo "FATAL: checkpoint directory does not exist: $MODEL_DIR_HOST" >&2
@@ -52,23 +81,26 @@ if [ -n "$HF_CACHE_HOST" ]; then
 fi
 
 draft_mounts=()
-draft_env=()
+# Clear any draft path baked into the image unless this launcher also mounts
+# that exact path. Otherwise a native-checkpoint run can silently inherit a
+# stale /models/mtp78-draft value from an older image revision.
+draft_env=(-e DRAFT_MODEL=)
 if [ -n "$DRAFT_MODEL_HOST" ]; then
-  [ -f "$DRAFT_MODEL_HOST/config.json" ] &&
-    [ -f "$DRAFT_MODEL_HOST/model.safetensors.index.json" ] || {
+  if [ ! -f "$DRAFT_MODEL_HOST/config.json" ] ||
+      [ ! -f "$DRAFT_MODEL_HOST/model.safetensors.index.json" ]; then
     echo "FATAL: external draft is incomplete: $DRAFT_MODEL_HOST" >&2
     exit 4
-  }
+  fi
   draft_mounts=(-v "$DRAFT_MODEL_HOST:$DRAFT_MODEL_CONTAINER:ro")
   draft_env=(-e DRAFT_MODEL="$DRAFT_MODEL_CONTAINER")
 fi
 
 vision_mounts=()
 if [ -n "$VISION_ASSET_HOST" ] || [ -n "$VISION_MARKER_HOST" ]; then
-  [ -n "$VISION_ASSET_HOST" ] && [ -n "$VISION_MARKER_HOST" ] || {
+  if [ -z "$VISION_ASSET_HOST" ] || [ -z "$VISION_MARKER_HOST" ]; then
     echo "FATAL: set both VISION_ASSET_HOST and VISION_MARKER_HOST" >&2
     exit 4
-  }
+  fi
   [ -d "$VISION_ASSET_HOST" ] || {
     echo "FATAL: prepared vision derivative does not exist: $VISION_ASSET_HOST" >&2
     exit 4
@@ -108,6 +140,25 @@ if [ -n "$SHARED_MODEL_STORE_HOST" ]; then
   shared_store_mounts=(-v "$SHARED_MODEL_STORE_HOST:$SHARED_MODEL_STORE_CONTAINER:ro")
 fi
 
+lmcache_mounts=()
+if [ -n "$LMCACHE_DISK_HOST" ]; then
+  case "$LMCACHE_DISK_HOST" in
+    /*) ;;
+    *)
+      echo "FATAL: LMCACHE_DISK_HOST must be an absolute path" >&2
+      exit 4
+      ;;
+  esac
+  [ -d "$LMCACHE_DISK_HOST" ] || {
+    echo "FATAL: LMCache disk directory does not exist: $LMCACHE_DISK_HOST" >&2
+    exit 4
+  }
+  # Keep the persistent tier beneath the appliance workspace. The secure
+  # termination planner already recognizes /workspace/.lmcache as derived,
+  # potentially sensitive KV and erases it on an opted-in teardown.
+  lmcache_mounts=(-v "$LMCACHE_DISK_HOST:/workspace/.lmcache:rw")
+fi
+
 # Advanced runtime A/Bs use the entrypoint's TUNE_<engine-env> convention.
 # Forward every explicitly supplied tuning override without teaching this local
 # launcher a second, inevitably incomplete list of SparkInfer/vLLM variables.
@@ -129,8 +180,11 @@ config_env=()
 for config_name in \
   TENSOR_PARALLEL_SIZE DCP MAX_MODEL_LEN MAX_NUM_SEQS \
   MAX_NUM_BATCHED_TOKENS DCP_PREFILL_WORKSPACE_MIB \
-  GPU_MEMORY_UTILIZATION GPU_BLOCKS_OVERRIDE OFFLOAD_FRACTION \
-  OFFLOAD_IGNORE_MEMLOCK MTP_DRAFT DRAFT_QUANTIZATION MTP_TOKENS \
+  GPU_MEMORY_UTILIZATION GPU_BLOCKS_OVERRIDE KV_CACHE_MEMORY_BYTES \
+  OFFLOAD_FRACTION \
+  OFFLOAD_IGNORE_MEMLOCK PREFIX_CACHE_BACKEND PREFIX_CACHE_DISK_GB \
+  LMCACHE_L1_INIT_GB \
+  MTP_DRAFT DRAFT_QUANTIZATION MTP_TOKENS \
   MTP_DRAFT_SAMPLE_METHOD MTP_REJECTION_SAMPLE_METHOD CUDAGRAPH_CAPTURE_SIZES \
   MAX_CUDAGRAPH_CAPTURE_SIZE VLLM_EXL3_TRELLIS_MAX_M \
   KV_CACHE_DTYPE KV_SCALE_MODE LOAD_FORMAT VISION B12X_PCIE_DMA F8_DMA \
@@ -144,8 +198,15 @@ do
 done
 unset config_name
 
-podman rm -f "$NAME" >/dev/null 2>&1 || true
-podman run -d --replace --restart="${RESTART_POLICY:-unless-stopped}" \
+# LMCache and vLLM both need time to drain background stores and release CUDA
+# workers. Podman's default force-removal grace is only ten seconds, which is
+# too short for a four-GPU GLM process and can leave extension locks or partial
+# L2 records behind. Stop an existing appliance cleanly before replacing it.
+if podman container exists "$NAME"; then
+  podman stop -t "${STOP_TIMEOUT:-120}" "$NAME" >/dev/null 2>&1 || true
+  podman rm -f "$NAME" >/dev/null 2>&1 || true
+fi
+podman run -d --replace --restart="$restart_policy" \
   --name "$NAME" \
   --health-cmd "curl -sf http://localhost:${PORT}/health || exit 1" \
   --health-interval 30s --health-timeout 10s --health-retries 3 \
@@ -157,23 +218,21 @@ podman run -d --replace --restart="${RESTART_POLICY:-unless-stopped}" \
   -e MODEL_READ_ONLY=1 \
   -e HF_HUB_OFFLINE=1 \
   -e GLM_STATE_DIR=/state/.glm-config \
-  -e VLLM_CACHE_ROOT=/cache/vllm \
-  -e TRITON_CACHE_DIR=/cache/triton \
-  -e TORCH_EXTENSIONS_DIR=/cache/torch_extensions \
-  -e TORCHINDUCTOR_CACHE_DIR=/cache/torchinductor \
   -e AUTH="${AUTH:-none}" \
   -e SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-GLM-5.2 local-primary}" \
   -e PORT="$PORT" -e LANDING_PAGE="${LANDING_PAGE:-0}" \
   -e SUPERVISOR="${SUPERVISOR:-1}" \
   -e SOUL_AUTONOMY_LEVEL="${SOUL_AUTONOMY_LEVEL:-0}" \
   -e SOUL_AUTONOMY_MAX_LEVEL="${SOUL_AUTONOMY_MAX_LEVEL:-0}" \
+  -e CONFIG_SMOKE="${CONFIG_SMOKE:-0}" \
   "${config_env[@]}" \
   "${tuning_env[@]}" \
-  -v "$MODEL_MOUNT_HOST:/models/checkpoint-root:ro" \
+  -v "$MODEL_MOUNT_HOST:$MODEL_MOUNT_CONTAINER:ro" \
   -v "$DOWNLOAD_MARKER_HOST:$MODEL_DIR_CONTAINER/.download-complete:ro" \
   "${vision_mounts[@]}" \
   "${tokenizer_mounts[@]}" \
   "${shared_store_mounts[@]}" \
+  "${lmcache_mounts[@]}" \
   -v "$CACHE_VOLUME:/cache" \
   -v "$STATE_VOLUME:/state" \
   "${cache_mounts[@]}" \
