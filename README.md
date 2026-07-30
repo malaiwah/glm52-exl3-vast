@@ -224,7 +224,10 @@ repeat a cold 32K retrieval gate, confirm memory profiling and runtime
 headroom, and rerun the compact performance matrix before comparing new
 numbers with this table. AIBeast is scheduled for such a host refresh; until
 that pass is recorded, these values describe the tested stack rather than the
-future installation.
+future installation. The appliance now puts its persistent vLLM, Triton,
+Torch-extension, and Inductor caches below the base image's immutable
+`LOCAL_INFERENCE_CACHE_FINGERPRINT`: same-stack restarts remain warm, while an
+r9-to-r11 change cannot accidentally execute stale compiled objects.
 
 The current GG image is CUDA 13.2. The appliance therefore fails fast below
 the qualified pair **NVIDIA driver 590.48.01 and reported CUDA 13.2**, before
