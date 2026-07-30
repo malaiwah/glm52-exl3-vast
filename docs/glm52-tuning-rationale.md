@@ -274,6 +274,45 @@ Only changes with a plausible path to a product requirement advance:
    There is no measured reason to trade away MTP5's higher acceptance ceiling,
    so MTP5/2,048 is the accepted production candidate.
 
+### Next maintenance window: 3.25-bpw runtime-route A/B plan
+
+These experiments are deferred until AIBeast has another explicit maintenance
+window. They apply only to the qualified r13 `exl3-tr3-3.25bpw` shape. Preserve
+TP4/DCP4, MTP5, batch 2,048, C8 graphs/Trellis through row 48, 2,048 GPU KV
+blocks / 524,288 logical tokens, dynamic-token NVFP4 MLA KV, 125 GiB LMCache
+DRAM and the bounded 512 GiB NVMe tier. Change one route at a time and start
+each comparison from the same idle production control.
+
+| order | variable | control | candidate | reason to test |
+|---:|---|---:|---:|---|
+| 1 | `VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE` | `0` | `auto` | r13 `auto` routes genuine MTP5 verifier batches as six query rows per request, exactly filling the C8×6 = 48 captured window; determine whether it improves decode without increasing transient memory |
+| 2 | `VLLM_DCP_TOPK_OWNER_MERGE` | `1` | `0` | `0` is the source default and the issue-33 DCP2 winner; isolate whether the current DCP4 owner-local merge helps or hurts long prefill, decode and workspace on this exact mixed-K shape |
+| 3 | `VLLM_DISABLE_SHARED_EXPERTS_STREAM` | `1` | `0` | the current 3.25-bpw profile disables the shared-expert overlap path; test whether re-enabling it improves decode without lifetime, memory or correctness regressions |
+| 3a | `VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD` | `16` | `256` | run only if step 3 selects streaming; `16` is the issue-33 profile value and `256` is the r13 source default |
+| 4 | `VLLM_DCP_A2A_MAX_TOKENS` | `16` | `0` | test the qualified hybrid crossover against uncapped B12X A2A; if the result is shape-dependent, follow with `8` and `32` around the current threshold |
+
+Do **not** test the unprefixed `DCP_A2A_MAX_TOKENS`: no r13 source consumes
+that name. Do not use forced
+`VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE=1` in this 48-row profile: with
+`VLLM_B12X_MLA_SPEC_DECODE_MAX_Q=8` it can plan C8×8 = 64 rows and therefore
+requires a separately qualified 64-row graph/Trellis and memory envelope.
+`B12X_MHC_MAX_TOKENS` also needs no A/B; the r13 source audit found no runtime
+consumer for GLM.
+
+For every control/candidate pair, retain the raw launch environment, image and
+checkpoint digests, startup memory/arena/KV lines, `nvidia-smi` snapshot, vLLM
+metrics and request JSON. Measure unique-prefix PP at 32K and 128K, C1/C2/C4/C8
+aggregate TG, TPOT, MTP accepted/drafted counter deltas, MAL and normalized
+acceptance `(MAL-1)/5`. Record preemptions, request failures, OOMs, free VRAM
+and LMCache transfer activity.
+
+A candidate advances only when it preserves all 524,288 active KV tokens,
+starts twice from the same compile namespace without an OOM, passes the normal
+API/structured-output/tool suite, and shows a repeatable material gain without
+trading away the project's PP > TG > KV priorities. Run the exact 522,360-token
+five-depth needle and degeneration gate only on the winning combined shape,
+then return it to port 8000 and observe real agent traffic before promotion.
+
 The proposed 4,096-token batch was tested and rejected before benchmarking.
 It created a correctly distinct compile key and compiled normally, but raised
 the EXL3 target/draft runtime from 77.66 to 77.83 GiB/GPU and enlarged each

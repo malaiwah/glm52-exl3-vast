@@ -454,7 +454,7 @@ VARIANTS["exl3-tr3-3.25bpw"] = {
     "family": "glm52",
     "label": "EXL3-TR3 mixed 3.25bpw — higher-fidelity 512K",
     "repo": "willfalco/GLM-5.2-EXL3-TR3-3.25bpw",
-    "revision": "61d2b6b757f6a4ac7098a78d861f2033497532dc",
+    "revision": "d7d79c2d14599dfce7a5d12b85f7ad73f40e623d",
     "dirname": "GLM-5.2-EXL3-TR3-3.25bpw",
     "quantization": "exl3",
     "native_mtp_format": "exl3-tr3",

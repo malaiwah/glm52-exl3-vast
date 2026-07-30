@@ -142,7 +142,7 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r13 runtime integration matches the measured launch contract")
+    section("the GG v20-r14 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
@@ -151,8 +151,8 @@ def test_glm_release_integration():
     kld_runner = open(
         os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r13 manifest",
-          "sha256:02796036c96a52fda0919aa260c45c70bc97d8e662a6ae5e614b5f987c20851b"
+    check("the base image is the pinned GG v20-r14 manifest",
+          "sha256:cb03f2079d8a74915f01cda15f6bdf505762d13cc3fff192f7ebdaaf6e318bf2"
           in dockerfile)
     check("static NVFP4 scaling selects and verifies the reviewed artifact",
           "KV_SCALE_MODE:-static-calibrated" in entry
@@ -247,18 +247,18 @@ def test_glm_release_integration():
           and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
           in entry)
     check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk5"'
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3native1"'
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
-    check("the r13 EXL3 repairs are immutable and cache-versioned",
+    check("the r14 native EXL3 gate and compatibility fallback are cache-versioned",
           "patch_exl3_parity_abi.py" in dockerfile
           and "patch_exl3_mixk.py" in dockerfile
-          and "44e171a8aea0009e3c786265914c6cf9d8a23ca9b474761aba990adcb7f74440"
+          and "34869669548f2f03e29fcdaca0db691f280b609f082de320d99ab58d1db23540"
           in dockerfile
           and dockerfile.index("patch_exl3_parity_abi.py")
           < dockerfile.rindex("patch_exl3_mixk.py")
-          and "-turnkey-exl3mixk5" in entry)
+          and "-turnkey-exl3native1" in entry)
     check("the local Podman runner does not bypass cache fingerprinting",
           "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
           and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
@@ -469,7 +469,7 @@ def test_higher_fidelity_exl3_candidate():
           derived["MODEL_REPO"] ==
           "willfalco/GLM-5.2-EXL3-TR3-3.25bpw"
           and derived["MODEL_REVISION"] ==
-          "61d2b6b757f6a4ac7098a78d861f2033497532dc")
+          "d7d79c2d14599dfce7a5d12b85f7ad73f40e623d")
     check("layer 78 remains the checkpoint-native rank-sliced Trellis draft",
           eff["MTP_DRAFT"] == "native"
           and derived["NATIVE_MTP_FORMAT"] == "exl3-tr3"

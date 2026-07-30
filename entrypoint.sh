@@ -1316,7 +1316,7 @@ if [ "${MODEL_VARIANT:-exl3-tr3}" = "madeby561-hybrid" ]; then
 else
   unset VLLM_B12X_ABSORB_BMM VLLM_NF3_GRID188_DECODE
 fi
-# r13 stamps target/draft ownership independently and makes m=1 capturable for
+# r14 retains r13's target/draft ownership and makes m=1 capturable for
 # both roles. Keep the variable absent with MTP so the role-aware backend owns
 # the minimum. The explicit MTP-off value preserves the same m=1 contract for
 # older compatible GG bases and makes that otherwise implicit choice visible
@@ -1685,10 +1685,11 @@ fi
 # the persistent path gives warm restarts for the same immutable stack without
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
-# Both the r13 parity repair and mixed-K EXL3 support change source consumed by
-# Dynamo/Inductor. They are uniform-checkpoint-compatible, but not compatible
-# with compiled objects from the older exl3abi1 source tree.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk5"
+# r14's native one-grid mixed-K EXL3 path changes source consumed by
+# Dynamo/Inductor. It is checkpoint-compatible with the r13 adapter, but its
+# compiled objects are not interchangeable. Keep same-r14 restarts warm while
+# isolating both lineages.
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3native1"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2
