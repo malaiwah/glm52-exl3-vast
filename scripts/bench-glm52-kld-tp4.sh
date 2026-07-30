@@ -18,6 +18,24 @@ EXL3_PY_PATCH="${EXL3_PY_PATCH:-}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-512}"
 EXL3_PREFILL_CHUNK="${EXL3_PREFILL_CHUNK:-128}"
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-podman}"
+
+case "$CONTAINER_RUNTIME" in
+  podman)
+    RUNTIME=(podman)
+    ;;
+  docker)
+    if docker info >/dev/null 2>&1; then
+      RUNTIME=(docker)
+    else
+      RUNTIME=(sudo docker)
+    fi
+    ;;
+  *)
+    echo "CONTAINER_RUNTIME must be podman or docker" >&2
+    exit 2
+    ;;
+esac
 
 case "$SCALE_MODE" in
   uncalibrated-static)
@@ -73,21 +91,26 @@ printf '%s\n' \
   "gpu_memory_utilization=$GPU_MEMORY_UTILIZATION" \
   "max_num_batched_tokens=$MAX_NUM_BATCHED_TOKENS" \
   "exl3_prefill_chunk=$EXL3_PREFILL_CHUNK" \
+  "container_runtime=$CONTAINER_RUNTIME" \
   >"$OUTPUT_DIR/config.env"
 
 container_name="glm52-kld-${RUN_NAME//[^A-Za-z0-9_.-]/-}"
-podman rm -f "$container_name" >/dev/null 2>&1 || true
+"${RUNTIME[@]}" rm -f "$container_name" >/dev/null 2>&1 || true
 
 GPU_DEVICE_ARGS=()
-for gpu_device in /dev/nvidia0 /dev/nvidia1 /dev/nvidia2 /dev/nvidia3 \
-                  /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia-uvm \
-                  /dev/nvidia-uvm-tools /dev/dri/card0 /dev/dri/card1 \
-                  /dev/dri/card2 /dev/dri/card3 /dev/dri/renderD128 \
-                  /dev/dri/renderD129 /dev/dri/renderD130 /dev/dri/renderD131; do
-  if [ -e "$gpu_device" ]; then
-    GPU_DEVICE_ARGS+=(--device "$gpu_device")
-  fi
-done
+if [[ "$CONTAINER_RUNTIME" == docker ]]; then
+  GPU_DEVICE_ARGS=(--gpus all)
+else
+  for gpu_device in /dev/nvidia0 /dev/nvidia1 /dev/nvidia2 /dev/nvidia3 \
+                    /dev/nvidiactl /dev/nvidia-modeset /dev/nvidia-uvm \
+                    /dev/nvidia-uvm-tools /dev/dri/card0 /dev/dri/card1 \
+                    /dev/dri/card2 /dev/dri/card3 /dev/dri/renderD128 \
+                    /dev/dri/renderD129 /dev/dri/renderD130 /dev/dri/renderD131; do
+    if [ -e "$gpu_device" ]; then
+      GPU_DEVICE_ARGS+=(--device "$gpu_device")
+    fi
+  done
+fi
 
 PATCH_MOUNT_ARGS=()
 if [ -n "$EXL3_PY_PATCH" ]; then
@@ -100,7 +123,7 @@ if [ -n "$EXL3_PY_PATCH" ]; then
   )
 fi
 
-podman run --rm --name "$container_name" \
+"${RUNTIME[@]}" run --rm --name "$container_name" \
   "${GPU_DEVICE_ARGS[@]}" \
   "${PATCH_MOUNT_ARGS[@]}" \
   --ipc=host \
