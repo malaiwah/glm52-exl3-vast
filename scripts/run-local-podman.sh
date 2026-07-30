@@ -15,7 +15,8 @@ NAME="${NAME:-glm52-turnkey}"
 PORT="${PORT:-8000}"
 MODEL_DIR_HOST="${MODEL_DIR_HOST:?set MODEL_DIR_HOST to the prepared checkpoint}"
 MODEL_MOUNT_HOST="${MODEL_MOUNT_HOST:-$MODEL_DIR_HOST}"
-MODEL_DIR_CONTAINER="${MODEL_DIR_CONTAINER:-/models/checkpoint-root}"
+MODEL_MOUNT_CONTAINER="${MODEL_MOUNT_CONTAINER:-/models/checkpoint-root}"
+MODEL_DIR_CONTAINER="${MODEL_DIR_CONTAINER:-$MODEL_MOUNT_CONTAINER}"
 DOWNLOAD_MARKER_HOST="${DOWNLOAD_MARKER_HOST:?set DOWNLOAD_MARKER_HOST}"
 HF_CACHE_HOST="${HF_CACHE_HOST:-}"
 DRAFT_MODEL_HOST="${DRAFT_MODEL_HOST:-}"
@@ -32,6 +33,29 @@ LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"
 restart_policy="${RESTART_POLICY:-unless-stopped}"
 if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   restart_policy=no
+fi
+
+# A Hugging Face snapshot is normally a directory of relative symlinks into
+# ../../blobs. Binding only snapshots/<revision> makes those targets disappear
+# inside the container even though every file resolves correctly on the host.
+# When the caller supplied the simple/default mount contract, recognize that
+# layout and bind the immutable model repository root instead. Explicit
+# MODEL_MOUNT_* settings remain authoritative for nonstandard stores.
+if [ "$MODEL_MOUNT_HOST" = "$MODEL_DIR_HOST" ] &&
+   [ "$MODEL_MOUNT_CONTAINER" = "/models/checkpoint-root" ] &&
+   [ "$MODEL_DIR_CONTAINER" = "$MODEL_MOUNT_CONTAINER" ]; then
+  case "$MODEL_DIR_HOST" in
+    */models--*/snapshots/*)
+      hf_model_root="${MODEL_DIR_HOST%%/snapshots/*}"
+      hf_snapshot_relative="${MODEL_DIR_HOST#"$hf_model_root"/}"
+      if [ -d "$hf_model_root/blobs" ]; then
+        MODEL_MOUNT_HOST="$hf_model_root"
+        MODEL_MOUNT_CONTAINER=/models/hf-checkpoint
+        MODEL_DIR_CONTAINER="$MODEL_MOUNT_CONTAINER/$hf_snapshot_relative"
+        echo ">>> local runner: preserving Hugging Face snapshot symlinks via $MODEL_MOUNT_CONTAINER" >&2
+      fi
+      ;;
+  esac
 fi
 
 [ -d "$MODEL_DIR_HOST" ] || {
@@ -57,7 +81,10 @@ if [ -n "$HF_CACHE_HOST" ]; then
 fi
 
 draft_mounts=()
-draft_env=()
+# Clear any draft path baked into the image unless this launcher also mounts
+# that exact path. Otherwise a native-checkpoint run can silently inherit a
+# stale /models/mtp78-draft value from an older image revision.
+draft_env=(-e DRAFT_MODEL=)
 if [ -n "$DRAFT_MODEL_HOST" ]; then
   [ -f "$DRAFT_MODEL_HOST/config.json" ] &&
     [ -f "$DRAFT_MODEL_HOST/model.safetensors.index.json" ] || {
@@ -153,8 +180,10 @@ config_env=()
 for config_name in \
   TENSOR_PARALLEL_SIZE DCP MAX_MODEL_LEN MAX_NUM_SEQS \
   MAX_NUM_BATCHED_TOKENS DCP_PREFILL_WORKSPACE_MIB \
-  GPU_MEMORY_UTILIZATION GPU_BLOCKS_OVERRIDE OFFLOAD_FRACTION \
+  GPU_MEMORY_UTILIZATION GPU_BLOCKS_OVERRIDE KV_CACHE_MEMORY_BYTES \
+  OFFLOAD_FRACTION \
   OFFLOAD_IGNORE_MEMLOCK PREFIX_CACHE_BACKEND PREFIX_CACHE_DISK_GB \
+  LMCACHE_L1_INIT_GB \
   MTP_DRAFT DRAFT_QUANTIZATION MTP_TOKENS \
   MTP_DRAFT_SAMPLE_METHOD MTP_REJECTION_SAMPLE_METHOD CUDAGRAPH_CAPTURE_SIZES \
   MAX_CUDAGRAPH_CAPTURE_SIZE VLLM_EXL3_TRELLIS_MAX_M \
@@ -198,7 +227,7 @@ podman run -d --replace --restart="$restart_policy" \
   -e CONFIG_SMOKE="${CONFIG_SMOKE:-0}" \
   "${config_env[@]}" \
   "${tuning_env[@]}" \
-  -v "$MODEL_MOUNT_HOST:/models/checkpoint-root:ro" \
+  -v "$MODEL_MOUNT_HOST:$MODEL_MOUNT_CONTAINER:ro" \
   -v "$DOWNLOAD_MARKER_HOST:$MODEL_DIR_CONTAINER/.download-complete:ro" \
   "${vision_mounts[@]}" \
   "${tokenizer_mounts[@]}" \

@@ -276,16 +276,16 @@ VARIANTS = {
             "DCP_CKV_GATHER_MAX_TOKENS": 140000,
             "DCP_KV_CACHE_INTERLEAVE_SIZE": "1",
             "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": 8192,
-            # r9 dynamic KV admitted 677,504 tokens at 0.976 but left only
-            # 25 MiB for a 36 MiB transient. 0.9675 also OOMed on a 108 MiB
-            # all-gather during a maximum-context request. With the final
-            # 3,072/140K scheduler shape, 0.955 exposed 543,488 tokens for the
-            # 524,288 request limit and retained 576 MiB/GPU after an exact
-            # 521,275-token, five-depth retrieval.
-            "GPU_MEMORY_UTILIZATION": 0.955,
+            # r11 safetensors at 0.957 exposed 542,208 logical KV tokens on its
+            # cold qualification boot and completed an exact 522,360-token
+            # five-depth request. The same image warm-started with its AOT
+            # cache, exposed 553,472 tokens, and showed no corruption or the
+            # historical low-throughput cache failure.
+            "GPU_MEMORY_UTILIZATION": 0.957,
             "GPU_BLOCKS_OVERRIDE": 0,
-            "LOAD_FORMAT": "instanttensor",
+            "LOAD_FORMAT": "safetensors",
             "OFFLOAD_FRACTION": 0.5,
+            "PREFIX_CACHE_BACKEND": "lmcache",
             "F8_DMA": "0",
             "PCIE_CALIBRATION": "auto",
             "PCIE_DMA_MIN_BYTES": -1,
@@ -443,11 +443,14 @@ VARIANTS = {
     },
 }
 
-# The higher-fidelity candidate deliberately inherits the exact scheduler and
-# collective control so its first live comparison changes only the weights.
+# The higher-fidelity mixed-K checkpoint needs DCP4 to fit its 315.9 GiB
+# payload, native MTP5 and one full binary-512K request on four 96 GiB cards.
+# Its exact r11 gate deliberately pins the KV pool: the auto pool can consume
+# first-request workspace, while LMCache's four CUDA transfer contexts remove
+# the remaining all-reduce margin.
 VARIANTS["exl3-tr3-3.25bpw"] = {
     "family": "glm52",
-    "label": "EXL3-TR3 mixed 3.25bpw — higher-fidelity candidate",
+    "label": "EXL3-TR3 mixed 3.25bpw — higher-fidelity 512K",
     "repo": "willfalco/GLM-5.2-EXL3-TR3-3.25bpw",
     "revision": "61d2b6b757f6a4ac7098a78d861f2033497532dc",
     "dirname": "GLM-5.2-EXL3-TR3-3.25bpw",
@@ -458,8 +461,42 @@ VARIANTS["exl3-tr3-3.25bpw"] = {
     "runtime_env": dict(VARIANTS["exl3-tr3"]["runtime_env"]),
     "kv_scales_calibrated": True,
     "download_gib": 316,
-    "tested": False,
+    "tested": True,
 }
+VARIANTS["exl3-tr3-3.25bpw"]["defaults"].update({
+    "DCP": "4",
+    "MAX_MODEL_LEN": 524288,
+    "MAX_NUM_BATCHED_TOKENS": 3072,
+    "MAX_NUM_SEQS": 8,
+    "MTP_TOKENS": 5,
+    "DCP_CKV_PREFETCH_DEPTH": "0",
+    "DCP_CKV_GATHER_MAX_TOKENS": 140000,
+    "DCP_KV_CACHE_INTERLEAVE_SIZE": "64",
+    "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS": -1,
+    "GPU_MEMORY_UTILIZATION": 0.957,
+    # 2,048 * 64 * DCP4 = exactly 524,288 logical tokens.
+    "GPU_BLOCKS_OVERRIDE": 2048,
+    "OFFLOAD_FRACTION": 0,
+    "PREFIX_CACHE_BACKEND": "native",
+    "PREFIX_CACHE_DISK_GB": 0,
+    "PCIE_CALIBRATION": "off",
+    "MAX_CUDAGRAPH_CAPTURE_SIZE": 48,
+    "CUDAGRAPH_CAPTURE_SIZES":
+        "4,8,12,16,20,24,28,32,36,40,44,48",
+    "VLLM_EXL3_TRELLIS_MAX_M": 48,
+})
+VARIANTS["exl3-tr3-3.25bpw"]["runtime_env"].update({
+    # Mixed-K loading replaces thousands of per-expert safetensor allocations
+    # with tier-contiguous slabs. Expandable segments plus the patch's
+    # post-layer cache release avoid an otherwise deterministic preparation
+    # OOM on four 96 GB cards.
+    "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+    "SAFETENSORS_FAST_GPU": "1",
+    # DCP4 selected routes from the qualified mixed-K launch.
+    "VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE": "0",
+    "VLLM_DCP_TOPK_OWNER_MERGE": "1",
+    "VLLM_DISABLE_SHARED_EXPERTS_STREAM": "1",
+})
 
 # MTP draft types -> the three env knobs the serve path actually consumes.
 # `tr3-graft`   in-place surgery on layer 78 of the target (the ONLY draft with
@@ -596,8 +633,10 @@ KNOBS = [
          rationale=(
              "0 lets vLLM profile all available KV and is the GLM release default "
              "(roughly 1.0-1.1M tokens on the v29 4x96 GB profile). A positive value "
-             "pins a reproducible smaller pool; 2048 blocks means 524,288 logical "
-             "tokens at TP4/DCP4. A pin must still fit MAX_MODEL_LEN.")),
+             "pins a reproducible smaller pool. On the measured MLA stack logical "
+             "capacity is blocks x 64 x DCP, so 2048 blocks means 524,288 tokens "
+             "at TP4/DCP4; do not multiply the requested block count by DCP a "
+             "second time. A pin must still fit MAX_MODEL_LEN.")),
 
     dict(key="KV_CACHE_DTYPE", type="choice", default="fp8",
          choices=["auto", "fp8", "nvfp4_ds_mla"], group="Model", scope="engine",
@@ -875,18 +914,14 @@ KNOBS = [
          choices=["safetensors", "instanttensor"],
          group="Memory", scope="engine", label="Weight loader",
          rationale=(
-             "safetensors is the generic fallback. On the balanced EXL3 profile, "
-             "InstantTensor is the measured default: it reduced target+draft loading "
-             "from 60.5-62.6s to 32.4-33.1s, passed five first-attempt boots and two "
-             "exact ~517K five-depth retrievals, and showed no systematic PP/TG "
-             "change. Safetensors OOMed at the same 514K prefill boundary with both "
-             "auto and exact KV pools because the final sparse-indexer allocation "
-             "could not obtain a contiguous 352 MiB segment. InstantTensor uses about "
-             "0.04 GiB/GPU more resident model memory. GG v20-r9's retained "
-             "graph-aware profiler additionally accounts for retained CUDA "
-             "graphs. The final r9 dynamic-token shape passed the complete "
-             "524288 envelope at GMU 0.955; larger batches or a larger CKV "
-             "gather ceiling reduced PP and/or KV headroom.")),
+             "safetensors is the r11 production default. The immutable r11 image "
+             "loaded all 81 target shards in 91.36s from a warm local store, passed "
+             "the OpenAI feature suite and an exact 522,360-token five-depth "
+             "retrieval, then reused its on-disk AOT cache without corruption or a "
+             "throughput collapse. InstantTensor remains an explicit experiment: it "
+             "can load faster when it works, but prior qualification found "
+             "intermittent startup stalls and memory-shape failures. Loader changes "
+             "remain a cold-boot, performance and near-maximum-correctness boundary.")),
 
     dict(key="MODEL_OUTPUT_LIMIT", type="int", default=131072, min=256, max=262144,
          group="Serving", scope="engine", label="Client output limit",
@@ -917,14 +952,16 @@ KNOBS = [
          choices=["native", "lmcache"], group="Memory", scope="engine",
          label="External prefix-cache backend",
          rationale=(
-             "native uses vLLM's in-process OffloadingConnector, the established "
-             "turnkey control. lmcache uses GG v20-r11's DCP-aware LMCache MP "
+             "native uses vLLM's in-process OffloadingConnector. lmcache uses GG "
+             "v20-r11's DCP-aware LMCache MP "
              "connector. Both treat OFFLOAD_FRACTION as aggregate host-DRAM L1 "
              "capacity and neither enlarges active GPU KV. LMCache adds independent "
              "health/metrics, durable L2 support, prefetch and restart-safe cache "
-             "management, but also adds a supervised process and a connector "
-             "boundary. Keep native until the exact model/runtime shape passes the "
-             "evict-and-reload gate; promote LMCache only from measured evidence.")),
+             "management, but also adds a supervised process and connector boundary. "
+             "The r11 GLM profile promotes LMCache after a 125 GiB four-worker DRAM "
+             "gate, complete feature and 522,360-token retrieval suites, and a "
+             "restart-persistent bounded NVMe test. Native remains the rollback "
+             "control.")),
 
     dict(key="PREFIX_CACHE_DISK_GB", type="int", default=0, min=0, max=8192,
          group="Memory", scope="engine", label="LMCache NVMe limit (GiB)",
@@ -1804,18 +1841,19 @@ def validate(cfg: dict, context=None):
              "The fixed pool can preserve transient runtime workspace, but it also "
              "caps context/concurrency and is hardware/model specific; verify its "
              "reported token capacity and run the near-maximum correctness gate.")
-    qualified_r9_512k = (
+    qualified_r11_512k = (
         is_glm
         and cfg["MODEL_VARIANT"] == "exl3-tr3"
-        and cfg["LOAD_FORMAT"] == "instanttensor"
+        and cfg["LOAD_FORMAT"] == "safetensors"
         and cfg["DCP"] == "2"
         and cfg["MAX_MODEL_LEN"] == 524288
         and cfg["MAX_NUM_BATCHED_TOKENS"] == 3072
         and cfg["MAX_NUM_SEQS"] == 8
         and cfg["DCP_CKV_GATHER_MAX_TOKENS"] == 140000
-        and cfg["GPU_MEMORY_UTILIZATION"] == 0.955
+        and cfg["GPU_MEMORY_UTILIZATION"] == 0.957
         and cfg["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"
         and cfg["KV_SCALE_MODE"] == "dynamic-token"
+        and cfg["PREFIX_CACHE_BACKEND"] == "lmcache"
         and cfg["MTP_TOKENS"] == 5
         and cfg["MAX_CUDAGRAPH_CAPTURE_SIZE"] == 64
         and cfg["VLLM_EXL3_TRELLIS_MAX_M"] == 64
@@ -1826,31 +1864,26 @@ def validate(cfg: dict, context=None):
     if (is_glm and cfg["MODEL_VARIANT"].startswith("exl3-tr3")
             and cfg["LOAD_FORMAT"] == "instanttensor"
             and cfg["MAX_MODEL_LEN"] >= 524288
-            and cfg["GPU_MEMORY_UTILIZATION"] <= 0.978
-            and not qualified_r9_512k):
+            and cfg["GPU_MEMORY_UTILIZATION"] <= 0.978):
         warn("instanttensor-context-margin",
              ["LOAD_FORMAT", "MAX_MODEL_LEN", "GPU_MEMORY_UTILIZATION"],
              "an earlier TP4/DCP2 EXL3 shape at MAX_MODEL_LEN=524288 and "
              "GPU_MEMORY_UTILIZATION=0.978 failed KV admission on both InstantTensor "
              "attempts: 9.04 GiB was needed and 9.03 GiB remained. InstantTensor "
              "loaded ~0.04 GiB/GPU more resident model memory than safetensors. "
-             "The qualified r9 exception is exact: DCP2, GMU 0.955, batch 3,072, "
-             "CKV gather 140,000, dynamic-token KV, auto-sized pool, and vision "
-             "off exposed 543,488 KV tokens and passed a 521,275-token five-depth "
-             "retrieval. Restore that shape or re-qualify this override from a "
-             "cold start; do not disable graph accounting.")
+             "The r11 production profile therefore uses safetensors. Re-qualify "
+             "this override from a cold start and at maximum context; do not infer "
+             "reliability from one successful InstantTensor boot.")
     if (cfg["GPU_MEMORY_UTILIZATION"] > 0.95
             and not cfg["GPU_BLOCKS_OVERRIDE"] and not fixed_kv):
-        if qualified_r9_512k:
+        if qualified_r11_512k:
             warn("gpu-util-high", ["GPU_MEMORY_UTILIZATION"],
                  f"{cfg['GPU_MEMORY_UTILIZATION']} is high by generic vLLM standards, "
-                 "but the GG v20-r9 dynamic-token DCP2/524,288 profile at 0.955 "
-                 "passed repeated cache-reused starts, the complete OpenAI feature "
-                 "suite, and a 521,275-token five-depth retrieval on AIBeast. "
-                 "It exposed 543,488 KV tokens and retained 576 MiB/GPU after "
-                 "the maximum-context gate. The 0.9675 candidate exposed more "
-                 "KV but OOMed on a 108 MiB all-gather while a client request "
-                 "overlapped the long-context gate. "
+                 "but the GG v20-r11 safetensors/DCP2/LMCache profile at 0.957 "
+                 "passed a cold boot, a same-image AOT-cache restart, the complete "
+                 "OpenAI feature suite, and an exact 522,360-token five-depth "
+                 "retrieval on AIBeast. It exposed 542,208 logical KV tokens on "
+                 "the cold qualification boot. "
                  "A new driver, GPU SKU, loader, graph shape, or vision setting is still "
                  "a cold-boot and near-maximum retrieval requalification boundary.")
         else:
@@ -1869,6 +1902,20 @@ def validate(cfg: dict, context=None):
              "the proposal's transient allocation. The measured 512K profile pins "
              "2048 blocks. Keep that pin, or re-run the 32K and near-maximum needle "
              "gates before trusting this configuration.")
+    if (is_glm and cfg["MODEL_VARIANT"] == "exl3-tr3-3.25bpw"
+            and cfg["MAX_MODEL_LEN"] >= 524288
+            and cfg["GPU_BLOCKS_OVERRIDE"] >= 2048
+            and cfg["MTP_TOKENS"] >= 5
+            and cfg["OFFLOAD_FRACTION"] > 0):
+        err("mixed-325-offload-headroom",
+            ["MODEL_VARIANT", "MAX_MODEL_LEN", "GPU_BLOCKS_OVERRIDE",
+             "MTP_TOKENS", "OFFLOAD_FRACTION"],
+            "the qualified 3.25bpw DCP4/MTP5 512K profile needs its remaining "
+            "runtime VRAM. With LMCache over 50% DRAM, short API checks passed "
+            "but the first 32K prefill OOMed when a PCIe all-reduce requested "
+            "36 MiB. Keep OFFLOAD_FRACTION=0 for this exact full-context shape, "
+            "or lower context/speculation and re-run cold prefill plus the "
+            "near-maximum retrieval gate.")
     logical_tokens_per_block = 64 * int(cfg.get("DCP", "1"))
     if (cfg["GPU_BLOCKS_OVERRIDE"]
             and cfg["GPU_BLOCKS_OVERRIDE"] * logical_tokens_per_block

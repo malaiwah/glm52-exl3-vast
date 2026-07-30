@@ -4,13 +4,14 @@ This is the challenge record for the `glm52-exl3` balanced profile, not a list
 of folklore flags. The parameter decisions were isolated on the July 27 v31
 control (vLLM `0c79e41`, SparkInfer `c3828fd`) using four RTX PRO 6000
 Blackwell cards at 280 W, driver 595.71.05 and CUDA 13.2, then exercised on
-Vast and Runpod. The release candidate pins GG v20-r9
-(`voipmonitor/vllm@sha256:82460244…`, vLLM integration tree `34f26c2`,
-SparkInfer tree `de7739a`). r9 retains r8's XGrammar 0.2.5 and opt-in
-DCP-aware LMCache, but adds paired dynamic-token NVFP4 and adaptive exact
-indexer-fold sources. Those source changes are a new requalification boundary;
-the r5/r8 performance evidence remains the control rather than being
-retroactively attributed to r9.
+Vast and Runpod. The current candidate pins GG v20-r11
+(`voipmonitor/vllm@sha256:eb4ece37…`, vLLM
+`0.11.2.dev280+…r11`, LMCache `0.5.2+glm52dcp.4`, XGrammar 0.2.5).
+r11 retains r9's paired dynamic-token NVFP4 and adaptive exact indexer-fold
+sources, and updates the LMCache/DCP transfer stack. The appliance adds a
+hash-pinned parity repair and mixed-K EXL3 support; its compile-cache ABI
+namespace is therefore distinct from both stock r11 and earlier turnkey
+images.
 
 The restored safetensors control started on its first attempt, loaded the
 target in 57.63 seconds and the draft in 0.78 seconds, directly loaded both
@@ -43,11 +44,12 @@ Its exact log is preserved at:
 | `glm47` tool parser + auto tool choice | off | GLM native tool syntax | tool calls and agentic loops work | parser bugs can affect malformed calls | retain; feature-suite gated |
 | prompt-token details + forced stream usage | off | appliance observability and UI accounting | exact PP tests and streamed usage | tiny response/CPU overhead | retain |
 | quantization `exl3` | inferred/none | target is an EXL3 rank-sliced checkpoint | makes the 753B model fit four 96 GB cards with measured quality | custom kernel/source layer; SM120-only qualification | retain |
-| `MAX_MODEL_LEN=524288` | checkpoint advertises 1,048,576 | final r9 dynamic-token TP4/DCP2 shape exposes 543,488 KV tokens at GMU 0.955 | exact 521,275-token five-depth pass, 5/5 retrieval, no degeneration | only 1.04× maximum-request concurrency; any memory-shape change requires requalification | retain |
+| mixed-K EXL3 preparation patch | stock r11 retains rank-sliced source tensors after preparing each tier | release consumed source backings after each prepared layer and empty the allocator cache; exact source hash is image-verified | lets the 315.9 GiB 3.25-bpw target plus native layer-78 MTP fit TP4 | turnkey/source ABI change; compile namespace and every new EXL3 head require requalification | retain for mixed-K; inert on uniform 3.0 bpw |
+| `MAX_MODEL_LEN=524288` | checkpoint advertises 1,048,576 | final r11 safetensors TP4/DCP2 shape exposed 542,208 logical KV tokens at GMU 0.957 | exact 522,360-token five-depth pass, 5/5 retrieval, no degeneration | only one near-maximum session; any memory-shape change requires requalification | retain |
 | RoPE clamp to 524,288 | checkpoint table is 1,048,576 | served and allocated envelopes must agree | avoids building/using unnecessary tables outside admission | changing context requires regeneration/requalification | retain |
 | `use_index_cache=true` + GLM sparse-layer pattern | checkpoint/runtime dependent | GLM has learned sparse-attention layers | required for the intended DSA path and long-context performance | incorrect pattern corrupts attention routing | retain; checkpoint-coupled |
-| load format `instanttensor` | auto | cold and reused-cache boots plus 510K- and 521K-class retrievals passed | target+draft load ~33 s; avoids the safetensors near-max fragmentation/OOM observed three times | the full-512K result is exact-shape evidence, not a generic loader guarantee | retain as balanced default |
-| safetensors | auto/fallback | operator-selectable generic loader | conventional loader and valid for shorter gates | failed three times at the 514,432-token boundary on this near-max shape; not full-envelope-qualified | fallback only |
+| load format `safetensors` | auto | exact r11 cold/warm boots and 522,360-token retrieval passed | reliable conventional loader; 81 shards loaded in 91.36s from warm local storage | slower than the best historical InstantTensor loads | retain as balanced default |
+| InstantTensor | opt-in | historical speed experiment | earlier warm loads reached ~33 s without systematic PP/TG change | later cold starts stalled before GPU allocation and its memory boundary varied | experiment only |
 | attention backend `B12X_MLA_SPARSE` | auto | SM120 GLM sparse MLA implementation | required for the measured PP/TG/context envelope | custom fork and kernels | retain |
 | MoE backend `b12x` | auto | Blackwell routed-expert path | contributes to >100 tok/s C1 with MTP | hardware-specific and actively developed | retain |
 | TP4 | 1/detected | four local cards and rank-sliced target | model fit and full-card utilization | inter-card traffic | retain, derived from detected GPU count |
@@ -57,10 +59,12 @@ Its exact log is preserved at:
 | static-calibrated NVFP4 | uncalibrated unless configured | select and checksum `/opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json` | keeps the reviewed 432-byte BF16-RoPE record for compatibility and independently qualified variants | artifact is GLM-specific; wrong/missing bytes must fail startup | retain fallback |
 | dynamic-token NVFP4 | off | flagship `KV_SCALE_MODE=dynamic-token` selects the paired 368-byte FP8-RoPE record | mean KLD 0.1167701185 reproduced twice; two exact 510,533-token prompts retrieved 5/5 needles without degeneration | new vLLM/SparkInfer ABI; every image/driver change remains a requalification boundary | retain EXL3 default |
 | adaptive exact indexer fold | `auto`, 256 MiB | retain source default | uses the parallel exact fold only inside a bounded candidate-slab budget and exact streaming carry otherwise | changes transient memory planning versus r8 | retain auto; remeasure capacity |
-| GPU utilization 0.955 | 0.9 | r9 dynamic-token safety point with graph profiling | exposed 543,488 KV tokens, preserved the 524,288 request limit, and retained 576 MiB/GPU after the maximum-context gate | 1.04× maximum-request concurrency; rentals and driver changes still require a cold boot | retain flagship |
-| explicit block override | auto | zero lets the corrected profiler size it | InstantTensor exposes 523,776 tokens and retains runtime headroom | an exact 4,064-block pin did not rescue safetensors and increased fragmentation | retain auto |
+| GPU utilization 0.957 | 0.9 | r11 safetensors safety point with graph profiling | exposed 542,208 logical KV tokens on the cold boot and passed an exact 522,360-token request; the same-stack warm boot exposed 553,472 | little spare VRAM at the maximum gate; rentals and driver changes still require a cold boot | retain flagship |
+| explicit block override | auto | zero lets the corrected profiler size it | adapts to the measured runtime profile and preserved the 524,288 request envelope | a pin is exact only for one driver/image/graph shape | retain auto |
 | prefix caching | off/model dependent | agentic workloads repeat large histories | avoids re-prefill when a prefix remains resident | KV bookkeeping/memory | retain |
-| DRAM offload 50% | off | L2 prefix cache, not active-GPU-KV expansion | 125.5 GiB aggregate host tier can restore large evicted prefixes faster than PP | experimental connector; host memlock is only ~31 GiB per worker and must be raised for fully pinned pages | retain with explicit warning |
+| LMCache DRAM offload 50% | off | L2 prefix cache, not active-GPU-KV expansion | 125 GiB aggregate four-worker tier passed feature and exact 522,360-token gates; independent metrics and supervision replace the native connector control | separate process/connector boundary and substantial host-RAM use | retain flagship; native connector is rollback |
+| LMCache initial L1 arena | upstream 20 GiB lazy default | `min(20 GiB, configured L1)`; retain the 125 GiB ceiling but grow beyond 20 GiB on demand | avoids taking half of host DRAM before a 316 GiB NFS checkpoint pages through cachefilesd | the first cache growth can add allocation latency | retain; live restart gate required |
+| LMCache filesystem tier | off | opt-in capacity for many evicted agentic prefixes | a bounded 32 GiB `/mnt/fast/lmcache/glm52-r11` trial survived engine replacement and restored an identical prompt from L2 in 0.465s | the first 64K write took 166.9s and derived KV is sensitive | opt-in only; local RAID0 NVMe, never NFS |
 | offload failure policy `recompute` | connector default varies | cache is an optimization | page/load failure does not kill inference | a miss pays full PP | retain |
 | maximum sequences 8 | 256 | product concurrency target is C1–C8 | aggregate generation rises through C8 | eight maximum-length sessions cannot coexist; graph/trellis window must cover `8×(1+MTP)` | retain |
 | batched tokens 3,072 | model-dependent | direct r9 A/B beat 3,200 at 8K, 64K, 128K, and 180K | best measured PP while keeping activation memory compatible with 524,288 and preserving decode | vLLM emits a generic speculative-slot warning | retain; 3,200 was slower and 4,096 previously failed admission |
@@ -77,6 +81,22 @@ Its exact log is preserved at:
 | block verification | opt-in | matched GLM temperature-one A/B plus exact long-context gate | passed the exact ~517K 5/5 retrieval; C1 improved 14.4% and C8 1.5% | C2 fell 7.5% and C4 10.9%; benefit is output/concurrency-sensitive | experiment only |
 | structured-output backend `auto` | auto | no forced backend | tool calling remains independent and usable | schema compilation can add latency; GLM reasoning+MTP edge cases exist upstream | retain optional |
 | vision | off | both tested compositions failed one mandatory gate | preserves full text quality/context | no default image capability | retain off |
+
+### Higher-fidelity 3.25-bpw variant deviations
+
+This option deliberately does not inherit every balanced-profile choice. Its
+mixed 3/4-bit weight layout and memory shape were qualified independently:
+
+| parameter | selected value | reason / measured benefit | cost / boundary |
+|---|---|---|---|
+| topology | TP4/DCP4, interleave 64 | model plus native MTP5 fit and exact 524,288-token pool | slower ordinary decode than DCP2 |
+| KV pool | 2,048 blocks | `2,048 × 64 × DCP4 = 524,288`; exact 522,360-token gate passed | one maximum-length request; do not multiply the block count by DCP again |
+| graph/trellis window | 48 | exactly covers `C8 × (1 + MTP5)` | 0.20 GiB/GPU graph pool |
+| offload | disabled | retains ~560 MiB/GPU after first-use JIT; 32K cold prefill passed | repeated evicted prefixes recompute |
+| LMCache | rejected at full shape | short features passed, then first 32K prefill OOMed on a 36 MiB all-reduce after four GPU transfer contexts initialized | use the 3.0-bpw flagship for DRAM/NVMe prefix reuse, or lower 3.25 context/speculation and requalify |
+| performance | PP 2,407.9/2,262.1 at 32K/128K; TG 128.0 C1 / 285.3 C8 | still clears the appliance's >100 tok/s C1 goal while improving checkpoint KLD | ~3–6% PP, 14% C1, and 26% C8 below the 3.0-bpw control |
+| independent KLD | 0.0927076684 over 2,047 positions | better than the quant author's 0.095971 and the appliance's matched 3.0-bpw 0.1167701185 | one fixed reference window; rerun after any model/KV/runtime change |
+| power at 280 W/card | 271.6 W/GPU prefill; 251.9 W/GPU decode; 272.5 W/GPU exact 522,360-token retrieval | confirms the workload is predominantly power-bound on AIBeast | electrical headroom, clocks and topology affect portability |
 
 ## Runtime environment deviations
 
@@ -96,21 +116,21 @@ Rows whose value equals the current source default are still called out.
 | `NCCL_P2P_LEVEL` | auto | `SYS`, permits cross-root PCIe P2P | may choose a slower path on unusual hosts | retain; topology probe required |
 | `NCCL_PROTO` | auto | `LL,LL128,Simple`, leaves all relevant protocols available | prevents future NCCL policy from using a new protocol | pin for tested image |
 | local NCCL preload/path variables | system NCCL discovery | pinned local-inference NCCL 2.30.4 library | ABI/version coupling | retain with image digest |
-| `VLLM_ENGINE_READY_TIMEOUT_S` | 600 s | 2,400 s for 300+ GiB cold starts and graph compilation | slower failure reporting | retain; supervisor still reports phases |
+| `VLLM_ENGINE_READY_TIMEOUT_S` / verification health timeout | 600 s / 2,400 s | 3,600 s for a 300+ GiB cold NFS/cachefilesd page-in plus compilation | slower final failure verdict; boot phases and process liveness remain visible | retain; the first 3.25bpw page-in exceeded 40 minutes without being wedged |
 | `VLLM_USE_FLASHINFER_SAMPLER` | true | `1`, same as fork default | none beyond FlashInfer dependency | pin |
 | `VLLM_USE_AOT_COMPILE` | false | `1` | persistent compiled model reloads in ~1.1 s instead of recompiling | stale/corrupt caches were a historical risk; fingerprint and retrieval gate are mandatory | retain |
 | `VLLM_USE_MEGA_AOT_ARTIFACT` | false | `1` | reconstructs 77 target artifacts and two draft artifacts directly | disk usage and strict software/config fingerprint | retain |
-| compile/autotune cache directories | user cache | immutable-checkpoint-external persistent volume, namespaced by the base image's `LOCAL_INFERENCE_CACHE_FINGERPRINT` | reuse survives same-stack container replacement, cannot mutate weights, and r9 artifacts cannot leak into r11 | consumes local SSD; a new source stack cold-compiles into a new namespace | retain |
+| compile/autotune cache directories | user cache | immutable-checkpoint-external persistent volume, namespaced by `LOCAL_INFERENCE_CACHE_FINGERPRINT` plus `turnkey-exl3mixk4` | same-stack restart loaded the backbone AOT artifact in 0.55s without corruption or low throughput; old parity/mixed-K source cannot leak in | consumes local SSD; each source/patch ABI cold-compiles a new namespace | retain |
 | `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS` | true | `1`, same as fork default; an explicit expert `0` is honored | accounts the measured ~0.81 GiB/GPU graph high-water before KV allocation | reports less KV than older optimistic behavior | retain on; override requires cold runtime and near-max requalification |
 | `VLLM_MEMORY_PROFILE_INCLUDE_ATTN` | false | `1` | includes persistent DCP/attention resources before sizing KV | lower advertised KV is possible | retain for reliable high-GMU boot |
 | `VLLM_USE_V2_MODEL_RUNNER` | auto | `1`, release-qualified execution path | new runner changes rapidly | retain with pinned image |
 | `VLLM_USE_BREAKABLE_CUDAGRAPH` | false | `0`, same as default | full qualified graph behavior | less flexible dynamic escape | pin |
-| `VLLM_EXL3_EXT_PATH` / `VLLM_EXL3_ABI_SHIM` | unset | pinned extension directory and Torch 2.12 shim | exact ABI coupling | retain; required |
+| `VLLM_EXL3_EXT_PATH` / `VLLM_EXL3_ABI_SHIM` | unset | explicitly unset; r11 carries the reviewed EXL3 integration in the image | an older external extension cannot be injected as a compatibility shortcut | retain unset |
 | `VLLM_EXL3_TRELLIS_BLOCK_M` | 8 | `8`, validated kernel geometry | none versus current default | pin |
 | `VLLM_EXL3_PREFILL_BLOCK_M` | 64 | `64`, issue-33/EXL3 planned prefill | another GPU might prefer a different tile | pin measured geometry |
-| `VLLM_EXL3_PREFILL_CHUNK` | 128 | `1`, selected DCP2 issue-33 route | more planner/launch granularity; surprising versus source default | retain only because profile evidence includes it; isolate in future A/B |
+| `VLLM_EXL3_PREFILL_CHUNK` | 128 rows in r11 | `128`, matching the r11 row-count contract | covers the target parity window; the former boolean-like value `1` fails r11 memory profiling | source-contract change from older images | retain |
 | `VLLM_EXL3_TRELLIS_MAX_M` | 32 | `64` | covers C8×MTP5 query geometry without eager fallback | larger arena/compile surface | retain |
-| `VLLM_NVFP4_MLA_SCALES_FILE` | unset | reviewed GLM scale JSON, exact SHA-256 verified at boot | avoids the silent uncalibrated path when bypassing the upstream launcher | checkpoint-family-specific artifact | retain static default |
+| `VLLM_NVFP4_MLA_SCALES_FILE` | unset | unset for the qualified dynamic-token profile; static mode alone requires the reviewed, hash-verified GLM scale JSON | dynamic mode changes the KV record ABI; static mode is a separate qualification | retain dynamic default; never combine modes |
 | `KV_FP8_ROPE` / `VLLM_NVFP4_MLA_DYNAMIC_SCALE` | `0` / `0` | both `1` only for `KV_SCALE_MODE=dynamic-token`; static file unset | selects the complete paired r9 record ABI | partial/mixed configuration is invalid | experiment as one atomic mode |
 | `SPARKINFER_INDEXER_TWO_LEVEL_FOLD` / `_MAX_MIB` | `auto` / `256` | retain | exact parallel fold below budget, exact streaming carry above it | default-on source change needs capacity/perf observation | retain |
 | `VLLM_DISABLED_KERNELS` | empty | disable `MarlinFP8ScaledMMLinearKernel` | removes a generic fallback | retain; checkpoint path is not Marlin |
@@ -217,6 +237,16 @@ Only changes with a plausible path to a product requirement advance:
    applied universally. The current Brandon control already passed the
    five-depth 521K gate; a checkpoint-specific policy requires a frozen cold
    discriminator showing a real failure and a no-regression ladder.
+5. r11 remains immutable. Upstream vLLM PR #190 has since moved EXL3 to
+   SparkInfer PR #90's unified fused-W4A16 API. Its runtime, scratch ownership,
+   and compile identity differ from the qualified r11 path, so it belongs in a
+   later image qualification rather than an in-place production patch.
+6. LMCache PR #4211 reports silent native-L2 drops when a multiprocess store
+   batch contains mixed object sizes. The qualified GLM workload restored an
+   identical 64K prefix from local filesystem L2, but this open upstream bug
+   reinforces the decision to keep NVMe opt-in, bounded, observable, and
+   subject to a restart-restore gate. DRAM L1 does not traverse that L2 store
+   adapter.
 
 The proposed 4,096-token batch was tested and rejected before benchmarking.
 It created a correctly distinct compile key and compiled normally, but raised

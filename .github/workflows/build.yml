@@ -20,7 +20,7 @@ jobs:
         with:
           persist-credentials: false
       - name: shellcheck boot scripts
-        run: shellcheck entrypoint.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh
+        run: shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh
       - name: validate Python
         run: python3 -m py_compile landing.py scripts/*.py
       # Guards the destructive path: provider detection, the terminate
@@ -34,6 +34,8 @@ jobs:
       # stay scoped to the family they were measured on.
       - name: model family tests
         run: python3 tests/test_families.py
+      - name: mixed-K EXL3 patch
+        run: python3 tests/test_exl3_mixk_patch.py
       - name: deSEC DNS-01 convergence guard
         run: python3 tests/test_desec_acme_guard.py
       # Catches "the knob exists but nothing reads it" — the class of defect that

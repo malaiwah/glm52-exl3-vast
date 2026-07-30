@@ -70,10 +70,15 @@ attempt() {
     propagation=(--dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-45s}")
   fi
   echo ">>> ACME attempt: $ACME_DOMAIN via $ACME_DNS_PROVIDER (bounded to ${attempt_timeout}s)"
+  local -a lego_args=(--accept-tos
+    --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}"
+    --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN")
+  if (( ${#propagation[@]} )); then
+    lego_args+=("${propagation[@]}")
+  fi
+  lego_args+=(--path "$lego_path" run)
   timeout --signal=TERM --kill-after=10 "$attempt_timeout" \
-    lego --accept-tos --email "${ACME_EMAIL:-admin@$ACME_DOMAIN}" \
-      --dns "$ACME_DNS_PROVIDER" --domains "$ACME_DOMAIN" \
-      "${propagation[@]}" --path "$lego_path" run && rc=0
+    lego "${lego_args[@]}" && rc=0
   [[ -z "$guard_pid" ]] ||
     { kill "$guard_pid" 2>/dev/null || true; wait "$guard_pid" 2>/dev/null || true; }
   cleanup_challenge

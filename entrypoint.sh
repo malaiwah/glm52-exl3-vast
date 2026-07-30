@@ -1259,7 +1259,7 @@ compute_vision_args() {
 export CUDA_DEVICE_MAX_CONNECTIONS=32 CUTE_DSL_ARCH=sm_120a OMP_NUM_THREADS=16
 export SAFETENSORS_FAST_GPU=1 NCCL_IB_DISABLE=1 NCCL_P2P_LEVEL=SYS NCCL_PROTO=LL,LL128,Simple
 export TORCH_CUDA_ARCH_LIST=12.0a FLASHINFER_CUDA_ARCH_LIST=12.0f FLASHINFER_DISABLE_VERSION_CHECK=1
-export VLLM_ENGINE_READY_TIMEOUT_S=2400
+export VLLM_ENGINE_READY_TIMEOUT_S=3600
 export VLLM_USE_FLASHINFER_SAMPLER=1
 unset NCCL_GRAPH_FILE NCCL_GRAPH_DUMP_FILE
 # The base image still carries three historical launcher switches that no
@@ -1687,7 +1687,10 @@ fi
 # the persistent path gives warm restarts for the same immutable stack without
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3abi1"
+# Both the r11 parity repair and mixed-K EXL3 support change source consumed by
+# Dynamo/Inductor. They are uniform-checkpoint-compatible, but not compatible
+# with compiled objects from the older exl3abi1 source tree.
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3mixk4"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2
@@ -2003,7 +2006,7 @@ start_verifier() {
     --out "$VERIFY_FILE" --pid "$SRV_PID" \
     --max-model-len "${MAX_MODEL_LEN:-524288}" \
     --needle-tokens "${VERIFY_NEEDLE_TOKENS:-32768}" \
-    --timeout "${VERIFY_HEALTH_TIMEOUT_S:-2400}" \
+    --timeout "${VERIFY_HEALTH_TIMEOUT_S:-3600}" \
     ${_skip_lc[@]+"${_skip_lc[@]}"} >/dev/null 2>&1 &
   VERIFY_PID=$!
   return 0

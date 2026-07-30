@@ -1356,3 +1356,142 @@ machine id and permanent-destruction acknowledgement. The worker stopped the
 engine, erased the session and destroyed VM 460920 through JarvisLabs. The CLI
 subsequently reported zero VMs, zero attached File Storage and a $60.0603
 remaining balance; the instance's deSEC A and ACME TXT records were absent.
+
+### GG v20-r11 flagship + LMCache qualification (AIBeast, 2026-07-30)
+
+The r11 appliance was qualified on AIBeast's four RTX PRO 6000 Blackwell
+96 GB cards at 280 W/card, driver 595.71.05 and CUDA 13.2. The exact base
+reports vLLM `0.11.2.dev280+…r11`, LMCache `0.5.2+glm52dcp.4`, XGrammar
+0.2.5, and source fingerprint
+`vllm4247d67653-b12xf9be272495-164b028d1c7c1c6b`.
+
+The selected 3.0bpw control is TP4/DCP2, external rank-sliced TR3 MTP5,
+probabilistic draft sampling, dynamic-token NVFP4 MLA KV with FP8 RoPE,
+3,072 batched tokens, 140,000-token CKV gather, GMU 0.957, safetensors,
+LMCache over 50% aggregate host DRAM, and a 524,288-token request limit.
+Vision is off.
+
+Cold startup loaded all 81 target shards in 91.36 seconds, completed model
+load in 135.08 seconds, compiled the backbone in 39.15 seconds and the
+speculative head in 4.05 seconds, then captured graphs in about 30 seconds.
+The API reached health in about 9m46s including cold extensions/AOT and
+exposed 542,208 logical KV tokens.
+
+The complete feature suite passed tokenization, thinking/no-thinking,
+streaming usage, preserve-thinking multi-turn, strict JSON in both reasoning
+modes, automatic and required tool calls, and tool-result continuation. An
+exact 522,360-token request retrieved all five needles at 1%, 10%, 50%, 90%
+and 99% without degeneration in 233.97 seconds. Steady prefill log windows
+were mostly 2,150–2,458 tok/s.
+
+A matched temperature-one benchmark measured:
+
+| metric | result |
+|---|---:|
+| uncached PP 32K / 128K | 2,479.9 / 2,393.1 tok/s |
+| aggregate TG C1 / C8 | 149.3 / 387.5 tok/s |
+| MTP5 mean acceptance length C1 / C8 | 5.16 / 5.74 |
+| average draft acceptance C1 / C8 | 83.2% / 94.8% |
+
+One unrelated client overlapped part of that matrix, so it is a loaded
+production observation rather than an isolated absolute record.
+
+The final source-exact image (including the parity and mixed-K loader
+patches) was then run on a private `:18000` maintenance endpoint to exclude
+agent traffic. It passed the complete feature suite and measured 2,665.3 /
+2,484.5 tok/s at 32K / 128K, 156.0 tok/s at C1 and 353.1 tok/s at C8. MTP5
+MAL was 5.36 / 5.29 with 87.1% / 85.8% draft acceptance; all requests
+completed without preemption or error. A preceding `:8000` sample was
+discarded because server logs proved unrelated requests were running and
+waiting throughout it.
+
+The same immutable image then warm-started against its existing compiled
+cache. The backbone AOT artifact loaded in 0.55 seconds, the small
+speculative head compiled in 3.63 seconds, graph capture took about 11
+seconds, and the exact response `CACHE-REUSE-OK` was returned. The API was
+healthy in about 6m22s despite concurrent checkpoint traffic through the same
+storage cache, and exposed 553,472 logical KV tokens. There was no corruption,
+degeneration, or historical low-throughput cache failure. Compiled artifacts
+are therefore retained only inside the immutable runtime fingerprint plus
+turnkey EXL3 patch-ABI namespace.
+
+The dynamic-NVFP4 KLD protocol independently reproduced mean
+`0.1167701184931591` over 2,047 positions. The reference bundle contains one
+window; standard deviation zero is therefore structural (`n=1`), not a claim
+of zero variance.
+
+LMCache's four-worker 125 GiB DRAM tier remained healthy through the feature,
+performance and exact maximum-context gates. Its optional filesystem L2 was
+separately tested at `/mnt/fast/lmcache/glm52-r11` with a 32 GiB hard limit.
+The first 64K write cost 166.9 seconds, so disk is not a latency-free default;
+after complete engine replacement, the identical prefix restored from L2 in
+0.465 seconds and proved persistence. The directory consumed about 3.0 GiB.
+The production default is DRAM-only; filesystem L2 is opt-in, local RAID0
+NVMe only, never the NFS checkpoint store.
+
+Credential-free artifacts are retained under
+`/mnt/fast/build/r11-qualification/` on AIBeast.
+
+### GG v20-r11 mixed 3.25-bpw qualification (AIBeast, 2026-07-30)
+
+`willfalco/GLM-5.2-EXL3-TR3-3.25bpw` revision `61d2b6b7…` is a
+315.9 GiB mixed-K checkpoint: 192 routed experts per layer use K=3 and 64 use
+K=4, including the checkpoint-native layer-78 draft. The stock r11 loader
+retained obsolete rank-sliced scale backings while preparing every tier and
+would deterministically OOM. The appliance's hash-pinned mixed-K patch drops
+each consumed source backing and releases the allocator cache after a prepared
+layer; the final target plus native MTP5 loaded at 82.93 GiB/GPU.
+
+The qualified shape is TP4/DCP4, native MTP5 with probabilistic proposals,
+dynamic-token NVFP4 MLA KV plus FP8 RoPE, batch 3,072, CKV gather 140,000,
+GMU 0.957, safetensors, vision off, and exactly 2,048 pinned blocks. On this
+stack, `2,048 × 64 × DCP4 = 524,288` logical KV tokens. The first attempted
+pin of 8,448 blocks incorrectly requested 2,162,688 tokens and OOMed; the
+configurator and documentation now state the unit relationship explicitly.
+
+The backbone reused its namespaced AOT artifact in 0.54 seconds. Model
+preparation/loading took 545.4–672.2 seconds across warm NFS runs; graph
+capture took 29 seconds and 0.20 GiB/GPU. After first-use 32K kernel
+compilation, about 560–642 MiB/GPU remained.
+
+The exact no-offload shape passed tokenization, thinking/no-thinking,
+streaming usage, preserve-thinking multi-turn, strict JSON with and without
+reasoning, automatic/required tool calls, duplicate suppression, and tool
+result continuation. Its isolated temperature-one matrix measured:
+
+| metric | 3.25 bpw | 3.0-bpw control | 3.25 delta |
+|---|---:|---:|---:|
+| uncached PP 32K | 2,407.9 tok/s | 2,479.9 | -2.9% |
+| uncached PP 128K | 2,262.1 tok/s | 2,393.1 | -5.5% |
+| aggregate TG C1 | 128.0 tok/s | 149.3 | -14.3% |
+| aggregate TG C8 | 285.3 tok/s | 387.5 | -26.4% |
+| MTP5 MAL C1 / C8 | 5.74 / 5.08 | 5.16 / 5.74 | workload-dependent |
+| draft acceptance C1 / C8 | 94.8% / 81.5% | 83.2% / 94.8% | workload-dependent |
+
+An actual 522,360-token prompt then recovered all five needles at 1%, 10%,
+50%, 90%, and 99% with no degeneration in 291.55 seconds. The endpoint stayed
+healthy and the log contained no engine error.
+
+External prefix cache changes the memory result. LMCache over 50% host DRAM
+passed the short feature suite and booted with the same 524,288-token pool,
+but its first 32K prefill OOMed when PCIe all-reduce requested another 36 MiB.
+The higher-fidelity profile therefore uses `OFFLOAD_FRACTION=0`; the default
+3.0-bpw flagship retains qualified LMCache DRAM/NVMe support.
+
+The independent dynamic-NVFP4 KLD run reported **0.09270766841426936** over
+2,047 positions. The same harness reported 0.1167701184931591 for the
+3.0-bpw control; the quant author's published dynamic values were 0.095971
+and 0.119525 respectively. The reference bundle has one window, so the
+standard deviation is structurally zero (`n=1`) rather than evidence of zero
+model variance.
+
+Power sampled once per second across all four 280 W-capped cards:
+
+| phase | mean/GPU | four-GPU mean | peak single GPU | mean utilization |
+|---|---:|---:|---:|---:|
+| 32K + 128K uncached prefill | 271.6 W | 1,086.5 W | 289.0 W | 97.6% |
+| C1 + C8 decode | 251.9 W | 1,007.6 W | 288.9 W | 97.4% |
+| exact 522,360-token retrieval | 272.5 W | 1,090.1 W | 288.9 W | 98.6% |
+
+Credential-free KLD, power, feature, benchmark, needle, and failure artifacts
+are retained under `/mnt/fast/build/r11-qualification/`.

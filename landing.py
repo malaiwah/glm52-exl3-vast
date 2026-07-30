@@ -25,6 +25,7 @@ import threading
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from string import Template
 from urllib.parse import parse_qs, urlparse
 
@@ -1745,6 +1746,16 @@ class DualProtocolServer(ThreadingHTTPServer):
     # alive indefinitely; each accepted socket gets a recv timeout below.
     daemon_threads = True
     timeout = LANDING_TIMEOUT
+
+    def server_bind(self):
+        # HTTPServer.server_bind performs a reverse-DNS lookup merely to fill
+        # server_name. Provider DNS can be absent or temporarily unhealthy
+        # during first boot, and that lookup otherwise stalls the dashboard
+        # before it has opened its socket.
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
 
     def get_request(self):
         sock, addr = self.socket.accept()

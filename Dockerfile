@@ -36,7 +36,9 @@ COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # call glm52-entry.sh from its remote onstart field. Keep the old path as a
 # compatibility alias so a stale provider template cannot strand a rental
 # before the landing page is reachable.
-RUN python3 /opt/scripts/patch_exl3_parity_abi.py \
+RUN echo "c0e6e7838cea034795d8ed79713504b52ee8ed596e5f35e28a59f53947b712a6  /opt/scripts/patch_exl3_mixk.py" | sha256sum -c - \
+ && python3 /opt/scripts/patch_exl3_parity_abi.py \
+ && python3 /opt/scripts/patch_exl3_mixk.py \
  && chmod +x /usr/local/bin/model-turnkey-entry.sh /opt/scripts/soul_controller.py /opt/scripts/soul_config.py \
       /opt/scripts/glm52_lmcache_wrapper.sh /opt/scripts/acme_retry.sh \
  && chmod -R a-w /opt/soul \

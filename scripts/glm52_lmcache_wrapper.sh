@@ -27,6 +27,19 @@ case "${DCP:-1}:$chunk" in
   3:512|6:512) chunk=384 ;;
 esac
 l1_gb="${LMCACHE_L1_GB:-24}"
+l1_init_gb="${LMCACHE_L1_INIT_GB:-}"
+if [[ -z "$l1_init_gb" ]]; then
+  # LMCache grows L1 lazily, but passing the full capacity as its initial arena
+  # defeats that design. A 125 GiB flagship tier then competes with NFS model
+  # page-in before it contains a single prefix. Retain LMCache's 20 GiB
+  # upstream default as the ceiling while allowing smaller tiers to initialize
+  # at their complete size.
+  if [[ "$l1_gb" =~ ^[0-9]+$ ]] && (( l1_gb > 20 )); then
+    l1_init_gb=20
+  else
+    l1_init_gb="$l1_gb"
+  fi
+fi
 log="${LMCACHE_LOG:-/tmp/lmcache-mp-${service_port}.log}"
 gpu_workers="${LMCACHE_MAX_GPU_WORKERS:-${TENSOR_PARALLEL_SIZE:-${GLM_GPU_COUNT:-${TP:-1}}}}"
 [[ "$gpu_workers" =~ ^[1-9][0-9]*$ ]] || {
@@ -37,7 +50,7 @@ gpu_workers="${LMCACHE_MAX_GPU_WORKERS:-${TENSOR_PARALLEL_SIZE:-${GLM_GPU_COUNT:
 args=(server --host "$host" --port "$port" --chunk-size "$chunk"
   --max-gpu-workers "$gpu_workers"
   --max-cpu-workers "${LMCACHE_MAX_CPU_WORKERS:-4}"
-  --l1-size-gb "$l1_gb" --l1-init-size-gb "${LMCACHE_L1_INIT_GB:-$l1_gb}"
+  --l1-size-gb "$l1_gb" --l1-init-size-gb "$l1_init_gb"
   --l1-write-ttl-seconds "${LMCACHE_L1_WRITE_TTL:-600}"
   --l1-read-ttl-seconds "${LMCACHE_L1_READ_TTL:-300}"
   --eviction-policy LRU --eviction-trigger-watermark 0.90
@@ -103,22 +116,37 @@ if [[ "$ready" != 1 ]]; then
   stop_children
   exit 1
 fi
-echo ">>> LMCache ready: mode=$mode L1=${l1_gb}GiB chunk=$chunk GPU-workers=$gpu_workers L2=$l2 metrics=http://127.0.0.1:${http_port}/metrics"
+echo ">>> LMCache ready: mode=$mode L1=${l1_gb}GiB (initial ${l1_init_gb}GiB, lazy growth) chunk=$chunk GPU-workers=$gpu_workers L2=$l2 metrics=http://127.0.0.1:${http_port}/metrics"
 
 "$@" --kv-transfer-config "$transfer" &
 model_pid=$!
-set +e
+# Bash 3.2 (still the system shell on macOS) has neither `wait -n` nor
+# `wait -p`. Polling the two supervised children keeps the wrapper portable
+# without weakening the important invariant: an LMCache crash must tear down
+# vLLM, while an ordinary vLLM exit must drain LMCache.
 finished=""
-wait -n -p finished "$cache_pid" "$model_pid"
-rc=$?
-set -e
-if [[ "$finished" == "$cache_pid" ]]; then
+while [[ -z "$finished" ]]; do
+  if ! kill -0 "$cache_pid" 2>/dev/null; then
+    finished=cache
+    break
+  fi
+  if ! kill -0 "$model_pid" 2>/dev/null; then
+    finished=model
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$finished" == cache ]]; then
   echo "FATAL: LMCache exited while vLLM was running" >&2
   sed -n '1,240p' "$log" >&2
   stop_children
   wait "$model_pid" 2>/dev/null || true
   exit 1
 fi
+set +e
+wait "$model_pid"
+rc=$?
+set -e
 stop_children
 wait "$cache_pid" 2>/dev/null || true
 exit "$rc"
