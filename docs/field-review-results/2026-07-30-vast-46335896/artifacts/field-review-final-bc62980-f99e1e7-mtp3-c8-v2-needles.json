@@ -1,0 +1,110 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T14:39:33Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "max_model_len": 131072,
+ "reserve_tokens": 4096,
+ "requested_sizes": [
+  65536,
+  126000
+ ],
+ "tested_sizes": [
+  65536,
+  126000
+ ],
+ "depths": [
+  0.01,
+  0.25,
+  0.5,
+  0.75,
+  0.99
+ ],
+ "seeds": [
+  20260730,
+  20260731
+ ],
+ "probes": [
+  {
+   "attempted": true,
+   "seed": 20260730,
+   "target_tokens": 65536,
+   "tokens": 65893,
+   "tokens_exact": true,
+   "depths": [
+    0.01,
+    0.25,
+    0.5,
+    0.75,
+    0.99
+   ],
+   "found": 5,
+   "total": 5,
+   "degenerate": "",
+   "answer_head": "Kyoto: YVF-5165\nReykjavik: TFB-7539\nValparaiso: TUB-3822\nOuagadougou: TLU-9205\nTrondheim: QMC-9489",
+   "ok": true,
+   "duration_s": 41.072
+  },
+  {
+   "attempted": true,
+   "seed": 20260731,
+   "target_tokens": 65536,
+   "tokens": 65892,
+   "tokens_exact": true,
+   "depths": [
+    0.01,
+    0.25,
+    0.5,
+    0.75,
+    0.99
+   ],
+   "found": 5,
+   "total": 5,
+   "degenerate": "",
+   "answer_head": "Kyoto: AJY-4896\nReykjavik: UHD-8720\nValparaiso: EMT-1262\nOuagadougou: XNS-4985\nTrondheim: VFC-6259",
+   "ok": true,
+   "duration_s": 37.298
+  },
+  {
+   "attempted": true,
+   "seed": 20260730,
+   "target_tokens": 126000,
+   "tokens": 126315,
+   "tokens_exact": true,
+   "depths": [
+    0.01,
+    0.25,
+    0.5,
+    0.75,
+    0.99
+   ],
+   "found": 5,
+   "total": 5,
+   "degenerate": "",
+   "answer_head": "Kyoto: YVF-5165\nReykjavik: TFB-7539\nValparaiso: TUB-3822\nOuagadougou: TLU-9205\nTrondheim: QMC-9489",
+   "ok": true,
+   "duration_s": 72.781
+  },
+  {
+   "attempted": true,
+   "seed": 20260731,
+   "target_tokens": 126000,
+   "tokens": 126333,
+   "tokens_exact": true,
+   "depths": [
+    0.01,
+    0.25,
+    0.5,
+    0.75,
+    0.99
+   ],
+   "found": 5,
+   "total": 5,
+   "degenerate": "",
+   "answer_head": "Kyoto: AJY-4896\nReykjavik: UHD-8720\nValparaiso: EMT-1262\nOuagadougou: XNS-4985\nTrondheim: VFC-6259",
+   "ok": true,
+   "duration_s": 72.76
+  }
+ ],
+ "ok": true
+}

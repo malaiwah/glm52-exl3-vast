@@ -1,0 +1,568 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T14:47:20Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 3072,
+  "output_tokens": 128,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 8,
+  "prefill_tokens": [
+   3072,
+   32768
+  ],
+  "warmup": 2,
+  "temperature": 1.0,
+  "seed": 20260731,
+  "prompt_seed": "field-baseline-v2-warm"
+ },
+ "metadata": {
+  "stack": "final-bc62980-f99e1e7-warm"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.5325,
+   "request_throughput_rps": 0.6525,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2011.072,
+   "output_throughput_tok_s": 0.653,
+   "mean_ttft_ms": 1532.263,
+   "p50_ttft_ms": 1532.263,
+   "p95_ttft_ms": 1532.263,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.532323,
+     "ttft_ms": 1532.263,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "alpha"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 17.6395,
+   "request_throughput_rps": 0.0567,
+   "prompt_tokens": 32774,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1857.989,
+   "output_throughput_tok_s": 0.057,
+   "mean_ttft_ms": 17639.2,
+   "p50_ttft_ms": 17639.2,
+   "p95_ttft_ms": 17639.2,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 32774,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32774,
+     "output_tokens": 1,
+     "elapsed_s": 17.639262,
+     "ttft_ms": 17639.2,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "apple"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 35.1659,
+   "request_throughput_rps": 0.2275,
+   "prompt_tokens": 24616,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 699.997,
+   "output_throughput_tok_s": 29.119,
+   "mean_ttft_ms": 1577.518,
+   "p50_ttft_ms": 1505.624,
+   "p95_ttft_ms": 1880.988,
+   "mean_tpot_ms": 22.19,
+   "p50_tpot_ms": 22.126,
+   "p95_tpot_ms": 26.99,
+   "mean_itl_ms": 57.325,
+   "metric_prompt_tokens": 24616,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 395,
+    "draft_tokens": 1185,
+    "accepted_tokens": 631,
+    "mean_acceptance_length": 2.5975,
+    "draft_token_acceptance_rate": 0.5325
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 4.830622,
+     "ttft_ms": 2082.343,
+     "tpot_ms": 21.64,
+     "mean_itl_ms": 57.255,
+     "output_head": "apple banana cherry date elder fig grape honey iris jolly kale lemon mango nectar orange peach quince raisin strawberry "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 4.163004,
+     "ttft_ms": 1507.044,
+     "tpot_ms": 20.913,
+     "mean_itl_ms": 57.737,
+     "output_head": "we name all calls to clear data nowNo more iterations; summarize the benchmark document.\n\n- **Document ID:** field-basel"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 5.052639,
+     "ttft_ms": 1503.74,
+     "tpot_ms": 27.944,
+     "mean_itl_ms": 56.331,
+     "output_head": "apple banana cherry date elderberry fig grape honey ice jelly\nkiwi lemon mango nectarine orange papaya quince raspberry "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 4.378067,
+     "ttft_ms": 1506.368,
+     "tpot_ms": 22.612,
+     "mean_itl_ms": 56.307,
+     "output_head": "we name all systems, probes, units, sensors, panels, valves, pipes, tanks, pumps, vents, buses, nodes, arrays, cores, gr"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 4.047571,
+     "ttft_ms": 1504.81,
+     "tpot_ms": 20.022,
+     "mean_itl_ms": 57.789,
+     "output_head": "continue deterministic sequence now using short lowercase words only with zero ambiguity present across all independent "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 4.38069,
+     "ttft_ms": 1505.532,
+     "tpot_ms": 22.639,
+     "mean_itl_ms": 58.676,
+     "output_head": "we pack all bags and tag each box with care then load the vans and drive off into the calm night**all records are indepe"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 4.707213,
+     "ttft_ms": 1504.594,
+     "tpot_ms": 25.217,
+     "mean_itl_ms": 56.186,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 3.605094,
+     "ttft_ms": 1505.717,
+     "tpot_ms": 16.531,
+     "mean_itl_ms": 58.315,
+     "output_head": "continue with batch 132 nominal pressure temperature checksum reviewed batch 133 nominal pressure temperature checksum r"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 28.2947,
+   "request_throughput_rps": 0.2827,
+   "prompt_tokens": 24616,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 869.987,
+   "output_throughput_tok_s": 36.191,
+   "mean_ttft_ms": 1797.348,
+   "p50_ttft_ms": 1572.709,
+   "p95_ttft_ms": 2656.851,
+   "mean_tpot_ms": 41.089,
+   "p50_tpot_ms": 37.349,
+   "p95_tpot_ms": 61.885,
+   "mean_itl_ms": 94.256,
+   "metric_prompt_tokens": 24616,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 440,
+    "draft_tokens": 1320,
+    "accepted_tokens": 586,
+    "mean_acceptance_length": 2.3318,
+    "draft_token_acceptance_rate": 0.4439
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 8.947922,
+     "ttft_ms": 1864.136,
+     "tpot_ms": 55.778,
+     "mean_itl_ms": 112.44,
+     "output_head": "apple banana cherry date elder fig grape hat iris jolly kale lemon mango nectar orange peach quince raisin stone tulip v"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 6.713464,
+     "ttft_ms": 3083.697,
+     "tpot_ms": 28.581,
+     "mean_itl_ms": 74.076,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 6.117813,
+     "ttft_ms": 1567.792,
+     "tpot_ms": 35.827,
+     "mean_itl_ms": 110.975,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 6.50732,
+     "ttft_ms": 1570.853,
+     "tpot_ms": 38.87,
+     "mean_itl_ms": 102.842,
+     "output_head": "continue with deterministic sequence of short lowercase words do not summarize the documentHere is another document. Ple"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 9.851531,
+     "ttft_ms": 1574.47,
+     "tpot_ms": 65.174,
+     "mean_itl_ms": 111.852,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 4.691265,
+     "ttft_ms": 1572.415,
+     "tpot_ms": 24.558,
+     "mean_itl_ms": 74.257,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 7.684455,
+     "ttft_ms": 1572.703,
+     "tpot_ms": 48.124,
+     "mean_itl_ms": 95.496,
+     "output_head": "apple banana cherry date elder fig grape hat ice jelly kite lemon mango nose ocean peach quill rose sun tea urn vine wol"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 5.610915,
+     "ttft_ms": 1572.716,
+     "tpot_ms": 31.797,
+     "mean_itl_ms": 72.11,
+     "output_head": "we pack all boxes, then tag each box with a red label, so the crew can scan it.dall-e-3 (DALL\u00b7E 3) Image Generation Prom"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 25.5594,
+   "request_throughput_rps": 0.313,
+   "prompt_tokens": 24616,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 963.088,
+   "output_throughput_tok_s": 40.063,
+   "mean_ttft_ms": 2848.916,
+   "p50_ttft_ms": 1744.935,
+   "p95_ttft_ms": 5532.487,
+   "mean_tpot_ms": 73.237,
+   "p50_tpot_ms": 68.326,
+   "p95_tpot_ms": 106.681,
+   "mean_itl_ms": 154.794,
+   "metric_prompt_tokens": 24616,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 481,
+    "draft_tokens": 1443,
+    "accepted_tokens": 549,
+    "mean_acceptance_length": 2.1414,
+    "draft_token_acceptance_rate": 0.3805
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 17.415907,
+     "ttft_ms": 3778.051,
+     "tpot_ms": 107.385,
+     "mean_itl_ms": 172.63,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 14.043626,
+     "ttft_ms": 1865.754,
+     "tpot_ms": 95.889,
+     "mean_itl_ms": 196.415,
+     "output_head": "ginger harbor falcon pocket ribbon velvet amber satchel canyon willow quartz anchor feather lantern marble thistle breez"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 11.831433,
+     "ttft_ms": 4641.29,
+     "tpot_ms": 56.615,
+     "mean_itl_ms": 140.982,
+     "output_head": "we have a plan to test the old unit each day and fix all faults\ud83c\udfb5 \u00a1Oh, ay...\n\n\u00a1Oh, ay... \ud83c\udfb5\n\n\ud83c\udfb5 \u00a1Oh...\n\n\u00a1Oh... \ud83c\udfb5\n\n\\(\\dotfil"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 19.394851,
+     "ttft_ms": 6012.363,
+     "tpot_ms": 105.374,
+     "mean_itl_ms": 163.2,
+     "output_head": "we name all systems for deep core checks at base zero zone past nine stable test modes over long grid arcs within quiet "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 10.360784,
+     "ttft_ms": 1623.819,
+     "tpot_ms": 68.795,
+     "mean_itl_ms": 213.095,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 10.240283,
+     "ttft_ms": 1622.43,
+     "tpot_ms": 67.857,
+     "mean_itl_ms": 148.583,
+     "output_head": "apple banana cherry date elderberry fig grape honey ice jelly\nkiwi lemon mango nectarine orange papaya quince raspberry "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 7.749736,
+     "ttft_ms": 1624.116,
+     "tpot_ms": 48.233,
+     "mean_itl_ms": 117.799,
+     "output_head": "we have a plan to scan the data set and check it for errors.Could you please provide the remaining data from the batch r"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 6.163106,
+     "ttft_ms": 1623.503,
+     "tpot_ms": 35.745,
+     "mean_itl_ms": 85.652,
+     "output_head": "we name all systems, logs, data, files, tags, lists, queues, nodes, ports, cores, and hubs for tasks, dates, months, wee"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 16.4267,
+   "request_throughput_rps": 0.487,
+   "prompt_tokens": 24616,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 1498.538,
+   "output_throughput_tok_s": 62.338,
+   "mean_ttft_ms": 7032.837,
+   "p50_ttft_ms": 7163.988,
+   "p95_ttft_ms": 11258.52,
+   "mean_tpot_ms": 63.326,
+   "p50_tpot_ms": 58.697,
+   "p95_tpot_ms": 94.788,
+   "mean_itl_ms": 167.524,
+   "metric_prompt_tokens": 24616,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 406,
+    "draft_tokens": 1218,
+    "accepted_tokens": 618,
+    "mean_acceptance_length": 2.5222,
+    "draft_token_acceptance_rate": 0.5074
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 14.332939,
+     "ttft_ms": 1867.649,
+     "tpot_ms": 98.152,
+     "mean_itl_ms": 270.982,
+     "output_head": "apple banana cherry date elder fig grape hat ice jelly kite lemon mango pear plum quartz rose star tree urn vine water x"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 15.024134,
+     "ttft_ms": 3779.498,
+     "tpot_ms": 88.54,
+     "mean_itl_ms": 208.233,
+     "output_head": "we name all paths for deep core checksEvaluate the implications of all records being independent and nominal. This can b"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 13.895151,
+     "ttft_ms": 4642.479,
+     "tpot_ms": 72.856,
+     "mean_itl_ms": 250.069,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 14.90535,
+     "ttft_ms": 6726.237,
+     "tpot_ms": 64.402,
+     "mean_itl_ms": 163.582,
+     "output_head": "we close the log, pack the data, send the file, mark the job as done.2552,2741,2836,2931,3026,3121,3216\n415,433,451,469,"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 14.331709,
+     "ttft_ms": 7601.74,
+     "tpot_ms": 52.992,
+     "mean_itl_ms": 168.247,
+     "output_head": "we name all systems for probes insecurity level in question\nthere exists a fix option\nthere exists a fix option\nthere ex"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 15.546562,
+     "ttft_ms": 10401.719,
+     "tpot_ms": 40.511,
+     "mean_itl_ms": 97.071,
+     "output_head": "apple banana cherry date elder fig grape hat iris jig kangaroo lemon mango nest owl plum quill rose sun tap urn vase win"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 16.142348,
+     "ttft_ms": 9523.498,
+     "tpot_ms": 52.117,
+     "mean_itl_ms": 108.505,
+     "output_head": "ginger harbor anchor gravel socket mantle ribbon pellet linden velvet compass spindle velvet ribbon linden spindle pelle"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 128,
+     "elapsed_s": 16.423885,
+     "ttft_ms": 11719.874,
+     "tpot_ms": 37.039,
+     "mean_itl_ms": 73.5,
+     "output_head": "apple banana cherry date elderberry fig grape honey ice jelly\nkiwi lemon mango nectarine orange papaya quince raspberry "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

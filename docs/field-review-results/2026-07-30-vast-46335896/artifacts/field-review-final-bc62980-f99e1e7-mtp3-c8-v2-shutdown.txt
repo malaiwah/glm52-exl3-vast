@@ -1,0 +1,55 @@
+shutdown_begin=2026-07-31T16:09:57+00:00
+wrapper_pid=292476
+pre_shutdown_processes:
+      1       0       1       1 Ss      16:03:43 /bin/bash /usr/local/bin/model-turnkey-entry.sh
+    176       1       1       1 T       16:03:42 /bin/bash /usr/local/bin/model-turnkey-entry.sh
+  70970       1   70970       1 T       12:48:20 /bin/bash /usr/local/bin/model-turnkey-entry.sh
+ 292476       1  292475  292475 S       01:40:32 bash /workspace/field-review-tests/final-bundle-4c880eb/field_review_full_gate.sh
+ 292554  292476  292554  292554 Ss      01:40:28 /bin/bash /workspace/field-review-tests/final-bundle-4c880eb/model-turnkey-entry.sh
+ 292606  292554  292554  292554 S       01:40:27 /bin/bash /workspace/field-review-tests/final-bundle-4c880eb/model-turnkey-entry.sh
+ 293243  292554  292554  292554 Sl      01:39:34 /opt/venv/bin/python /opt/venv/bin/vllm serve /workspace/GLM-5.2-EXL3-TR3-3.25bpw --served-model-name GLM-5.2 --host 0.0.0.0 --port 18000 --trust-remote-code --tensor-parallel-size 4 --kv-cache-dtype nvfp4_ds_mla --gpu-memory-utilization 0.92 --max-model-len 131072 --max-num-seqs 8 --max-num-batched-tokens 2048 --max-cudagraph-capture-size 32 --enable-chunked-prefill --enable-prefix-caching --enable-prompt-tokens-details --enable-force-include-usage --no-async-scheduling --quantization exl3 --decode-context-parallel-size 4 --dcp-comm-backend a2a --dcp-kv-cache-interleave-size 64 --attention-backend B12X_MLA_SPARSE --moe-backend b12x --load-format safetensors --enable-auto-tool-choice --tool-call-parser glm47 --reasoning-parser glm45 --default-chat-template-kwargs {"reasoning_effort":"high"} --hf-overrides {"use_index_cache":true,"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS","max_position_embeddings":131072} --compilation-config {"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":[4,8,12,16,20,24,28,32],"custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":true}} --speculative-config {"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton","draft_sample_method":"probabilistic","rejection_sample_method":"standard"}
+ 293473  293243  292554  292554 Sl      01:39:13 VLLM::EngineCore
+ 293533  293473  292554  292554 Sl      01:39:08 VLLM::Worker_TP0_DCP0
+ 293588  293473  292554  292554 Sl      01:39:04 VLLM::Worker_TP1_DCP1
+ 293637  293473  292554  292554 Sl      01:39:00 VLLM::Worker_TP2_DCP2
+ 293700  293473  292554  292554 Sl      01:38:56 VLLM::Worker_TP3_DCP3
+pre_shutdown_compute_apps:
+GPU-02440084-2705-f734-f695-e493ec39930b, 293533, VLLM::Worker_TP0_DCP0, 92196 MiB
+GPU-dd25f96d-fc92-a5b0-2683-f5fc614bc99e, 293588, VLLM::Worker_TP1_DCP1, 92196 MiB
+GPU-fa68399d-3300-4ff0-272c-553a4182ef51, 293637, VLLM::Worker_TP2_DCP2, 92196 MiB
+GPU-670eb079-4c61-3f0a-6fa8-f43aa14506e4, 293700, VLLM::Worker_TP3_DCP3, 92196 MiB
+pre_shutdown_gpu_state:
+0, 92223, 84.25, 0
+1, 92223, 80.82, 0
+2, 92223, 81.94, 0
+3, 92223, 85.78, 0
+wrapper_gone=1
+post_shutdown_processes:
+      1       0       1       1 Ss      16:03:49 /bin/bash /usr/local/bin/model-turnkey-entry.sh
+    176       1       1       1 T       16:03:47 /bin/bash /usr/local/bin/model-turnkey-entry.sh
+  70970       1   70970       1 T       12:48:25 /bin/bash /usr/local/bin/model-turnkey-entry.sh
+ 293533       1  292554  292554 Sl      01:39:14 VLLM::Worker_TP0_DCP0
+ 293588       1  292554  292554 Sl      01:39:10 VLLM::Worker_TP1_DCP1
+ 293637       1  292554  292554 Sl      01:39:06 VLLM::Worker_TP2_DCP2
+ 293700       1  292554  292554 Sl      01:39:02 VLLM::Worker_TP3_DCP3
+post_shutdown_compute_apps:
+293533, VLLM::Worker_TP0_DCP0, 90426 MiB
+293588, VLLM::Worker_TP1_DCP1, 90426 MiB
+293637, VLLM::Worker_TP2_DCP2, 90426 MiB
+293700, VLLM::Worker_TP3_DCP3, 90426 MiB
+post_shutdown_gpu_state:
+0, 90453, 84.46, 0
+1, 90453, 80.57, 0
+2, 90453, 82.32, 0
+3, 90453, 84.79, 0
+shutdown_end=2026-07-31T16:10:02+00:00
+FATAL: graceful shutdown did not release the complete serving tree
+shutdown_followup=2026-07-31T16:10:35+00:00
+followup_processes:
+followup_compute_apps:
+followup_gpu_state:
+0, 14, 31.79, 0
+1, 14, 30.71, 0
+2, 14, 31.35, 0
+3, 14, 33.03, 0
+final_result=PASS: TERM reached the service process group; wrapper exited within 2 s and all four workers/GPU allocations released within 19 s. The first 5 s snapshot was intentionally retained and was too early.

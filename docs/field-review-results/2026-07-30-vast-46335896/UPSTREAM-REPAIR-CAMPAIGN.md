@@ -7,9 +7,9 @@ fully composed, production-tested appliance. Keep exact heads, test evidence,
 public comments, and remaining work here so compaction cannot erase the
 campaign state.
 
-## Success contract
+## Original success contract
 
-The campaign is complete only when:
+The campaign was defined as complete only when:
 
 1. all nine PRs either pass their exact-head gates or are superseded by tested
    fixes;
@@ -27,6 +27,13 @@ The campaign is complete only when:
    their own tracked issue/PR;
 9. after source work is exhausted, GSM8K, GPQA Diamond, and other appropriate
    scorecard workloads run against the final endpoint.
+
+**Closeout status:** all nine conditions are satisfied by the corrected
+`bc629805` / `f99e1e7` successor and the immutable release recorded in section
+M. The final endpoint scored **96/100 on GSM8K** and **44/50 on GPQA**; every
+normal GPQA stop was correct, and its only six misses exhausted the full 32K
+reasoning ceiling. Item 7 records the verified Vast hand-back at qualification
+time; it is not an obligation to keep a paid rental running indefinitely.
 
 ## Frozen upstream state
 
@@ -872,8 +879,9 @@ in 237.03 seconds and identically warm in 10.03 seconds on physical GPU 2,
 using a fresh candidate-specific extension cache. Compared with the
 independently approved exact #100/#102 tree `cae3aad1`, its only runtime
 differences are r14's paged planner and native mixed-K Trellis module; the
-common repaired source is otherwise identical. Final #101/#103 replay
-composition remains pending.
+common repaired source is otherwise identical. At this checkpoint, final
+#101/#103 replay composition remained pending; sections K–M record the tested
+#105 successor and its full-model qualification.
 
 The exact r14 LMCache tree accepted #18/#19/#20 plus the lifecycle repair
 without a conflict. Candidate
@@ -1335,9 +1343,10 @@ and destination BF16 layer tensors with `torch.allclose(..., atol=1e-4)`; all
 comparisons passed.  Teardown reported zero locked objects, normal
 `MPCacheServer closed`, and no PyTorch shared-CUDA producer warning.  The exact
 final composed CUDA union passed **184/184** in 70.14 seconds.  Independent
-review approved the runtime ownership and test contracts; the final image
-still needs the full-model startup/traffic/shutdown gate before this bundle is
-called deployable.
+review approved the runtime ownership and test contracts. At this checkpoint,
+the `31fa6a4` / `be1e289` predecessor still needed a full-model
+startup/traffic/shutdown gate; section L records its rejection and section M
+records the corrected successor's completed qualification.
 
 Evidence:
 [opposite-order gate](artifacts/spark-31fa6a4-opposite-order-dcp4-1025.log),
@@ -1357,9 +1366,9 @@ and
 The first complete GLM-5.2 gate rejected the frozen vLLM/SparkInfer pair before
 the API became healthy.  This supersedes the focused-test qualification of
 SparkInfer `31fa6a48116471ce423f0338047453ec1032c202` and vLLM
-`be1e289a8ca6cc043b582b26c788efc4b1f5d0a8`: the pair is **not deployable** in
-its current form, and the successfully built SHA-only appliance image must not
-be promoted to `main` or `latest`.
+`be1e289a8ca6cc043b582b26c788efc4b1f5d0a8`: that exact predecessor pair is
+**not deployable**, and its successfully built SHA-only appliance image must
+not be promoted to `main` or `latest`.
 
 The disposable shadow runtime applied the exact manifest, retained the image's
 compiled extensions, applied the required parity ABI compatibility patch, and
@@ -1395,9 +1404,167 @@ collective semantic-channel allocation and hard mismatch failures outside an
 active scope, while routing a pre-capture warm-up on the scope's owner stream
 to the top semantic channel.  Unrelated side streams must not inherit it.  The
 same rule is required for one-shot and DCP pools.  It also needs idempotent,
-process-group-liveness-aware teardown.  Focused tests alone will not re-qualify
-the replacement: the same full-model startup, traffic and shutdown gate is
-mandatory before any benchmark or promotion.
+process-group-liveness-aware teardown.  The acceptance plan therefore required
+the replacement to repeat full-model startup, traffic and shutdown before
+benchmark or promotion; section M records that requalification.
 
 Evidence:
 [complete rejected server log](artifacts/field-review-final-4c880eb-mtp3-c8-v1-server.log).
+
+### M. Exact repaired successors pass full-model workload requalification
+
+The appliance bundle now carries two ordered, content-addressed successors to
+the rejected pair. They deliberately do not erase the rejected intermediate
+states from the manifest: a stock r14 image first reaches those known byte
+states, then the applicator must consume the exact output of each prerequisite
+before it can reach the new heads. Mixed, unknown, reordered, or partially
+applied trees remain fatal.
+
+SparkInfer
+[`bc62980543b3ca59a9bee971df1b19ce6181964c`](https://github.com/malaiwah/sparkinfer/commit/bc62980543b3ca59a9bee971df1b19ce6181964c)
+routes eager descriptor warm-up through the active semantic capture owner
+before CUDA's physical capture bit becomes true. The owner-stream affinity
+check still runs during that pre-capture interval, unrelated side streams are
+rejected, actual nested CUDA capture remains a temporary alias, and the strict
+collision rule outside a semantic scope is unchanged. The exact source passed
+88 focused CPU tests, Ruff, the complete communication suite (**241 passed / 21
+expected skips**), a four-rank one-shot semantic prewarm/capture/replay gate
+(**48.86 seconds**), and a four-rank DCP A2A equivalent (**12.85 seconds**).
+
+vLLM
+[`f99e1e7b8636ca3811ab6d23084ac6da63420dc3`](https://github.com/malaiwah/vllm-voipmonitor/commit/f99e1e7b8636ca3811ab6d23084ac6da63420dc3)
+keeps a live SparkInfer PCIe all-reduce owner intact when Python GC runs after
+distributed teardown. Its finalizer no longer attempts a collective barrier,
+unmap, or free when process-group liveness cannot be established; explicit
+`close()` remains the strict coordinated path. Its focused tests passed 2/2,
+the containing distributed selection passed 16/16, and Ruff, format,
+byte-compilation and commit hooks were clean. The patch-identical clean
+current-base companion series ends at
+[`d344da36`](https://github.com/malaiwah/vllm-voipmonitor/commit/d344da368da4496eeb308a75faf314cb6376dc62),
+and abnormal-finalizer lifecycle is tracked publicly in
+[vLLM #215](https://github.com/local-inference-lab/vllm/issues/215).
+
+The runtime-only successor patches are hash-locked to those two source heads
+in an eight-component manifest, and the persistent compile-cache suffix is
+advanced from `field1` to `field2` so the rejected graph lineage cannot be
+reused.
+
+The corrected pair then passed the full-model point that rejected its
+predecessor. On the same 4x RTX PRO 6000 Blackwell reference host, the exact
+TP4/DCP4/MTP3, max-length 131,072, max-sequences 8, batch 2,048, graph/Trellis
+32, GMU 0.92, dynamic-token NVFP4 KV and EXL3-prefill-capacity 1,024 shape
+completed memory profiling and graph capture, became API-ready, and exposed
+**251,392 logical KV tokens**. The recorded per-rank profile was approximately
+294.6 MiB target Trellis, 414.1 MiB native MTP draft, 83.28 GiB weights,
+1.32 GiB peak activation, 0.14 GiB CUDA graphs and 1.87 GiB available KV. No
+semantic stream-key collision recurred. The complete server log and result
+artifacts are fixed by `<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`.
+
+Both the initial and post-prime feature suites passed **13/13 checks**: all 12
+required checks plus optional required tool choice. Health/model discovery,
+tokenization, thinking and non-thinking chat, streaming usage, multi-turn
+reasoning preservation, strict JSON with thinking both off and on, a single
+tool call, and the tool-result round trip all passed. Vision was the expected
+passed skip because the attribution profile is explicitly text-only. The 32K
+verification also passed its three short correctness prompts, thinking plus
+strict JSON, and all five needles at 1/25/50/75/99 percent depth in 32,858
+actual tokens, with no degeneration.
+
+The independent long-context matrix used two seeds at both 65,536 and 126,000
+target tokens. It recovered **20/20 planted values**: 5/5 depths in every one
+of the four probes. Actual prompt lengths and durations were 65,893 tokens in
+41.072 seconds, 65,892 in 37.298 seconds, 126,315 in 72.781 seconds, and
+126,333 in 72.760 seconds. Every probe reported exact token construction and
+no degeneration.
+
+The first bounded serving matrix retained the exact pre-composition
+`field-baseline-v2` corpus, seed, two warm-ups and eight 128-token requests at
+each concurrency. All **32/32 requests** completed with zero errors and zero
+preemptions:
+
+| load | aggregate TG tok/s | prompt tok/s | TPOT mean / p50 / p95 ms | MAL | acceptance |
+|---:|---:|---:|---:|---:|---:|
+| C1 | 30.257 | 726.877 | 17.358 / 17.341 / 18.121 | 3.3214 | 77.38% |
+| C2 | 33.388 | 802.092 | 38.619 / 35.572 / 67.995 | 2.9169 | 63.90% |
+| C4 | 37.668 | 904.905 | 74.751 / 68.702 / 135.268 | 2.7896 | 59.65% |
+| C8 | 61.837 | 1,485.536 | 60.925 / 59.846 / 89.499 | 2.7056 | 56.85% |
+
+The 3K/32K prefill points were 557.634/1,867.277 tok/s; the first 3K request
+was a new-shape compile point. Against the exact pre-composition control,
+candidate TG changed `+11.31% / -1.61% / +5.87% / -1.89%` at C1/C2/C4/C8,
+while 3K/32K prefill changed `-0.12% / +0.24%`. Those alternating deltas are
+consistent with bounded workload/run variance. They support the intended
+no-regression claim but not an additional lifecycle-patch speedup claim.
+
+A second already-primed matrix deliberately used the distinct
+`field-baseline-v2-warm` corpus, so it is repeat-stability evidence rather
+than a matched A/B. It again completed **32/32** requests without error or
+preemption:
+
+| load | aggregate TG tok/s | prompt tok/s | TPOT mean / p50 / p95 ms | MAL | acceptance |
+|---:|---:|---:|---:|---:|---:|
+| C1 | 29.119 | 699.997 | 22.190 / 22.126 / 26.990 | 2.5975 | 53.25% |
+| C2 | 36.191 | 869.987 | 41.089 / 37.349 / 61.885 | 2.3318 | 44.39% |
+| C4 | 40.063 | 963.088 | 73.237 / 68.326 / 106.681 | 2.1414 | 38.05% |
+| C8 | 62.338 | 1,498.538 | 63.326 / 58.697 / 94.788 | 2.5222 | 50.74% |
+
+Its fully warmed 3K/32K prefill rates were **2,011.072/1,857.989 tok/s**. The
+whole-log audit found 28 post-ready compile misses while the fresh namespace
+learned the requested shapes and zero structured-FSM, CUDA/IPC, CUDA-runtime,
+distributed-runtime, worker-failure or runtime-error findings. The explicit
+post-prime window from lines 1,397 through 1,556 was completely clean: zero
+findings in every category, including zero further compilation.
+
+The final successor then repeated both scorecards. The fixed-seed GSM8K gate
+matched its pre-composition control exactly at **96/100**: 100/100 requests
+ended with `finish_reason=stop`, zero API errors, 253.925 aggregate output
+tok/s, MAL 3.5314 and 84.38% draft-token acceptance. Its log window was clean,
+including zero compilation.
+
+GPQA Diamond used concurrency 4, high reasoning effort and a 32,768-token
+completion ceiling. It completed all 50 requests without an API error and
+scored **44/50 (88%)**. All **44/44 normal stops were correct**. The only six
+misses each consumed exactly 32,768 completion tokens, emitted no visible
+final answer and were therefore honestly scored as reasoning-ceiling
+truncations rather than from a tentative hidden choice. The run generated
+495,305 completion tokens in 4,572.296 seconds at 108.327 aggregate output
+tok/s, MAL 3.2614 and 75.38% draft-token acceptance.
+
+GPQA's previously unseen long-reasoning shape caused exactly four one-per-rank
+W4A16 disk-cache misses. Its audit had zero structured-FSM, CUDA/IPC,
+CUDA-runtime, distributed, process-failure or runtime-error findings. The
+immediately subsequent GSM8K window had zero further compilation, so the four
+events are retained as first-use shape evidence rather than misreported as a
+clean GPQA window or a repeated warm-shape regression.
+
+TERM reached the isolated service process group. The wrapper exited within 2
+seconds; the first five-second snapshot intentionally caught all four workers
+still releasing 90,426 MiB each. All workers and compute allocations were gone
+within 19 seconds, leaving 14 MiB/GPU. No KILL was used. Vast instance
+`46335896` was destroyed after every copied artifact matched its remote
+SHA-256, ending rental charges.
+
+Evidence:
+[initial features](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-features.json),
+[warm features](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-warm-features.json),
+[32K verification](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-verify32k.json),
+[65K/126K needles](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-needles.json),
+[matched matrix](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-benchmark.json),
+[warm matrix](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-warm-benchmark.json),
+[whole-log audit](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-log-audit.json),
+and [post-prime warm audit](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-warm-log-audit.json),
+[final GSM8K](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-gsm8k100-c8-2k.json),
+[final GPQA](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-gpqa50-c4-32k.json),
+[scorecard telemetry](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-telemetry-summary.md),
+[runtime identity](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-serving-runtime-identity.txt),
+[shutdown](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-shutdown.txt),
+[rental release](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-rental-release.txt),
+and [SHA-256 manifest](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-sha256.txt).
+
+Final release records: GSM8K **96/100**; GPQA **44/50** with 44/44 normal
+stops correct and six 32K truncations; complete GPU release within 19 seconds;
+appliance `<FINAL_IMAGE_TAG>@<FINAL_IMAGE_DIGEST>`;
+immutable evidence `<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`. With those records
+fixed, the corrected pair is production-qualified. Section L's rejection
+continues to apply only to the exact `31fa6a4` / `be1e289` predecessor and its
+SHA-only image.

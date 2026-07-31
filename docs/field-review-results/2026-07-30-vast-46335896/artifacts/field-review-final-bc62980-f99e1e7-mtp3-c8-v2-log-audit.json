@@ -1,0 +1,162 @@
+{
+  "schema": 1,
+  "start_line": 1,
+  "line_count": 1396,
+  "ready": true,
+  "ready_lines": [
+    1133
+  ],
+  "require_ready": true,
+  "findings": [
+    {
+      "kind": "post_ready_compile",
+      "line": 1151,
+      "excerpt": "(Worker_TP0_DCP0 pid=293533) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=407e197b5ad69711 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1153,
+      "excerpt": "(Worker_TP3_DCP3 pid=293700) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=9e6a7ec1bba3e637 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1154,
+      "excerpt": "(Worker_TP2_DCP2 pid=293637) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=c98b119b7d0311ca attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1155,
+      "excerpt": "(Worker_TP1_DCP1 pid=293588) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=33a01e7106669018 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1170,
+      "excerpt": "(Worker_TP2_DCP2 pid=293637) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.attention._shared.mla.prefill_mg.UnifiedPrefillMGKernel status=disk-cache-miss cache_key=7746e08ea7ca8e80 attrs={'block_threads': 384, 'extra_indices_stride_row': 2048, 'extra_topk': 0, 'has_extra': False, 'has_sink': False, 'head_offset': 0, 'indices_stride_row': 2048, 'math_threads': 256, 'mg_n_hg': 1, 'num_heads': 16, 'num_main_tiles': 0, 'num_tiles': 32, 'out_lse_stride_head': 1, 'out_lse_s"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1172,
+      "excerpt": "(Worker_TP3_DCP3 pid=293700) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.attention._shared.mla.prefill_mg.UnifiedPrefillMGKernel status=disk-cache-miss cache_key=8837cf330ff3f9d4 attrs={'block_threads': 384, 'extra_indices_stride_row': 2048, 'extra_topk': 0, 'has_extra': False, 'has_sink': False, 'head_offset': 0, 'indices_stride_row': 2048, 'math_threads': 256, 'mg_n_hg': 1, 'num_heads': 16, 'num_main_tiles': 0, 'num_tiles': 32, 'out_lse_stride_head': 1, 'out_lse_s"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1174,
+      "excerpt": "(Worker_TP0_DCP0 pid=293533) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.attention._shared.mla.prefill_mg.UnifiedPrefillMGKernel status=disk-cache-miss cache_key=c2e75f0f53e0c49e attrs={'block_threads': 384, 'extra_indices_stride_row': 2048, 'extra_topk': 0, 'has_extra': False, 'has_sink': False, 'head_offset': 0, 'indices_stride_row': 2048, 'math_threads': 256, 'mg_n_hg': 1, 'num_heads': 16, 'num_main_tiles': 0, 'num_tiles': 32, 'out_lse_stride_head': 1, 'out_lse_s"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1176,
+      "excerpt": "(Worker_TP1_DCP1 pid=293588) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.attention._shared.mla.prefill_mg.UnifiedPrefillMGKernel status=disk-cache-miss cache_key=49da3d563c44c882 attrs={'block_threads': 384, 'extra_indices_stride_row': 2048, 'extra_topk': 0, 'has_extra': False, 'has_sink': False, 'head_offset': 0, 'indices_stride_row': 2048, 'math_threads': 256, 'mg_n_hg': 1, 'num_heads': 16, 'num_main_tiles': 0, 'num_tiles': 32, 'out_lse_stride_head': 1, 'out_lse_s"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1190,
+      "excerpt": "(Worker_TP1_DCP1 pid=293588) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=4430465502bd6492 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1191,
+      "excerpt": "(Worker_TP3_DCP3 pid=293700) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=c3c883f326594a01 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1192,
+      "excerpt": "(Worker_TP0_DCP0 pid=293533) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=0329941075fcc243 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1193,
+      "excerpt": "(Worker_TP2_DCP2 pid=293637) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=1a6593313dc24bba attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1241,
+      "excerpt": "(Worker_TP3_DCP3 pid=293700) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=9d7afc5a7b78e849 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1242,
+      "excerpt": "(Worker_TP1_DCP1 pid=293588) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=d442b1969c7b0e8a attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1244,
+      "excerpt": "(Worker_TP2_DCP2 pid=293637) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=4d9c6083c189fc0c attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1245,
+      "excerpt": "(Worker_TP0_DCP0 pid=293533) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=3c4bb5e567a39010 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1274,
+      "excerpt": "(Worker_TP3_DCP3 pid=293700) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=244a82fad0ea44f8 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1275,
+      "excerpt": "(Worker_TP1_DCP1 pid=293588) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=6e462ac37292567d attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1276,
+      "excerpt": "(Worker_TP2_DCP2 pid=293637) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=31ccd4a41227b28b attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1277,
+      "excerpt": "(Worker_TP0_DCP0 pid=293533) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=bef3ad81df53e397 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1316,
+      "excerpt": "(Worker_TP1_DCP1 pid=293588) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=8083fdfa8d089ff1 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1317,
+      "excerpt": "(Worker_TP0_DCP0 pid=293533) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=040be48f88e56200 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1318,
+      "excerpt": "(Worker_TP3_DCP3 pid=293700) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=19830f66c988d3e9 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1319,
+      "excerpt": "(Worker_TP2_DCP2 pid=293637) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=dcebab20ec3bc654 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1358,
+      "excerpt": "(Worker_TP1_DCP1 pid=293588) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=3f757f8f3d2f8711 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1359,
+      "excerpt": "(Worker_TP3_DCP3 pid=293700) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=6e61fd01b92375fe attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1360,
+      "excerpt": "(Worker_TP2_DCP2 pid=293637) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=fbce1559a5a4ded4 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 1361,
+      "excerpt": "(Worker_TP0_DCP0 pid=293533) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=8e3fa1becda99390 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    }
+  ],
+  "counts": {
+    "post_ready_compile": 28,
+    "structured_fsm": 0,
+    "cuda_ipc_lifetime": 0,
+    "cuda_runtime": 0,
+    "distributed_runtime": 0,
+    "process_failure": 0,
+    "runtime_error_level": 0
+  },
+  "ok": false
+}

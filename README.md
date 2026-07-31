@@ -188,8 +188,21 @@ MTP3 for the candidate profile: draft acceptance was 84.10% versus 39.84%,
 mean acceptance length was 3.523 versus 2.992, and mean/p95 TPOT was
 16.962/23.647 ms versus 25.104/48.709 ms for MTP5. MTP5 produced four fast
 samples but two repeatable ~48 ms outliers, so its median alone was misleading.
-The combined patched image must still repeat the full correctness gate before
-this candidate replaces the historical MTP5 production record.
+The corrected r14 field-repair successor has now completed that gate and is
+the authoritative result: **251,392 logical KV tokens** (**1.87 GiB/rank**),
+13/13 API features on both initial and warm passes, 5/5 needles at 32K,
+20/20 needles across cold 65K/126K probes, and two bounded C1/C2/C4/C8
+matrices with no request failure or preemption. Fully warm prefill was
+2,011.072 tok/s at 3K and 1,857.989 tok/s at 32K; warm aggregate decode was
+29.119/36.191/40.063/62.338 tok/s at C1/C2/C4/C8. Final scorecards were
+**96/100 GSM8K** and **44/50 GPQA**; every one of GPQA's 44 normal stops was
+correct and its only six misses exhausted the 32K reasoning ceiling. TERM
+released the wrapper within 2 seconds and all workers/GPU allocations within
+19 seconds. Release appliance: `<FINAL_IMAGE_TAG>@<FINAL_IMAGE_DIGEST>`;
+immutable evidence
+`<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`. The exact patch order and independent
+reproduction contract are in the
+[counter-validation guide](docs/field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md).
 
 The checkpoint's reported dynamic-NVFP4 KLD is 0.095971 versus 0.119525 for
 3.0 bpw. The appliance independently measured **0.0927076684** over the

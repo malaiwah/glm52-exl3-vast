@@ -1,0 +1,8 @@
+Provider: Vast.ai
+Instance: 46335896
+Action: vastai destroy instance 46335896 -y --raw
+Destroy response: {"instances": null}
+Verification time: 2026-07-31T16:15:59Z
+Verification query: vastai show instances --raw | jq '[.[] | select(.id==46335896)]'
+Verification result: []
+Final state: destroyed; no matching active rental

@@ -1,0 +1,70 @@
+[1/50] correct=1 errors=0 source=107
+[2/50] correct=2 errors=0 source=66
+[3/50] correct=3 errors=0 source=98
+[4/50] correct=4 errors=0 source=124
+[5/50] correct=5 errors=0 source=103
+[6/50] correct=6 errors=0 source=194
+[7/50] correct=7 errors=0 source=77
+[8/50] correct=8 errors=0 source=122
+[9/50] correct=9 errors=0 source=91
+[10/50] correct=10 errors=0 source=149
+[11/50] correct=11 errors=0 source=129
+[12/50] correct=11 errors=0 source=10
+[13/50] correct=12 errors=0 source=35
+[14/50] correct=13 errors=0 source=72
+[15/50] correct=13 errors=0 source=130
+[16/50] correct=14 errors=0 source=183
+[17/50] correct=15 errors=0 source=24
+[18/50] correct=15 errors=0 source=55
+[19/50] correct=16 errors=0 source=136
+[20/50] correct=17 errors=0 source=154
+[21/50] correct=18 errors=0 source=158
+[22/50] correct=19 errors=0 source=37
+[23/50] correct=20 errors=0 source=64
+[24/50] correct=21 errors=0 source=18
+[25/50] correct=22 errors=0 source=84
+[26/50] correct=23 errors=0 source=143
+[27/50] correct=24 errors=0 source=173
+[28/50] correct=24 errors=0 source=25
+[29/50] correct=24 errors=0 source=79
+[30/50] correct=25 errors=0 source=111
+[31/50] correct=26 errors=0 source=156
+[32/50] correct=27 errors=0 source=163
+[33/50] correct=28 errors=0 source=52
+[34/50] correct=29 errors=0 source=141
+[35/50] correct=30 errors=0 source=188
+[36/50] correct=31 errors=0 source=80
+[37/50] correct=32 errors=0 source=90
+[38/50] correct=33 errors=0 source=193
+[39/50] correct=34 errors=0 source=133
+[40/50] correct=35 errors=0 source=140
+[41/50] correct=36 errors=0 source=3
+[42/50] correct=37 errors=0 source=23
+[43/50] correct=38 errors=0 source=120
+[44/50] correct=39 errors=0 source=0
+[45/50] correct=40 errors=0 source=102
+[46/50] correct=41 errors=0 source=113
+[47/50] correct=41 errors=0 source=15
+[48/50] correct=42 errors=0 source=126
+[49/50] correct=43 errors=0 source=62
+[50/50] correct=44 errors=0 source=85
+{
+ "requests": 50,
+ "completed": 50,
+ "errors": 0,
+ "correct": 44,
+ "accuracy": 0.88,
+ "wall_s": 4572.296067,
+ "prompt_tokens": 12795,
+ "completion_tokens": 495305,
+ "prompt_throughput_tok_s": 2.798,
+ "output_throughput_tok_s": 108.327,
+ "mean_request_s": 359.420348,
+ "speculative": {
+  "drafts": 151864,
+  "draft_tokens": 455592,
+  "accepted_tokens": 343422,
+  "mean_acceptance_length": 3.2614,
+  "draft_token_acceptance_rate": 0.7538
+ }
+}

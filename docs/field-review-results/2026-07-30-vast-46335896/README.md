@@ -6,6 +6,28 @@ Provider instance: Vast.ai `46335896`
 
 Test plan: `FIELD-REVIEW-PR-TEST-PLAN.md`, generated 2026-07-30
 
+## Final closeout
+
+This document preserves the first-pass attribution and its negative controls;
+the authoritative final result is the corrected r14 successor described in
+[the counter-validation guide](COUNTER-VALIDATION.md) and
+[repair-campaign section M](UPSTREAM-REPAIR-CAMPAIGN.md#M-exact-repaired-successors-pass-full-model-workload-requalification).
+That exact successor exposed **251,392 logical KV tokens**
+(**1.87 GiB/rank**), passed the 13/13 API suite twice, retrieved 5/5 needles at
+32K and 20/20 across cold 65K/126K probes, completed two bounded
+C1/C2/C4/C8 matrices without a request failure or preemption, and had a clean
+post-prime log window. Final scorecards were **96/100 GSM8K** and **44/50
+GPQA**; all 44 GPQA normal stops were correct and its only six misses exhausted
+the 32K reasoning ceiling. TERM released the wrapper within 2 seconds and all
+workers/GPU allocations within 19 seconds. Release appliance
+`<FINAL_IMAGE_TAG>@<FINAL_IMAGE_DIGEST>`; immutable evidence
+`<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`.
+
+Every `FAIL`, `BLOCKED`, “not releasable”, and “not run” statement below is a
+point-in-time result for the immutable first-pass heads. Those statements are
+retained as failure attribution and must not be read as the final successor's
+current release status.
+
 ## Repair-campaign update
 
 The outcome below is the immutable first-pass attribution. Work continued on
@@ -55,14 +77,14 @@ The repaired #100 union passed 116/116, and the exact #100 + #102 integration
 passed 112 with 8 intentional skips cold and warm. Full evidence and exact
 integration SHAs are in the repair ledger.
 
-## Outcome
+## Historical first-pass outcome
 
 The focused vLLM changes pass. The individual W4A16 sizing/capture changes
 pass, and the claimed planner-size reduction is reproduced exactly. The
 individual LMCache changes pass, including a real source-built CUDA
 STORE/RETRIEVE round trip.
 
-The complete candidate is **not releasable**:
+At this first-pass checkpoint, the complete candidate was **not releasable**:
 
 1. Current SparkInfer PRs
    [#101](https://github.com/local-inference-lab/sparkinfer/pull/101) and
@@ -76,8 +98,9 @@ The complete candidate is **not releasable**:
 
 Per the plan's correctness-before-performance and no-conflict-resolution
 rules, no combined image was built and no full GLM-5.2 PP/TG/KV or capacity
-sweep was run. The report does not claim full-model memory or throughput gains
-that were not measured.
+sweep was run at this checkpoint. The first-pass report does not claim
+full-model memory or throughput gains that were not measured there; the later
+measured successor result is recorded in the final closeout above.
 
 ## Host and toolchain
 
@@ -98,7 +121,10 @@ Evidence:
 The production supervisor was stopped before GPU tests. No other GPU process
 was present, and no Xid was observed during the test campaign.
 
-## Exact-head result matrix
+## Historical first-pass exact-head result matrix
+
+The rows below freeze the initial exact-head checkpoint. Later repaired heads,
+compositions, and full-model measurements are recorded in the repair ledger.
 
 | Project / PR | Exact tested head | Exact tested base | Individual result | Composed/full result |
 |---|---|---|---|---|
@@ -336,7 +362,7 @@ Logs:
 [#18 + #19 GPU](artifacts/lmcache-compose-18-19-gpu.log), and
 [#20 conflict](artifacts/lmcache-compose-conflict.log).
 
-## Full-candidate decision
+## Historical first-pass full-candidate decision
 
 | Gate | Status | Reason |
 |---|---|---|
@@ -348,13 +374,17 @@ Logs:
 | #210 capacity sweep | BLOCKED | no valid combined image |
 | Combined correctness/needle tests | BLOCKED | no valid combined image |
 
-No turnkey runtime defaults were changed. Only this evidence package is added
-to the turnkey repository. Promotion should wait for:
+At this checkpoint, no turnkey runtime defaults were changed and only this
+evidence package was added. Promotion was correctly withheld pending:
 
 1. a one-shot replay fix on current SparkInfer #101/#103;
 2. a W4A16 scratch-lifetime fix that passes the ordered #100 + #102 suite;
 3. an upstream reconciliation of LMCache #18 and #20's
    `MessagingFuture` lifecycle.
+
+Those three first-pass blockers were subsequently repaired or reconciled and
+the corrected exact successor completed full-model qualification. See the
+final closeout above; this list remains only as the historical promotion gate.
 
 The complete raw evidence set is in [`artifacts/`](artifacts/).
 
@@ -370,5 +400,12 @@ The retained turnkey appliance was restored after testing. At
 - all four vLLM workers were present;
 - each GPU had about 514 MiB free after model initialization.
 
-The instance was deliberately left running for the next patch cycle, as
-requested; it was not terminated.
+That was the first-pass hand-back; the retained instance was then reused for
+the successor repair campaign. At final closeout on 2026-07-31, TERM reached
+the isolated process group, the wrapper exited within 2 seconds, and all four
+workers/GPU allocations released naturally within 19 seconds. The first
+five-second snapshot and the clean final state are both retained in
+[shutdown evidence](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-shutdown.txt).
+After every copied artifact matched its remote SHA-256, Vast instance
+`46335896` was destroyed and a subsequent inventory query returned no matching
+instance. No rental remains from this campaign.

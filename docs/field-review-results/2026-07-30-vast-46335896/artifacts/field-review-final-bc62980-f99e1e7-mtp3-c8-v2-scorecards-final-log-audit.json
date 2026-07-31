@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "start_line": 1560,
+  "line_count": 2670,
+  "ready": true,
+  "ready_lines": [
+    1133
+  ],
+  "require_ready": true,
+  "findings": [
+    {
+      "kind": "post_ready_compile",
+      "line": 2195,
+      "excerpt": "(Worker_TP0_DCP0 pid=293533) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=8974595d16b4a78e attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 2196,
+      "excerpt": "(Worker_TP1_DCP1 pid=293588) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=ad9bcb973b3dfd3d attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 2197,
+      "excerpt": "(Worker_TP2_DCP2 pid=293637) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=7258082bc63bab25 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    },
+    {
+      "kind": "post_ready_compile",
+      "line": 2198,
+      "excerpt": "(Worker_TP3_DCP3 pid=293700) [sparkinfer cute.compile] miss reason=post-engine-start target=sparkinfer.moe._shared.kernels.w4a16.kernel.W4A16FusedMoeKernel status=disk-cache-miss cache_key=4181a85781989619 attrs={'activation': 'silu', 'activation_is_gated': True, 'activation_is_situ': False, 'activation_is_swigluoai': False, 'apply_router_weight_on_input': False, 'barrier_count_off': 752, 'barrier_sense_off': 753, 'blocks_per_sm': 1, 'broadcast_suh': False, 'collect_activation_amax': False, 'cta"
+    }
+  ],
+  "counts": {
+    "post_ready_compile": 4,
+    "structured_fsm": 0,
+    "cuda_ipc_lifetime": 0,
+    "cuda_runtime": 0,
+    "distributed_runtime": 0,
+    "process_failure": 0,
+    "runtime_error_level": 0
+  },
+  "ok": false
+}
