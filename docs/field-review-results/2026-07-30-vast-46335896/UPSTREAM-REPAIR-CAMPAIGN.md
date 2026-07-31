@@ -922,3 +922,43 @@ Evidence:
 [LMCache warm split](artifacts/lmcache-r14-00563612-gpu3-warm-split.log).
 The earlier candidate's source-identical ownership path is captured by the
 [real checksum round trip](artifacts/lmcache-3d22b3ce-real-roundtrip-gpu3.log).
+
+### G. Second-stage lifecycle safety review
+
+The first post-replay SparkInfer hardening candidate,
+`f0eb0f7763f9c1c521bcc714353c8321acd3d8f2`, is **rejected** despite positive
+focused results. It passed 180 CPU/static tests (19 expected GPU skips), a
+two-rank reduced-SM collective rejection before IPC allocation, and a DCP2
+1,025-replay/skew/teardown gate. Its corresponding DCP4 warm gate then stalled
+for more than 6.5 minutes immediately after reporting the four 188-SM devices;
+the parent and all four workers were terminated and the GPUs were verified
+idle. That run is retained as HUNG/INVALID evidence, never a pass.
+
+Independent source review found five remaining lifecycle defects:
+
+1. the no-op one-shot destructor did not retain the Torch `rank_data` tensor
+   whose raw pointer is held by native code, so real GC could recycle storage
+   still referenced by queued/captured kernels;
+2. one-shot capture exit did not restore/remove stream-key aliases in strict
+   LIFO order, allowing a recycled capture key to adopt graph-owned staging;
+3. process-local stream handles and encounter order did not give channels a
+   cross-rank logical identity, so asymmetric A/B discovery could pair A with
+   B and deadlock;
+4. CUDA runtime/device/extension/layout failures before shared-buffer
+   allocation were not collectively reported, so one rank could fail while
+   peers entered allocation; and
+5. public direct constructors bypassed the new SM-residency gate.
+
+No SparkInfer replay patch will enter the r14 bundle until a new commit fixes
+all five, passes an independent re-review, and repeats the asymmetric-order,
+actual-GC, nested-capture, one-rank setup-failure, reduced-SM, DCP2 and DCP4
+GPU gates from fresh caches.
+
+The first LMCache ownership repair was likewise rejected before GPU promotion.
+The replacement design is being reviewed against a stricter contract:
+serialization must be one-shot and race-safe; an accepted ZeroMQ send must
+make the entire wrapper-batch ownership commit non-throwing and atomic; any
+ambiguous post-send state must retain the full payload for process lifetime;
+unknown-handler and frame-count failures must decode/release every known or
+generic extension frame; and async forwarding must pin the export before the
+handler's `finally` cleanup can run.
