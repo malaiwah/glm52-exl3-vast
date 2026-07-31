@@ -222,11 +222,16 @@ class SoulControllerTests(unittest.TestCase):
             root = Path(raw)
             path = root / "config.json"
             controller._nanobot_config(path, root / "workspace", "local-model",
-                                       8000, 1, "UTC")
+                                       8000, 1, "UTC", api_key="sk-in-memory")
             doc = json.loads(path.read_text())
             self.assertFalse(doc["agents"]["defaults"]["dream"]["enabled"])
             self.assertFalse(doc["tools"]["exec"]["enable"])
-            self.assertEqual(doc["providers"]["custom"]["apiKey"], "${VLLM_API_KEY}")
+            # The literal in-memory key, never an env reference: the
+            # controller strips VLLM_API_KEY from its environment so exec
+            # children cannot inherit it, which would leave "${VLLM_API_KEY}"
+            # expanding to nothing.
+            self.assertEqual(doc["providers"]["custom"]["apiKey"], "sk-in-memory")
+            self.assertNotIn("${VLLM_API_KEY}", path.read_text())
             self.assertEqual(
                 doc["providers"]["custom"]["apiBase"],
                 "http://127.0.0.1:8000/v1")

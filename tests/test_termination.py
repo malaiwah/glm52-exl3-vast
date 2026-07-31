@@ -900,6 +900,34 @@ def test_no_secret_written_world_readable(tmp):
     check("describe() never contains the key itself", "super-secret" not in blob, blob[:200])
 
 
+def test_worker_lock_during_erase_is_honoured(tmp):
+    section("a lock thrown while the erase runs still refuses the destroy")
+    # The regression: the erase used to shred terminate-switches.json before
+    # the mid-flight re-check, whose env fallback necessarily said "allowed"
+    # in any flow that passed gate 1 — so operator B's lock was ignored.
+    root = os.path.join(tmp, "inst-lock-race")
+    build_fake_instance(root)
+    env = erase_env(root)
+    env.update(VAST_ENV)
+    env["TERMINATE_ENABLED"] = "1"
+    os.environ.update(env)
+    gc.init_switches({"TERMINATE_ENABLED": "1"})
+    def _locking_stopper(pr):
+        # operator B hits "Lock termination (hard)" during the engine stop
+        gc.tighten(locked=True, reason="mid-flight lock")
+        return (True, "stub")
+    doc = terminate_worker.run(
+        {"confirm": "9876543", "erase": True},
+        transport=StubTransport([(200, '{"success": true}')]),
+        stopper=_locking_stopper, env=env)
+    check("the mid-flight lock refuses the destroy even with erase enabled",
+          doc["ok"] is False and doc.get("refused") == "switch",
+          json.dumps(doc)[:300])
+    check("the ratchet file survived the erase for the re-check to read",
+          os.path.isfile(gc.p_switches()))
+    shutil.rmtree(root, ignore_errors=True)
+
+
 def test_erase_keeps_progress_file(tmp):
     section("erase keeps what the worker still needs")
     root = os.path.join(tmp, "inst4")
@@ -1111,6 +1139,7 @@ def main():
         _run(test_erase_plan, tmp)
         _run(test_erase_without_manifest, tmp)
         _run(test_erase_execution, tmp)
+        _run(test_worker_lock_during_erase_is_honoured, tmp)
         _run(test_erase_keeps_progress_file, tmp)
         _run(test_no_secret_written_world_readable, tmp)
         _run(test_landing, tmp)

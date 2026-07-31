@@ -295,7 +295,14 @@ class VastAI(Provider):
                 ok = True                      # 200 with a non-JSON body: take it
         elif status == 0:
             ok = True                          # dry run
-        detail = _explain(status, text, self)
+        if status == 200 and not ok:
+            # HTTP 200 with success=false must not read as the accepted-
+            # terminate wording _explain gives every 200.
+            detail = ("Vast returned HTTP 200 but success=false for the "
+                      "destroy request. THE INSTANCE MAY STILL BE RUNNING "
+                      "AND BILLING — check the dashboard.")
+        else:
+            detail = _explain(status, text, self)
         return {"ok": ok, "status": status, "provider": self.name,
                 "detail": detail, "attempts": [attempt]}
 

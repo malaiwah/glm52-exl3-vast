@@ -538,12 +538,18 @@ class IncidentBook:
 
 
 def _nanobot_config(path: Path, workspace: Path, model: str, port: int,
-                    level: int, timezone: str, api_base: str = "") -> None:
+                    level: int, timezone: str, api_base: str = "",
+                    api_key: str = "") -> None:
     api_base = api_base or f"http://127.0.0.1:{port}"
     document = {
         "providers": {
             "custom": {
-                "apiKey": "${VLLM_API_KEY}",
+                # The literal key, not an env reference: the controller strips
+                # VLLM_API_KEY from its own environment so L2/L3 exec shells
+                # do not inherit it. The config file itself is 0640 and the
+                # exec tool's results pass through the redactor, but the env
+                # of every spawned child was the widest copy.
+                "apiKey": api_key,
                 "apiBase": api_base.rstrip("/") + "/v1",
             }
         },
@@ -807,14 +813,20 @@ class ToolEvidenceHook:
         self.instance = Hook()
 
 
-def _active_requests(snapshot: Mapping[str, Any]) -> int:
+def _active_requests(snapshot: Mapping[str, Any]) -> Optional[int]:
+    """Running-request count, or None when the metric could not be observed.
+
+    None means "assume busy": a broken /metrics scrape while real traffic is
+    in flight must not green-light the idle-only canary or the long-context
+    probe against a production workload. (`None == 0` is False, so the
+    idle-gated call sites treat unknown as busy without special-casing.)"""
     for line in snapshot.get("endpoint", {}).get("metrics", {}).get("selected", []):
         if line.startswith("vllm:num_requests_running"):
             try:
                 return int(float(line.rsplit(" ", 1)[-1]))
             except ValueError:
-                return 0
-    return 0
+                return None
+    return None
 
 
 def _cheap_canary(port: int, api_key: str, model: str,
@@ -1100,6 +1112,12 @@ class SoulController:
         self.boot_status = boot_status
         self.port = port
         self.api_key = os.environ.get("VLLM_API_KEY", "")
+        # Keep the key out of the process environment from here on: the L2/L3
+        # exec tool spawns shells that inherit os.environ, and the sandboxed
+        # soul account must not find credentials with a bare `env`. The
+        # in-memory copy serves the canary/metrics probes and the nanobot
+        # provider config.
+        os.environ.pop("VLLM_API_KEY", None)
         self.paths = sc.ensure_tree()
         self.book = IncidentBook(self.paths["incidents"] / "index.json")
         self.bot = None
@@ -1153,7 +1171,7 @@ class SoulController:
         config_path = self.paths["runtime"] / "nanobot-config.json"
         _nanobot_config(config_path, self.paths["workspace"], model, self.port,
                         int(config["autonomyLevel"]), str(config["timezone"]),
-                        api_base)
+                        api_base, api_key=self.api_key)
         soul_source = Path(os.environ.get("SOUL_PROMPT", "/opt/soul/SOUL.md"))
         try:
             shutil.copyfile(soul_source, self.paths["workspace"] / "SOUL.md")
@@ -1202,6 +1220,15 @@ class SoulController:
         level = int(config["autonomyLevel"])
         boot = _read_json(self.boot_status, {}) or {}
         phase = str(boot.get("phase", "waiting"))
+        if level <= 0:
+            # Level 0 is inert by contract. PID 1's five-second reconcile
+            # normally stops this process, but a mid-cycle override drop must
+            # not fall through to analysis (whose prompt table has no level-0
+            # entry and would raise) or report a misleading "Investigating".
+            _atomic_status(config, state="Off", bootPhase=phase,
+                           pendingIncidents=self.book.pending_count(),
+                           lastError="", configNotes=notes)
+            return
         model = str(boot.get("served_model") or boot.get("model") or
                     os.environ.get("SERVED_MODEL_NAME", "model")).split()[0]
         runtime_marker = (
@@ -1323,7 +1350,8 @@ class SoulController:
 
         due = now - self.last_journal >= int(config["journalIntervalS"])
         if due:
-            if _active_requests(snapshot) > 0:
+            _running = _active_requests(snapshot)
+            if _running is None or _running > 0:
                 self.journal_due_since = self.journal_due_since or now
                 if now - self.journal_due_since < 900:
                     _atomic_status(config, nextRunAt=_iso(now + 60))

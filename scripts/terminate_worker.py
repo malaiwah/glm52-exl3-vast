@@ -142,19 +142,30 @@ def run(opts, transport=None, runner=None, provider_obj=None, stopper=None,
     pr.step("engine-stopped", detail, engine_stopped=stopped)
 
     # ---- erase -----------------------------------------------------------
+    erase_failures = 0
     if opts.get("erase"):
         pr.step("planning-erase", "listing session data")
+        # gc.p_switches() stays until AFTER the destructive call: the
+        # mid-flight kill-switch re-check below reads it, and erasing it first
+        # would blind that re-check to a lock thrown during this erase (the
+        # env fallback necessarily says "allowed" in any flow that got here).
         plan_doc = secure_erase.plan(keep=(p_progress(), p_request_stop(),
-                                           p_engine_stopped()))
+                                           p_engine_stopped(),
+                                           gc.p_switches()))
         pr.step("erasing",
                 f"{plan_doc['count']} files, {plan_doc['total_bytes'] / 2**20:.1f} MiB",
                 erase_plan={k: plan_doc[k] for k in
                             ("count", "total_bytes", "groups", "manifest_used")},
                 unknown_large=plan_doc["unknown_large"])
         result = secure_erase.erase(plan_doc, dry_run=dry_run)
-        pr.step("erased", f"{result['erased']} file(s), "
-                          f"{result['bytes'] / 2**20:.1f} MiB overwritten",
-                erase_result=result)
+        erase_failures = len(result.get("failed") or [])
+        _detail = (f"{result['erased']} file(s), "
+                   f"{result['bytes'] / 2**20:.1f} MiB overwritten")
+        if erase_failures:
+            # A partial erase must not read like a clean one in the progress
+            # headline a UI renders; the full list stays in erase_result.
+            _detail += f"; {erase_failures} file(s) FAILED to erase"
+        pr.step("erased", _detail, erase_result=result)
         if opts.get("ram"):
             pr.step("erasing-ram", "dropping caches and overwriting free RAM")
             pr.step("erased-ram", "", ram_result=secure_erase.erase_ram(dry_run=dry_run))
@@ -196,7 +207,11 @@ def run(opts, transport=None, runner=None, provider_obj=None, stopper=None,
         return pr.finish(False, res.get("detail", "") + " Serving was stopped; the "
                                 "operator may need to restart the engine via the "
                                 "provider dashboard.", terminate=res)
-    return pr.finish(bool(res.get("ok")), res.get("detail", ""), terminate=res)
+    final_detail = res.get("detail", "")
+    if erase_failures:
+        final_detail += (f" NOTE: {erase_failures} file(s) could not be "
+                         "erased; see the erase step for the list.")
+    return pr.finish(bool(res.get("ok")), final_detail, terminate=res)
 
 
 def main(argv):

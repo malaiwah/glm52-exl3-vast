@@ -323,7 +323,10 @@ entrypoint re-derives it from the startup environment on every container start.
 So the *only* way back to a looser state is a container restart with a different
 environment, which requires editing the template or the pod configuration:
 provider-dashboard authority, which is precisely what a landing-page token
-holder may not have.
+holder may not have. Session erase deliberately leaves this file in place: the
+terminate worker re-checks it immediately before the destructive call, so a
+lock thrown while an erase is still running is honoured; the file holds two
+booleans and dies with the container either way.
 
 **(c-UI)** `/terminate` always shows both switches with their current values and
 an explanation. When locked it says, in the page body, that it cannot be

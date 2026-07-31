@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.request
 
+import dns.exception
 import dns.resolver
 
 
@@ -77,7 +78,14 @@ def republish(zone: str, subname: str, values: set[str], token: str) -> None:
 
 
 def guard(zone: str, fqdn: str, token: str, timeout: int) -> int:
-    subname = f"_acme-challenge.{fqdn.removesuffix('.' + zone)}"
+    rel = fqdn.removesuffix("." + zone)
+    if rel == zone:
+        # Apex issuance: the challenge is _acme-challenge.<zone> itself, with
+        # an empty relative part — the naive f-string doubled the zone and
+        # made the guard poll a name that never exists.
+        subname = "_acme-challenge"
+    else:
+        subname = f"_acme-challenge.{rel}"
     challenge = f"{subname}.{zone}"
     deadline = time.monotonic() + timeout
     repaired = False
@@ -95,7 +103,11 @@ def guard(zone: str, fqdn: str, token: str, timeout: int) -> int:
                     print(">>> deSEC ACME guard: authoritative TXT servers converged",
                           flush=True)
                 return 0
-        except (OSError, RuntimeError, urllib.error.URLError) as exc:
+        except (OSError, RuntimeError, urllib.error.URLError,
+                dns.exception.DNSException) as exc:
+            # DNSException covers the NS/A discovery lookups too: one resolver
+            # timeout must degrade to a retry, not kill the guard for the rest
+            # of the lego attempt.
             print(f"!!! deSEC ACME guard: transient check failed: "
                   f"{type(exc).__name__}", flush=True)
         time.sleep(3)

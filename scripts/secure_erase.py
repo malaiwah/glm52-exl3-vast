@@ -228,16 +228,30 @@ def _add(targets, path, group, why, seen):
         pass
 
 
+def _path_within(path, prefixes):
+    """True when `path` IS one of `prefixes` or lives underneath one.
+
+    A bare startswith over-matches siblings that merely share the prefix
+    string: skipping /tmp/glm-runtime must not also skip /tmp/glm-runtime-old,
+    and keeping terminate.json must not keep terminate.json.bak."""
+    for pref in prefixes:
+        if not pref:
+            continue
+        if path == pref or path.startswith(pref.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
 def _add_tree(targets, root, group, why, seen, skip=()):
     if not os.path.isdir(root):
         return
     skip = tuple(os.path.realpath(s) for s in skip if s)
     for dirpath, dirs, files in os.walk(root):
-        if os.path.realpath(dirpath).startswith(skip):
+        if _path_within(os.path.realpath(dirpath), skip):
             dirs[:] = []
             continue
         dirs[:] = [d for d in dirs
-                   if not os.path.realpath(os.path.join(dirpath, d)).startswith(skip)]
+                   if not _path_within(os.path.realpath(os.path.join(dirpath, d)), skip)]
         for f in files:
             _add(targets, os.path.join(dirpath, f), group, why, seen)
 
@@ -248,6 +262,9 @@ def plan(paths=None, keep=()):
     `keep` is the worker's own progress file and anything else that must
     survive until the terminate call has been made."""
     p = paths or Paths()
+    # Normalize once: the kept paths are compared against realpath'd targets,
+    # so a symlinked keep entry must not silently fail to protect its file.
+    keep = tuple(os.path.realpath(k) for k in keep if k)
     targets, seen = [], set()
     keep = tuple(os.path.realpath(k) for k in keep if k)
 
@@ -297,11 +314,14 @@ def plan(paths=None, keep=()):
                  "verify-last.json", "checkpoint-baseline.json"):
         _add(targets, os.path.join(p.state_dir, name), "config-state",
              "your saved configuration and its history", seen)
-    # terminate-switches.json lives in the per-container runtime dir, not the
-    # persisted state dir (glm_config.p_switches) — it is the opted-in state
-    # of the terminate control and must be erased with this container.
-    _add(targets, gc.p_switches(), "config-state",
-         "terminate switches — the opted-in state of the terminate control", seen)
+    # terminate-switches.json is deliberately NOT targeted: the terminate
+    # worker re-checks the kill switch immediately before the destructive
+    # call, and erasing the ratchet file first would blind that re-check to a
+    # lock thrown during the erase (its env fallback necessarily says
+    # "allowed" in any flow that reached the erase). The file holds two
+    # booleans, lives in the per-container runtime dir, and dies with the
+    # instance; the worker also passes it in `keep` to fence the runtime-dir
+    # sweep below.
     _add_tree(targets, os.path.join(p.state_dir, "failures"), "config-state",
               "preserved failed configurations, their boot logs and the model's "
               "written analysis of them", seen)
@@ -341,10 +361,15 @@ def plan(paths=None, keep=()):
     # 6. shell / editor history -------------------------------------------
     for rel in (".bash_history", ".python_history", ".viminfo", ".zsh_history",
                 ".lesshst", ".wget-hsts", ".nano_history",
-                ".ipython/profile_default/history.sqlite",
-                ".jupyter/lab/workspaces", ".local/share/jupyter/runtime"):
+                ".ipython/profile_default/history.sqlite"):
         _add(targets, os.path.join(p.home, rel), "history",
              "what you typed on this box", seen)
+    # These two are DIRECTORIES — _add silently ignores anything that is not
+    # a regular file, and the Jupyter runtime dir's nbserver-*/jpserver-*
+    # connection files carry the live server token.
+    for rel in (".jupyter/lab/workspaces", ".local/share/jupyter/runtime"):
+        _add_tree(targets, os.path.join(p.home, rel), "history",
+                  "what you typed on this box", seen)
 
     # 7. anything you added under the model dir ----------------------------
     user, unknown_large, manifest_used = user_files_under_model(p.model_dir)
@@ -355,7 +380,8 @@ def plan(paths=None, keep=()):
         seen.add(real)
         targets.append(t)
 
-    targets = [t for t in targets if not os.path.realpath(t["path"]).startswith(keep)]
+    targets = [t for t in targets
+               if not _path_within(os.path.realpath(t["path"]), keep)]
     outside = []
     if p.confine_to:
         fence = os.path.realpath(p.confine_to).rstrip("/") + "/"

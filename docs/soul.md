@@ -16,6 +16,19 @@ It is disabled by default:
 Startup verification and rollback are always authoritative. SOUL only observes,
 explains, and suggests.
 
+**The level 2/3 "read-only" contract is a policy boundary, not a security
+boundary.** The instruction to keep shell use bounded and read-only is enforced
+by the SOUL prompt and Nanobot's upstream command guards, but the shell itself
+runs with the `soul` user's full local privileges: it can read anything
+group-readable, reach the network, and talk to the local API. Treat enabling
+level 2 or 3 as trusting the local model's outputs with that identity — the
+engine logs it reads are labelled untrusted data for exactly this reason.
+Levels 0/1 remain the hard boundary: there the shell tool is not registered at
+all. Two mitigations narrow the blast radius: the autonomy override file is
+root-owned, so a level-2 shell cannot raise its own level, and the controller
+strips `VLLM_API_KEY` from its process environment so spawned shells do not
+inherit the credential.
+
 ## Isolation and lifecycle
 
 Nanobot and every locked dependency are installed in `/opt/nanobot-venv`.

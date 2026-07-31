@@ -562,6 +562,14 @@ soul_prepare_permissions() {
       chown -R soul:soul "$SOUL_STATE_DIR" "$SOUL_RUNTIME_DIR" 2>/dev/null || true
       SOUL_PERMISSIONS_PREPARED=1
     fi
+    # The autonomy override is written by root (the landing page) and only
+    # READ by the soul user. Root ownership keeps an injected L2 shell —
+    # which runs with the soul identity that owns the rest of this tree —
+    # from raising its own autonomy level up to the env ceiling.
+    if [ -f "$SOUL_STATE_DIR/config.json" ]; then
+      chown root:soul "$SOUL_STATE_DIR/config.json" 2>/dev/null || true
+      chmod 640 "$SOUL_STATE_DIR/config.json" 2>/dev/null || true
+    fi
     if [ $((_soul_permissions_now - SOUL_PERMISSIONS_LAST)) -lt 60 ]; then
       return 0
     fi
