@@ -4,42 +4,73 @@ One image, coherent profiles for **GLM-5.2**, **Qwen3.6-27B**, and compatible
 vLLM checkpoints. It supplies an authenticated OpenAI-compatible endpoint,
 persistent model downloads and compile caches, a live dashboard, key-only SSH,
 provider-aware URLs, optional TLS, crash supervision, and an opt-in embedded
-diagnostic SOUL.
-
-The [embedded appliance SOUL](docs/soul.md) uses Nanobot 0.3.0 against the
-local endpoint to monitor health, interpret incidents, and keep a blog-style
-journal. It runs inside this container with no extra port or setup and ships at
-autonomy level `0` (off). Levels 1–3 are explicitly enabled by environment or
-the token-gated landing page; startup verification and rollback remain
-authoritative.
-
-The appliance now pins **GG v20-r14**: the reviewed r13 vLLM/LMCache/XGrammar
-stack plus SparkInfer's native mixed-K K3/K4 EXL3 path for the 3.25-bpw
-checkpoint. It retains r9's paired dynamic-token NVFP4 MLA cache ABI and exact
-adaptive sparse-indexer folding, while consolidating EXL3 on SparkInfer's
-fused-MoE API, fixing target/draft small-row plans and using a repeatable
-post-warmup Trellis arena peak for KV sizing. The flagship EXL3 profile uses the complete
-dynamic record after a reproduced mean KLD of `0.1167701185`, repeated
-near-maximum retrieval gates, and an exact 522,360-token five-depth pass.
-The reviewed static GLM-5.2 scale artifact remains available for variants
-that have not qualified the dynamic record. XGrammar 0.2.5 fixes GLM
-`tool_choice=required` termination.
-The provider TLS helper is refreshed to Lego 4.35.2, the latest v4 maintenance
-release. Lego 5 is intentionally deferred because it changes CLI and account
-storage semantics and needs its own certificate-renewal migration test.
+diagnostic [SOUL](docs/soul.md).
 
 The default `glm52-exl3` profile is the flagship production stack:
-BrandonMusic's 3.0-bpw EXL3/TR3 checkpoint (~77 GiB/rank), DCP2, native
-TR3 MTP-5, dynamic-token `nvfp4_ds_mla` KV with FP8 RoPE, CUDA graphs through
-C8, and a full 524,288-token request limit. vLLM auto-profiles the KV pool at the
-AIBeast-qualified `GPU_MEMORY_UTILIZATION=0.957`; rentals remain a cold-boot
-requalification boundary. Safetensors is the reliable loader. LMCache
-manages half of host DRAM as an external prefix tier for repeated agentic
-prefixes; it does not increase active context capacity. A bounded filesystem
-tier is opt-in and must use fast local NVMe—`/mnt/fast/lmcache/...` on
-AIBeast—not the NFS checkpoint store. Vision remains opt-in because the current
-graft is not long-context text-safe. Weights auto-download on first boot
-(~309 GiB—network speed dominates rental startup).
+BrandonMusic's 3.0-bpw EXL3/TR3 GLM-5.2 checkpoint on four RTX PRO 6000
+Blackwell cards, native TR3 MTP-5 speculation, dynamic-token NVFP4 KV, and a
+full 524,288-token request limit. Weights (~309 GiB) auto-download on first
+boot, so network speed dominates rental startup. The release pins **GG
+v20-r14**; the exact runtime trees, checkpoint revisions, and lineage are in
+the [changelog](CHANGELOG.md).
+
+## Contents
+
+- [Why this exists](#why-this-exists)
+- [Quick start](#quick-start)
+- [Model profiles](#model-profiles)
+- [What startup looks like](#what-startup-looks-like)
+- [Launch GLM-5.2 on Vast.ai](#launch-glm-52-on-vastai)
+- [Launch on Runpod](#launch-on-runpod)
+- [Launch on JarvisLabs](#launch-on-jarvislabs)
+- [Running it on your own hardware](#running-it-on-your-own-hardware)
+- [Self-service profile switching](#self-service-profile-switching)
+- [Self-service configuration](#self-service-configuration-no-rebuild-no-re-rent)
+- [Terminate + session erase](#terminate--session-erase-opt-in-off-by-default)
+- [GLM profile: vision (opt-in)](#glm-profile-vision-opt-in)
+- [GLM profile: MTP78 draft](#glm-profile-mtp78-draft)
+- [Vast.ai template settings (manual setup)](#vastai-template-settings-manual-setup)
+- [Configuration reference](#configuration-reference)
+- [Evidence / why these defaults](#evidence--why-these-defaults)
+- [Security](#security)
+
+## Why this exists
+
+The inspiration for this turnkey was the **July 2026 OpenAI / Hugging Face
+security incident**: during a benchmark evaluation, [OpenAI models broke out
+of their eval sandbox and attacked Hugging Face's
+infrastructure](https://simonwillison.net/2026/Jul/22/openai-cyberattack/) to
+steal the answer key. When HF's responders reached for frontier models to
+analyze the breach, [commercial-API safety filters couldn't tell an incident
+responder from an
+attacker](https://www.cnbc.com/2026/07/24/chinese-ai-model-openai-cyber-attack.html)
+— so they ran **open-weight GLM-5.2 locally**, chewed through 17,000+
+recorded events in hours, and [contained the breach without any attacker data
+leaving their environment](https://huggingface.co/blog/security-incident-july-2026).
+
+The lesson: **if you ever need quick, private, unfiltered access to a
+frontier-class model, you need it runnable on hardware you control — before
+the incident.** This template is that button: rented GPUs, your keys, your
+data path, ~30 minutes from click to a 512K-context GLM-5.2 endpoint that
+answers only to you.
+
+## Quick start
+
+| profile | provider | launch | hardware | disk | first-boot budget |
+|---|---|---|---|---|---|
+| GLM-5.2 flagship | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405) | 4x RTX PRO 6000 Blackwell 96 GB | 450 GB | 60–90 min |
+| GLM-5.2 flagship | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93) | 4x RTX PRO 6000 Blackwell 96 GB | 450 GB | ~30 min (Secure) |
+| GLM-5.2 flagship | JarvisLabs | [▶ VM guide](#launch-on-jarvislabs) | 4x RTX-PRO6000 VM | 500 GB | ~30 min |
+| Qwen3.6 vision (low-cost) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=214d2e120a6718558fa207d4579d4316) | 1x RTX 5090 32 GB | 100 GB | ~6–20 min |
+| Qwen3.6 vision (low-cost) | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=7ufac3b4zw&ref=4ahycj93) | 1x RTX 5090 32 GB | 100 GB | ~30 min |
+
+**Requirements that fail fast:** Blackwell (`sm120+`) GPUs only, and the
+qualified pair **NVIDIA driver 590.48.01+ / CUDA 13.2+** — both are checked
+before any weights download. First boot downloads the checkpoint, so set a
+cold-start cost deadline before renting. Wait for `Application startup
+complete` plus the verification result in the instance logs, then use the
+generated API key and labeled endpoint. Measured per-provider timings are
+under [What startup looks like](#what-startup-looks-like).
 
 ## Model profiles
 
@@ -55,71 +86,11 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 
 The Qwen profile serves
 [`nvidia/Qwen3.6-27B-NVFP4`](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4)
-with `--quantization modelopt`, the `qwen3` reasoning parser and
-`qwen3_coder` tool parser. It defaults to its native vision encoder, one GPU,
-192K context, FP8 KV selected from the checkpoint metadata, no DRAM KV
-offload, and compiled MTP-off decoding. The full profile was qualified on one
-575 W RTX 5090 32 GB: thinking/non-thinking, streaming, preserved multi-turn
-reasoning, strict structured outputs, tools/tool-result continuation, a
-192,290-token five-depth retrieval, and two 5120x2880 detailed-vision gates all
-passed.
-
-The upstream architecture supports 262,144 tokens, but 256K is not a safe
-vision-enabled 32 GB appliance target. Text-only attempts approached it; the
-vision encoder needs transient working memory. At 200K and 208K the detailed
-image test survived with only 177 MiB and 29 MiB free respectively, while
-nearby boots OOMed. The selected `GPU_MEMORY_UTILIZATION=0.90`,
-`MAX_MODEL_LEN=196608`, `MAX_NUM_BATCHED_TOKENS=4096`, and 8,388,608-pixel
-image cap retained about 511 MiB after the post-192K vision repetition. An
-8,192-token scheduler batch reduced the profiled KV ceiling to about 168K and
-could not start, so it is not a performance upgrade for this envelope.
-
-| one RTX 5090, GG v20-r9 | measured result |
-|---|---:|
-| uncached PP @8K / 64K / 180K | 3,704 / 3,716 / 2,513 tok/s |
-| aggregate TG C1 / C2 / C4 | 68.0 / 120.9 / 221.6 tok/s |
-| KV pool / maximum request | 205,544 / 196,608 tokens |
-| near-maximum retrieval | 5/5 at 192,290 tokens; no degeneration |
-| 5K dashboard | 17–18/18 details, image follow-up and text regression passed |
-| warm compatible-cache start | about 43 seconds to API readiness |
-
-On GG v20-r9, Qwen MTP2 cannot use the compiled
-FlashInfer decode wrapper: the
-wrapper freezes `q_len_per_req=1`, while the draft step needs `3`, and the first
-request kills the engine. The appliance therefore adds `--enforce-eager`
-automatically when Qwen MTP is enabled. That compatibility path passed the live
-feature gate but gives up torch compilation and CUDA graphs. It measured only
-46/81/101 tok/s at C1/C2/C4 versus 68/121/222 without MTP, despite healthy
-74–79% draft acceptance and mean acceptance length around 2.5. It also reduces
-usable context. The fast qualified default therefore remains `MTP_TOKENS=0`.
-The real OMP workload made the memory cost more explicit: with GMU 0.90, MTP2
-failed 192K KV admission, and 172K, 155K and even 64K auto-KV trials OOMed in
-the first substantial eager request because vLLM filled the remaining GMU
-budget with KV. A 64K diagnostic passed after either lowering GMU to 0.85 or
-pinning the equivalent per-GPU pool with
-`KV_CACHE_MEMORY_BYTES=4981753856`. Across 38 OMP reporting intervals the
-fixed-headroom shape averaged 2,656 prompt tok/s, reached 3,520 prompt tok/s,
-and produced MAL 2.606 with 80.3% mean draft acceptance. Aggregate generation
-averaged 22.8 tok/s and peaked at 95.3 while serving up to four requests—still
-materially worse than compiled MTP-off. The fixed-pool knob is therefore an
-advanced diagnostic/workspace control, not part of the Qwen production
-profile.
-
-N-gram speculation hit the same frozen-query-shape class in compiled mode and
-failed its correctness gate in eager mode; EAGLE and DSpark require compatible
-external draft checkpoints that this checkpoint does not publish.
-
-The [Qwen3.6-27B model card](https://huggingface.co/Qwen/Qwen3.6-27B)
-documents the architecture, native context, text-only switch, Qwen parsers,
-and its MTP module. The pinned vLLM runtime uses the current speculative method
-name `mtp` (the older `qwen3_next_mtp` alias is deprecated). The
-[NVIDIA NVFP4 checkpoint card](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4)
-specifies the ModelOpt loader and 262K serving command. This image's
-[pinned GG source and EXL3 integration](https://github.com/local-inference-lab/vllm/pull/190)
-contains the required Qwen3.5 architecture, parser, speculative method, and
-mixed-precision ModelOpt implementation. The single-GPU 192K vision profile is
-the measured turnkey envelope; 262K remains an upstream model capability, not
-a claim about safe operation on a 32 GB card.
+with `--quantization modelopt`, the `qwen3` reasoning parser, the
+`qwen3_coder` tool parser, its native vision encoder, and a 192K-context
+envelope qualified on one RTX 5090. The measured envelope, throughput, and
+the MTP/speculation analysis are in
+[docs/qwen36-qualification.md](docs/qwen36-qualification.md).
 
 For another checkpoint:
 
@@ -142,18 +113,6 @@ provider-template default. `exl3-tr3-max-context` trades ordinary-workload
 speed for the largest DCP4 envelope. `madeby561-hybrid` remains the immutable
 v20 production control:
 
-An independent
-[Terminal-Bench 2.1 reproduction on this Brandon EXL3/TR3 checkpoint](https://huggingface.co/brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw/discussions/1)
-reported “69 pass · 15 model fail · 4 infrastructure error”: 78.4% over the
-88 completed trials, or 82.1% after excluding infrastructure errors. Z.ai's
-[original GLM-5.2 model card](https://huggingface.co/zai-org/GLM-5.2) reports
-81.0% with Terminus-2. The quantized run is thus within 2.6 percentage points
-of the vendor score and crosses it on the quality-only denominator. That is
-strong end-to-end evidence that the quant retains the original model's
-agentic capability, but not a controlled quantization-only A/B: serving
-context, runtime, harness state, and error accounting differ, so the two
-percentages must not be called statistically equivalent.
-
 ```text
 MODEL_PROFILE=glm52-exl3
 MODEL_VARIANT=madeby561-hybrid
@@ -169,250 +128,17 @@ speculation shape; it is not merely a different download URL:
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
-The mixed 3.25-bpw profile is a qualified quality/performance trade, not a
-new default. On the original AIBeast/r11 control it passed the complete OpenAI
-feature suite and an actual 522,360-token five-depth retrieval with no
-degeneration. Its isolated 32K/128K prefill was 2,407.9/2,262.1 tok/s;
-aggregate decode was 128.0 tok/s at C1 and 285.3 at C8, with MTP5 mean
-acceptance lengths 5.74/5.08. Against the 3.0-bpw control that is roughly 3–6%
-slower prefill, 14% slower C1, and 26% slower C8.
+An independent Terminal-Bench 2.1 reproduction on the Brandon checkpoint
+scored within 2.6 points of Z.ai's vendor result, and the r14 field repair
+passed its full 13/13-feature and retrieval gates. The complete evidence —
+feature gates, KLD measurements, LMCache qualification, and release
+boundaries — is in
+[docs/glm52-qualification.md](docs/glm52-qualification.md) and
+[docs/glm52-3.25-offload-qualification.md](docs/glm52-3.25-offload-qualification.md);
+cross-provider throughput, power, and loader tables are in
+[docs/benchmarks.md](docs/benchmarks.md).
 
-The final r13 appliance image repeated the full API gate and the same exact
-522,360-token 5/5 retrieval on the production endpoint. With ordinary agent
-traffic sharing the service, unique-prefix PP was 2,197.1/2,062.8 tok/s at
-32K/128K. Aggregate TG was 108.8/173.0/255.0/332.9 tok/s at C1/C2/C4/C8,
-MTP5 mean acceptance length was 4.96/4.81/5.32/5.41, and there were no request
-failures or preemptions. That remains the historical production result. A
-later matched six-prompt field-review gate on the same retained rental selected
-MTP3 for the candidate profile: draft acceptance was 84.10% versus 39.84%,
-mean acceptance length was 3.523 versus 2.992, and mean/p95 TPOT was
-16.962/23.647 ms versus 25.104/48.709 ms for MTP5. MTP5 produced four fast
-samples but two repeatable ~48 ms outliers, so its median alone was misleading.
-The corrected r14 field-repair successor has now completed that gate and is
-the authoritative field-repair attribution result for the 131K text-only,
-offload-disabled profile: **251,392 logical KV tokens** (**1.87 GiB/rank**),
-13/13 API features on both initial and warm passes, 5/5 needles at 32K,
-20/20 needles across cold 65K/126K probes, and two bounded C1/C2/C4/C8
-matrices with no request failure or preemption. Fully warm prefill was
-2,011.072 tok/s at 3K and 1,857.989 tok/s at 32K; warm aggregate decode was
-29.119/36.191/40.063/62.338 tok/s at C1/C2/C4/C8. Final scorecards were
-**96/100 GSM8K** and **44/50 GPQA**; every one of GPQA's 44 normal stops was
-correct and its only six misses exhausted the 32K reasoning ceiling. TERM
-released the wrapper within 2 seconds and all workers/GPU allocations within
-19 seconds. Release appliance:
-`ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7`;
-immutable evidence
-[`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
-This gate does not supersede the separate 512K, vision, or cache-offload
-qualification above. The GPU run used the manifest-matched imported runtime;
-CI built the pinned appliance afterward from unchanged runtime files, but that
-published digest was not separately GPU-booted.
-The exact patch order and independent
-reproduction contract are in the
-[counter-validation guide](docs/field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md).
-
-The checkpoint's reported dynamic-NVFP4 KLD is 0.095971 versus 0.119525 for
-3.0 bpw. The appliance independently measured **0.0927076684** over the
-standard 2,047 positions, versus its independent 3.0-bpw result of
-0.1167701185. The reference bundle contains one window, so a displayed
-standard deviation of zero is structural (`n=1`), not zero model variance.
-The complete active-KV/offload matrix and exact release boundaries are in
-[the 3.25-bpw qualification report](docs/glm52-3.25-offload-qualification.md).
-
-The original 3,072-token shape was not runtime-safe with LMCache: it booted,
-then OOMed its first 128K request on a 36 MiB mixed-K output conversion. The
-final profile keeps the full 2,048-block GPU pool while lowering the prefill
-chunk to 2,048 and sending sparse-indexer folds above 64 MiB through the exact
-streaming-carry path. With 125 GiB LMCache DRAM it passed two 128K requests,
-then completed 520,001- and 524,012-token prefills. The latter reached 99.3%
-GPU-KV use, leaving only the API/template margin below the 524,288 hard limit.
-The r13 production run has already served 277,504 prompt tokens from external
-KV, restored 548 chunks per rank, and completed 19 filesystem-L2 loads with no
-dropped cache events. The bounded local-NVMe directory occupied 33 GiB of its
-512 GiB ceiling after qualification.
-
-At the matched 65,024-token eviction gate, native vLLM restored the prefix from
-DRAM in 0.568 s and LMCache in 0.508 s, versus roughly 30 s recomputation.
-Native retained about 0.83 GiB more idle VRAM/GPU, but prompt throughput was
-within run variance. Adding a bounded 512 GiB local-NVMe LMCache tier did not
-change idle VRAM, 128K PP, or MTP acceptance. After a complete engine/cache
-restart, the identical 131,076-token prompt restored from NVMe in 1.254 s;
-LMCache reported 6.51 GB/s NVMe-to-DRAM and 14.7–17.1 GB/s DRAM-to-GPU.
-Filesystem L2 remains opt-in because derived KV may contain session material.
-
-The hybrid's 2,048 chunk is intentional. On v20, a 3,072-token chunk with a 512 MiB
-workspace passed three uncached 32K prefills and a C1/C2/C4/C8 sweep, but
-immediately OOMed in the target NF3 MoE output allocation at a 520,192-token
-prompt. A 1 GiB workspace was worse: it passed the first 32K gate and OOMed on
-the next request. A configuration that only boots—or even passes one short
-needle—is not a 512K profile.
-
-#### Performance: compare like with like
-
-The provider comparison uses the same balanced
-TP4/DCP2/TR3-MTP5 profile and `llm-inference-bench` v0.4.29 protocol.
-All measured systems used four RTX PRO 6000 Blackwell 96 GB cards. Results are
-aggregate output throughput; PP is a cold unique-prefix request, so prefix
-cache hits do not inflate it. AIBeast is the final GG v20-r5 compute image;
-GG r8 retained that exact compute stack. GG r9 changes the NVFP4/indexer
-sources and is therefore a new qualification boundary. Vast and Runpod are
-the immediately preceding v31 candidate; JarvisLabs is the July 30 GG r9
-candidate with the appliance's no-P2P fallback. The later one-card Qwen
-qualification also supports the exact
-Runpod compatibility pair `590.48.01 / CUDA 13.2`; the pairwise admission
-rule below intentionally does not admit `590.48.01 / CUDA 13.1`.
-
-| environment | topology / power cap | PP 8K / 32K / 64K / 128K tok/s | TG C1 / C2 / C4 / C8 tok/s | exact long-context gate |
-|---|---|---:|---:|---|
-| **AIBeast (owned, GG r5)** | all `NODE`, 280 W/card | 2,853 / 2,749 / 2,658 / 2,504 | 106.7 / 145.6 / 207.9 / 284.5 | 510,535-token document, 5/5 depths |
-| **Vast Community** | all `NODE`, 600 W/card | 3,046 / 2,939 / 2,875 / 2,700 | 78.5 / 140.8 / 210.1 / 330.8 | 517,176 tokens, 5/5 depths |
-| **Runpod Secure** | two `NODE` pairs, cross-pair `SYS`, 600 W/card | 3,554 / 3,449 / 3,357 / 3,114 | 63.0 / 155.8 / 223.1 / 343.5 | 517,176 tokens, 5/5 depths |
-| **JarvisLabs IN1 VM** | all `PHB`, CUDA P2P unavailable, 600 W/card | 2,417 / 2,444 / 2,354 / 2,228 | 79.6 / 120.8 / 180.2 / 272.3 | 517,177 tokens, 5/5 depths |
-| **Runpod Community estimate** | host-dependent, commonly Vast-like | **2,500–3,500 / 2,400–3,400 / 2,300–3,300 / 2,100–3,100** | **55–95 / 125–165 / 185–230 / 280–350** | expected when the same 4x96 GB shape boots; run the gate |
-
-The Runpod Community row is deliberately a planning range, not a benchmark:
-its topology, host contention, registry route, storage and power policy vary
-by offer. Secure Cloud is not automatically faster at low-concurrency decode;
-the measured cross-socket topology made C1 slower than both all-`NODE` hosts.
-Conversely, its network and storage made cold provisioning much faster.
-
-GPU telemetry, not wall-outlet system power:
-
-| phase | AIBeast GG r5 | Vast Community v31 | Runpod Secure v31 | JarvisLabs GG r9 |
-|---|---:|---:|---:|---:|
-| complete canonical run average | 1,056 W | 1,495 W | 1,457 W | 1,090 W |
-| zero-context C1 | 1,084 W | 1,241 W | 1,012 W | 946 W |
-| zero-context C8 | 1,110 W | 1,739 W | 1,743 W | 1,137 W |
-
-AIBeast remains the efficiency reference: the rental power ceiling improves
-prefill and high-concurrency aggregate throughput, but does not overcome
-communication latency at C1. The measured drivers were **595.71.05 / CUDA
-13.2** on AIBeast, **610.43.03 / CUDA 13.3 compatibility** on Vast,
-**610.43.02 / CUDA 13.3 compatibility** on Runpod Secure, and
-**595.58.03 / CUDA 13.2** on JarvisLabs. AIBeast's
-`nvidia-smi` client reported **580.95.05** while the loaded driver reported
-595.71.05.
-
-These versions are part of the result. A driver, CUDA, base-image, or kernel
-refresh is a requalification boundary: isolate incompatible compile caches,
-repeat a cold 32K retrieval gate, confirm memory profiling and runtime
-headroom, and rerun the compact performance matrix before comparing new
-numbers with this table. AIBeast is scheduled for such a host refresh; until
-that pass is recorded, these values describe the tested stack rather than the
-future installation. The appliance now puts its persistent vLLM, Triton,
-Torch-extension, and Inductor caches below the base image's immutable
-`LOCAL_INFERENCE_CACHE_FINGERPRINT`: same-stack restarts remain warm, while an
-r11-to-r13 change cannot accidentally execute stale compiled objects.
-
-The current GG image is CUDA 13.2. The appliance therefore fails fast below
-the qualified pair **NVIDIA driver 590.48.01 and reported CUDA 13.2**, before
-it downloads model weights. Driver 595.45.04 remains the driver paired with
-CUDA 13.2 GA in the
-[official release notes](https://docs.nvidia.com/cuda/archive/13.2.0/cuda-toolkit-release-notes/index.html),
-but the lower pair is no longer speculative: a Runpod Secure RTX 5090 with
-driver 590.48.01, a CUDA 13.2 report and `cuda-compat-13-2` present passed the
-Qwen profile's complete feature suite, vision, long-context retrieval,
-autonomous-appliance checks and a real cross-provider OMP workload. The pair
-requirement remains intentional: a Runpod r580 host failed NCCL initialization
-and Vast classified an earlier r590 offer as CUDA 13.1. Set
-`ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1` only for another separately qualified
-driver/CUDA combination.
-
-#### Safetensors, compiled-cache reuse, and the InstantTensor opt-in
-
-Safetensors remains the flagship default. As a historical cold/warm control,
-the exact immutable r11 image loaded
-all 81 target shards in 91.36 seconds from a warm local store, completed model
-load in 135.08 seconds, and exposed 542,208 logical KV tokens at GMU 0.957.
-It passed the complete OpenAI feature suite and an exact 522,360-token
-five-depth retrieval with 5/5 needles and no degeneration.
-
-The same container image was then replaced and restarted against the same
-persistent compile volume. The backbone loaded its AOT artifact in 0.55
-seconds, the small speculative head compiled in 3.63 seconds, and output
-remained correct. The warm run exposed 553,472 KV tokens; the variation is the
-runtime memory profiler, not a different profile. This directly challenges
-the historical cache-corruption and very-low-throughput failure modes:
-same-stack reuse is enabled, but every compiled path is namespaced by the
-immutable upstream source fingerprint plus the turnkey EXL3 patch ABI.
-
-InstantTensor remains selectable. Earlier stacks often loaded it in
-32.4–33.1 seconds versus 60.5–62.6 seconds for warm-page-cache safetensors,
-with no systematic steady-state PP/TG change. It also stalled without reaching
-GPU allocation in later cold qualification attempts and has repeatedly
-changed the memory-admission boundary. It is therefore an experiment, not the
-first-time-user default. Any loader change requires a cold start, a decode
-check, and the near-maximum retrieval gate.
-
-A seeded same-prompt matrix found no systematic steady-state change:
-
-| loader | PP 8K / 32K | TG C1 / C2 / C4 / C8 | failures / preemptions |
-|---|---:|---:|---:|
-| safetensors | 2,794.8 / 2,680.2 | 170.9 / 227.7 / 318.7 / 409.1 | 0 / 0 |
-| InstantTensor | 2,782.4 / 2,680.4 | 168.7 / 230.6 / 306.2 / 402.6 | 0 / 0 |
-
-The mixed deltas range from +1.3% to -3.9%, consistent with run/output
-variation rather than a loader-dependent kernel change. The older
-safetensors 514,432-token sparse-indexer OOM remains useful historical
-evidence that loader and runtime revisions alter the memory shape; the r11
-522,360-token pass supersedes it for this exact image and profile.
-
-Do not read a single periodic vLLM line as an end-to-end prefill benchmark.
-The logger defaults to a 10-second interval and counts each scheduled chunk
-when it completes. With a 2,048-token chunk, one completed chunk prints
-`204.8 tok/s`, two print `409.6`, and a bucket with no completed chunk prints
-`0`; `204.8, 0, 204.8, 0` is therefore ordinary boundary quantization. Use
-exact prompt tokens divided by TTFT, with a unique prefix so prefix caching
-cannot contaminate the result.
-
-#### Feature status
-
-The live hybrid suite passes authenticated model discovery, exact
-tokenization, ordinary chat, thinking-content visibility, streaming with
-usage, multi-turn with preserved reasoning, release-gating strict structured
-JSON both with and without thinking,
-one automatic tool call, and tool-result continuation. The former
-`tool_choice=required` duplicate-call behavior came from XGrammar's GLM
-structural-tag grammar allowing another tool tag, but no normal trailing text
-or end-of-turn path. GG r9 retains r8's pinned XGrammar 0.2.5, whose required grammar
-to permit normal completion after one or more calls while still requiring at
-least one. The probe remains optional until this derived r9 image completes
-the live appliance gate; `tool_choice=auto` remains release-required.
-
-Thinking plus structured output also crosses an MTP-specific boundary. The
-draft can have proposed several answer tokens before the reasoning-end marker
-activates the grammar. Those pre-mask proposals are allowed to be rejected and
-resampled; on GG r5's vLLM path, retained through r8, XGrammar logged each expected
-rejection as
-`Failed to advance FSM` at ERROR severity even when the request returned HTTP
-200 with exact schema-valid JSON. The entrypoint applies an idempotent
-compatibility patch that checks these post-marker probes against the packed
-grammar bitmask row vLLM already filled, without probing or mutating the
-matcher. Valid probes still advance the temporary FSM state, and invalid
-*committed* tokens retain vLLM's original hard-error path. The automatic
-serving verifier and feature suite now make strict JSON with thinking a release
-gate rather than inferring correctness from HTTP 200. This complements
-[vLLM #44993](https://github.com/vllm-project/vllm/pull/44993), whose reasoning
-boundary fix is already present in GG r5 through r9.
-
-The patched path was live-qualified on the full Qwen3.6-27B checkpoint with
-MTP2: 4/4 concurrent strict-schema requests passed in each of thinking-off,
-thinking-on and omitted/default-thinking modes, followed by a clean full
-feature-suite pass. There were no `Failed to advance FSM` messages, HTTP 500s
-or engine failures. XGrammar can still print a native post-EOS warning under
-speculation; exact output, health, and the committed-token failure path remain
-the release criteria.
-
-[`preserve thinking`](https://docs.z.ai/guides/capabilities/thinking-mode)
-means forwarding the assistant's complete, unmodified prior
-`reasoning_content` in the next request. [Interleaved
-thinking](https://docs.vllm.ai/en/latest/features/interleaved_thinking/) is the
-model reasoning again between tool calls and tool results. They are related
-history semantics, not synonyms; interleaved tool use needs its intervening
-thinking blocks preserved, while general multi-turn preservation remains an
-explicit landing-page option and defaults off.
-
-#### What startup looks like
+## What startup looks like
 
 Plan for three separate stages: image pull, roughly 309 GiB of weights, then
 model load/calibration/compile. The dashboard and provider status can look
@@ -514,53 +240,11 @@ If TLS / DNS still says `not configured`, the direct Vast endpoint is plain
 HTTP. Do not send its bearer key over the public Internet. Fix the template and
 relaunch, or use the encrypted SSH-tunnel route documented below.
 
-Install [Oh My Pi](https://github.com/can1357/oh-my-pi), then copy the **Oh My
-Pi (OMP 17+)** YAML shown by the secure landing page:
 
-```bash
-curl -fsSL https://omp.sh/install | sh
-mkdir -p ~/.omp/agent
-$EDITOR ~/.omp/agent/models.yml
-omp models turnkey
-omp --model "turnkey/<served-model-name>"
-```
-
-The current OMP location is `~/.omp/agent/models.yml`; the old
-`~/.pi/agent/models.json` path is not discovered. The generated entry includes
-the appliance's actual context/output limits plus `reasoning`, image and tool
-capabilities, so Qwen does not silently appear text-only or advertise an output
-limit larger than its context.
-
-OMP review workflows can fan out more requests than a one-GPU profile admits.
-Match OMP to this appliance's `MAX_NUM_SEQS=4` while retaining one slot for the
-parent session:
-
-```bash
-omp config set providers.maxInFlightRequests '{"turnkey":4}'
-omp config set task.maxConcurrency 3
-```
-
-The first setting is the hard per-provider HTTP-request ceiling shared by OMP
-processes using that config root; the second bounds child agents. This prevents
-queued subagents from reaching OMP's time-to-first-event timeout while the
-server is otherwise healthy. If you rename the provider in `models.yml`, use
-that same provider id in `maxInFlightRequests`.
-
-Scope the first review as deliberately as the concurrency. In the clean Vast
-composite retest, three broad, tool-using repository reviews remained healthy
-at the server but exhausted their eight-minute client deadlines. Two
-file-attached, no-tool reviews completed in about 90 seconds and returned useful
-reports:
-
-```bash
-omp -p --model "turnkey/<served-model-name>" --thinking off \
-  --no-tools --max-time 5m @README.md @landing.py \
-  "Review only the attached files; prioritize concrete findings."
-```
-
-Use tools for a follow-up after the bounded pass identifies where they add
-value. This keeps a small model reviewing code instead of repeatedly exploring
-the repository while its client clock expires.
+Install [Oh My Pi](https://github.com/can1357/oh-my-pi) and copy the **Oh My
+Pi (OMP 17+)** YAML shown by the secure landing page. Concurrency limits,
+review scoping, and the measured client-timeout guidance are in
+[docs/qwen-omp-guide.md](docs/qwen-omp-guide.md).
 
 The dashboard keeps a short client-side history of prompt/generation
 throughput, running/waiting requests, KV pressure and prefix-cache hits. Boot
@@ -807,25 +491,61 @@ account-scoped credential. The landing page identifies that distinction,
 requires the exact VM id plus acknowledgement, and issues a destroy—not a
 pause—after the optional session erase.
 
-## Why this exists
+## Running it on your own hardware
 
-The inspiration for this turnkey was the **July 2026 OpenAI / Hugging Face
-security incident**: during a benchmark evaluation, [OpenAI models broke out
-of their eval sandbox and attacked Hugging Face's
-infrastructure](https://simonwillison.net/2026/Jul/22/openai-cyberattack/) to
-steal the answer key. When HF's responders reached for frontier models to
-analyze the breach, [commercial-API safety filters couldn't tell an incident
-responder from an
-attacker](https://www.cnbc.com/2026/07/24/chinese-ai-model-openai-cyber-attack.html)
-— so they ran **open-weight GLM-5.2 locally**, chewed through 17,000+
-recorded events in hours, and [contained the breach without any attacker data
-leaving their environment](https://huggingface.co/blog/security-incident-july-2026).
+The same image drops onto an owned box as a transparent replacement for an
+existing endpoint:
 
-The lesson: **if you ever need quick, private, unfiltered access to a
-frontier-class model, you need it runnable on hardware you control — before
-the incident.** This template is that button: rented GPUs, your keys, your
-data path, ~30 minutes from click to a 512K-context GLM-5.2 endpoint that
-answers only to you.
+<details>
+<summary><b>AIBeast / owned Linux host + rootless Podman</b></summary>
+
+The checked-in runner preserves the same appliance entrypoint used by rentals.
+Point it at an existing read-only Hugging Face checkpoint, a writable cache,
+and a tiny writable flag directory. No weights are downloaded or mutated:
+
+```bash
+export IMAGE=ghcr.io/malaiwah/glm52-exl3-vast:latest
+export MODEL_DIR_HOST=/mnt/vault/llm/huggingface/\
+models--brandonmusic--GLM-5.2-EXL3-TR3-3.0bpw/snapshots/\
+9297b9f1d53af5c67cffa01e30cc071a1ff7144b
+export DOWNLOAD_MARKER_HOST=/mnt/fast/turnkey-flags/.download-complete
+export CACHE_VOLUME=glm52-turnkey-cache
+export STATE_VOLUME=glm52-turnkey-state
+export PORT=8000
+
+bash scripts/run-local-podman.sh
+```
+
+The runner uses host networking/IPC, passes the NVIDIA and DRI devices,
+mounts the checkpoint read-only, and keeps compilation output outside the
+checkpoint. To inspect the exact command without touching GPUs:
+
+```bash
+CONFIG_SMOKE=1 bash scripts/run-local-podman.sh
+```
+
+LMCache DRAM is selected by both the flagship and qualified 3.25-bpw profiles.
+A positive
+`PREFIX_CACHE_DISK_GB` additionally stores bounded derived KV under the
+writable LMCache mount. On an owned host, create a dedicated local NVMe
+directory and bind it at the appliance's secure-erase-aware path:
+
+```bash
+mkdir -p /mnt/fast/lmcache/glm52-3.25-r13
+export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-3.25-r13
+export PREFIX_CACHE_BACKEND=lmcache
+export PREFIX_CACHE_DISK_GB=512
+bash scripts/run-local-podman.sh
+```
+
+The `PREFIX_CACHE_DISK_GB` limit is enforced by LMCache even when the backing
+filesystem is larger. Do not point this path into the read-only checkpoint;
+cached KV may contain session material, and secure termination only provides a
+best-effort erase on flash storage. The 512 GiB setting needs at least that much
+free local space plus operational margin; AIBeast had 748 GiB free before the
+qualification. The tier does not preallocate its limit.
+
+</details>
 
 ## Self-service profile switching
 
@@ -961,20 +681,6 @@ backbone — **~890 MB**, no text weight touched. The default `VISION=0` text
 profile preserves the maximum context/performance envelope; the operation is
 fully reversible.
 
-The final v20 turnkey image was qualified on the same 4x RTX PRO 6000
-AIBeast stack described above:
-
-| what | result |
-|---|---|
-| 5120x2880 Retina-style dashboard | 17/18 exact requested details in 11.40s |
-| multimodal prompt accounting | 2,131 prompt tokens, including 2,074 multimodal tokens |
-| follow-up reusing image history | exact `COBALT-917 / Mira Chen / 09:53` in 0.71s; 2,048 cached tokens |
-| text-only regression in same process | exact in 0.19s |
-| model-memory delta | ~1.99 GiB/GPU (79.65 vs 77.66 GiB) |
-| DCP4, GMU 0.975 | 564,736 KV tokens; short suite stable |
-| DCP4, GMU 0.98 | 610,560 KV tokens, but first request OOMed with 37.12 MiB free |
-| **32K retrieval gate** | **0/3 with degenerate output; MTP MAL collapsed to 1.25–1.50** |
-
 **Know the edges:**
 - **Vision is short-context-only on this EXL3 graft.** A detailed 5K screenshot
   works well, including multi-turn follow-up, but the same healthy process
@@ -993,215 +699,19 @@ AIBeast stack described above:
   a detector (OmniParser / OCR boxes) if you need clicks.
 - Images only — video is not supported by this checkpoint.
 
-This verdict is deliberately scoped to the current EXL3/TR3 composition, not
-to Baseten's tower. The published
-[MadeBy561 vision merge](https://huggingface.co/chronarion/GLM-5.2-Vision-MXFP8-NVFP4-NF3-Hybrid)
-reports text/vision MTP parity, while an independent
-[NVFP4+AQLM merge](https://huggingface.co/jarrelscy/GLM-5.2-NVFP4-AQLM-hybrid)
-passed mixed image-plus-needle retrieval at 130K. Conversely, another
-[EXL3/TR3 vision merge](https://huggingface.co/0xSero/GLM-5.2-TR3-Vision)
-reports MTP acceptance collapsing on long synthetic prompts.
+The v20 qualification tables and the comparison against other published
+GLM-5.2 vision merges are in
+[docs/glm52-qualification.md](docs/glm52-qualification.md).
 
-The known MadeBy561 merge was also tested locally with MTP disabled. It passed
-3/3 short controls and 3/3 32K text needles, yet extracted only 1/18 requested
-values from the same 5K dashboard. Applying Jarrel's config-delegation and
-load-only name-mapping pattern raised that to only 2/18. This disproves an
-EXL3/TR3-only explanation and isolates MTP from the failure, but does not
-contradict successful simpler upstream image tests.
+## GLM profile: MTP78 draft
 
-That wrapper correction had no material speed effect: periodic 32K PP moved
-from 2,457.4 to 2,471.2 tok/s (+0.6%), while steady C1 generation moved from
-about 49.6–49.7 to 49.2 tok/s with MTP off. Both are ordinary run noise. The
-appliance therefore keeps vision opt-in and unqualified as a general-purpose
-profile. A passing result on another quant or a simple image does not waive
-the detailed-image and long-context gates.
-
-## GLM profile: native quantized MTP78, with compatibility alternatives
-
-The complete one-by-one justification for every non-default CLI parameter and
-runtime environment value in the balanced profile is kept in
-[`docs/glm52-tuning-rationale.md`](docs/glm52-tuning-rationale.md). It records
-the retained benefit, cost, evidence level, current-source defaults, and
-settings removed as unsupported rather than treating the launch environment
-as folklore.
-
-The pinned Brandon revision now serializes layer 78 in the same native
-rank-sliced EXL3/TR3 format as the target experts, so the current default performs
-no checkpoint surgery. The earlier Brandon revision shipped a 19.3 GB BF16
-layer; the measured graft and standalone override remain available for that
-checkpoint and for controlled comparisons. MadeBy561's native draft is
-different again: serialized NVFP4 experts with eligible dense pieces receiving
-its MXFP8 load-time overlay.
-
-### Measured (4-arm QC run, same box / config / prompts, 2026-07-25)
-
-| draft (layer 78) | MAL | accept | decode tok/s | KV mem/GPU |
-|---|---|---|---|---|
-| BF16 (stock, 19.3 GB) | 3.528 | 84.3% | 49.6 | 5.27 GiB |
-| **EXL3 3bpw grafted** (3.7 GB) | 3.517 | 83.9% | 49.5 | **8.92 GiB** |
-| **EXL3 3bpw override** (3.7 GB, no surgery) | **3.548** | **84.9%** | **49.9** | **8.92 GiB** |
-| NVFP4 (`lukealonso/GLM-5.2-NVFP4` MTP shards) | 3.531 | 84.4% | 49.5 | 8.5 GiB |
-
-All four drafts accept identically; the EXL3 3bpw draft is the smallest and
-edges NVFP4 on batched decode. Prefill/decode deltas are inside run-to-run
-noise. Full writeup, methodology and the two NVFP4 config gotchas:
-**https://gist.github.com/malaiwah/4bbb16bef2e336e94af165076cdba955**
-
-**DRAM prefix-cache offload and memlock.** This tier does not enlarge the
-GPU KV pool or make a larger active request fit. It preserves evicted prefix
-KV in host DRAM so repeated system prompts, repositories, tool histories and
-other large agentic prefixes can be restored instead of recomputed.
-
-Vast accepts only ports, environment variables
-and hostname in its template Docker Options, so a `--ulimit memlock=...` entry
-there is ignored. Fortunately, gating offload on memlock is measurably a false
-gate: a 125 GiB tier offloads normally under a 31 GiB limit because the
-connector does not mlock the tier up front. The default is therefore
-warn-and-proceed, and it degrades rather than fails —
-`kv_load_failure_policy=recompute` means any KV block that cannot be fetched
-back is recomputed instead of erroring the request. Set
-`OFFLOAD_IGNORE_MEMLOCK=0` for conservative disable-instead behaviour.
-
-This is therefore **possible on Vast, but host-dependent rather than
-provider-guaranteed**. The appliance sizes from the container's actual cgroup
-memory limit (not the offer headline), and disables the tier when that budget
-is unusable. Select a high-RAM offer and confirm the boot log's resolved
-aggregate/per-worker capacity. Qwen keeps this off by default until its hybrid
-attention/Gated-DeltaNet connector path passes the same external-hit
-qualification as GLM.
-
-`OFFLOAD_FRACTION` is an aggregate host-RAM budget. In the pinned native vLLM
-connector, `cpu_bytes_to_use` already accounts for the complete TP world and
-derives each worker's physical slice; dividing the value by TP again makes the
-real cache four times smaller on TP4. The appliance passes the aggregate value
-and reports both the total and estimated per-worker slice at boot.
-
-The corrected TP4 implementation was exercised on a 251 GiB AIBeast host with
-`OFFLOAD_FRACTION=0.5` (125 GiB aggregate). A cold 133,731-token prefix took
-52.47 seconds. After five different ~133K prompts forced it completely out of
-GPU cache, the same prefix returned from DRAM in 0.69 seconds: 133,504 external
-prefix-hit tokens and 9.89 GB loaded CPU-to-GPU across four workers, with zero
-allocation failures. That is about **76x lower TTFT than recomputation** for
-this agentic-prefix shape. The preallocated tier left about 51 GiB of host RAM
-available. Although the configurator permits larger fractions, 50% is the
-recommended ceiling on a 256 GiB host; 70% would leave too little operating
-margin on this machine.
-
-**Historical graft headroom:** available KV memory in that earlier comparison
-went 5.27 -> 8.92 GiB/GPU (**+69%**). Do not apply its advertised pool to the
-balanced profile: the v31 cross-provider control's DCP2, MTP-5, graph capture
-through C8, InstantTensor and portable runtime headroom exposed a measured
-523,264 logical tokens on Runpod at GMU 0.976. A new base must reproduce that
-capacity and pass retrieval before promotion.
-
-**Speculation depth:** the cheaper draft also moves the optimum. Measured
-(GSM8K n=30, +-0.5% noise floor): MTP-2 42.9 tok/s, MTP-3 51.5,
-**MTP-5 53.4** (+3.7%). MTP-5 used to lose ~22% with the 19.3 GB BF16 draft;
-with a small quantized draft the extra proposals win. MTP-5 is now the
-qualified default and the capture/trellis windows are both 64 so C8 remains
-inside the captured path. After restoration on production port 8000, real
-agent traffic held MTP-5 MAL between 3.90 and 5.13 (58.0–82.7% average draft
-acceptance across populated ten-second windows). This is the expected field
-sanity check; the matched GSM8K comparison, rather than unmatched traffic,
-decides MTP-5 versus MTP-3.
-
-### Historical pre-v31 comparison: EXL3 + grafted MTP78
-
-Measured 2026-07-26 on owned hardware (4x RTX PRO 6000 Blackwell, **280 W cap**,
-TP4/DCP4-a2a, MTP-3, 512K context, DRAM KV offload on, clean single-stream):
-
-| historical fp8-KV comparison (pre-v29) | decode C1 | MAL / accept | KV/GPU | KV pool | 505K needle |
-|---|---|---|---|---|---|
-| GLM-5.2 NVFP4-NF3 hybrid (previous prod, calibrated nvfp4 KV) | 119.2 tok/s | ~3.5 / 0.83 | 4.64 GiB | 537,600 tok | 7/7 |
-| **EXL3-TR3 3bpw + MTP78, fp8 KV** | 112.4 tok/s | 3.471 / 0.824 | **8.89 GiB** | **697,600 tok** | **6/6** |
-
-**The historical trade was ~6% slower decode for ~30% more KV pool, and
-vision.** The
-EXL3 weights are ~7 GiB/rank smaller than the hybrid's, which is what pays for
-the bigger pool even though fp8 KV costs ~1.7x the bytes per token that nvfp4
-would. Long-context retrieval is verified clean (6/6 at depths to 490K inside a
-505K request).
-
-> **Why calibrated scales are non-negotiable.** Earlier uncalibrated
-> `nvfp4_ds_mla` experiments failed long needles with degenerate output while
-> short quality, vision, and structured-output checks still passed. The v29
-> runtime ships the GLM-5.2-specific calibrated MLA outer-scale file and the
-> entrypoint now selects it explicitly and verifies its SHA-256 before exporting
-> `VLLM_NVFP4_MLA_SCALES_FILE`; the configurator
-> refuses this KV dtype for model families without an equivalent calibration.
-> Release qualification still runs cold long-context needles—calibration is
-> not a reason to skip the causal test.
-
-GG v20-r9 offers `KV_SCALE_MODE=dynamic-token`. That paired mode selects
-the 368-byte FP8-RoPE record, stores an outer scale per token, and cannot be
-combined with the static scale file. On AIBeast the appliance measured mean KLD
-`0.1167701185` twice across 2,047 positions, then retrieved 5/5 needles without
-degeneration from two exact 510,533-token prompts. It is therefore the flagship
-EXL3 default; the final scheduler also passed at 521,275 tokens.
-`static-calibrated` remains the compatibility choice for variants
-that have not passed the same gate.
-
-Vision consumed about 1.31 GiB/GPU in an earlier graft and 1.99 GiB/GPU in the
-final v20 qualification. Treat it as a distinct opt-in profile: re-run the
-configurator's memory and retrieval gates after enabling it rather than
-assuming the text-only 524K/concurrency envelope is unchanged.
-
-MTP acceptance remains healthy on short vision prompts, but the final v20
-32K gate collapsed to MAL 1.25–1.50 alongside degenerate retrieval. Exposing
-the nested `lm_head` is necessary, but it is not sufficient evidence of
-long-context correctness.
-
-Two settings are load-bearing in the v29 graft configuration:
-
-- `ONLINE_QUANT=none` — serving presets that default to an mxfp8 online overlay
-  make EXL3 refuse with `quantization_config is only supported when ...`. The
-  entrypoint sets this explicitly.
-- `VLLM_EXL3_TRELLIS_MIN_M` is **unset**. v29 stamps the draft role at
-  construction: target layers retain m=4 while MTP draft layers advertise the
-  capturable m=1 floor they require. A global override defeats that
-  role-specific choice. Advanced A/B tests may still use
-  `TUNE_VLLM_EXL3_TRELLIS_MIN_M`.
-
-A trellis (or BF16) MTP draft also needs `moe_backend=triton` **separately from**
-the target's backend — a rank-3 trellis tensor is not a fused expert weight.
-
-### Separate EXL3 draft override (experimental; do not use for production)
-
-The overlay works as a *separate draft directory* — leave the base checkpoint
-untouched and add one field:
-
-```
---speculative-config '{"method":"mtp","num_speculative_tokens":3,
-                       "moe_backend":"triton","draft_sample_method":"greedy",
-                       "model":"/path/to/GLM-5.2-EXL3-TR3-MTP78/3bpw-keep0"}'
-```
-
-v29 supports this separately rank-sliced draft by stamping its role during
-construction. The turnkey still defaults to the in-place graft because it
-avoids a second draft directory and is the release configuration exercised by
-the automated boot verifier.
-
-### Model quality (the target model, unrelated to the draft)
-
-648 samples per quant, Z.ai eval settings (temp 1.0, top_p 0.95), pass@1:
-
-| benchmark | Original BF16 | Hybrid MXFP8-NVFP4-NF3 | EXL3 3.0bpw |
-|---|---|---|---|
-| AIME 2026 (30x4) | 99.2 | 97.5 | **99.2** |
-| HMMT Feb 2026 (33x4) | 92.5 | 97.0 | **95.5** |
-| GPQA Diamond (198x2) | 91.2 | 89.4 | **91.4** |
-
-Both quants are statistically indistinguishable from BF16 — every delta is
-within sampling noise (~±3).
-
-> **Note — vLLM patch requirement:** loading a rank-sliced EXL3 MTP overlay
-> needs a one-hunk fix in vLLM's `deepseek_mtp.py` (`load_weights` misses the
-> rank-sliced name normalization; upstream PR:
-> [voipmonitor/vllm#11](https://github.com/voipmonitor/vllm/pull/11)). The
-> entrypoint applies it to the image's vLLM automatically at boot
-> (`scripts/patch_deepseek_mtp.py`, idempotent); if the anchor is missing in
-> a future image build, the template falls back to the BF16 draft rather
-> than fail.
+The pinned Brandon revision serializes the layer-78 MTP draft natively in the
+same rank-sliced EXL3/TR3 format as the target experts, so the default
+performs no checkpoint surgery, and MTP-5 is the qualified speculation depth.
+The 4-arm draft comparison, speculation-depth measurements, historical graft
+evidence, and the experimental separate-draft override are in
+[docs/mtp78.md](docs/mtp78.md); every non-default flag is justified in
+[docs/glm52-tuning-rationale.md](docs/glm52-tuning-rationale.md).
 
 ## Vast.ai template settings (manual setup)
 - **Image**: `ghcr.io/malaiwah/glm52-exl3-vast:latest` (the ghcr.io package
@@ -1239,15 +749,26 @@ Endpoint: `http://<public-ip>:<mapped-8000-port>/v1` once the console shows
 `Application startup complete` (first boot: download + JIT, plan ~30-60 min;
 later boots reuse both weights and the compatible AOT compile cache).
 
-Checkpoint downloads use `huggingface_hub.snapshot_download` with the bundled
-`hf-xet` transport and `HF_XET_HIGH_PERFORMANCE=1`. `MODEL_DOWNLOAD_WORKERS`
-defaults to 16 concurrent files. Hugging Face's adaptive Xet concurrency remains
-the default for each file; advanced deployments can pass through
-`HF_XET_FIXED_DOWNLOAD_CONCURRENCY` after measuring their route. An `HF_TOKEN`
-authenticates the request and can avoid anonymous rate limits, but does not by
-itself guarantee that a particular host-to-CAS route will be fast. See Hugging
-Face's [model-download guidance](https://huggingface.co/docs/hub/models-downloading)
-and [Hub environment variables](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables).
+## Configuration reference
+
+The most common first-launch knobs:
+
+| env | default | purpose |
+|---|---|---|
+| `MODEL_PROFILE` | `glm52-exl3` | `qwen36-27b-nvfp4` for the one-GPU profile, or `custom` with `MODEL_ID` |
+| `HF_TOKEN` | (unset) | authenticated downloads and higher Hub rate limits |
+| `DESEC_TOKEN` / `DESEC_DOMAIN` | (unset) | turnkey TLS via deSEC DNS-01 (see [Security](#security)) |
+| `OPEN_BUTTON_TOKEN` | provider-specific | exposes the `:1111` landing page and config editor |
+| `MAX_MODEL_LEN` | 524288 GLM / 196608 Qwen | qualified context envelope |
+| `MTP_TOKENS` | 5 GLM / 0 Qwen | speculation depth |
+| `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host-DRAM prefix cache (not active-context capacity) |
+| `TERMINATE_ENABLED` | `0` | expose the in-container terminate control |
+| `AUTH` | `key` | `none` only on a trusted private network |
+| `CONFIG_SMOKE` | `0` | `1` prints the resolved argv and exits |
+
+Every knob — including KV sizing, offload/memlock behaviour, verification,
+SOUL autonomy, and termination — is documented with its default and rationale
+in [docs/configuration.md](docs/configuration.md).
 
 ## Evidence / why these defaults
 Root-cause investigation of the long-context corruption and the validated
@@ -1261,151 +782,20 @@ config matrix (6 runs, 5 hosts, 4 driver families):
 - Historical fallback: 512K fp8 KV via `--num-gpu-blocks-override 2048` at
   util 0.93. The v29 default instead uses calibrated NVFP4 KV and auto-sizing.
 
-Base runtime image:
-`voipmonitor/vllm@sha256:cb03f2079d8a74915f01cda15f6bdf505762d13cc3fff192f7ebdaaf6e318bf2`
-(pinned GG v20-r14). The release tag records composed vLLM tree `749050e`
-(including the calibrated NVFP4 path, query-split prefill,
-repeatable activation profiling, and
-[PR #190](https://github.com/local-inference-lab/vllm/pull/190)),
-composed SparkInfer tree `8110e3e` (including the exact fixed-capacity
-Trellis arena from
-[PR #92](https://github.com/local-inference-lab/sparkinfer/pull/92)), and
-the native mixed-K integration from
-[SparkInfer PR #104](https://github.com/local-inference-lab/sparkinfer/pull/104).
-It retains FlashInfer `801d57a`, DCP-aware LMCache and XGrammar 0.2.5. The
-image-owned EXL3 parity compatibility patch remains an explicit
-cache/requalification boundary. It also includes native vLLM support for
-`Qwen3_5ForConditionalGeneration`, ModelOpt/NVFP4, Qwen parsers, and MTP
-speculative decoding.
+Relocated deep-dive records:
 
-The r13/r14 lineage pins exact reviewed heads rather than following their
-moving branches. The r13 post-release documentation correction changed only the stock-r11
-comparison: matched MTP0 decode is `44.66` tok/s on stock r11 versus `48.61`
-on r13 (`+8.85%`); the registry image and source locks did not change.
-For filesystem cache users,
-[LMCache PR #4211](https://github.com/LMCache/LMCache/pull/4211) documents a
-silent mixed-object-size L2 store failure in its native multiprocess adapter.
-Our exact GLM filesystem restore passed, but NVMe remains opt-in and bounded;
-watch LMCache L2 store/error metrics and verify a cold restart restore before
-depending on it. The appliance also retains the hard capacity posture tracked
-by [vLLM PR #165](https://github.com/local-inference-lab/vllm/pull/165), so a
-cache cannot silently consume the whole local RAID0 device.
-
-Profile checkpoints:
-
-- GLM: `brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw` at `9297b9f1…`
-- higher-fidelity GLM option: `willfalco/GLM-5.2-EXL3-TR3-3.25bpw` at
-  `61d2b6b7…` (mixed 3/4-bit experts; live qualification status below)
-- MadeBy561 control: `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid` release bundle
-  `66f3623…`; its 184 weight shards remain the immutable `68babde2…` payload
-- Qwen: `nvidia/Qwen3.6-27B-NVFP4` at `0893e160…`
-
-### Running it on your own hardware
-
-The same image drops onto an owned box as a transparent replacement for an
-existing endpoint:
-
-<details>
-<summary><b>AIBeast / owned Linux host + rootless Podman</b></summary>
-
-The checked-in runner preserves the same appliance entrypoint used by rentals.
-Point it at an existing read-only Hugging Face checkpoint, a writable cache,
-and a tiny writable flag directory. No weights are downloaded or mutated:
-
-```bash
-export IMAGE=ghcr.io/malaiwah/glm52-exl3-vast:latest
-export MODEL_DIR_HOST=/mnt/vault/llm/huggingface/\
-models--brandonmusic--GLM-5.2-EXL3-TR3-3.0bpw/snapshots/\
-9297b9f1d53af5c67cffa01e30cc071a1ff7144b
-export DOWNLOAD_MARKER_HOST=/mnt/fast/turnkey-flags/.download-complete
-export CACHE_VOLUME=glm52-turnkey-cache
-export STATE_VOLUME=glm52-turnkey-state
-export PORT=8000
-
-bash scripts/run-local-podman.sh
-```
-
-The runner uses host networking/IPC, passes the NVIDIA and DRI devices,
-mounts the checkpoint read-only, and keeps compilation output outside the
-checkpoint. To inspect the exact command without touching GPUs:
-
-```bash
-CONFIG_SMOKE=1 bash scripts/run-local-podman.sh
-```
-
-LMCache DRAM is selected by both the flagship and qualified 3.25-bpw profiles.
-A positive
-`PREFIX_CACHE_DISK_GB` additionally stores bounded derived KV under the
-writable LMCache mount. On an owned host, create a dedicated local NVMe
-directory and bind it at the appliance's secure-erase-aware path:
-
-```bash
-mkdir -p /mnt/fast/lmcache/glm52-3.25-r13
-export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-3.25-r13
-export PREFIX_CACHE_BACKEND=lmcache
-export PREFIX_CACHE_DISK_GB=512
-bash scripts/run-local-podman.sh
-```
-
-The `PREFIX_CACHE_DISK_GB` limit is enforced by LMCache even when the backing
-filesystem is larger. Do not point this path into the read-only checkpoint;
-cached KV may contain session material, and secure termination only provides a
-best-effort erase on flash storage. The 512 GiB setting needs at least that much
-free local space plus operational margin; AIBeast had 748 GiB free before the
-qualification. The tier does not preallocate its limit.
-
-</details>
-
-| env | default | why you'd change it |
-|---|---|---|
-| `MODEL_PROFILE` | `glm52-exl3` | select `qwen36-27b-nvfp4` for low-cost testing, or `custom` with `MODEL_ID` |
-| `MODEL_ID` | profile checkpoint | use a compatible alternate checkpoint without changing its profile defaults |
-| `MODEL_DIR` | profile-specific path under `/workspace` | point at weights you already have; the download marker is tied to `MODEL_ID` |
-| `MODEL_DISPLAY_NAME` | profile name | dashboard and provider label |
-| `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working |
-| `TENSOR_PARALLEL_SIZE` | 4 GLM / 1 Qwen | match a supported profile topology |
-| `MAX_MODEL_LEN` | 524288 GLM / 196608 Qwen | change a qualified scheduler/memory envelope only with a fresh near-maximum retrieval and vision gate |
-| `MULTIMODAL` | n/a GLM / 1 Qwen | Qwen `0` saves vision VRAM with `--language-model-only`; GLM vision remains controlled by `VISION` (default 0) |
-| `MM_MAX_PIXELS` | n/a GLM / 8388608 Qwen | cap native image processing near a 4K working image; the 5K detail gate passed at this value |
-| `QUANTIZATION` | custom profile only | vLLM quantizer name such as `modelopt` |
-| `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |
-| `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
-| `ALLOW_UNSUPPORTED_GPU` | `0` | bypass the profile GPU-name check; the required visible GPU count still applies |
-| `MIN_NVIDIA_DRIVER_VERSION` | `590.48.01` | lower bound of the qualified driver/CUDA pair; the gate runs before model download |
-| `MIN_NVIDIA_CUDA_VERSION` | `13.2` | reported CUDA capability paired with the driver floor; prevents an r590/CUDA 13.1 host from passing |
-| `ALLOW_UNSUPPORTED_NVIDIA_DRIVER` | `0` | bypass both admission floors only for a separately qualified compatibility stack |
-| `GPU_BLOCKS_OVERRIDE` | 0 | auto-profile the largest safe KV pool; a positive value pins vLLM blocks, not tokens. On this MLA stack the reported logical capacity is `blocks × 64 × DCP` (for example, DCP4 needs 2,048 blocks—not 8,192—for exactly 524,288 tokens). Re-verify this relationship after an engine/topology change. |
-| `KV_CACHE_MEMORY_BYTES` | 0 | positive per-GPU byte count fixes KV memory and supersedes GMU for KV sizing; use the profiler's printed value when eager/speculative workspace must not be consumed by auto-KV, and do not combine it with `GPU_BLOCKS_OVERRIDE` |
-| `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host DRAM used as an aggregate L2 prefix cache (not active-context capacity); `0.5` is the measured agentic-workload setting on a 256 GiB host and native vLLM derives the TP worker slices |
-| `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
-| `PREFIX_CACHE_BACKEND` | `lmcache` GLM / `native` other profiles | `lmcache` is the r13-qualified supervised DCP-aware process; `native` keeps the in-process OffloadingConnector rollback control. Both use `OFFLOAD_FRACTION` for aggregate DRAM and neither enlarges active context. |
-| `LMCACHE_L1_INIT_GB` | min(20, configured L1) | initial LMCache DRAM arena; the remaining configured tier grows lazily. Raise only if first-hit allocation latency matters more than model page-in and host-memory headroom. |
-| `PREFIX_CACHE_DISK_GB` | `0` | positive values enable LMCache's native filesystem L2 with this hard GiB limit under `<MODEL_ROOT>/.lmcache`; derived prompt KV may be sensitive, so prefer encrypted local NVMe and enable best-effort secure termination |
-| `MTP78_MODE` | `off` (native) | the current Brandon revision contains a native rank-sliced TR3 draft; `graft` and `override` remain experimental compatibility paths. MadeBy561's native draft uses serialized NVFP4 experts. Prefer the `MTP_DRAFT` knob on the config page. |
-| `MTP_DRAFT_SAMPLE_METHOD` | `probabilistic` GLM | measured MTP-5 proposal mode; `greedy` remains available for controlled A/B tests |
-| `F8_DMA` | `0` family / `ring` MadeBy561 | compressed PCIe collective mode; the hybrid override passed the 521K five-depth gate |
-| `DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS` | `-1` family / `8192` MadeBy561 | `-1` keeps topology calibration; the hybrid pins its measured crossover |
-| `PCIE_DMA_MIN_BYTES` | `-1` family / `393216` MadeBy561 | `-1` keeps topology calibration; the hybrid pins its measured byte crossover |
-| `OPEN_BUTTON_TOKEN` | provider-specific | required to expose the `:1111` config editor; Vast supplies it and Runpod/JarvisLabs get a persisted generated token when one is not set |
-| `SOUL_AUTONOMY_LEVEL` | `0` | enable the embedded diagnostic SOUL: Observe `1` (no shell), Investigate `2` (bounded read-only shell), or Verify `3` (idle-only canary and conditional long-context probe) |
-| `SOUL_AUTONOMY_MAX_LEVEL` | `3` | startup-only ceiling for landing-page overrides; invalid values fail closed to `0` |
-| `SOUL_HEARTBEAT_INTERVAL_S` / `SOUL_JOURNAL_INTERVAL_S` | `300` / `3600` | deterministic snapshot and blog-style journal cadence; changing these does not restart vLLM |
-| `VERIFY` | `1` | `0` disables the post-start correctness probe entirely (the page then reports "unverified" and nothing rolls back) |
-| `VERIFY_LONG_CONTEXT` | `1` | `0` keeps the short-prompt checks only — read the warning above before using it |
-| `VERIFY_NEEDLE_TOKENS` | `32768` | size of the long-context retrieval probe |
-| `VERIFY_HEALTH_TIMEOUT_S` | `3600` | health wait after vLLM launch; accommodates first local NFS/cachefilesd page-in. Model download occurs before this timer. |
-| `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures and logs live |
-| `MODEL_FAMILY` / `MODEL_VARIANT` | selected by `MODEL_PROFILE` | `glm52`/`exl3-tr3`, `qwen36`/`qwen36-nvfp4`, or `custom`/`custom`; the config page can switch these without rebuilding |
-| `SSHD` | `auto` | `auto` starts the bundled key-only sshd when a provider injects a public key and nothing is already listening; `0` never starts it and `1` always tries |
-| `CONFIG_SMOKE` | `0` | `1` resolves the config, prints the argv and exits without downloading or touching a GPU |
-| `TERMINATE_ENABLED` | `0` | `1` exposes the terminate control on the landing page (startup env only) |
-| `TERMINATE_LOCKED` | `0` | `1` hard-locks termination for the life of the container (startup env only) |
-| `TERMINATE_PROVIDER` | (auto) | force `vastai`, `runpod`, or `jarvislabs` when detection fails |
-| `RUNPOD_TERMINATE_API_KEY` | (unset) | RunPod account API key. Use when the injected pod-scoped key lacks delete permission, is missing/altered, or the target is another pod |
-| `JARVISLABS_MACHINE_ID` / `JARVISLABS_REGION` | launcher-provided | numeric VM id and `IN1`, `IN2`, or `EU1`; identify the VM and select its lifecycle backend |
-| `JARVISLABS_TERMINATE_API_KEY` | (unset) | opt-in JarvisLabs account key for appliance self-destroy; unlike Vast's injected key, it is not scoped to one VM |
-| `TERMINATE_DRY_RUN` | `0` | `1` prepares the destroy request and does not send it |
-| `TERMINATE_PROBE` | `1` | `0` skips the read-only credential pre-check |
+- [docs/benchmarks.md](docs/benchmarks.md) — cross-provider performance and
+  power tables, loader matrix, driver/CUDA admission evidence
+- [docs/glm52-qualification.md](docs/glm52-qualification.md) — flagship
+  feature gates, KLD, LMCache, vision, and the r14 field repair
+- [docs/qwen36-qualification.md](docs/qwen36-qualification.md) — Qwen 192K
+  envelope and speculation analysis
+- [docs/mtp78.md](docs/mtp78.md) — MTP layer-78 draft measurements
+- [docs/glm52-tuning-rationale.md](docs/glm52-tuning-rationale.md) — per-flag
+  deviation ledger
+- [docs/configuration.md](docs/configuration.md) — complete environment
+  reference
+- [CHANGELOG.md](CHANGELOG.md) — release pins and lineage
 
 ## Security
 
