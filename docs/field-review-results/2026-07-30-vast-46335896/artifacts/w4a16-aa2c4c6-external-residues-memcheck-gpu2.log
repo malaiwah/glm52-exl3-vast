@@ -1,0 +1,18 @@
+========= COMPUTE-SANITIZER
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+UTC 2026-07-31T08:11:55.028696+00:00 head aa2c4c6f38175f5bf0a4f7bb0866a32746dc8b15 gpu NVIDIA RTX PRO 6000 Blackwell Server Edition
+CASE 464 1 relu2
+CASE 464 1 silu
+CASE 464 3 relu2
+CASE 464 3 silu
+CASE 480 1 relu2
+CASE 480 1 silu
+CASE 480 3 relu2
+CASE 480 3 silu
+CASE 512 1 relu2
+CASE 512 1 silu
+CASE 512 3 relu2
+CASE 512 3 silu
+PASS cases 12
+========= ERROR SUMMARY: 0 errors

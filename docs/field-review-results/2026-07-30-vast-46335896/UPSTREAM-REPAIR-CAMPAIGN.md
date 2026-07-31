@@ -363,8 +363,36 @@ matched A/B JSON records
 [base 3](artifacts/w4a16-ab-base-3.json) /
 [candidate 3](artifacts/w4a16-ab-candidate-3.json).
 
-Independent review of this exact final head is still pending. It must approve
-before the repair is published or admitted to the full-model stack.
+Independent review **rejected** `9535f545` after finding one last wide-tail
+residue. The activation mask used padded scale-grid fullness rather than
+logical row completeness. At `I=496`, for example, the scale geometry filled
+all eight control blocks while FC1 wrote only 248 of 256 packed activation
+slots. Exact W/scale predicates could therefore still evaluate
+`0 * stale-NaN`. The same gap covered residue representatives
+`I=464/480/496`; existing `I=352` happened to take the masked branch and did
+not expose it.
+
+Focused successor `aa2c4c6f38175f5bf0a4f7bb0866a32746dc8b15` makes both M=1
+and M>=2 wide W4A16 paths key activation masking to logical
+`n % 256 != 0`. Aligned W4A16 and non-W4A16 paths retain their old compiled
+arm. The exact head passed Ruff/format, **52/52** committed contract,
+poisoned-graph-replay and bounds cases, and **4/4** `I=496` Compute
+Sanitizer cases with zero errors.
+
+Because the first successor commit only parameterized `I=496`, an external
+exact-source harness also exercised `I=464/480` and aligned `I=512` across
+M=1/3, ReLU2/SiLU, contract, poisoned graph replay, and bounds: **36/36**.
+The corresponding 12 bounds cases passed Compute Sanitizer with zero errors.
+Those external controls prove the code path but do not replace committed
+regressions; the complete residue/control matrix still needs to be added
+before final re-review.
+
+Evidence:
+[successor matrix](artifacts/w4a16-aa2c4c6-wide-gpu2.log),
+[`I=496` memcheck](artifacts/w4a16-aa2c4c6-i496-memcheck-gpu2.log),
+[external residue/control matrix](artifacts/w4a16-aa2c4c6-external-residues-gpu2.log),
+and
+[external residue/control memcheck](artifacts/w4a16-aa2c4c6-external-residues-memcheck-gpu2.log).
 
 ### C. LMCache future lifecycle
 
