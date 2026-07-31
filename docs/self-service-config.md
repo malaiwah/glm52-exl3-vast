@@ -110,7 +110,8 @@ knobs to the model. Summary of the trade each one makes:
 | `PREFIX_CACHE_BACKEND` | The GLM flagship selects r13's supervised DCP-aware `lmcache` connector after its DRAM/restart gates; `native` is the measured in-process rollback. The same DRAM fraction applies. |
 | `PREFIX_CACHE_DISK_GB` | 0 is DRAM-only. A positive value enables LMCache's native filesystem L2 and hard-bounds it to that many GiB. It retains derived prompt KV on disk, so use encrypted local NVMe where available (`/mnt/fast/lmcache/...` on AIBeast), never NFS, and make best-effort secure termination available at startup. The 3.25-bpw AIBeast gate used 512 GiB with 748 GiB initially free; it did not preallocate the limit or reduce the 524,288-token GPU pool. |
 | `VISION` | Image input vs long-context correctness on EXL3 (see rule 6) and ~1.99 GiB/GPU on the final v20 qualification shape. |
-| `MAX_NUM_SEQS`, `MAX_NUM_BATCHED_TOKENS`, `GPU_MEMORY_UTILIZATION` | Concurrency and prefill chunk against the capture window and against VRAM headroom. |
+| `MAX_NUM_SEQS`, `MAX_NUM_BATCHED_TOKENS`, `GPU_MEMORY_UTILIZATION` | Concurrency and scheduler prefill chunk against the capture window and against VRAM headroom. |
+| `VLLM_EXL3_PREFILL_CAPACITY` | Reusable EXL3 prefill-arena rows inside a scheduler chunk. The retained-host sweep measured 759.8/399.7/279.7/159.7 MiB per target rank at 3072/1536/1024/512; the 3.25-bpw candidate uses 1024. It must not exceed `MAX_NUM_BATCHED_TOKENS`. |
 | `MAX_CUDAGRAPH_CAPTURE_SIZE`, `CUDAGRAPH_CAPTURE_SIZES`, `VLLM_EXL3_TRELLIS_MAX_M` | The three ceilings that must move together to serve more streams. |
 
 ---
@@ -127,8 +128,21 @@ VLLM_EXL3_TRELLIS_MAX_M)`, both 64 in the balanced MTP-5 profile. Exceeding it d
 at boot; decode silently leaves the captured trellis fast path under
 concurrency and loses throughput. Raising concurrency requires raising
 `CUDAGRAPH_CAPTURE_SIZES`, `MAX_CUDAGRAPH_CAPTURE_SIZE` and
-`VLLM_EXL3_TRELLIS_MAX_M` together. This is why `MAX_NUM_SEQS` defaults to 8:
-`8 * (1+3) = 32` exactly fills the window.
+`VLLM_EXL3_TRELLIS_MAX_M` together. The mixed 3.25-bpw MTP3 profile uses a
+32-wide window: `8 * (1+3) = 32` exactly fills it. The balanced MTP5 profile
+uses 48 of its 64-wide window.
+
+### `exl3-prefill-capacity-above-scheduler` — error
+
+`VLLM_EXL3_PREFILL_CAPACITY` is the reusable EXL3 arena inside one
+`MAX_NUM_BATCHED_TOKENS` scheduler chunk, so it must be less than or equal to
+the scheduler value. The runtime rejects an impossible value rather than
+silently clamping it. Lower values slice the complete chunk, including its
+short tail; they trade extra launches for memory. On the retained rental,
+1,024 rows instead of 2,048 returned 73,472 logical KV tokens in the unpinned
+MTP3 control while changing prefill throughput by 0.29%. The pinned 3.25-bpw
+profile spends that saving as transient safety margin around its exact 512K
+GPU pool.
 
 ### Role-aware Trellis minimum — fixed in v29
 The old base treated target and draft layers as if they shared one minimum.

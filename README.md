@@ -13,9 +13,9 @@ autonomy level `0` (off). Levels 1–3 are explicitly enabled by environment or
 the token-gated landing page; startup verification and rollback remain
 authoritative.
 
-The appliance now pins **GG v20-r13**: vLLM
-`0.11.2.dev280+…r13`, DCP-aware LMCache `0.5.2+glm52dcp.4`, and XGrammar
-0.2.5. It retains r9's paired dynamic-token NVFP4 MLA cache ABI and exact
+The appliance now pins **GG v20-r14**: the reviewed r13 vLLM/LMCache/XGrammar
+stack plus SparkInfer's native mixed-K K3/K4 EXL3 path for the 3.25-bpw
+checkpoint. It retains r9's paired dynamic-token NVFP4 MLA cache ABI and exact
 adaptive sparse-indexer folding, while consolidating EXL3 on SparkInfer's
 fused-MoE API, fixing target/draft small-row plans and using a repeatable
 post-warmup Trellis arena peak for KV sizing. The flagship EXL3 profile uses the complete
@@ -165,7 +165,7 @@ speculation shape; it is not merely a different download URL:
 | variant | topology / speculation | context and memory | intended use |
 |---|---|---|---|
 | **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 524,288 max, 542,208-token cold r11 KV pool at GMU 0.957 on AIBeast, 3,072-token prefill batch, 140,000-token CKV gather, 1 GiB workspace, LMCache over 50% host DRAM | balanced flagship; default |
-| `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-5, probabilistic proposals | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token batch, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
+| `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler batch with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
@@ -182,9 +182,14 @@ The final r13 appliance image repeated the full API gate and the same exact
 traffic sharing the service, unique-prefix PP was 2,197.1/2,062.8 tok/s at
 32K/128K. Aggregate TG was 108.8/173.0/255.0/332.9 tok/s at C1/C2/C4/C8,
 MTP5 mean acceptance length was 4.96/4.81/5.32/5.41, and there were no request
-failures or preemptions. MTP3 did not make the rejected 3,072-token workspace
-shape viable; r13's published 101.92 tok/s MTP3 control does not establish an
-advantage over this production MTP5 result.
+failures or preemptions. That remains the historical production result. A
+later matched six-prompt field-review gate on the same retained rental selected
+MTP3 for the candidate profile: draft acceptance was 84.10% versus 39.84%,
+mean acceptance length was 3.523 versus 2.992, and mean/p95 TPOT was
+16.962/23.647 ms versus 25.104/48.709 ms for MTP5. MTP5 produced four fast
+samples but two repeatable ~48 ms outliers, so its median alone was misleading.
+The combined patched image must still repeat the full correctness gate before
+this candidate replaces the historical MTP5 production record.
 
 The checkpoint's reported dynamic-NVFP4 KLD is 0.095971 versus 0.119525 for
 3.0 bpw. The appliance independently measured **0.0927076684** over the
@@ -1197,6 +1202,8 @@ within sampling noise (~±3).
   applicable Hub rate limits), `OFFLOAD_FRACTION`
   (GLM default 0.5 for reusable agentic prefixes), `MTP_TOKENS` (GLM default 5; Qwen
   default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 524288; Qwen 196608),
+  `VLLM_EXL3_PREFILL_CAPACITY` (GLM-only reusable EXL3 arena; the mixed
+  3.25-bpw profile selects 1024 rows inside its 2048-token scheduler chunk),
   `SERVED_MODEL_NAME`,
   `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 = stock BF16 draft),
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
@@ -1235,23 +1242,24 @@ config matrix (6 runs, 5 hosts, 4 driver families):
   util 0.93. The v29 default instead uses calibrated NVFP4 KV and auto-sizing.
 
 Base runtime image:
-`voipmonitor/vllm@sha256:02796036c96a52fda0919aa260c45c70bc97d8e662a6ae5e614b5f987c20851b`
-(pinned GG v20-r13). Its labels record vLLM base `f978d009`, composed vLLM
-tree `69ba80b9` (including the calibrated NVFP4 path, query-split prefill,
+`voipmonitor/vllm@sha256:cb03f2079d8a74915f01cda15f6bdf505762d13cc3fff192f7ebdaaf6e318bf2`
+(pinned GG v20-r14). The release tag records composed vLLM tree `749050e`
+(including the calibrated NVFP4 path, query-split prefill,
 repeatable activation profiling, and
 [PR #190](https://github.com/local-inference-lab/vllm/pull/190)),
-composed SparkInfer tree `a2ea6083` (including the exact fixed-capacity
+composed SparkInfer tree `8110e3e` (including the exact fixed-capacity
 Trellis arena from
 [PR #92](https://github.com/local-inference-lab/sparkinfer/pull/92)), and
-FlashInfer `801d57a`. It composes LMCache `0.5.2+glm52dcp.4` from integration
-tree `a5aa59cc` and XGrammar `0.2.5` at `2ea71da4…`. The image-owned EXL3
-parity and mixed-K patches add another explicit cache/requalification
-boundary. It also includes native vLLM support for
+the native mixed-K integration from
+[SparkInfer PR #104](https://github.com/local-inference-lab/sparkinfer/pull/104).
+It retains FlashInfer `801d57a`, DCP-aware LMCache and XGrammar 0.2.5. The
+image-owned EXL3 parity compatibility patch remains an explicit
+cache/requalification boundary. It also includes native vLLM support for
 `Qwen3_5ForConditionalGeneration`, ModelOpt/NVFP4, Qwen parsers, and MTP
 speculative decoding.
 
-The r13 image pins exact open-PR heads rather than following their moving
-branches. Its post-release documentation correction changed only the stock-r11
+The r13/r14 lineage pins exact reviewed heads rather than following their
+moving branches. The r13 post-release documentation correction changed only the stock-r11
 comparison: matched MTP0 decode is `44.66` tok/s on stock r11 versus `48.61`
 on r13 (`+8.85%`); the registry image and source locks did not change.
 For filesystem cache users,

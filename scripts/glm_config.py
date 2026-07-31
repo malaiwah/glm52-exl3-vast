@@ -444,12 +444,16 @@ VARIANTS = {
 }
 
 # The higher-fidelity mixed-K checkpoint needs DCP4 to fit its 315.9 GiB
-# payload, native MTP5 and one full binary-512K request on four 96 GiB cards.
+# payload, native MTP3 and one full binary-512K request on four 96 GiB cards.
 # Its exact r11 gate deliberately pins the KV pool: the auto pool can consume
 # first-request workspace.  The final offload qualification also lowers the
 # prefill chunk and the exact-fold workspace budget so LMCache's four CUDA
 # transfer contexts do not consume the last all-reduce/output-conversion
-# margin.
+# margin. The field-review capacity sweep keeps the scheduler chunk at 2,048
+# while splitting EXL3 prefill work into 1,024-row slices: versus a 2,048-row
+# arena this returned 73,472 logical KV tokens in the unpinned MTP3 control for
+# a noise-sized 0.29% prefill delta, and becomes transient headroom here because
+# this profile deliberately pins its 2,048-block GPU KV pool.
 VARIANTS["exl3-tr3-3.25bpw"] = {
     "family": "glm52",
     "label": "EXL3-TR3 mixed 3.25bpw — higher-fidelity 512K",
@@ -469,8 +473,9 @@ VARIANTS["exl3-tr3-3.25bpw"]["defaults"].update({
     "DCP": "4",
     "MAX_MODEL_LEN": 524288,
     "MAX_NUM_BATCHED_TOKENS": 2048,
+    "VLLM_EXL3_PREFILL_CAPACITY": 1024,
     "MAX_NUM_SEQS": 8,
-    "MTP_TOKENS": 5,
+    "MTP_TOKENS": 3,
     "DCP_CKV_PREFETCH_DEPTH": "0",
     "DCP_CKV_GATHER_MAX_TOKENS": 140000,
     "DCP_KV_CACHE_INTERLEAVE_SIZE": "64",
@@ -482,10 +487,9 @@ VARIANTS["exl3-tr3-3.25bpw"]["defaults"].update({
     "PREFIX_CACHE_BACKEND": "lmcache",
     "PREFIX_CACHE_DISK_GB": 0,
     "PCIE_CALIBRATION": "off",
-    "MAX_CUDAGRAPH_CAPTURE_SIZE": 48,
-    "CUDAGRAPH_CAPTURE_SIZES":
-        "4,8,12,16,20,24,28,32,36,40,44,48",
-    "VLLM_EXL3_TRELLIS_MAX_M": 48,
+    "MAX_CUDAGRAPH_CAPTURE_SIZE": 32,
+    "CUDAGRAPH_CAPTURE_SIZES": "4,8,12,16,20,24,28,32",
+    "VLLM_EXL3_TRELLIS_MAX_M": 32,
 })
 VARIANTS["exl3-tr3-3.25bpw"]["runtime_env"].update({
     # Mixed-K loading replaces thousands of per-expert safetensor allocations
@@ -776,6 +780,20 @@ KNOBS = [
              "headroom and decode latency (a decode step queued behind a big prefill "
              "chunk waits for it). 3072 is the shipped balance for a 512K-context "
              "single-stream workload.")),
+
+    dict(key="VLLM_EXL3_PREFILL_CAPACITY", families=("glm52",), type="int",
+         default=3072, min=1, max=65536,
+         group="Memory", scope="engine", label="EXL3 prefill arena rows",
+         rationale=(
+             "Maximum rows allocated for one EXL3 prefill dispatch. It may be smaller "
+             "than MAX_NUM_BATCHED_TOKENS: vLLM then slices a scheduler chunk through "
+             "the same arena without dropping its short tail. On the retained 4x RTX "
+             "PRO 6000 Blackwell host, 3,072/1,536/1,024/512 rows used "
+             "759.8/399.7/279.7/159.7 MiB per target rank. In the matched MTP3 gate, "
+             "1,024 versus 2,048 returned 73,472 logical KV tokens with a 0.29% "
+             "prefill-throughput delta. Capacity must not exceed "
+             "MAX_NUM_BATCHED_TOKENS. Lower values trade extra launches for memory "
+             "headroom and require a long-prefill correctness and performance A/B.")),
 
     dict(key="DCP_PREFILL_WORKSPACE_MIB", families=("glm52",), type="int",
          default=1024, min=256, max=16384,
@@ -1910,16 +1928,25 @@ def validate(cfg: dict, context=None):
              "the proposal's transient allocation. The measured 512K profile pins "
              "2048 blocks. Keep that pin, or re-run the 32K and near-maximum needle "
              "gates before trusting this configuration.")
+    if (is_glm
+            and cfg["VLLM_EXL3_PREFILL_CAPACITY"]
+            > cfg["MAX_NUM_BATCHED_TOKENS"]):
+        err("exl3-prefill-capacity-above-scheduler",
+            ["VLLM_EXL3_PREFILL_CAPACITY", "MAX_NUM_BATCHED_TOKENS"],
+            "VLLM_EXL3_PREFILL_CAPACITY is the reusable EXL3 arena inside one "
+            "scheduler chunk and cannot exceed MAX_NUM_BATCHED_TOKENS. Lower the "
+            "arena capacity or raise the scheduler chunk; values are rejected "
+            "rather than silently clamped so the measured memory shape remains "
+            "reproducible.")
     if (is_glm and cfg["MODEL_VARIANT"] == "exl3-tr3-3.25bpw"
             and cfg["MAX_MODEL_LEN"] >= 524288
             and cfg["GPU_BLOCKS_OVERRIDE"] >= 2048
-            and cfg["MTP_TOKENS"] >= 5
             and cfg["OFFLOAD_FRACTION"] > 0
             and cfg["MAX_NUM_BATCHED_TOKENS"] > 2048):
         err("mixed-325-offload-headroom",
             ["MODEL_VARIANT", "MAX_MODEL_LEN", "GPU_BLOCKS_OVERRIDE",
-             "MTP_TOKENS", "OFFLOAD_FRACTION", "MAX_NUM_BATCHED_TOKENS"],
-            "the qualified 3.25bpw DCP4/MTP5 512K offload profile uses a "
+             "OFFLOAD_FRACTION", "MAX_NUM_BATCHED_TOKENS"],
+            "the qualified 3.25bpw DCP4/MTP3 512K offload profile uses a "
             "2,048-token prefill chunk and a 64 MiB sparse-fold budget. The older "
             "3,072-token shape OOMed its first 128K request after a successful "
             "boot. Keep MAX_NUM_BATCHED_TOKENS<=2048 for full-context offload, "
