@@ -23,6 +23,17 @@ cert_valid() {
     openssl x509 -checkend 604800 -noout -in "$crt" >/dev/null 2>&1
 }
 
+# The token travels in a 0600 header file, never argv: this helper re-runs
+# every ~300 s for the life of the container, and /proc/*/cmdline is world-
+# readable inside it (including by the sandboxed soul account).
+desec_header_file() {
+  if [[ -z "${_DESEC_HDR:-}" || ! -f "${_DESEC_HDR:-}" ]]; then
+    _DESEC_HDR="$(umask 077 && mktemp "${GLM_RUNTIME_DIR:-/tmp}/acme-desec-hdr.XXXXXX")"
+    printf 'Authorization: Token %s\n' "$DESEC_TOKEN" > "$_DESEC_HDR"
+  fi
+  printf '%s' "$_DESEC_HDR"
+}
+
 cleanup_challenge() {
   [[ "$ACME_DNS_PROVIDER" == desec && -n "${DESEC_DOMAIN:-}" &&
      -n "${DESEC_TOKEN:-}" ]] || return 0
@@ -31,7 +42,7 @@ cleanup_challenge() {
       local sub="${ACME_DOMAIN%."$DESEC_DOMAIN"}"
       curl -sf --max-time 15 -X DELETE \
         "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/_acme-challenge.${sub}/TXT/" \
-        -H "Authorization: Token ${DESEC_TOKEN}" >/dev/null 2>&1 || true
+        -H @"$(desec_header_file)" >/dev/null 2>&1 || true
       ;;
   esac
 }
@@ -47,7 +58,7 @@ register_desec() {
   }
   curl -sf --max-time 20 -X PUT \
     "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/" \
-    -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json" \
+    -H @"$(desec_header_file)" -H "Content-Type: application/json" \
     -d "[{\"subname\":\"${sub}\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"${ip}\"]}]" \
     >/dev/null
 }

@@ -70,6 +70,23 @@ fi
   echo "FATAL: completion marker does not exist: $DOWNLOAD_MARKER_HOST" >&2
   exit 4
 }
+# Existence is not integrity. An HF snapshot is a directory of relative
+# symlinks into ../../blobs; a pruned blob store (HF cache GC, partial
+# download) passes the directory checks above while the container sees
+# dangling links and fails minutes later inside vLLM load — the exact failure
+# the rebind logic exists to prevent. With -L, `find -type l` reports exactly
+# the links whose targets are gone.
+[ -r "$MODEL_DIR_HOST/config.json" ] || {
+  echo "FATAL: $MODEL_DIR_HOST/config.json is missing or unreadable — this is" >&2
+  echo "       not a complete checkpoint (pruned blobs or a broken snapshot)." >&2
+  exit 4
+}
+if find -L "$MODEL_DIR_HOST" -maxdepth 1 -type l 2>/dev/null | head -1 | grep -q .; then
+  echo "FATAL: the checkpoint contains dangling symlinks (pruned HF blobs?):" >&2
+  find -L "$MODEL_DIR_HOST" -maxdepth 1 -type l 2>/dev/null | head -5 | sed 's/^/       /' >&2
+  echo "       Re-download the snapshot or point MODEL_DIR_HOST at complete bytes." >&2
+  exit 4
+fi
 
 cache_mounts=()
 if [ -n "$HF_CACHE_HOST" ]; then
@@ -206,12 +223,19 @@ if podman container exists "$NAME"; then
   podman stop -t "${STOP_TIMEOUT:-120}" "$NAME" >/dev/null 2>&1 || true
   podman rm -f "$NAME" >/dev/null 2>&1 || true
 fi
+# The smoke contract is "no GPU touched": requesting devices would fail at
+# container create on any host without the NVIDIA container stack, before the
+# resolved config ever printed.
+gpu_args=(--gpus "\"device=${GPU_DEVICES}\"")
+if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  gpu_args=()
+fi
 podman run -d --replace --restart="$restart_policy" \
   --name "$NAME" \
   --health-cmd "curl -sf http://localhost:${PORT}/health || exit 1" \
   --health-interval 30s --health-timeout 10s --health-retries 3 \
   --health-start-period 45m \
-  --gpus "\"device=${GPU_DEVICES}\"" --ipc=host --network host \
+  ${gpu_args[@]+"${gpu_args[@]}"} --ipc=host --network host \
   -e MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}" \
   -e MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3}" \
   -e MODEL_DIR="$MODEL_DIR_CONTAINER" \

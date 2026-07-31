@@ -485,13 +485,28 @@ def main() -> None:
     if MARKER_V5 in src:
         print(f"already patched (v5): {path}")
         return
+    def write_and_compile(new_src, previous_src, action):
+        """Write, byte-compile, and roll back on a compile failure.
+
+        The siblings (parity-abi, structured-output) restore their backups on
+        a failed compile; leaving the broken text in place here bricked every
+        subsequent vLLM boot when the applier ran on a retained appliance
+        rather than inside a Docker build."""
+        path.write_text(new_src)
+        import py_compile
+        try:
+            py_compile.compile(str(path), doraise=True)
+        except py_compile.PyCompileError:
+            path.write_text(previous_src)
+            sys.exit(f"{action} produced a module that does not compile; "
+                     f"restored the previous source of {path}")
+
     if MARKER_V1 in src:
         # rebuild any older mixk install: keep the in-place E-edits, replace
         # the appended block wholesale from the v1 marker onward
+        original = src
         src = src[: src.index(MARKER_V1)].rstrip() + "\n\n" + APPEND + "\n"
-        path.write_text(src)
-        import py_compile
-        py_compile.compile(str(path), doraise=True)
+        write_and_compile(src, original, "v1->v5 upgrade")
         print(f"upgraded to v5: {path}")
         return
     missing = [name for name, old in (("E1", E1_OLD), ("E2", E2_OLD),
@@ -500,6 +515,7 @@ def main() -> None:
     if missing:
         sys.exit(f"ANCHOR MISMATCH {missing} in {path}; image lineage differs "
                  "from v20final — do not apply blindly.")
+    original = src
     for old, new in ((E1_OLD, E1_NEW), (E2_OLD, E2_NEW),
                      (E3_OLD, E3_NEW), (E5_OLD, E5_NEW)):
         if src.count(old) != 1:
@@ -508,10 +524,8 @@ def main() -> None:
     src = src + "\n\n" + APPEND + "\n"
     backup = path.with_suffix(".py.orig")
     if not backup.exists():
-        backup.write_text(path.read_text())
-    path.write_text(src)
-    import py_compile
-    py_compile.compile(str(path), doraise=True)
+        backup.write_text(original)
+    write_and_compile(src, original, "fresh v5 apply")
     print(f"patched {path} (v5, backup at {backup})")
 
 

@@ -148,8 +148,14 @@ if [ "$PREFILL_CAPACITY" != unset ] &&
   exit 2
 fi
 
-if nvidia-smi --query-compute-apps=pid --format=csv,noheader |
-   grep -q '[0-9]'; then
+# Capture first, then test: a failing nvidia-smi (missing binary,
+# driver/library mismatch) made the pipeline's grep miss and the guard fall
+# OPEN — proceeding precisely when the host cannot prove it is clean.
+if ! _gpu_procs="$(nvidia-smi --query-compute-apps=pid --format=csv,noheader)"; then
+  echo "FATAL: nvidia-smi failed; cannot prove the gate is unpolluted" >&2
+  exit 3
+fi
+if printf '%s' "$_gpu_procs" | grep -q '[0-9]'; then
   echo "FATAL: a GPU process is already running; refusing a polluted gate" >&2
   exit 3
 fi
