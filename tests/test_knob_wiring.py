@@ -252,9 +252,10 @@ def main():
           'const finalText=cleanAnswer||(!stopped?cleanReasoning:"")' in landing
           and "if(!cleanAnswer&&cleanReasoning){out.hidden=false;" in landing
           and "out.innerHTML=renderMarkdown(cleanReasoning);think.remove()" in landing)
-    check("Runpod proxy HTTPS is treated as a secure landing connection",
+    check("Runpod proxy trust is per-request (X-Forwarded-Proto), not a blanket flag",
           "LANDING_TRUST_PROXY_HTTPS" in landing
-          and "or TRUST_PROXY_HTTPS" in landing)
+          and "X-Forwarded-Proto" in landing
+          and "or TRUST_PROXY_HTTPS" not in landing)
     check("chat JavaScript values are safely escaped for inline scripts",
           "model_js=js_literal" in landing and "key_js=js_literal" in landing
           and "ep_js=js_literal" in landing and '.replace("<", "\\\\u003c")' in landing)

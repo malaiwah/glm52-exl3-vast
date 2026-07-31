@@ -16,12 +16,20 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # the actual authoritative queries.
 dns_module = types.ModuleType("dns")
 dns_module.__path__ = []
+exception_module = types.ModuleType("dns.exception")
+exception_module.DNSException = type("DNSException", (Exception,), {})
 resolver_module = types.ModuleType("dns.resolver")
 for name in ("NXDOMAIN", "NoAnswer", "NoNameservers", "LifetimeTimeout"):
-    setattr(resolver_module, name, type(name, (Exception,), {}))
+    # Mirror dnspython: every resolver error derives from DNSException, which
+    # guard() now catches so a transient NS/A lookup failure retries instead
+    # of killing the helper.
+    setattr(resolver_module, name,
+            type(name, (exception_module.DNSException,), {}))
 resolver_module.Resolver = object
+dns_module.exception = exception_module
 dns_module.resolver = resolver_module
 sys.modules.setdefault("dns", dns_module)
+sys.modules.setdefault("dns.exception", exception_module)
 sys.modules.setdefault("dns.resolver", resolver_module)
 
 spec = importlib.util.spec_from_file_location(
