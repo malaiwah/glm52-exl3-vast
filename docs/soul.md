@@ -24,10 +24,15 @@ group-readable, reach the network, and talk to the local API. Treat enabling
 level 2 or 3 as trusting the local model's outputs with that identity — the
 engine logs it reads are labelled untrusted data for exactly this reason.
 Levels 0/1 remain the hard boundary: there the shell tool is not registered at
-all. Two mitigations narrow the blast radius: the autonomy override file is
-root-owned, so a level-2 shell cannot raise its own level, and the controller
-strips `VLLM_API_KEY` from its process environment so spawned shells do not
-inherit the credential.
+all, and `SOUL_AUTONOMY_MAX_LEVEL` is startup-environment only, so nothing
+inside the container can raise the ceiling — that is the real bound on
+autonomy. Two mitigations narrow the blast radius within a level, without
+pretending to be barriers: the autonomy override file is root-owned (which
+stops an in-place edit, though `soul` owns the directory and could still
+unlink and replace it), and the controller strips `VLLM_API_KEY` from its
+process environment so spawned shells do not inherit the credential from
+`env` — the provider config file still holds it, readable by the same
+identity.
 
 ## Isolation and lifecycle
 

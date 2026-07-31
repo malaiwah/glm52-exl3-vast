@@ -81,12 +81,17 @@ fi
   echo "       not a complete checkpoint (pruned blobs or a broken snapshot)." >&2
   exit 4
 }
-if find -L "$MODEL_DIR_HOST" -maxdepth 1 -type l 2>/dev/null | head -1 | grep -q .; then
+# No `| head` here: under `set -o pipefail` an early-exiting head SIGPIPEs
+# find, the pipeline reports 141, and the guard silently passes in exactly the
+# mass-pruned case it exists to catch. -print -quit stops at the first hit.
+_dangling="$(find -L "$MODEL_DIR_HOST" -type l -print -quit 2>/dev/null || true)"
+if [ -n "$_dangling" ]; then
   echo "FATAL: the checkpoint contains dangling symlinks (pruned HF blobs?):" >&2
-  find -L "$MODEL_DIR_HOST" -maxdepth 1 -type l 2>/dev/null | head -5 | sed 's/^/       /' >&2
+  echo "       $_dangling" >&2
   echo "       Re-download the snapshot or point MODEL_DIR_HOST at complete bytes." >&2
   exit 4
 fi
+unset _dangling
 
 cache_mounts=()
 if [ -n "$HF_CACHE_HOST" ]; then

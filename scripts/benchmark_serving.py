@@ -2,7 +2,7 @@
 """Dependency-free serving benchmark for the turnkey appliance.
 
 The harness is intentionally small enough to run inside the production image.
-It measures uncached prefill, streamed TTFT/TPOT/ITL, aggregate output
+It measures uncached prefill, streamed TTFT/TPOT/inter-chunk latency, aggregate output
 throughput, speculative-decoding acceptance, preemptions, and a concurrency
 sweep. Results are written as JSON and never contain the API key.
 

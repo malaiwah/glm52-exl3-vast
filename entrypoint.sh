@@ -455,16 +455,21 @@ status_update() {
   # in any interpolated value (API key, served name, GPU name) would corrupt
   # the file the landing page depends on for the whole session. Values travel
   # via the child's environment, never argv.
-  STATUS_PHASE="$1" STATUS_EP_URL="$EP_URL" STATUS_TLS="$TLS_STATE" \
-  STATUS_HTTPS_HOSTPORT="$HTTPS_HOSTPORT" STATUS_CERT="$CERT_PATH" \
-  STATUS_KEYFILE="$KEY_PATH" STATUS_OFFLOAD="$OFFLOAD_STATE" \
-  STATUS_API_KEY="${VLLM_API_KEY:-}" STATUS_MODEL_DIR="$MODEL_DIR" \
-  STATUS_SERVED="${SERVED_MODEL_NAME:-model}" \
-  STATUS_FAMILY="${MODEL_FAMILY:-unknown}" STATUS_AUTH="${AUTH:-key}" \
-  STATUS_PORT="${PORT:-8000}" STATUS_GPUS="${GLM_GPU_COUNT:-?}" \
-  STATUS_GPU_NAME="${GPU_NAME:-}" STATUS_SSHD="${SSHD_STATE:-not started}" \
-  STATUS_PROVIDER="${GLM_PROVIDER:-unknown}" \
-  python3 - > "$STATUS_FILE" <<'PY' || echo "!!! status_update failed for phase $1" >&2
+  # Staged then renamed: `> "$STATUS_FILE"` truncated before python ran, so a
+  # spawn failure under memory pressure blanked the dashboard's only status
+  # source. umask 077 because the staged file carries the API key too.
+  _su_written=0
+  ( umask 077
+    STATUS_PHASE="$1" STATUS_EP_URL="$EP_URL" STATUS_TLS="$TLS_STATE" \
+    STATUS_HTTPS_HOSTPORT="$HTTPS_HOSTPORT" STATUS_CERT="$CERT_PATH" \
+    STATUS_KEYFILE="$KEY_PATH" STATUS_OFFLOAD="$OFFLOAD_STATE" \
+    STATUS_API_KEY="${VLLM_API_KEY:-}" STATUS_MODEL_DIR="$MODEL_DIR" \
+    STATUS_SERVED="${SERVED_MODEL_NAME:-model}" \
+    STATUS_FAMILY="${MODEL_FAMILY:-unknown}" STATUS_AUTH="${AUTH:-key}" \
+    STATUS_PORT="${PORT:-8000}" STATUS_GPUS="${GLM_GPU_COUNT:-?}" \
+    STATUS_GPU_NAME="${GPU_NAME:-}" STATUS_SSHD="${SSHD_STATE:-not started}" \
+    STATUS_PROVIDER="${GLM_PROVIDER:-unknown}" \
+    python3 - > "$STATUS_FILE.tmp" <<'PY'
 import json, os
 e = os.environ.get
 print(json.dumps({
@@ -487,6 +492,13 @@ print(json.dumps({
     "provider": e("STATUS_PROVIDER", "unknown"),
 }))
 PY
+  ) && _su_written=1
+  if [ "$_su_written" = "1" ] && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE" 2>/dev/null; then
+    :
+  else
+    rm -f "$STATUS_FILE.tmp" 2>/dev/null || true
+    echo "!!! status_update failed for phase $1 (keeping the previous snapshot)" >&2
+  fi
   if id soul >/dev/null 2>&1; then
     chgrp soul "$STATUS_FILE" 2>/dev/null || true
     chmod 640 "$STATUS_FILE" 2>/dev/null || true
@@ -563,9 +575,12 @@ soul_prepare_permissions() {
       SOUL_PERMISSIONS_PREPARED=1
     fi
     # The autonomy override is written by root (the landing page) and only
-    # READ by the soul user. Root ownership keeps an injected L2 shell —
-    # which runs with the soul identity that owns the rest of this tree —
-    # from raising its own autonomy level up to the env ceiling.
+    # READ by the soul user, so root-own it: that stops an in-place edit.
+    # It is NOT a complete barrier — soul owns this directory (it writes
+    # journal.jsonl and status.json here), so a determined shell can still
+    # unlink and replace the file. The real bound on autonomy is
+    # SOUL_AUTONOMY_MAX_LEVEL, which is startup-env only and cannot be
+    # raised from inside the container at all.
     if [ -f "$SOUL_STATE_DIR/config.json" ]; then
       chown root:soul "$SOUL_STATE_DIR/config.json" 2>/dev/null || true
       chmod 640 "$SOUL_STATE_DIR/config.json" 2>/dev/null || true
@@ -841,13 +856,34 @@ snapshot_download(os.environ["MODEL_REPO"], revision=os.environ.get("MODEL_REVIS
   # USR1 wake-up hint lands here during long downloads. Treating that as a
   # download failure killed healthy multi-hundred-GiB transfers and respawned
   # a second concurrent download; re-wait until the child has actually exited.
+  #
+  # The status MUST be captured in the else branch: after `fi`, `$?` is the
+  # exit status of the *if statement* (0 when an untested-else condition
+  # fails), which silently turned every real download failure into a success
+  # and stamped the completion marker for an incomplete checkpoint.
   while :; do
     if wait "$_download_pid"; then
       _download_rc=0
       break
+    else
+      _download_rc=$?
     fi
-    _download_rc=$?
-    kill -0 "$_download_pid" 2>/dev/null || break
+    # Only a signal-shaped status (>128) with a live child means "interrupted,
+    # keep waiting". A genuine nonzero exit breaks out immediately.
+    if [ "$_download_rc" -gt 128 ]; then
+      if kill -0 "$_download_pid" 2>/dev/null; then
+        continue
+      fi
+      # Reaped between the interrupted wait and this probe: bash retains the
+      # real status for exactly one more wait. Anything ambiguous stays
+      # nonzero so the caller retries (snapshot_download resumes safely).
+      if wait "$_download_pid" 2>/dev/null; then
+        _download_rc=0
+      else
+        _download_rc=$?
+      fi
+    fi
+    break
   done
   # The monitor normally notices the reaped child within five seconds. Stop it
   # immediately so successful startup is not delayed by a reporting helper.
@@ -1686,14 +1722,20 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${DESEC_TOKEN:-}" ] &&
     echo ">>> Registering ${SUB}.${DESEC_DOMAIN} -> ${MYIP} via deSEC"
     # The token travels in a 0600 header file, not argv: /proc/*/cmdline is
     # world-readable inside the container (including by the soul account).
-    _desec_hdr="$(umask 077 && mktemp "${GLM_RUNTIME_DIR:-/tmp}/desec-hdr.XXXXXX")"
-    printf 'Authorization: Token %s\n' "$DESEC_TOKEN" > "$_desec_hdr"
-    curl -sf -X PUT "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/" \
-      -H @"$_desec_hdr" -H "Content-Type: application/json" \
-      -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"${MYIP}\"]}]" >/dev/null \
-      && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${PUBLIC_API_PORT}/v1" \
-      || echo "!!! deSEC registration failed; continuing startup and retrying in the background"
-    rm -f "$_desec_hdr"
+    # Every step degrades to the background retry rather than aborting the
+    # boot — this whole block is explicitly best-effort.
+    _desec_hdr=""
+    if _desec_hdr="$(umask 077 && mktemp "${GLM_RUNTIME_DIR:-/tmp}/desec-hdr.XXXXXX")" &&
+       printf 'Authorization: Token %s\n' "$DESEC_TOKEN" > "$_desec_hdr"; then
+      curl -sf -X PUT "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/" \
+        -H @"$_desec_hdr" -H "Content-Type: application/json" \
+        -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"${MYIP}\"]}]" >/dev/null \
+        && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${PUBLIC_API_PORT}/v1" \
+        || echo "!!! deSEC registration failed; continuing startup and retrying in the background"
+    else
+      echo "!!! Could not stage the deSEC auth header; retrying in the background"
+    fi
+    [ -z "$_desec_hdr" ] || rm -f "$_desec_hdr"
   fi
 fi
 

@@ -1830,7 +1830,7 @@ def validate(cfg: dict, context=None):
             "the EXL3 path and throws the identical 'capture (m=3)' error as the v20 "
             "rank-sliced bug. Set DRAFT_QUANTIZATION=modelopt_fp4. This is a config trap, "
             "not a bug.")
-    if re.search(r'["\\]', str(cfg.get("DRAFT_MODEL") or "")):
+    if is_glm and re.search(r'["\\]', str(cfg.get("DRAFT_MODEL") or "")):
         err("draft-model-quoting", ["DRAFT_MODEL"],
             "DRAFT_MODEL may not contain double quotes or backslashes: the "
             "path is embedded verbatim in the --speculative-config JSON "

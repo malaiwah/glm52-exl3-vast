@@ -266,7 +266,6 @@ def plan(paths=None, keep=()):
     # so a symlinked keep entry must not silently fail to protect its file.
     keep = tuple(os.path.realpath(k) for k in keep if k)
     targets, seen = [], set()
-    keep = tuple(os.path.realpath(k) for k in keep if k)
 
     # 1. credentials -------------------------------------------------------
     _add(targets, p.keyfile, "credentials",
