@@ -2,9 +2,9 @@ name: build-and-push
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "scripts/**", "soul/**", "tests/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", .github/workflows/build.yml]
   pull_request:
-    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "scripts/**", "soul/**", "tests/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", .github/workflows/build.yml]
   workflow_dispatch:
 permissions:
   contents: read
