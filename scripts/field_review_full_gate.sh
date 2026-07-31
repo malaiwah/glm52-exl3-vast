@@ -77,8 +77,13 @@ export GLM_RUNTIME_DIR="/tmp/field-review-$RUN_LABEL/runtime"
 
 if [ "$MODE" = "candidate" ]; then
   export PYTHONPATH="$CANDIDATE_PYTHONPATH${PYTHONPATH:+:$PYTHONPATH}"
+  # Preserve the exact reviewed vLLM tree. The turnkey compatibility patch is
+  # enabled by default in every appliance boot, but mutating a PR worktree
+  # would invalidate exact-SHA attribution for this source-review gate.
+  export STRUCTURED_OUTPUT_SPEC_PATCH=0
 else
   unset PYTHONPATH
+  unset STRUCTURED_OUTPUT_SPEC_PATCH
 fi
 
 # Isolate the benchmark from all rental-facing auxiliaries and credentials.

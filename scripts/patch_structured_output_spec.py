@@ -106,6 +106,9 @@ def patch_text(source: str) -> tuple[str, str]:
     return source.replace(OLD, NEW, 1), "patched"
 
 def main(argv: list[str]) -> int:
+    if os.environ.get("STRUCTURED_OUTPUT_SPEC_PATCH", "1") == "0":
+        print("structured-output/spec-decode: skipped by explicit source-review gate")
+        return 0
     target = Path(argv[0]) if argv else default_target()
     source = target.read_text()
     patched, status = patch_text(source)

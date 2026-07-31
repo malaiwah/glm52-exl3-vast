@@ -68,6 +68,22 @@ class StructuredOutputPatchTests(unittest.TestCase):
             compile(target.read_text(), str(target), "exec")
             self.assertEqual(patch.main([str(target)]), 0)
 
+    def test_explicit_source_review_gate_does_not_import_or_mutate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "manager.py"
+            target.write_text(RUNTIME_SOURCE)
+            with mock.patch.dict(
+                os.environ,
+                {"STRUCTURED_OUTPUT_SPEC_PATCH": "0"},
+            ), mock.patch.object(
+                patch,
+                "default_target",
+                side_effect=AssertionError("must not import vLLM"),
+            ):
+                self.assertEqual(patch.main([str(target)]), 0)
+            self.assertEqual(target.read_text(), RUNTIME_SOURCE)
+            self.assertFalse(target.with_suffix(".py.orig").exists())
+
     def test_compile_failure_restores_original_and_returns_1(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "manager.py"
