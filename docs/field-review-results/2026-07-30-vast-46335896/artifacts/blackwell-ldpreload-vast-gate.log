@@ -1,0 +1,4 @@
+GLM-5.2 PCIe calibration helper: PASS
+declare -x LD_PRELOAD="/opt/libnccl-local-inference.so.2.30.4"
+LD_PRELOAD=/opt/libnccl-local-inference.so.2.30.4
+## codex/fix-unset-ld-preload...origin/codex/fix-unset-ld-preload

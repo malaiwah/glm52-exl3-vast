@@ -104,21 +104,26 @@ intermediate size takes the byte-identical wide path.
 Independent review requested changes before upstreaming because the committed
 regression only exercised the `m>=2` consumer. Commit
 `783707cd` parameterizes the same-binding replay over `m=[1,3]`, forces and
-asserts the native direct path. The exact pre-fix lineage failed all four
+asserts the native direct path. Final stacked candidate `5178cb5c` adds only
+lint-safe equivalent cleanup required when `micro.py` enters the PR diff. The
+exact pre-fix lineage failed all four
 M=1/M=3 × ReLU2/SiLU poisoned-replay cases with non-finite output. The narrow
 lane mask then passed all four cold and warm. The repaired #100 lineage passed
-116/116 focused tests; exact #100 + #102 integration
-`6b2ad9dc` passed 112 with 8 intentional skips cold in 106.12 seconds and warm
-in 5.38 seconds. The 64.90904 MiB/rank planner reduction remains unchanged.
+116/116 focused tests at exact final head `5178cb5c`; exact #100 + #102
+integration `25f6a8e3` passed 112 with 8 intentional skips cold in
+106.12 seconds and warm in 5.12 seconds. Ruff and `git diff --check` are
+clean. Compute Sanitizer then ran all four repaired replay cases with zero
+memcheck errors. The 64.90904 MiB/rank planner reduction remains unchanged.
 
 Evidence:
 [pre-fix four-case failure](artifacts/sparkinfer-w4a16-m13-prefix-cold.log),
 [post-fix cold](artifacts/sparkinfer-w4a16-m13-post-cold.log),
 [post-fix warm](artifacts/sparkinfer-w4a16-m13-post-warm.log),
-[#100 repaired union](artifacts/sparkinfer-w4a16-pr100-final-suite-cold.log),
-[#100 + #102 cold](artifacts/sparkinfer-w4a16-pr100-102-final-suite-cold.log),
+[final-head memcheck](artifacts/sparkinfer-w4a16-pr100-final-v2-memcheck.log),
+[#100 final-head union](artifacts/sparkinfer-w4a16-pr100-final-v2-cold.log),
+[#100 + #102 final cold](artifacts/sparkinfer-w4a16-pr100-102-final-v2-cold.log),
 and
-[#100 + #102 warm](artifacts/sparkinfer-w4a16-pr100-102-final-suite-warm.log).
+[#100 + #102 final warm](artifacts/sparkinfer-w4a16-pr100-102-final-v2-warm.log).
 
 Review also found a separate generic-shape bug for ModelOpt intermediates
 divisible by 16 but not 64 (for example `I=144`): padded-grid validity can
@@ -230,6 +235,33 @@ Evidence:
 [512 server](artifacts/vllm-current210-cap512-mtp0-v1-server.log),
 and
 [512 steady repeat](artifacts/vllm-current210-cap512-mtp0-v1-bench-measure-b.json).
+
+### E. PCIe calibration launcher reliability
+
+The full-model gates independently exposed a release-launcher defect outside
+the nine-PR inventory. `blackwell-llm-docker@2464cc03` evaluates bare
+`$LD_PRELOAD` under `set -u`; an unset variable aborts
+`glm52-pcie-runtime-env.sh` before calibration and silently forces the turnkey
+fallback posture.
+
+Stacked candidate `b4a2f25` normalizes `${LD_PRELOAD:-}`, idempotently prepends
+the local NCCL shim, and unconditionally exports the final value—including
+when a shell-local, unexported value already contains the shim. Results:
+
+- exact parent `2464cc03` with unset `LD_PRELOAD`: exit 1,
+  `unbound variable`;
+- candidate shell release gate: PASS;
+- real retained Vast environment: unset value becomes exported
+  `/opt/libnccl-local-inference.so.2.30.4`;
+- a second invocation leaves exactly one shim entry;
+- local Bash 5 release gate, ShellCheck, 14 Python calibration tests, syntax,
+  and `git diff --check`: clean.
+
+Evidence:
+[parent reproduction](artifacts/blackwell-ldpreload-parent-repro.log) and
+[Vast candidate gate](artifacts/blackwell-ldpreload-vast-gate.log).
+Independent re-review and upstream issue/PR publication remain pending; the
+immutable r14 image is still affected even after source main is repaired.
 
 ## Public status
 
