@@ -1,0 +1,53 @@
+utc=2026-07-31T09:14:25+00:00 candidate=5a7ac1481e1fc24b0bbc35efe160b2ff34797bee tree=46f6f5bf387ee2c07712808cfe64f722fa2b99f3
+43e42e0a020820ec4221d194d9726ca9bbb5097f061b060eaeac4ac3f8139c9b  /opt/venv/lib/python3.12/site-packages/vllm/_C_stable_libtorch.abi3.so
+4180e67ac2afba44012f1c66fac2f071979066a51c92401fe24491f1073e910d  /opt/venv/lib/python3.12/site-packages/vllm/_moe_C_stable_libtorch.abi3.so
+fe81345336ccc4213703f9a0547908b34f63742a89315c859ed912c19c546563  /opt/venv/lib/python3.12/site-packages/vllm/_qutlass_C.abi3.so
+825312bfed234836c2088d2d0d0dd14f369036e3a0359e45e4dae3e381d5c481  /opt/venv/lib/python3.12/site-packages/vllm/_rust_tool_parser.abi3.so
+d5e058f28b4372a41f4ab6908826373a60c5882fe33a469b48f208fb8a1a5b95  /opt/venv/lib/python3.12/site-packages/vllm/cumem_allocator.abi3.so
+bfdb40cc358d24ad9fc968f3a48503c26e32b7c2c79219d32f5d60075b724e0e  /opt/venv/lib/python3.12/site-packages/vllm/fs_io_C.abi3.so
+dd626134e0a7ccc38aaaed6073cc04a9aae4eb1902a7600b43cf2a0dbb1c8e5b  /opt/venv/lib/python3.12/site-packages/vllm/spinloop.abi3.so
+exl3/parity-abi: already patched
+/workspace/field-review-tests/worktrees/vllm-r14-field-runtime-overlay/vllm/__init__.py:7: RuntimeWarning: Failed to read commit hash:
+No module named 'vllm._version'
+  from .version import __version__, __version_tuple__  # isort:skip
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+upstream native mixed-K present; compatibility patch skipped: /workspace/field-review-tests/worktrees/vllm-r14-field-runtime-overlay/vllm/model_executor/layers/quantization/exl3.py
+exl3_runtime_sha=bd084b55d0e8ce949e5402762ce35d67a73736ab057bfbf0ee64154f4d76fef4
+rc=0 end=2026-07-31T09:14:28+00:00
+exl3/parity-abi: patched OK
+exl3/parity-abi: already patched
+ vllm/model_executor/layers/quantization/exl3.py | 1 +
+ 1 file changed, 1 insertion(+)
+diff --git a/vllm/model_executor/layers/quantization/exl3.py b/vllm/model_executor/layers/quantization/exl3.py
+index 72839d83a..f0bad9163 100644
+--- a/vllm/model_executor/layers/quantization/exl3.py
++++ b/vllm/model_executor/layers/quantization/exl3.py
+@@ -2391,6 +2391,7 @@ class Exl3MoEMethod(FusedMoEMethodBase):
+                 True,
+                 False,
+                 0.0,
++                0,
+             )
+         return out32.to(x.dtype)
+ 
+exl3_runtime_sha=00c624bb88a9ae0c22203543184c3c2fd16dc859d5c2bc222ad8809a3a8f81f5
+corrected_target_rc=0 end=2026-07-31T09:15:16+00:00
+................                                                         [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+vllm/__init__.py:7
+  /workspace/field-review-tests/worktrees/vllm-r14-field-runtime-overlay/vllm/__init__.py:7: RuntimeWarning: Failed to read commit hash:
+  No module named 'vllm._version'
+    from .version import __version__, __version_tuple__  # isort:skip
+
+../../../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+16 passed, 16 warnings in 4.54s
+post_compat_cpu_rc=0 end=2026-07-31T09:15:54+00:00

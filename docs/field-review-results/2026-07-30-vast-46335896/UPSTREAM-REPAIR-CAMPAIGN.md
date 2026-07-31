@@ -768,6 +768,17 @@ worktree because `PYTHONPATH` otherwise shadows the installed native modules.
 Their SHA-256 values are in the log; all links were removed and the source
 worktree was clean after each gate.
 
+The final appliance patch order was also replayed in a detached copy of that
+candidate. With `EXL3_PY_PATH` explicitly bound to the detached source, the
+turnkey parity-ABI compatibility patch added its one required trailing integer,
+passed `py_compile` and `diff --check`, then reported `already patched` on the
+second invocation. The r14 mixed-K compatibility probe correctly recognized
+the native implementation and made no edit. The post-compatibility #210/#211
+CPU union remained **16/16**. An initial diagnostic invocation had accidentally
+left `EXL3_PY_PATH` unset and therefore inspected the detached tree while
+patching the installed package; that target error is retained in the raw log
+and is not counted as evidence.
+
 The exact r14 SparkInfer tree accepted final #100 source and the reviewed
 #100/#102 merge. One source-composition conflict was recorded in
 `tests/moe/test_w4a16_e2e.py`: both PRs edited the same import block. The
@@ -802,16 +813,31 @@ then removed. The recurrent PyTorch
 warning was isolated to
 `tests/v1/multiprocess/test_mq.py::test_mq_register_kv_cache`: its client
 process exits before the still-running test server releases the shared fixture
-tensors. No other warm suite emits it and no GPU process survives. Independent
-review must still decide whether to accept this as fixture teardown noise or
-require a test-harness repair before the LMCache stack is promoted.
+tensors. No other warm suite emits it and no GPU process survives.
+
+Independent review nevertheless **rejected promotion**: the fixture is only
+one manifestation of a production CUDA IPC ownership defect. A
+`CudaIPCWrapper` creates one PyTorch exporter counter, but initial registration
+materializes it once for device detection and again for the retained CUDA cache
+context. Recovery has the inverse problem: a fresh wrapper/export is sent, then
+the existing-instance fast path returns without importing or explicitly
+releasing it. The real checksum-verified three-cycle GPU round trip also emits
+the warning after an acknowledged unregister, proving this is not fixture-only
+noise. Because LMCache disables GitHub Issues, the defect and acceptance
+contract are tracked in [rtx6kpro #49](https://github.com/local-inference-lab/rtx6kpro/issues/49).
+Candidate `00563612` remains a useful exact composition base but is not
+deployable until one wire export is matched by exactly one import or explicit
+release on every success, recovery, race, exception and teardown path.
 
 Evidence:
 [vLLM CPU/static](artifacts/vllm-r14-210-211-static-cpu-v2.log),
 [vLLM GPU cold/warm](artifacts/vllm-r14-210-211-gpu0-cold-warm.log),
+[vLLM appliance patch order](artifacts/vllm-r14-field-runtime-overlay.log),
 [SparkInfer CPU/static](artifacts/sparkinfer-r14-w4-100-102-static-cpu.log),
 [SparkInfer GPU cold](artifacts/sparkinfer-r14-w4-e2205cba-gpu2-cold.log),
 [SparkInfer GPU warm](artifacts/sparkinfer-r14-w4-e2205cba-gpu2-warm.log),
 [LMCache CPU/static](artifacts/lmcache-r14-00563612-static-cpu-v2.log),
 [LMCache CUDA cold](artifacts/lmcache-r14-00563612-gpu3-cold.log), and
 [LMCache warm split](artifacts/lmcache-r14-00563612-gpu3-warm-split.log).
+The earlier candidate's source-identical ownership path is captured by the
+[real checksum round trip](artifacts/lmcache-3d22b3ce-real-roundtrip-gpu3.log).
