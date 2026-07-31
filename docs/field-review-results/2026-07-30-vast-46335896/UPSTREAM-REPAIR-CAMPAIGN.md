@@ -85,6 +85,47 @@ the existing PR/issue comments were updated with exact repaired heads:
 - #101 `0959fe807d366628380f41933244e3ccce0a8ae0`;
 - #103 `8fd90a4f687895e705bdf52fcff84ef653a5abf0`.
 
+A subsequent launch-safety audit found that the selector's grid-wide atomic
+rendezvous is safe only while every participating CTA is simultaneously
+resident. The existing one-shot maximum of eight and two-shot maximum of 64
+fit this full 188-SM Blackwell host, but were not generic/MIG-safe. Dedicated
+repair heads now query
+`cudaOccupancyMaxActiveBlocksPerMultiprocessor` for the exact kernel
+specialization, combine it with the visible/MIG SM count using overflow-safe
+arithmetic, cache the result per kernel/threads/device, and clamp grid-stride
+one-shot, two-shot, and fused launches without dropping row work. They also
+package the new header required by JIT-installed wheels:
+
+- #101 repair `6e947cc2528005cb744a6371959344dd9ff80d5b`;
+- #103 repair `9db41aa0e2140a5a8563852b742a54a274d262a4`.
+
+The #101 exact head has passed a fresh-cache Vast gate on all four GPUs:
+
+- resident-grid arithmetic/source guards: 4/4;
+- one-shot eager, 256 graph replays, and multistream torture: 1/1 in 49.10 s;
+- fused add+RMSNorm eager/graph: 1/1 in 5.83 s;
+- DCP A2A eager/graph: 1/1 in 39.95 s;
+- two-shot reduce-scatter/all-gather eager, alternating replay, and benchmark:
+  correct at four ranks;
+- zero GPU processes before and after.
+
+[Exact #101 residency GPU gate](artifacts/sparkinfer-replay-residency-101-6e947cc-gpu-cold.log).
+
+The exact #103 head then passed the same four-rank GPU gates from its own fresh
+extension cache: one-shot torture in 49.06 s, fused add+RMSNorm in 5.01 s,
+DCP A2A in 39.16 s, and correct two-shot eager/alternating graph results. Its
+static rerun passed 16/16 plus Ruff and clean-tree checks. The first static
+command incorrectly named `test_pcie_two_slot_selector.py`, which does not
+exist on this stacked lineage; because that shell intentionally continued to
+the independent GPU commands, the error is retained in the complete log and
+not counted as a source failure. The corrected static command has its own
+artifact.
+
+[Exact #103 residency GPU gate](artifacts/sparkinfer-replay-residency-103-9db41aa-gpu-cold.log)
+and
+[corrected static gate](artifacts/sparkinfer-replay-residency-103-9db41aa-static-corrected.log).
+Independent review is still required before publication.
+
 ### B. SparkInfer W4A16 scratch lifetime
 
 Owner: `w4a16_scratch_fix` subagent.
