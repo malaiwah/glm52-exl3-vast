@@ -1102,13 +1102,17 @@ draft acceptance **55.99%**. The prior exact-r14 GPU distribution suite passed
 11/11 cold and warm, including the greedy/temperature-zero controls. No
 separate plain-checkpoint download is needed to exercise this code path.
 
-This control is **not a clean final-stack PASS** despite correct responses.
-The fail-closed log audit records 28 post-ready SparkInfer cache misses/JIT
-events for previously unseen request shapes, and XGrammar logged four
+This exact-source control is **not a clean final-stack PASS** despite correct
+responses. Its cold-window audit records 28 post-ready SparkInfer cache
+misses/JIT events while the feature and benchmark harness deliberately primed
+previously unseen shapes. That cold compilation is permitted by the plan; the
+warm window beginning after the final miss contains no compile, ERROR,
+CUDA/IPC, or process-failure finding. XGrammar did log four
 `Failed to advance FSM` errors during otherwise successful strict-JSON
-responses. Both are retained as baseline defects that the final appliance
-must eliminate or explicitly reproduce and classify; response-level success
-does not erase a plan-level runtime-log failure.
+responses. The exact-source gate intentionally disabled the appliance's
+structured-output compatibility patch to preserve SHA attribution, so the
+final built-image gate must prove that those four errors disappear.
+Response-level success does not erase that remaining log-level requirement.
 
 Evidence:
 [server log](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-server.log),
@@ -1116,6 +1120,7 @@ Evidence:
 [32K verification](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-verify32k.json),
 [65K/126K needle matrix](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-needles.json),
 [concurrency matrix](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-benchmark.json),
-[machine-readable log audit](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-log-audit.json),
+[cold-window log audit](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-log-audit.json),
+[clean warm-window log audit](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-warm-log-audit.json),
 and
 [steady prefill control](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-steady-prefill.json).
