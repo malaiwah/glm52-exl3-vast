@@ -1,0 +1,251 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T06:31:52Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 3072,
+  "output_tokens": 64,
+  "concurrency": [
+   1
+  ],
+  "requests_per_level": 6,
+  "prefill_tokens": [
+   3072,
+   3073,
+   3074
+  ],
+  "warmup": 0,
+  "temperature": 0.0,
+  "seed": null,
+  "prompt_seed": "field-review-capacity-measure-b"
+ },
+ "metadata": {},
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.7439,
+   "request_throughput_rps": 0.5734,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1767.295,
+   "output_throughput_tok_s": 0.573,
+   "mean_ttft_ms": 1742.844,
+   "p50_ttft_ms": 1742.844,
+   "p95_ttft_ms": 1742.844,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.7429,
+     "ttft_ms": 1742.844,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.7391,
+   "request_throughput_rps": 0.575,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1772.134,
+   "output_throughput_tok_s": 0.575,
+   "mean_ttft_ms": 1738.836,
+   "p50_ttft_ms": 1738.836,
+   "p95_ttft_ms": 1738.836,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.738892,
+     "ttft_ms": 1738.836,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 3073
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.7444,
+   "request_throughput_rps": 0.5733,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1766.764,
+   "output_throughput_tok_s": 0.573,
+   "mean_ttft_ms": 1744.103,
+   "p50_ttft_ms": 1744.103,
+   "p95_ttft_ms": 1744.103,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.744168,
+     "ttft_ms": 1744.103,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "alpha"
+    }
+   ],
+   "target_prompt_tokens": 3074
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 6,
+   "completed": 6,
+   "failed": 0,
+   "duration_s": 16.374,
+   "request_throughput_rps": 0.3664,
+   "prompt_tokens": 18462,
+   "output_tokens": 384,
+   "prompt_throughput_tok_s": 1127.522,
+   "output_throughput_tok_s": 23.452,
+   "mean_ttft_ms": 1660.284,
+   "p50_ttft_ms": 1660.889,
+   "p95_ttft_ms": 1663.329,
+   "mean_tpot_ms": 16.962,
+   "p50_tpot_ms": 15.059,
+   "p95_tpot_ms": 23.647,
+   "mean_itl_ms": 58.985,
+   "metric_prompt_tokens": 18462,
+   "metric_generation_tokens": 384,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 109,
+    "draft_tokens": 327,
+    "accepted_tokens": 275,
+    "mean_acceptance_length": 3.5229,
+    "draft_token_acceptance_rate": 0.841
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.332821,
+     "ttft_ms": 1662.791,
+     "tpot_ms": 26.508,
+     "mean_itl_ms": 57.585,
+     "output_head": "apple banana cherry date elder fig grape hat igloo jumble kite lemon mango nectar orange pear quince rose sun turnip vin"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 2.606709,
+     "ttft_ms": 1659.693,
+     "tpot_ms": 15.032,
+     "mean_itl_ms": 59.186,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 2.606219,
+     "ttft_ms": 1657.271,
+     "tpot_ms": 15.063,
+     "mean_itl_ms": 59.306,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 2.611446,
+     "ttft_ms": 1663.508,
+     "tpot_ms": 15.047,
+     "mean_itl_ms": 59.243,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 2.604957,
+     "ttft_ms": 1656.357,
+     "tpot_ms": 15.057,
+     "mean_itl_ms": 59.285,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 2.610988,
+     "ttft_ms": 1662.084,
+     "tpot_ms": 15.062,
+     "mean_itl_ms": 59.305,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

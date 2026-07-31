@@ -166,4 +166,15 @@ print(f">>> candidate vLLM import: {vllm.__file__}")
 PY
 fi
 
-exec /usr/local/bin/model-turnkey-entry.sh
+# Keep the complete entrypoint/vLLM process tree in a dedicated process group
+# so the caller can tear a gate down by signaling the recorded wrapper PID.
+# The stock entrypoint does not forward TERM to its serving child when it is
+# launched directly from an SSH/nohup gate.
+command -v setsid >/dev/null || {
+  echo "FATAL: setsid is required for an isolated field-review process group" >&2
+  exit 4
+}
+setsid /usr/local/bin/model-turnkey-entry.sh &
+service_pid=$!
+trap 'kill -TERM -- "-$service_pid" 2>/dev/null || true' TERM INT
+wait "$service_pid"

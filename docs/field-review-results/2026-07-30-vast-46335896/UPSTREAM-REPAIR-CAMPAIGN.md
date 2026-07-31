@@ -125,6 +125,22 @@ Both exact lineages additionally passed a warm 1,025-graph-replay stress
 cycle on four GPUs (6.86 s for #101, 6.73 s for #103), with 64 eager and 64
 multistream iterations and zero residual GPU processes.
 
+The host-side occupancy lookup was then exercised from a completely cold
+extension cache with the first collective launch occurring inside CUDA graph
+capture. Both repaired lineages passed at two ranks, including eight correct
+replays. The #101 log also records an invalid inherited `LD_PRELOAD` path;
+the loader ignored it and the test used the bundled NCCL. #103 repeated the
+gate with the image's real `/opt/libnccl.so.2.30.4`, so the capture result
+does not depend on that harness mistake.
+
+This does **not** yet close launch-safety review. Per-launch residency clamping
+does not by itself prove progress if independent stream-owned channels launch
+simultaneously on a constrained/MIG device: each launch can be individually
+valid while their aggregate resident grid is not. The large-host multistream
+gate has substantial occupancy slack and cannot refute that case. This
+candidate remains withheld pending an aggregate-overlap safety design or a
+proof that such channel launches cannot overlap.
+
 The initial four-rank two-shot timing was correctly withheld from the
 two-rank historical control. A matched world-size-2 A/B then excluded one
 base compile/warmup and ran three repeats per exact head. Median
@@ -140,6 +156,9 @@ and
 and
 [warm #103 stress](artifacts/sparkinfer-replay-residency-103-9db41aa-gpu-warm1025.log).
 [Matched world-size-2 A/B](artifacts/sparkinfer-replay-residency-101-twoshot-world2-ab.log).
+[Cold-capture #101](artifacts/sparkinfer-replay-residency-101-cold-capture.log)
+and
+[cold-capture #103](artifacts/sparkinfer-replay-residency-103-cold-capture.log).
 Independent review is still required before publication.
 
 ### B. SparkInfer W4A16 scratch lifetime
@@ -427,6 +446,27 @@ were 3.161/72.04% versus 3.111/70.37%, well within this three-request sample's
 content variance. Capacity 1,024 therefore remains the measured balanced
 choice; 2,048 is not promoted on a performance claim that small.
 
+A matched MTP3-versus-MTP5 follow-up kept the exact source, capacity 1,024,
+GMU 0.92, 3,072-token prompts, six prompt bodies, and reusable compile cache
+fixed. Both modes exposed the same 257,024-token KV capacity. MTP5's three
+steady prefill measurements had a 1,775.5 tok/s median versus 1,767.3 tok/s
+for MTP3 (+0.46%), which is noise-sized. Its decode result was not:
+
+| Draft depth | Draft acceptance | MAL | Mean TPOT | Median TPOT | p95 TPOT |
+|---:|---:|---:|---:|---:|---:|
+| MTP3 | 84.10% | 3.523 | 16.962 ms | 15.059 ms | 23.647 ms |
+| MTP5 | 39.84% | 2.992 | 25.104 ms | 13.663 ms | 48.709 ms |
+
+MTP5 produced four superficially fast 13–14 ms requests and two 48.4–48.8 ms
+requests. Its attractive median therefore concealed a 48% worse mean and a
+106% worse p95 than MTP3. The MTP3 prime absorbed all post-ready JIT warnings;
+the six measured requests caused no additional compilation. MTP3 remains the
+balanced candidate for this workload.
+
+This rerun also validated the field harness's process-group teardown: sending
+TERM to the recorded wrapper stopped the complete entrypoint/vLLM tree and
+released all four GPUs without a residual worker.
+
 Evidence:
 [server](artifacts/vllm-current210-cap1024-mtp3-v3-server.log),
 [arithmetic](artifacts/vllm-current210-cap1024-mtp3-v3-correctness.json),
@@ -437,6 +477,11 @@ Evidence:
 [Capacity-2,048 benchmark](artifacts/vllm-current210-cap2048-mtp3-v1-bench-measure-a.json)
 and
 [server](artifacts/vllm-current210-cap2048-mtp3-v1-server.log).
+[Matched MTP3 benchmark](artifacts/vllm-current210-cap1024-mtp3-v4-matched-bench-measure-b.json),
+[MTP3 server/teardown log](artifacts/vllm-current210-cap1024-mtp3-v4-matched-server.log),
+[matched MTP5 benchmark](artifacts/vllm-current210-cap1024-mtp5-v1-bench-measure-b.json),
+and
+[MTP5 server](artifacts/vllm-current210-cap1024-mtp5-v1-server.log).
 
 ### E. PCIe calibration launcher reliability
 
