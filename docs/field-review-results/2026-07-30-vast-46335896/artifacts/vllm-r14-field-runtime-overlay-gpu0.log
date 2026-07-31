@@ -1,0 +1,38 @@
+utc=2026-07-31T09:21:19+00:00 head=5a7ac1481e1fc24b0bbc35efe160b2ff34797bee tree=46f6f5bf387ee2c07712808cfe64f722fa2b99f3 compat_exl3_sha=00c624bb88a9ae0c22203543184c3c2fd16dc859d5c2bc222ad8809a3a8f81f5 gpu=physical-0 cache=/workspace/field-review-tests/cache/vllm-r14-field-runtime-overlay-gpu0
+=== cold ===
+...........                                                              [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+vllm/__init__.py:7
+  /workspace/field-review-tests/worktrees/vllm-r14-field-runtime-overlay/vllm/__init__.py:7: RuntimeWarning: Failed to read commit hash:
+  No module named 'vllm._version'
+    from .version import __version__, __version_tuple__  # isort:skip
+
+tests/v1/worker/test_gpu_gumbel_sample.py: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+11 passed, 16 warnings in 18.89s
+=== warm ===
+...........                                                              [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+vllm/__init__.py:7
+  /workspace/field-review-tests/worktrees/vllm-r14-field-runtime-overlay/vllm/__init__.py:7: RuntimeWarning: Failed to read commit hash:
+  No module named 'vllm._version'
+    from .version import __version__, __version_tuple__  # isort:skip
+
+tests/v1/worker/test_gpu_gumbel_sample.py: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+11 passed, 16 warnings in 16.88s
+rc=0 end=2026-07-31T09:22:09+00:00

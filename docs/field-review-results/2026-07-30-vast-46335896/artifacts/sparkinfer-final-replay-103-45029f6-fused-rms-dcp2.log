@@ -1,0 +1,158 @@
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+F
+=================================== FAILURES ===================================
+_____________ test_pcie_oneshot_fused_add_rms_norm_eager_and_graph _____________
+
+    def test_pcie_oneshot_fused_add_rms_norm_eager_and_graph() -> None:
+        if not torch.cuda.is_available():
+            pytest.skip("CUDA is not available")
+        world_size = int(os.getenv("SPARKINFER_PCIE_ONESHOT_RMS_WORLD_SIZE", "2"))
+        if world_size not in (2, 4, 6, 8, 10):
+            pytest.skip("PCIe oneshot only supports world sizes 2, 4, 6, 8, and 10")
+        if torch.cuda.device_count() < world_size:
+            pytest.skip(
+                f"need {world_size} CUDA devices, found {torch.cuda.device_count()}"
+            )
+        context = mp.spawn(
+            _worker,
+            args=(world_size, _free_port()),
+            nprocs=world_size,
+            join=False,
+        )
+        deadline = time.monotonic() + TEST_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+>           if context.join(timeout=min(1.0, remaining), grace_period=5):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/comm/test_pcie_oneshot_fused_rmsnorm_gpu.py:336: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <torch.multiprocessing.spawn.ProcessContext object at 0x70aeb59aa7e0>
+timeout = 1.0, grace_period = 5
+
+    def join(self, timeout: float | None = None, grace_period: float | None = None):
+        r"""Join one or more processes within spawn context.
+    
+        Attempt to join one or more processes in this spawn context.
+        If one of them exited with a non-zero exit status, this function
+        kills the remaining processes (optionally with a grace period)
+        and raises an exception with the cause of the first process exiting.
+    
+        Returns ``True`` if all processes have been joined successfully,
+        ``False`` if there are more processes that need to be joined.
+    
+        Args:
+            timeout (float): Wait this long (in seconds) before giving up on waiting.
+            grace_period (float): When any processes fail, wait this long (in seconds)
+                for others to shutdown gracefully before terminating them. If they
+                still don't exit, wait another grace period before killing them.
+        """
+        # Ensure this function can be called even when we're done.
+        if len(self.sentinels) == 0:
+            return True
+    
+        # Wait for any process to fail or all of them to succeed.
+        ready = multiprocessing.connection.wait(
+            self.sentinels.keys(),
+            timeout=timeout,
+        )
+    
+        error_index = None
+        for sentinel in ready:
+            index = self.sentinels.pop(sentinel)
+            process = self.processes[index]
+            process.join()
+            if process.exitcode != 0:
+                error_index = index
+                break
+    
+        # Return if there was no error.
+        if error_index is None:
+            # Return whether or not all processes have been joined.
+            return len(self.sentinels) == 0
+        # An error occurred. Clean-up all processes before returning.
+        # First, allow a grace period for processes to shutdown themselves.
+        if grace_period is not None:
+            self._join_procs_with_timeout(grace_period)
+        # Then, terminate processes that are still alive. Try SIGTERM first.
+        for process in self.processes:
+            if process.is_alive():
+                log.warning("Terminating process %s via signal SIGTERM", process.pid)
+                process.terminate()
+    
+        # Try SIGKILL if the process isn't going down after another grace_period.
+        # The reason is related to python signal handling is limited
+        # to main thread and if that is in c/c++ land and stuck it won't
+        # to handle it. We have seen processes getting stuck not handling
+        # SIGTERM for the above reason.
+        self._join_procs_with_timeout(30 if grace_period is None else grace_period)
+        for process in self.processes:
+            if process.is_alive():
+                log.warning(
+                    "Unable to shutdown process %s via SIGTERM , forcefully exiting via SIGKILL",
+                    process.pid,
+                )
+                process.kill()
+            process.join()
+    
+        # The file will only be created if the process crashed.
+        failed_process = self.processes[error_index]
+        if not os.access(self.error_files[error_index], os.R_OK):
+            exitcode = self.processes[error_index].exitcode
+            if exitcode < 0:
+                try:
+                    name = signal.Signals(-exitcode).name
+                except ValueError:
+                    name = f"<Unknown signal {-exitcode}>"
+                raise ProcessExitedException(
+                    f"process {error_index:d} terminated with signal {name}",
+                    error_index=error_index,
+                    error_pid=failed_process.pid,
+                    exit_code=exitcode,
+                    signal_name=name,
+                )
+            else:
+                raise ProcessExitedException(
+                    f"process {error_index:d} terminated with exit code {exitcode:d}",
+                    error_index=error_index,
+                    error_pid=failed_process.pid,
+                    exit_code=exitcode,
+                )
+    
+        with open(self.error_files[error_index], "rb") as fh:
+            original_trace = pickle.load(fh)
+        msg = f"\n\n-- Process {error_index:d} terminated with the following error:\n"
+        msg += original_trace
+>       raise ProcessRaisedException(msg, error_index, failed_process.pid)
+E       torch.multiprocessing.spawn.ProcessRaisedException: 
+E       
+E       -- Process 1 terminated with the following error:
+E       Traceback (most recent call last):
+E         File "/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py", line 87, in _wrap
+E           fn(i, *args)
+E         File "/workspace/field-review-tests/worktrees/sparkinfer-final-replay-103-45029f6/tests/comm/test_pcie_oneshot_fused_rmsnorm_gpu.py", line 310, in _worker
+E           _run_graph(pool, device, rank)
+E         File "/workspace/field-review-tests/worktrees/sparkinfer-final-replay-103-45029f6/tests/comm/test_pcie_oneshot_fused_rmsnorm_gpu.py", line 243, in _run_graph
+E           _cuda_graph_kernel_chain(graph)
+E         File "/workspace/field-review-tests/worktrees/sparkinfer-final-replay-103-45029f6/tests/comm/test_pcie_oneshot_fused_rmsnorm_gpu.py", line 128, in _cuda_graph_kernel_chain
+E           result, _, _, num_edges = cudart.cudaGraphGetEdges(graph_handle)
+E           ^^^^^^^^^^^^^^^^^^^^^^^
+E       ValueError: too many values to unpack (expected 4)
+
+/opt/venv/lib/python3.12/site-packages/torch/multiprocessing/spawn.py:211: ProcessRaisedException
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /workspace/field-review-tests/artifacts/sparkinfer-final-replay-103-45029f6-fused-rms-dcp2.xml -
+=========================== short test summary info ============================
+FAILED tests/comm/test_pcie_oneshot_fused_rmsnorm_gpu.py::test_pcie_oneshot_fused_add_rms_norm_eager_and_graph
+1 failed, 1 warning in 46.95s

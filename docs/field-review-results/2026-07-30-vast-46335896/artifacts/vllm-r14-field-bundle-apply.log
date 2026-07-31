@@ -1,0 +1,16 @@
+utc=2026-07-31T09:24:58+00:00 release_base=5a6979f176ef7535c2f44ab653c78f8292887076 tree=749050edab1b6664937c52fa1b0be360be632c1e
+>>> field review vllm-210-211: applied at /workspace/field-review-tests/worktrees/vllm-r14-field-bundle-source (base tree 749050edab1b6664937c52fa1b0be360be632c1e, tested head 5a7ac1481e1fc24b0bbc35efe160b2ff34797bee)
+>>> field review vllm-210-211: applied at /workspace/field-review-tests/worktrees/vllm-r14-field-bundle-site (base tree 749050edab1b6664937c52fa1b0be360be632c1e, tested head 5a7ac1481e1fc24b0bbc35efe160b2ff34797bee)
+>>> field review vllm-210-211: already applied at /workspace/field-review-tests/worktrees/vllm-r14-field-bundle-source
+>>> field review vllm-210-211: already applied at /workspace/field-review-tests/worktrees/vllm-r14-field-bundle-site
+source_diff_sha=0f2c10110fc9bc0701003a46c8379c335dd9018cecbf64722e0db64eea748fb1 expected_patch_sha=0f2c10110fc9bc0701003a46c8379c335dd9018cecbf64722e0db64eea748fb1
+exl3/parity-abi: patched OK
+exl3/parity-abi: already patched
+/workspace/field-review-tests/worktrees/vllm-r14-field-bundle-site/vllm/__init__.py:7: RuntimeWarning: Failed to read commit hash:
+No module named 'vllm._version'
+  from .version import __version__, __version_tuple__  # isort:skip
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+upstream native mixed-K present; compatibility patch skipped: /workspace/field-review-tests/worktrees/vllm-r14-field-bundle-site/vllm/model_executor/layers/quantization/exl3.py
+site_post_compat_exl3_sha=00c624bb88a9ae0c22203543184c3c2fd16dc859d5c2bc222ad8809a3a8f81f5
+rc=0 end=2026-07-31T09:25:01+00:00

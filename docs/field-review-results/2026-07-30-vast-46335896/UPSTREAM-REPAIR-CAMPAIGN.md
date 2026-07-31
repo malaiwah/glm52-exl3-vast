@@ -197,7 +197,86 @@ and
 [#103 cold capture](artifacts/sparkinfer-coop-103-10d79f3-cold-capture.log),
 and
 [#103 four-GPU smoke](artifacts/sparkinfer-coop-103-10d79f3-gpu-cold.log).
-Independent review is still required before publication.
+
+A subsequent control-node implementation removed the rejected cooperative
+launch and put slab selection in a same-stream `<<<1,1>>>` device node. The
+first frozen heads (`376298c` / `4505fc3`) exposed an honest cold-build failure:
+the new worker used an undefined `ld_flag_acquire_gpu` helper. The corrected
+runtime heads (`cd9c2625dbb65adf5a775379e5022a60dfec0b6f` /
+`45029f6f101ce8b733d088d2694d3320836b924b`) add the matching GPU-scope
+acquire load. Both then compiled all three PCIe extensions from isolated
+caches and passed the 168-test communication union cold and warm.
+
+CUDA 13.3 exposed two evidence-harness incompatibilities rather than kernel
+failures: the modern binding returns edge-data as a fifth
+`cudaGraphGetEdges` field, and legacy `cudaGraphKernelNodeGetParams` can
+reject a driver-launched function that the generic `cudaGraphNodeGetParams`
+can inspect. The version-compatible test/benchmark fixes are retained in
+local heads `5c3e854a8d6f94af39ff0db79f29ff7c7d8889a2` (#101) and
+`c32da63ea589f32a33e5cc06dabdc9fb87f7f820` (#103). Their focused GPU
+evidence is:
+
+- fused add+RMSNorm eager and captured graph: 2-rank and 4-rank pass;
+- opposite-order two-channel stress: 128 eager iterations plus 1,025 graph
+  replays at four ranks pass;
+- 17-collective scratch reuse: 1,025 graph replays plus multistream stress at
+  four ranks pass;
+- first collective captured before any eager use: fresh-cache 2-rank and
+  4-rank pass;
+- two-shot correctness: 2-rank and 4-rank pass; at 2 ranks SparkInfer
+  reduce-scatter/all-gather measured 343.5/342.7 us versus NCCL
+  854.9/805.6 us, while at 4 ranks it measured 3691.3/3712.7 us versus NCCL
+  1025.9/990.0 us. The four-rank result is a real topology/algorithm
+  performance loss and is not generalized into a speed claim.
+
+The plain 64-KiB BF16 one-shot control-node cost was measured with four
+AB/BA pairs, four ranks, 200 warmups and 2,000 aligned samples per run. Every
+run rebuilt into a distinct cache and recorded frozen source/binary hashes,
+the direct control-worker graph edge, rank-aligned critical-path samples and
+hardware telemetry. Eager was unchanged within noise
+(`-0.144 us`, approximate 95% interval `[-1.392, +1.104]`). Captured graph
+mean cost increased by `1.273 us`, approximate interval
+`[+0.194, +2.351]`, from an aggregate 99.081 to 100.353 us. This is a narrow
+net-algorithm comparison, not isolated launch overhead; the schema now
+explicitly excludes registered/push one-shot, fused RMSNorm, both two-shot
+operations and both DCP operations, and calls the post-preflight observation
+`first_sample_us` rather than “cold”.
+
+[Initial CUDA-edge binding failure](artifacts/sparkinfer-final-replay-103-45029f6-fused-rms-dcp2.log),
+[generic-node fallback pass at two ranks](artifacts/sparkinfer-final-replay-103-18c1a8c-fused-rms-dcp2.log),
+[four-rank fused pass](artifacts/sparkinfer-final-replay-103-18c1a8c-fused-rms-dcp4.log),
+[1,025 opposite-order replays](artifacts/sparkinfer-final-replay-103-18c1a8c-opposite-order-1025-dcp4.log),
+[1,025 scratch-reuse replays](artifacts/sparkinfer-final-replay-103-18c1a8c-torture-1025-dcp4.log),
+[two-rank two-shot](artifacts/sparkinfer-final-replay-103-18c1a8c-twoshot-dcp2.log),
+[four-rank two-shot](artifacts/sparkinfer-final-replay-103-18c1a8c-twoshot-dcp4.log),
+[fresh first-use capture at two ranks](artifacts/sparkinfer-final-replay-103-18c1a8c-first-use-capture-dcp2.log),
+[fresh first-use capture at four ranks](artifacts/sparkinfer-final-replay-103-18c1a8c-first-use-capture-dcp4.log),
+and
+[complete AB/BA JSON](artifacts/sparkinfer-final-replay-101-cd9c262-control-ab-r2.json).
+
+These positive tests do **not** accept the current replay branches.
+Independent strict review returned **REQUEST CHANGES** on defects not made
+deterministic by the original plan:
+
+1. #101 still capture-bakes DCP's slab. #103 changes that to per-block parity,
+   but a large-small-large grid sequence leaves returning blocks one operation
+   behind and can overwrite the smaller operation under rank skew.
+2. DCP retains legacy best-effort teardown that discards ownership after
+   suppressed unmap/free failures; rollback removes retryable ownership too
+   early.
+3. one-shot/two-shot setup can free an export after only a subset of peers
+   opened it, and two-shot can leak imports opened before a later open fails.
+4. GC can unmap imports while asynchronous kernels still dereference them.
+5. process-group ranks are incorrectly sorted even though PyTorch returns
+   group-rank order; nonmonotonic groups can misroute IPC handles/status.
+6. fixed 36/64-block worker barriers still lack a proved residency contract
+   on smaller or MIG partitions.
+
+The replacement must use one channel-wide DCP control node, collective
+two-phase setup and retryable coordinated teardown, safe GC retention/defer,
+group-order preservation, deterministic skew/variable-grid tests, and either
+prove/enforce residency or remove that assumption. That implementation and a
+fresh independent review are in progress; no replay repair has been pushed.
 
 ### B. SparkInfer W4A16 scratch lifetime
 
@@ -774,10 +853,11 @@ turnkey parity-ABI compatibility patch added its one required trailing integer,
 passed `py_compile` and `diff --check`, then reported `already patched` on the
 second invocation. The r14 mixed-K compatibility probe correctly recognized
 the native implementation and made no edit. The post-compatibility #210/#211
-CPU union remained **16/16**. An initial diagnostic invocation had accidentally
-left `EXL3_PY_PATH` unset and therefore inspected the detached tree while
-patching the installed package; that target error is retained in the raw log
-and is not counted as evidence.
+CPU union remained **16/16**, and the probabilistic GPU union remained
+**11/11 cold** and **11/11 warm** on physical GPU 0. An initial diagnostic
+invocation had accidentally left `EXL3_PY_PATH` unset and therefore inspected
+the detached tree while patching the installed package; that target error is
+retained in the raw log and is not counted as evidence.
 
 The exact r14 SparkInfer tree accepted final #100 source and the reviewed
 #100/#102 merge. One source-composition conflict was recorded in
@@ -833,6 +913,7 @@ Evidence:
 [vLLM CPU/static](artifacts/vllm-r14-210-211-static-cpu-v2.log),
 [vLLM GPU cold/warm](artifacts/vllm-r14-210-211-gpu0-cold-warm.log),
 [vLLM appliance patch order](artifacts/vllm-r14-field-runtime-overlay.log),
+[vLLM post-compat GPU cold/warm](artifacts/vllm-r14-field-runtime-overlay-gpu0.log),
 [SparkInfer CPU/static](artifacts/sparkinfer-r14-w4-100-102-static-cpu.log),
 [SparkInfer GPU cold](artifacts/sparkinfer-r14-w4-e2205cba-gpu2-cold.log),
 [SparkInfer GPU warm](artifacts/sparkinfer-r14-w4-e2205cba-gpu2-warm.log),

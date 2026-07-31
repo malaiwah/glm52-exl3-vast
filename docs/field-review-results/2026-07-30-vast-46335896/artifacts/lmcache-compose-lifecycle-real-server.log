@@ -1,0 +1,80 @@
+head=caf7417be83f225c93e426f0885b935cefcc388c gpu=physical-3 rpc=tcp://127.0.0.1:15558 http=http://127.0.0.1:18081 start=2026-07-31T03:37:56Z
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+[32;20m[2026-07-31 03:37:57,658] LMCache INFO:[0m torch_dev=<module 'torch.cuda' from '/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py'>, torch_device_type=cuda [3m(__init__.py:249:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 03:37:57,777] LMCache INFO:[0m Using backend: lmcache.c_ops [3m(__init__.py:239:lmcache.v1.platform)[0m
+
+ _     __  __    ____           _          
+| |   |  \/  |  / ___|__ _  ___| |__   ___      LMCache vunknown
+| |   | |\/| | | |   / _` |/ __| '_ \ / _ \     Website:  https://lmcache.ai/
+| |___| |  | | | |__| (_| | (__| | | |  __/     Recipes:  https://docs.lmcache.ai/recipes
+|_____|_|  |_|  \____\__,_|\___|_| |_|\___|     LinkedIn: https://www.linkedin.com/company/lmcache-lab
+Set LMCACHE_DISABLE_BANNER=1 to hide this banner.
+
+[32;20m[2026-07-31 03:37:58,273] LMCache INFO:[0m multi_layer_block_kv_transfer mode: ptr [3m(base.py:94:lmcache.v1.multiprocess.transfer_context.base)[0m
+[32;20m[2026-07-31 03:37:59,374] LMCache INFO:[0m Discovered API module: cache_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,375] LMCache INFO:[0m Discovered API module: env_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,376] LMCache INFO:[0m Discovered API module: loglevel_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,377] LMCache INFO:[0m Discovered API module: metrics_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,378] LMCache INFO:[0m Discovered API module: periodic_thread_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,379] LMCache INFO:[0m Discovered API module: run_script_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,380] LMCache INFO:[0m Discovered API module: thread_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,382] LMCache INFO:[0m Discovered API module: common_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,383] LMCache INFO:[0m Discovered API module: config_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,385] LMCache INFO:[0m Discovered API module: info_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,387] LMCache INFO:[0m Discovered API module: quota_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,390] LMCache INFO:[0m Discovered API module: reconfigure_api [3m(router_discovery.py:53:lmcache.v1.utils.router_discovery)[0m
+[32;20m[2026-07-31 03:37:59,403] LMCache INFO:[0m CudaPinMemoryBackend: using torch cudart [3m(pin_memory.py:89:lmcache.v1.platform.cuda.pin_memory)[0m
+[32;20m[2026-07-31 03:37:59,404] LMCache INFO:[0m Starting LMCache HTTP server on http://127.0.0.1:18081 [3m(http_server.py:258:lmcache.v1.multiprocess.http_server)[0m
+INFO:     Started server process [88777]
+INFO:     Waiting for application startup.
+[32;20m[2026-07-31 03:37:59,413] LMCache INFO:[0m Starting LMCache HTTP server... (accelerator available: True) [3m(http_server.py:73:lmcache.v1.multiprocess.http_server)[0m
+[32;20m[2026-07-31 03:37:59,423] LMCache INFO:[0m OTel MeterProvider initialised with Prometheus fallback (standalone metrics HTTP server disabled; /metrics must be exposed by the caller), resource={'telemetry.sdk.language': 'python', 'telemetry.sdk.name': 'opentelemetry', 'telemetry.sdk.version': '1.44.0', 'service.instance.id': '516ade1a-cc33-4161-a5b2-c894a64a1d45', 'service.name': 'unknown_service'} [3m(otel_init.py:114:lmcache.v1.mp_observability.otel_init)[0m
+[32;20m[2026-07-31 03:37:59,424] LMCache INFO:[0m Checking if shm capacity is larger than L1 request [3m(server.py:331:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 03:38:00,132] LMCache INFO:[0m Starting L1EvictionController... [3m(eviction_controller.py:53:lmcache.v1.distributed.storage_controllers.eviction_controller)[0m
+[32;20m[2026-07-31 03:38:00,132] LMCache INFO:[0m Starting L2EvictionController... [3m(eviction_controller.py:250:lmcache.v1.distributed.storage_controllers.eviction_controller)[0m
+[32;20m[2026-07-31 03:38:00,132] LMCache INFO:[0m Starting StoreController... [3m(store_controller.py:305:lmcache.v1.distributed.storage_controllers.store_controller)[0m
+[32;20m[2026-07-31 03:38:00,133] LMCache INFO:[0m Starting PrefetchController... [3m(prefetch_controller.py:558:lmcache.v1.distributed.storage_controllers.prefetch_controller)[0m
+[32;20m[2026-07-31 03:38:00,133] LMCache INFO:[0m Using blake3 hash function [3m(token_hasher.py:79:lmcache.v1.multiprocess.token_hasher)[0m
+[32;20m[2026-07-31 03:38:00,133] LMCache INFO:[0m Computed NONE_HASH=b"~>\xff\x9e\xf7a:P4\x0e\xb1&w\xee\x03\xb8:\xc7Y\xfc\xba\x9b\xb3'\x05\xf0rH\xd5mG;" using hash function [3m(token_hasher.py:180:lmcache.v1.multiprocess.token_hasher)[0m
+[32;20m[2026-07-31 03:38:00,134] LMCache INFO:[0m TokenHasher initialized: chunk_size=256, hash_algorithm=blake3 [3m(token_hasher.py:67:lmcache.v1.multiprocess.token_hasher)[0m
+[32;20m[2026-07-31 03:38:00,134] LMCache INFO:[0m PeriodicThread SessionManager-cleanup-thread-7dfa53bb05c0 entering main loop (interval=60.0s) [3m(periodic_thread.py:284:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 03:38:00,134] LMCache INFO:[0m Started PeriodicThread: SessionManager-cleanup-thread-7dfa53bb05c0 (level=medium, interval=60.0s, init_wait=0.0s) [3m(periodic_thread.py:244:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 03:38:00,135] LMCache INFO:[0m Supported transfer mode: auto [3m(server.py:208:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 03:38:00,135] LMCache INFO:[0m PeriodicThread lmcache-mp-worker-reaper entering main loop (interval=30.0s) [3m(periodic_thread.py:284:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 03:38:00,135] LMCache INFO:[0m Started PeriodicThread: lmcache-mp-worker-reaper (level=medium, interval=30.0s, init_wait=0.0s) [3m(periodic_thread.py:244:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 03:38:00,135] LMCache INFO:[0m Initializing MP usage context. [3m(mp.py:93:lmcache.usage_telemetry.mp)[0m
+[32;20m[2026-07-31 03:38:00,135] LMCache INFO:[0m Initializing MP continuous usage reporting. [3m(mp_continuous.py:239:lmcache.usage_telemetry.mp_continuous)[0m
+[32;20m[2026-07-31 03:38:00,152] LMCache INFO:[0m Created AffinityThreadPool 'affinity-pool-0' with 1 worker slots: up to 1 distinct affinity keys each bind to their own thread before slots are shared. Compare this against the number of clients expected to connect to confirm routing. [3m(affinity_pool.py:60:lmcache.v1.multiprocess.affinity_pool)[0m
+[32;20m[2026-07-31 03:38:00,152] LMCache INFO:[0m LMCache ZMQ cache server is running on tcp://127.0.0.1:15558 [3m(server.py:394:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 03:38:00,152] LMCache INFO:[0m LMCache cache server is running... [3m(server.py:409:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 03:38:00,152] LMCache INFO:[0m LMCache HTTP server initialized [3m(http_server.py:166:lmcache.v1.multiprocess.http_server)[0m
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:18081 (Press CTRL+C to quit)
+[32;20m[2026-07-31 03:38:19,300] LMCache INFO:[0m Engine KV Format: EngineKVFormat.NL_X_TWO_NB_BS_NH_HS NL x [2, NB, BS, NH, HS] [3m(detection.py:44:lmcache.v1.gpu_connector.kv_format.detection)[0m
+[32;20m[2026-07-31 03:38:19,301] LMCache INFO:[0m Engine KV Format: EngineKVFormat.NL_X_TWO_NB_BS_NH_HS NL x [2, NB, BS, NH, HS] [3m(detection.py:44:lmcache.v1.gpu_connector.kv_format.detection)[0m
+[32;20m[2026-07-31 03:38:19,301] LMCache INFO:[0m Group 0 first-layer tensor: layer_idx=0 shape=(2, 1024, 16, 8, 128) stride=(16777216, 16384, 1024, 128, 1) is_contiguous=True dtype=torch.float16 device=cuda:0 storage_offset=0 numel=33554432 storage_nbytes=67108864 padding_per_block=0 [3m(utils.py:589:lmcache.v1.gpu_connector.utils)[0m
+[32;20m[2026-07-31 03:38:19,301] LMCache INFO:[0m KV layer groups: ---
+KernelGroupInfo(layers=32, indices=0-31, shape_desc=(kv=2, nl=32, nb=1024, bs=16, nh=8, hs=128, element_size=2, block_stride_elems=0), dtype=torch.float16, tokens_per_block=16, slots_per_block=16, physical_blocks_per_engine_block=1, engine_group_idx=0, sw_size_tokens=-1)
+--- [3m(kv_layer_groups.py:458:lmcache.v1.kv_layer_groups)[0m
+[33;20m[2026-07-31 03:38:19,301] LMCache WARNING:[0m KVLayerGroupsManager.kv_layer_groups is deprecated: `kv_layer_groups` is an outdated alias for `kernel_groups` [3m(utils.py:734:lmcache.utils)[0m
+[32;20m[2026-07-31 03:38:19,398] LMCache INFO:[0m Registered KV cache for GPU ID 0 with 32 layers [3m(lmcache_driven_transfer.py:902:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+[32;20m[2026-07-31 03:38:19,398] LMCache INFO:[0m Initialized cuda stream on device cuda:0 [3m(cache_context.py:430:lmcache.v1.platform.cuda.cache_context)[0m
+[32;20m[2026-07-31 03:38:19,400] LMCache INFO:[0m AffinityThreadPool: affinity_key=-7302245105883085611 assigned to worker slot 0 of 1 (thread affinity-pool-0-0); 1 distinct key(s) now bound [3m(affinity_pool.py:108:lmcache.v1.multiprocess.affinity_pool)[0m
+[32;20m[2026-07-31 03:38:19,403] LMCache INFO:[0m Stored 512 tokens in 0.003 seconds [3m(lmcache_driven_transfer.py:1134:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+INFO:     127.0.0.1:60200 - "POST /cache/checksums HTTP/1.1" 200 OK
+[32;20m[2026-07-31 03:38:19,637] LMCache INFO:[0m Prefetch request completed (L1+L2): 2/2 retained keys (2 L1, 0 L2) in 0.3 ms (external_request_id=req-0-warm, prefetch_request_id=-1) [3m(storage_manager.py:709:lmcache.v1.distributed.storage_manager)[0m
+[32;20m[2026-07-31 03:38:19,639] LMCache INFO:[0m Retrieved 512 tokens in 0.001 seconds [3m(lmcache_driven_transfer.py:1322:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+INFO:     127.0.0.1:60206 - "POST /cache/checksums HTTP/1.1" 200 OK
+[32;20m[2026-07-31 03:38:19,829] LMCache INFO:[0m Stored 512 tokens in 0.001 seconds [3m(lmcache_driven_transfer.py:1134:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+INFO:     127.0.0.1:60220 - "POST /cache/checksums HTTP/1.1" 200 OK
+[32;20m[2026-07-31 03:38:20,016] LMCache INFO:[0m Prefetch request completed (L1+L2): 2/2 retained keys (2 L1, 0 L2) in 0.3 ms (external_request_id=req-1-warm, prefetch_request_id=-1) [3m(storage_manager.py:709:lmcache.v1.distributed.storage_manager)[0m
+[32;20m[2026-07-31 03:38:20,017] LMCache INFO:[0m Retrieved 512 tokens in 0.000 seconds [3m(lmcache_driven_transfer.py:1322:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+INFO:     127.0.0.1:60230 - "POST /cache/checksums HTTP/1.1" 200 OK
+[32;20m[2026-07-31 03:38:20,205] LMCache INFO:[0m Stored 512 tokens in 0.000 seconds [3m(lmcache_driven_transfer.py:1134:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+INFO:     127.0.0.1:60232 - "POST /cache/checksums HTTP/1.1" 200 OK
+[32;20m[2026-07-31 03:38:20,392] LMCache INFO:[0m Prefetch request completed (L1+L2): 2/2 retained keys (2 L1, 0 L2) in 0.3 ms (external_request_id=req-2-warm, prefetch_request_id=-1) [3m(storage_manager.py:709:lmcache.v1.distributed.storage_manager)[0m
+[32;20m[2026-07-31 03:38:20,392] LMCache INFO:[0m Retrieved 512 tokens in 0.000 seconds [3m(lmcache_driven_transfer.py:1322:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+INFO:     127.0.0.1:60246 - "POST /cache/checksums HTTP/1.1" 200 OK
+[32;20m[2026-07-31 03:38:20,582] LMCache INFO:[0m Unregistered KV cache for GPU ID 0 [3m(lmcache_driven_transfer.py:929:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+server_exit_confirmed=2026-07-31T03:39:54Z gpu3_memory_mib=14
