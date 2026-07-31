@@ -125,6 +125,30 @@ Evidence:
 and
 [#100 + #102 final warm](artifacts/sparkinfer-w4a16-pr100-102-final-v2-warm.log).
 
+Checkpoint (2026-07-31 05:13 UTC): independent review approved the
+consumer-side stale-tail mask with no blocking correctness, race, out-of-bounds
+or production-performance finding. Review suggested extending the regression
+to the narrow-range boundaries and proving that the actual custom operator
+launched. Test-only commit `d4d101e8` therefore covers
+`I=[32,128,224]`, `M=[1,3]` and ReLU2/SiLU, spies on the real
+`w4a16_small_m_direct_launch` implementation, requires two launches, and
+compares first use with poisoned replay bit-for-bit. The corresponding exact
+#100 + #102 head is `3382e15b`.
+
+That stronger cold gate found a **separate numerical defect** on both exact
+lineages: all SiLU cases and all `I=128` cases pass, but ReLU2 misses the FP32
+oracle at `I=32` (`cos=0.9592/0.9625` for M=1/3) and `I=224`
+(`cos=0.9975/0.9927`). Both lineages reproduce the same four failures, so this
+is neither a #102 interaction nor a JIT-cache artifact. The failed results are
+preserved in
+[pure #100 boundary evidence](artifacts/sparkinfer-w4a16-boundaries-pure-d4d101e-cold.log)
+and
+[#100 + #102 boundary evidence](artifacts/sparkinfer-w4a16-boundaries-composed-3382e15-cold.log).
+Root-cause analysis is active in a separate branch; these new failures do not
+invalidate the already-proven GLM shape (`I=1856`) or the stale-tail fix at
+`I=128`, but the upstream repair will not be published with a red supported-
+shape test.
+
 Review also found a separate generic-shape bug for ModelOpt intermediates
 divisible by 16 but not 64 (for example `I=144`): padded-grid validity can
 permit raw W/scale loads beyond logical rows. A separate repair/test track is

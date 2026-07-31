@@ -1,0 +1,550 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.1, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /workspace/field-review-tests/worktrees/sparkinfer-w4a16-pr100-102-final-v2
+configfile: pyproject.toml
+plugins: anyio-4.14.2
+collecting ... collected 12 items
+
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[32-1-relu2] FAILED [  8%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[32-1-silu] PASSED [ 16%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[32-3-relu2] FAILED [ 25%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[32-3-silu] PASSED [ 33%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[128-1-relu2] PASSED [ 41%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[128-1-silu] PASSED [ 50%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[128-3-relu2] PASSED [ 58%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[128-3-silu] PASSED [ 66%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[224-1-relu2] FAILED [ 75%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[224-1-silu] PASSED [ 83%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[224-3-relu2] FAILED [ 91%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[224-3-silu] PASSED [100%]
+
+=================================== FAILURES ===================================
+___ test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[32-1-relu2] ___
+
+activation = 'relu2', m = 1, intermediate_size = 32
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x77f9459de330>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+    @pytest.mark.parametrize("activation", ["relu2", "silu"])
+    @pytest.mark.parametrize("m", [1, 3])
+    @pytest.mark.parametrize("intermediate_size", [32, 128, 224])
+    def test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail(
+        activation: str,
+        m: int,
+        intermediate_size: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sparkinfer.moe._shared.kernels.w4a16.kernel as w4a16_kernel
+    
+        experts, hidden_size = 8, 128
+        topk = 2
+        monkeypatch.setenv("SPARKINFER_W4A16_SMALL_M_DIRECT", "1")
+        torch.manual_seed(
+            20260730
+            + (1000 if activation == "silu" else 0)
+            + m
+            + intermediate_size
+        )
+        real_direct_launch = w4a16_kernel._w4a16_small_m_direct_launch_flat
+        direct_launches: list[tuple[int, int]] = []
+    
+        def spy_direct_launch(*args, **kwargs) -> None:
+            direct_launches.append((int(kwargs["m"]), int(kwargs["intermediate_size"])))
+            real_direct_launch(*args, **kwargs)
+    
+        monkeypatch.setattr(
+            w4a16_kernel,
+            "_w4a16_small_m_direct_launch_flat",
+            spy_direct_launch,
+        )
+        rows = intermediate_size * (2 if activation == "silu" else 1)
+        w13_dense = torch.randn(experts, rows, hidden_size, device="cuda") * 0.12
+        w2_dense = (
+            torch.randn(experts, hidden_size, intermediate_size, device="cuda") * 0.12
+        )
+        w13_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w2_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w13, w13_blockscale = _quantize_dense_moe_weight_storage(
+            w13_dense,
+            w13_global_scale,
+        )
+        w2, w2_blockscale = _quantize_dense_moe_weight_storage(
+            w2_dense,
+            w2_global_scale,
+        )
+        x = (torch.randn(m, hidden_size, device="cuda") * 0.5).to(torch.bfloat16)
+        topk_ids = torch.randint(
+            0,
+            experts,
+            (m, topk),
+            device="cuda",
+            dtype=torch.int32,
+        )
+        topk_weights = torch.softmax(torch.randn(m, topk, device="cuda"), dim=-1)
+        a_gscale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w4a16_experts = prepare_tp_moe_fp4_experts(
+            a=x,
+            a1_gscale=a_gscale,
+            w1_fp4=w13,
+            w1_blockscale=w13_blockscale,
+            w1_alphas=w13_global_scale,
+            a2_gscale=a_gscale,
+            w2_fp4=w2,
+            w2_blockscale=w2_blockscale,
+            w2_alphas=w2_global_scale,
+            activation=activation,
+            quant_mode="w4a16",
+        )
+        prepared_w4a16 = w4a16_experts.representation_for("w4a16")
+        assert prepared_w4a16.weight_layout == "modelopt"
+        assert _small_m_direct_supported(
+            m=m,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            num_experts=experts,
+            topk=topk,
+            activation=activation,
+            apply_router_weight_on_input=False,
+            swiglu_limit=None,
+            swiglu_alpha=None,
+            swiglu_beta=None,
+            element_dtype="bf16",
+            weight_layout=prepared_w4a16.weight_layout,
+            w13_layout="w13",
+            scale_format="e4m3_k16",
+        )
+        binding = make_tp_moe_fp4_binding(
+            a=x,
+            experts=w4a16_experts,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            quant_mode="w4a16",
+        )
+        expected = moe_reference_w4a16_f32(
+            x,
+            w13,
+            w13_blockscale,
+            w13_global_scale,
+            w2,
+            w2_blockscale,
+            w2_global_scale,
+            topk_ids,
+            topk_weights,
+            experts,
+            hidden_size,
+            intermediate_size,
+            activation=activation,
+        )
+    
+        first = binding.run()
+        torch.cuda.synchronize()
+        first_metrics = compare_to_reference(first, expected)
+        assert bool(torch.isfinite(first).all().item())
+>       assert first_metrics.cos > 0.999, first_metrics
+E       AssertionError: OracleMetrics(max_abs=0.1947811245918274, rmse=0.08991170674562454, mean_abs=0.07418028265237808, cos=0.9591643214225769)
+E       assert 0.9591643214225769 > 0.999
+E        +  where 0.9591643214225769 = OracleMetrics(max_abs=0.1947811245918274, rmse=0.08991170674562454, mean_abs=0.07418028265237808, cos=0.9591643214225769).cos
+
+tests/moe/test_w4a16_e2e.py:1212: AssertionError
+___ test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[32-3-relu2] ___
+
+activation = 'relu2', m = 3, intermediate_size = 32
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x77f93c2b2ea0>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+    @pytest.mark.parametrize("activation", ["relu2", "silu"])
+    @pytest.mark.parametrize("m", [1, 3])
+    @pytest.mark.parametrize("intermediate_size", [32, 128, 224])
+    def test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail(
+        activation: str,
+        m: int,
+        intermediate_size: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sparkinfer.moe._shared.kernels.w4a16.kernel as w4a16_kernel
+    
+        experts, hidden_size = 8, 128
+        topk = 2
+        monkeypatch.setenv("SPARKINFER_W4A16_SMALL_M_DIRECT", "1")
+        torch.manual_seed(
+            20260730
+            + (1000 if activation == "silu" else 0)
+            + m
+            + intermediate_size
+        )
+        real_direct_launch = w4a16_kernel._w4a16_small_m_direct_launch_flat
+        direct_launches: list[tuple[int, int]] = []
+    
+        def spy_direct_launch(*args, **kwargs) -> None:
+            direct_launches.append((int(kwargs["m"]), int(kwargs["intermediate_size"])))
+            real_direct_launch(*args, **kwargs)
+    
+        monkeypatch.setattr(
+            w4a16_kernel,
+            "_w4a16_small_m_direct_launch_flat",
+            spy_direct_launch,
+        )
+        rows = intermediate_size * (2 if activation == "silu" else 1)
+        w13_dense = torch.randn(experts, rows, hidden_size, device="cuda") * 0.12
+        w2_dense = (
+            torch.randn(experts, hidden_size, intermediate_size, device="cuda") * 0.12
+        )
+        w13_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w2_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w13, w13_blockscale = _quantize_dense_moe_weight_storage(
+            w13_dense,
+            w13_global_scale,
+        )
+        w2, w2_blockscale = _quantize_dense_moe_weight_storage(
+            w2_dense,
+            w2_global_scale,
+        )
+        x = (torch.randn(m, hidden_size, device="cuda") * 0.5).to(torch.bfloat16)
+        topk_ids = torch.randint(
+            0,
+            experts,
+            (m, topk),
+            device="cuda",
+            dtype=torch.int32,
+        )
+        topk_weights = torch.softmax(torch.randn(m, topk, device="cuda"), dim=-1)
+        a_gscale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w4a16_experts = prepare_tp_moe_fp4_experts(
+            a=x,
+            a1_gscale=a_gscale,
+            w1_fp4=w13,
+            w1_blockscale=w13_blockscale,
+            w1_alphas=w13_global_scale,
+            a2_gscale=a_gscale,
+            w2_fp4=w2,
+            w2_blockscale=w2_blockscale,
+            w2_alphas=w2_global_scale,
+            activation=activation,
+            quant_mode="w4a16",
+        )
+        prepared_w4a16 = w4a16_experts.representation_for("w4a16")
+        assert prepared_w4a16.weight_layout == "modelopt"
+        assert _small_m_direct_supported(
+            m=m,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            num_experts=experts,
+            topk=topk,
+            activation=activation,
+            apply_router_weight_on_input=False,
+            swiglu_limit=None,
+            swiglu_alpha=None,
+            swiglu_beta=None,
+            element_dtype="bf16",
+            weight_layout=prepared_w4a16.weight_layout,
+            w13_layout="w13",
+            scale_format="e4m3_k16",
+        )
+        binding = make_tp_moe_fp4_binding(
+            a=x,
+            experts=w4a16_experts,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            quant_mode="w4a16",
+        )
+        expected = moe_reference_w4a16_f32(
+            x,
+            w13,
+            w13_blockscale,
+            w13_global_scale,
+            w2,
+            w2_blockscale,
+            w2_global_scale,
+            topk_ids,
+            topk_weights,
+            experts,
+            hidden_size,
+            intermediate_size,
+            activation=activation,
+        )
+    
+        first = binding.run()
+        torch.cuda.synchronize()
+        first_metrics = compare_to_reference(first, expected)
+        assert bool(torch.isfinite(first).all().item())
+>       assert first_metrics.cos > 0.999, first_metrics
+E       AssertionError: OracleMetrics(max_abs=0.33999159932136536, rmse=0.08551304042339325, mean_abs=0.05905032902956009, cos=0.9624855518341064)
+E       assert 0.9624855518341064 > 0.999
+E        +  where 0.9624855518341064 = OracleMetrics(max_abs=0.33999159932136536, rmse=0.08551304042339325, mean_abs=0.05905032902956009, cos=0.9624855518341064).cos
+
+tests/moe/test_w4a16_e2e.py:1212: AssertionError
+__ test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[224-1-relu2] ___
+
+activation = 'relu2', m = 1, intermediate_size = 224
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x77f944901bb0>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+    @pytest.mark.parametrize("activation", ["relu2", "silu"])
+    @pytest.mark.parametrize("m", [1, 3])
+    @pytest.mark.parametrize("intermediate_size", [32, 128, 224])
+    def test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail(
+        activation: str,
+        m: int,
+        intermediate_size: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sparkinfer.moe._shared.kernels.w4a16.kernel as w4a16_kernel
+    
+        experts, hidden_size = 8, 128
+        topk = 2
+        monkeypatch.setenv("SPARKINFER_W4A16_SMALL_M_DIRECT", "1")
+        torch.manual_seed(
+            20260730
+            + (1000 if activation == "silu" else 0)
+            + m
+            + intermediate_size
+        )
+        real_direct_launch = w4a16_kernel._w4a16_small_m_direct_launch_flat
+        direct_launches: list[tuple[int, int]] = []
+    
+        def spy_direct_launch(*args, **kwargs) -> None:
+            direct_launches.append((int(kwargs["m"]), int(kwargs["intermediate_size"])))
+            real_direct_launch(*args, **kwargs)
+    
+        monkeypatch.setattr(
+            w4a16_kernel,
+            "_w4a16_small_m_direct_launch_flat",
+            spy_direct_launch,
+        )
+        rows = intermediate_size * (2 if activation == "silu" else 1)
+        w13_dense = torch.randn(experts, rows, hidden_size, device="cuda") * 0.12
+        w2_dense = (
+            torch.randn(experts, hidden_size, intermediate_size, device="cuda") * 0.12
+        )
+        w13_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w2_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w13, w13_blockscale = _quantize_dense_moe_weight_storage(
+            w13_dense,
+            w13_global_scale,
+        )
+        w2, w2_blockscale = _quantize_dense_moe_weight_storage(
+            w2_dense,
+            w2_global_scale,
+        )
+        x = (torch.randn(m, hidden_size, device="cuda") * 0.5).to(torch.bfloat16)
+        topk_ids = torch.randint(
+            0,
+            experts,
+            (m, topk),
+            device="cuda",
+            dtype=torch.int32,
+        )
+        topk_weights = torch.softmax(torch.randn(m, topk, device="cuda"), dim=-1)
+        a_gscale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w4a16_experts = prepare_tp_moe_fp4_experts(
+            a=x,
+            a1_gscale=a_gscale,
+            w1_fp4=w13,
+            w1_blockscale=w13_blockscale,
+            w1_alphas=w13_global_scale,
+            a2_gscale=a_gscale,
+            w2_fp4=w2,
+            w2_blockscale=w2_blockscale,
+            w2_alphas=w2_global_scale,
+            activation=activation,
+            quant_mode="w4a16",
+        )
+        prepared_w4a16 = w4a16_experts.representation_for("w4a16")
+        assert prepared_w4a16.weight_layout == "modelopt"
+        assert _small_m_direct_supported(
+            m=m,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            num_experts=experts,
+            topk=topk,
+            activation=activation,
+            apply_router_weight_on_input=False,
+            swiglu_limit=None,
+            swiglu_alpha=None,
+            swiglu_beta=None,
+            element_dtype="bf16",
+            weight_layout=prepared_w4a16.weight_layout,
+            w13_layout="w13",
+            scale_format="e4m3_k16",
+        )
+        binding = make_tp_moe_fp4_binding(
+            a=x,
+            experts=w4a16_experts,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            quant_mode="w4a16",
+        )
+        expected = moe_reference_w4a16_f32(
+            x,
+            w13,
+            w13_blockscale,
+            w13_global_scale,
+            w2,
+            w2_blockscale,
+            w2_global_scale,
+            topk_ids,
+            topk_weights,
+            experts,
+            hidden_size,
+            intermediate_size,
+            activation=activation,
+        )
+    
+        first = binding.run()
+        torch.cuda.synchronize()
+        first_metrics = compare_to_reference(first, expected)
+        assert bool(torch.isfinite(first).all().item())
+>       assert first_metrics.cos > 0.999, first_metrics
+E       AssertionError: OracleMetrics(max_abs=0.13247814774513245, rmse=0.058111365884542465, mean_abs=0.047352857887744904, cos=0.9974949955940247)
+E       assert 0.9974949955940247 > 0.999
+E        +  where 0.9974949955940247 = OracleMetrics(max_abs=0.13247814774513245, rmse=0.058111365884542465, mean_abs=0.047352857887744904, cos=0.9974949955940247).cos
+
+tests/moe/test_w4a16_e2e.py:1212: AssertionError
+__ test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[224-3-relu2] ___
+
+activation = 'relu2', m = 3, intermediate_size = 224
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x77f93c24b650>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+    @pytest.mark.parametrize("activation", ["relu2", "silu"])
+    @pytest.mark.parametrize("m", [1, 3])
+    @pytest.mark.parametrize("intermediate_size", [32, 128, 224])
+    def test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail(
+        activation: str,
+        m: int,
+        intermediate_size: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sparkinfer.moe._shared.kernels.w4a16.kernel as w4a16_kernel
+    
+        experts, hidden_size = 8, 128
+        topk = 2
+        monkeypatch.setenv("SPARKINFER_W4A16_SMALL_M_DIRECT", "1")
+        torch.manual_seed(
+            20260730
+            + (1000 if activation == "silu" else 0)
+            + m
+            + intermediate_size
+        )
+        real_direct_launch = w4a16_kernel._w4a16_small_m_direct_launch_flat
+        direct_launches: list[tuple[int, int]] = []
+    
+        def spy_direct_launch(*args, **kwargs) -> None:
+            direct_launches.append((int(kwargs["m"]), int(kwargs["intermediate_size"])))
+            real_direct_launch(*args, **kwargs)
+    
+        monkeypatch.setattr(
+            w4a16_kernel,
+            "_w4a16_small_m_direct_launch_flat",
+            spy_direct_launch,
+        )
+        rows = intermediate_size * (2 if activation == "silu" else 1)
+        w13_dense = torch.randn(experts, rows, hidden_size, device="cuda") * 0.12
+        w2_dense = (
+            torch.randn(experts, hidden_size, intermediate_size, device="cuda") * 0.12
+        )
+        w13_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w2_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w13, w13_blockscale = _quantize_dense_moe_weight_storage(
+            w13_dense,
+            w13_global_scale,
+        )
+        w2, w2_blockscale = _quantize_dense_moe_weight_storage(
+            w2_dense,
+            w2_global_scale,
+        )
+        x = (torch.randn(m, hidden_size, device="cuda") * 0.5).to(torch.bfloat16)
+        topk_ids = torch.randint(
+            0,
+            experts,
+            (m, topk),
+            device="cuda",
+            dtype=torch.int32,
+        )
+        topk_weights = torch.softmax(torch.randn(m, topk, device="cuda"), dim=-1)
+        a_gscale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w4a16_experts = prepare_tp_moe_fp4_experts(
+            a=x,
+            a1_gscale=a_gscale,
+            w1_fp4=w13,
+            w1_blockscale=w13_blockscale,
+            w1_alphas=w13_global_scale,
+            a2_gscale=a_gscale,
+            w2_fp4=w2,
+            w2_blockscale=w2_blockscale,
+            w2_alphas=w2_global_scale,
+            activation=activation,
+            quant_mode="w4a16",
+        )
+        prepared_w4a16 = w4a16_experts.representation_for("w4a16")
+        assert prepared_w4a16.weight_layout == "modelopt"
+        assert _small_m_direct_supported(
+            m=m,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            num_experts=experts,
+            topk=topk,
+            activation=activation,
+            apply_router_weight_on_input=False,
+            swiglu_limit=None,
+            swiglu_alpha=None,
+            swiglu_beta=None,
+            element_dtype="bf16",
+            weight_layout=prepared_w4a16.weight_layout,
+            w13_layout="w13",
+            scale_format="e4m3_k16",
+        )
+        binding = make_tp_moe_fp4_binding(
+            a=x,
+            experts=w4a16_experts,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            quant_mode="w4a16",
+        )
+        expected = moe_reference_w4a16_f32(
+            x,
+            w13,
+            w13_blockscale,
+            w13_global_scale,
+            w2,
+            w2_blockscale,
+            w2_global_scale,
+            topk_ids,
+            topk_weights,
+            experts,
+            hidden_size,
+            intermediate_size,
+            activation=activation,
+        )
+    
+        first = binding.run()
+        torch.cuda.synchronize()
+        first_metrics = compare_to_reference(first, expected)
+        assert bool(torch.isfinite(first).all().item())
+>       assert first_metrics.cos > 0.999, first_metrics
+E       AssertionError: OracleMetrics(max_abs=0.3480168581008911, rmse=0.08920659124851227, mean_abs=0.06192865967750549, cos=0.9926667213439941)
+E       assert 0.9926667213439941 > 0.999
+E        +  where 0.9926667213439941 = OracleMetrics(max_abs=0.3480168581008911, rmse=0.08920659124851227, mean_abs=0.06192865967750549, cos=0.9926667213439941).cos
+
+tests/moe/test_w4a16_e2e.py:1212: AssertionError
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[32-1-relu2] - AssertionError: OracleMetrics(max_abs=0.1947811245918274, rmse=0.08991170674562454, mean_abs=0.07418028265237808, cos=0.9591643214225769)
+assert 0.9591643214225769 > 0.999
+ +  where 0.9591643214225769 = OracleMetrics(max_abs=0.1947811245918274, rmse=0.08991170674562454, mean_abs=0.07418028265237808, cos=0.9591643214225769).cos
+FAILED tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[32-3-relu2] - AssertionError: OracleMetrics(max_abs=0.33999159932136536, rmse=0.08551304042339325, mean_abs=0.05905032902956009, cos=0.9624855518341064)
+assert 0.9624855518341064 > 0.999
+ +  where 0.9624855518341064 = OracleMetrics(max_abs=0.33999159932136536, rmse=0.08551304042339325, mean_abs=0.05905032902956009, cos=0.9624855518341064).cos
+FAILED tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[224-1-relu2] - AssertionError: OracleMetrics(max_abs=0.13247814774513245, rmse=0.058111365884542465, mean_abs=0.047352857887744904, cos=0.9974949955940247)
+assert 0.9974949955940247 > 0.999
+ +  where 0.9974949955940247 = OracleMetrics(max_abs=0.13247814774513245, rmse=0.058111365884542465, mean_abs=0.047352857887744904, cos=0.9974949955940247).cos
+FAILED tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[224-3-relu2] - AssertionError: OracleMetrics(max_abs=0.3480168581008911, rmse=0.08920659124851227, mean_abs=0.06192865967750549, cos=0.9926667213439941)
+assert 0.9926667213439941 > 0.999
+ +  where 0.9926667213439941 = OracleMetrics(max_abs=0.3480168581008911, rmse=0.08920659124851227, mean_abs=0.06192865967750549, cos=0.9926667213439941).cos
+==================== 4 failed, 8 passed, 1 warning in 8.93s ====================
