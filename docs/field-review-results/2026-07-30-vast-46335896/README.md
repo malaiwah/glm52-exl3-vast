@@ -6,6 +6,39 @@ Provider instance: Vast.ai `46335896`
 
 Test plan: `FIELD-REVIEW-PR-TEST-PLAN.md`, generated 2026-07-30
 
+## Repair-campaign update
+
+The outcome below is the immutable first-pass attribution. Work continued on
+the retained host after that checkpoint.
+
+SparkInfer #101/#103's reported one-shot failure was a false negative in the
+new torture test, not incorrect CUDA output:
+
+- the 17-collective graph overwrites both staging slabs, so the old
+  `exactly one changed slab` assertion cannot hold when every layer marker
+  changes;
+- replay was launched on the default stream while the test synchronized and
+  sampled its separate capture stream, producing a real partial observation
+  `(25, 171)` instead of final markers `(40, 41)`.
+
+Repaired heads #101 `0959fe807d366628380f41933244e3ccce0a8ae0` and #103
+`8fd90a4f687895e705bdf52fcff84ef653a5abf0` enqueue fill/replay/probe on the
+same stream, require the final two layer markers in the two slabs, and require
+the final marker to alternate slots. #103 passed cold/warm/final at
+48.59/5.07/5.06 seconds; an independent reviewer then passed 1,025 graph
+replays cold in 48.23 seconds with a fresh cache. No runtime CUDA source was
+changed for this correction.
+
+Evidence:
+[#101 corrected](artifacts/sparkinfer-replay-fix-agent-pr101-corrected-v2.log),
+[#103 cold](artifacts/sparkinfer-replay-fix-agent-pr103-corrected.log),
+[#103 warm](artifacts/sparkinfer-replay-fix-agent-pr103-corrected-warm.log),
+[#103 final warm](artifacts/sparkinfer-replay-fix-agent-pr103-final-warm.log),
+and
+[independent 1,025-replay review](artifacts/sparkinfer-replay-peer-review-pr103-1025-cold.log).
+The continuing repair ledger is
+[`UPSTREAM-REPAIR-CAMPAIGN.md`](UPSTREAM-REPAIR-CAMPAIGN.md).
+
 ## Outcome
 
 The focused vLLM changes pass. The individual W4A16 sizing/capture changes

@@ -1,0 +1,10 @@
+5c4f8b01962c42d3aab8ac36b1e663974ad2537b
+0458ff8ea13fdee540154dc55b2589c0871d1b0b29237404044fe4c67187d02b  /workspace/field-review-tests/worktrees/sparkinfer-replay-fix-agent/tests/comm/test_pcie_oneshot_torture.py
+9e04448b22a54ff992707a8339e68508d0eb1417b8610f78a8ac3e29fde0567d  /workspace/field-review-tests/artifacts/sparkinfer-replay-peer-review-pr103-1025-cold.log
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+2.12.0+cu132 13.2
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 610.43.02
+1, NVIDIA RTX PRO 6000 Blackwell Server Edition, 610.43.02
+2, NVIDIA RTX PRO 6000 Blackwell Server Edition, 610.43.02
+3, NVIDIA RTX PRO 6000 Blackwell Server Edition, 610.43.02
