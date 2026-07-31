@@ -1031,6 +1031,37 @@ eager-callsite contract with its matching vLLM patch, and add bounded
 asymmetric-failure, real-GC and maximum-overlap tests before any fresh-cache
 GPU run.
 
+The atomic vLLM half is now independently **approved** at exact clean SHA
+`a89816a3a1062a2ae82e9ac87abd67e2bdcdfe98` (base `5a7ac148`). It assigns
+stable target/draft/encoder and profile/production identities across all V1
+and V2 GLM speculative paths, rolls disposable profiling channels back only
+after graph destruction and synchronized KV cleanup, and fails closed when a
+distributed caller omits the new semantic ID. Static gates passed; Linux
+target/draft capture and replay remain required with the corrected SparkInfer
+half. [Independent review](artifacts/vllm-a89816a3-independent-review.md).
+
+LMCache ownership successor `4ab7112e2a442e05928ba4c78e4cf09076b419b9`
+then cleared every available GPU behavior gate: **172/172 cold**, **172/172
+warm**, focused registration cleanup, and a native daemon registration plus
+three checksum-exact STORE/RETRIEVE cycles and UNREGISTER. Every warning gate
+was clean. It is nevertheless **rejected before appliance promotion** after a
+second independent review found four deterministic lifecycle gaps: caught
+exception traceback retention, permanent quarantine of empty ownership
+records, worker-pool/notifier shutdown ordering, and malformed response-header
+futures left pending. It also needs upstream LMCache shutdown commit
+`b20e6151` plus a live-registration serving teardown gate. This distinction is
+important: the original CUDA exporter warning is repaired, but daemon outage
+and shutdown safety are not yet complete.
+
+Evidence:
+[independent review](artifacts/lmcache-4ab7112e-independent-review.md),
+[focused registration](artifacts/lmcache-r14-field-4ab7112e-register-gpu3.log),
+[cold union](artifacts/lmcache-r14-field-4ab7112e-gpu3-cold.log),
+[warm union](artifacts/lmcache-r14-field-4ab7112e-gpu3-warm.log),
+[native client round trip](artifacts/lmcache-r14-field-4ab7112e-real-roundtrip-gpu3.log),
+and
+[native server log](artifacts/lmcache-r14-field-4ab7112e-real-server-gpu3.log).
+
 ### H. Fail-closed appliance packaging
 
 The first deployable appliance boundary was exercised before adding either
