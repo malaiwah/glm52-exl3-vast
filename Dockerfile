@@ -13,7 +13,7 @@ LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai, Runp
       ai.malaiwah.base="voipmonitor/vllm@sha256:cb03f2079d8a74915f01cda15f6bdf505762d13cc3fff192f7ebdaaf6e318bf2"
 COPY requirements-soul.lock /opt/requirements-soul.lock
 RUN echo "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2  /opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json" | sha256sum -c - \
- && pip install --no-cache-dir huggingface_hub==1.25.1 hf-xet==1.5.2 dnspython==2.8.0 && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux && rm -rf /var/lib/apt/lists/* \
+ && pip install --no-cache-dir huggingface_hub==1.25.1 hf-xet==1.5.2 dnspython==2.8.0 && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux patch && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/ssh/ssh_host_* \
  && curl -sSL -o /tmp/lego.tgz https://github.com/go-acme/lego/releases/download/v4.35.2/lego_v4.35.2_linux_amd64.tar.gz \
  && echo "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3  /tmp/lego.tgz" | sha256sum -c - \
@@ -29,6 +29,7 @@ RUN echo "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2  /opt
 COPY sshd_config /etc/ssh/sshd_config.d/99-model-turnkey.conf
 COPY landing.py /opt/landing.py
 COPY scripts/ /opt/scripts/
+COPY patches/field-review-r14/ /opt/field-review-patches/
 COPY soul/ /opt/soul/
 COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # The public Vast template predates the provider-neutral rename and may still
@@ -36,6 +37,10 @@ COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # compatibility alias so a stale provider template cannot strand a rental
 # before the landing page is reachable.
 RUN echo "34869669548f2f03e29fcdaca0db691f280b609f082de320d99ab58d1db23540  /opt/scripts/patch_exl3_mixk.py" | sha256sum -c - \
+ && /opt/venv/bin/python /opt/scripts/apply_field_review_patches.py \
+      --manifest /opt/field-review-patches/manifest.json \
+      --site-packages /opt/venv/lib/python3.12/site-packages \
+      --vllm-source /opt/vllm \
  && python3 /opt/scripts/patch_exl3_parity_abi.py \
  && python3 /opt/scripts/patch_exl3_mixk.py \
  && chmod +x /usr/local/bin/model-turnkey-entry.sh /opt/scripts/soul_controller.py /opt/scripts/soul_config.py \

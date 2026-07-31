@@ -241,6 +241,81 @@ def apply_component(
         )
 
 
+def preflight_components(
+    components: list[dict[str, Any]],
+    *,
+    manifest_dir: Path,
+    site_packages: Path,
+    vllm_source: Path,
+) -> None:
+    """Validate every target before allowing the first source mutation.
+
+    The image build applies several independently qualified components.  A
+    later component or secondary target must not be able to strand an earlier
+    target in the patched state when its own source has drifted.  Exact hashes
+    establish the state; a dry run also proves that GNU patch accepts every
+    complete before-state with fuzz disabled.
+    """
+
+    failures: list[str] = []
+    dry_runs: list[tuple[str, Path, Path]] = []
+    for component in components:
+        name = component["name"]
+        patch_path = manifest_dir / safe_relative_path(component["patch"])
+        for target in component["targets"]:
+            root = resolve_target(
+                target,
+                site_packages=site_packages,
+                vllm_source=vllm_source,
+            )
+            if not root.is_dir():
+                failures.append(f"{name}: patch root does not exist: {root}")
+                continue
+            all_before, all_after, details = state_for(root, component["files"])
+            if all_after:
+                continue
+            if not all_before:
+                rendered = "\n    ".join(details)
+                failures.append(
+                    f"{name}: refusing mixed/unknown source state at {root}:\n"
+                    f"    {rendered}"
+                )
+                continue
+            dry_runs.append((name, root, patch_path))
+
+    if failures:
+        raise RuntimeError(
+            "field-review preflight rejected the source tree before mutation:\n  "
+            + "\n  ".join(failures)
+        )
+
+    for name, root, patch_path in dry_runs:
+        result = subprocess.run(
+            [
+                "patch",
+                "--dry-run",
+                "--batch",
+                "--forward",
+                "--fuzz=0",
+                "--no-backup-if-mismatch",
+                "-p1",
+                "-d",
+                str(root),
+                "-i",
+                str(patch_path),
+            ],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if result.returncode:
+            raise RuntimeError(
+                f"{name}: patch dry run failed at {root} "
+                f"(rc={result.returncode}) before mutation:\n{result.stdout}"
+            )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -285,12 +360,20 @@ def main() -> int:
         print(f">>> validated {len(components)} field-review patch components")
         return 0
 
+    site_packages = args.site_packages.resolve()
+    vllm_source = args.vllm_source.resolve()
+    preflight_components(
+        components,
+        manifest_dir=manifest_path.parent,
+        site_packages=site_packages,
+        vllm_source=vllm_source,
+    )
     for component in components:
         apply_component(
             component,
             manifest_dir=manifest_path.parent,
-            site_packages=args.site_packages.resolve(),
-            vllm_source=args.vllm_source.resolve(),
+            site_packages=site_packages,
+            vllm_source=vllm_source,
         )
     return 0
 

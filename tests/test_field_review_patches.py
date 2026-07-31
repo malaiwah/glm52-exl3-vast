@@ -116,6 +116,24 @@ class FieldReviewPatchTests(unittest.TestCase):
                 (source / "demo/value.py").read_text(), "VALUE = 'before'\n"
             )
 
+    def test_later_unknown_target_is_rejected_before_first_target_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, site, source = self.make_fixture(Path(tmp))
+            (source / "demo/value.py").write_text(
+                "VALUE = 'unknown'\n", encoding="utf-8"
+            )
+            result = self.run_applier(manifest, site, source)
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn(
+                "preflight rejected the source tree before mutation", result.stdout
+            )
+            self.assertEqual(
+                (site / "demo/value.py").read_text(), "VALUE = 'before'\n"
+            )
+            self.assertEqual(
+                (source / "demo/value.py").read_text(), "VALUE = 'unknown'\n"
+            )
+
     def test_tampered_patch_is_rejected_before_apply(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             manifest, site, source = self.make_fixture(Path(tmp))
