@@ -1689,10 +1689,11 @@ fi
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
 # r14's native one-grid mixed-K EXL3 path changes source consumed by
-# Dynamo/Inductor. It is checkpoint-compatible with the r13 adapter, but its
-# compiled objects are not interchangeable. Keep same-r14 restarts warm while
-# isolating both lineages.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3native1"
+# Dynamo/Inductor. The field-review bundle additionally changes compiled
+# SparkInfer PCIe kernels and vLLM EXL3 planning. Neither lineage may consume
+# objects built by the stock r14 image, while restarts of this exact appliance
+# should remain warm.
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3native-field1"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2
