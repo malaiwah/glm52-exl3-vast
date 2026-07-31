@@ -17,8 +17,10 @@ result to this stack.
 > request errors; all 44 GPQA normal stops were correct and its only six misses
 > exhausted the 32K reasoning ceiling. TERM released the wrapper within 2
 > seconds and all workers/GPU allocations within 19 seconds. Release appliance
-> `<FINAL_IMAGE_TAG>@<FINAL_IMAGE_DIGEST>`;
-> immutable evidence `<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`. Independent
+> `ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7`;
+> immutable evidence
+> [`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
+> Independent
 > counter-validation remains encouraged, but no listed release gate is open.
 
 ## Immutable starting point
@@ -36,9 +38,9 @@ result to this stack.
 | EXL3 extension | `brandonmmusic-max/exllamav3`, `a1-retile-sm120@704aefd` |
 | runtime | PyTorch `2.12.0+cu132`; CUDA runtime `13.2.1`; FlashInfer `801d57a`; XGrammar `0.2.5` |
 | turnkey manifest | [`patches/field-review-r14/manifest.json`](../../../patches/field-review-r14/manifest.json), SHA-256 `6ba55c5f39711b875dbd044e310ee5a2473ae597cbc4b57a85911e9a4ba868eb` |
-| immutable evidence commit | `<EVIDENCE_COMMIT>` |
-| runtime release commit | `<RELEASE_COMMIT>` |
-| runtime image | `<FINAL_IMAGE_TAG>@<FINAL_IMAGE_DIGEST>` |
+| immutable evidence commit | `5c76a2536e7fc9a5f1cb6bf182531889f5385e65` |
+| runtime release commit | `fa52eda06ab516cd7e1a6628d915d2fd2478478f` |
+| runtime image | `ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7` |
 
 The base image must be pulled by digest:
 
@@ -59,7 +61,7 @@ idempotent only for a complete known state.
 | # | manifest component | exact base -> tested head | patch SHA-256 | public review surface |
 |---:|---|---|---|---|
 | 1 | `vllm-210-211` | `5a6979f176ef7535c2f44ab653c78f8292887076` -> [`5a7ac1481e1fc24b0bbc35efe160b2ff34797bee`](https://github.com/malaiwah/vllm-voipmonitor/commit/5a7ac1481e1fc24b0bbc35efe160b2ff34797bee) | `0f2c10110fc9bc0701003a46c8379c335dd9018cecbf64722e0db64eea748fb1` | [vLLM #210](https://github.com/local-inference-lab/vllm/pull/210) at `47dc47d87f428e195f66cd8e7beffd24946a415b`; merged [#211](https://github.com/local-inference-lab/vllm/pull/211), merge `30038602b71395f481ef4a6edfe4fcf8551d9c15` |
-| 2 | `vllm-semantic-pcie-channels` | `5a7ac1481e1fc24b0bbc35efe160b2ff34797bee` -> [`be1e289a8ca6cc043b582b26c788efc4b1f5d0a8`](https://github.com/malaiwah/vllm-voipmonitor/commit/be1e289a8ca6cc043b582b26c788efc4b1f5d0a8) | `25ef7b7a56ac82ddcdddcf7c4ae3a57cc6af33995af2464fb97cf7f7315e1ee7` | caller half of the semantic eager/target/draft/encoder PCIe-channel contract; patch-identical clean current-base companion series ending at [`d344da36`](https://github.com/malaiwah/vllm-voipmonitor/commit/d344da368da4496eeb308a75faf314cb6376dc62) |
+| 2 | `vllm-semantic-pcie-channels` | `5a7ac1481e1fc24b0bbc35efe160b2ff34797bee` -> [`be1e289a8ca6cc043b582b26c788efc4b1f5d0a8`](https://github.com/malaiwah/vllm-voipmonitor/commit/be1e289a8ca6cc043b582b26c788efc4b1f5d0a8) | `25ef7b7a56ac82ddcdddcf7c4ae3a57cc6af33995af2464fb97cf7f7315e1ee7` | caller half of the semantic eager/target/draft/encoder PCIe-channel contract; patch-identical clean current-base review series in [vLLM #216](https://github.com/local-inference-lab/vllm/pull/216), ending at [`d344da36`](https://github.com/malaiwah/vllm-voipmonitor/commit/d344da368da4496eeb308a75faf314cb6376dc62) |
 | 3 | `vllm-semantic-pcie-finalizer` | `be1e289a8ca6cc043b582b26c788efc4b1f5d0a8` -> [`f99e1e7b8636ca3811ab6d23084ac6da63420dc3`](https://github.com/malaiwah/vllm-voipmonitor/commit/f99e1e7b8636ca3811ab6d23084ac6da63420dc3) | `d69ff9c4a212e59838b031d3d2ec8bd40fc8c8e0c5ce6e2b23220fec6bdbf685` | process-group-aware abnormal-GC containment; same clean companion series, with abnormal-finalizer lifecycle tracked by [vLLM #215](https://github.com/local-inference-lab/vllm/issues/215) |
 | 4 | `sparkinfer-w4a16-100-102` | `9b852b281250123fe323f63ccb1df3cac0f3bbca` -> `e2205cba8d78db03427a3945a75a1f647b51ef5a` | `247fa59a633144933e5993299dab35ee079b1dd3e4f7c12f113f1103c2ad2c69` | [SparkInfer #100](https://github.com/local-inference-lab/sparkinfer/pull/100) at `c2f135c66032ac5e9d0778067dd19ae1910cff47` + [#102](https://github.com/local-inference-lab/sparkinfer/pull/102) at `2bed880a7e9edbd9f2d976ba1a8ee88c9ba6e338`; reviewed composition `cae3aad137bd739881833c064e1912177698156f`; exact r14 replay head `e2205cba...` has **no standalone public commit**, so use the manifest patch |
 | 5 | `sparkinfer-pcie-ipc-hardening` | `9b852b281250123fe323f63ccb1df3cac0f3bbca` -> [`31fa6a48116471ce423f0338047453ec1032c202`](https://github.com/malaiwah/sparkinfer/commit/31fa6a48116471ce423f0338047453ec1032c202) | `114c782ce99da46394b8110de68cb72b368cc7257e88693e405375218384c720` | first portion of draft [SparkInfer #105](https://github.com/local-inference-lab/sparkinfer/pull/105), which supersedes the unsafe public [#101](https://github.com/local-inference-lab/sparkinfer/pull/101)/[#103](https://github.com/local-inference-lab/sparkinfer/pull/103) runtime lineage |
@@ -85,7 +87,8 @@ The public issue map for reviewers is:
 - vLLM [#208](https://github.com/local-inference-lab/vllm/issues/208) for
   V1 semantic PCIe-channel rollback and
   [#215](https://github.com/local-inference-lab/vllm/issues/215) for safe
-  finalization after process-group teardown;
+  finalization after process-group teardown, both implemented for review by
+  [vLLM #216](https://github.com/local-inference-lab/vllm/pull/216);
 - vLLM [#205](https://github.com/local-inference-lab/vllm/issues/205) for
   probabilistic draft sampling; SparkInfer
   [#93](https://github.com/local-inference-lab/sparkinfer/issues/93) for the
@@ -185,7 +188,7 @@ bounded-load gates below. The recorded per-rank profile was approximately
 294.6 MiB target Trellis, 414.1 MiB native MTP draft, 83.28 GiB weights,
 1.32 GiB peak activation and 0.14 GiB CUDA graphs, leaving 1.87 GiB for KV.
 Its complete server log and companion result artifacts are fixed by
-`<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`.
+[`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
 
 Hard failures include any stream-key collision, OOM, Xid, CUDA/IPC warning,
 worker death, repeated JIT on a previously exercised warm shape, failed
@@ -538,8 +541,8 @@ Final release records:
 - graceful shutdown/GPU release: **PASS** — wrapper gone within 2 seconds,
   all four workers and GPU allocations gone within 19 seconds, 14 MiB/GPU
   idle footprint;
-- immutable appliance: `<FINAL_IMAGE_TAG>@<FINAL_IMAGE_DIGEST>`
-- complete successor log and JSON evidence: `<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`
+- immutable appliance: `ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7`
+- complete successor log and JSON evidence: [`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts)
 
 ## What to report back
 
@@ -604,10 +607,11 @@ lifecycle-patch speedup claim.
 
 Final closeout: GSM8K 96/100; GPQA 44/50 (44/44 normal stops correct, six 32K
 truncations); graceful shutdown released every worker/GPU allocation within
-19 seconds; appliance <FINAL_IMAGE_TAG>@<FINAL_IMAGE_DIGEST>; immutable
-evidence <EVIDENCE_COMMIT> / <EVIDENCE_URL>.
+19 seconds; appliance
+ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7;
+immutable evidence 5c76a2536e7fc9a5f1cb6bf182531889f5385e65 / https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts.
 
 Canonical commands, patch digests, expected startup lines, controls and
 evidence ledger:
-https://github.com/malaiwah/glm52-exl3-vast/blob/<EVIDENCE_COMMIT>/docs/field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md
+https://github.com/malaiwah/glm52-exl3-vast/blob/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md
 ```

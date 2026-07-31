@@ -198,9 +198,11 @@ matrices with no request failure or preemption. Fully warm prefill was
 **96/100 GSM8K** and **44/50 GPQA**; every one of GPQA's 44 normal stops was
 correct and its only six misses exhausted the 32K reasoning ceiling. TERM
 released the wrapper within 2 seconds and all workers/GPU allocations within
-19 seconds. Release appliance: `<FINAL_IMAGE_TAG>@<FINAL_IMAGE_DIGEST>`;
+19 seconds. Release appliance:
+`ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7`;
 immutable evidence
-`<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`. The exact patch order and independent
+[`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
+The exact patch order and independent
 reproduction contract are in the
 [counter-validation guide](docs/field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md).
 

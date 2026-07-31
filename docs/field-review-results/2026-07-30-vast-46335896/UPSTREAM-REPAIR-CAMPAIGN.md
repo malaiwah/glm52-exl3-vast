@@ -1441,7 +1441,9 @@ the containing distributed selection passed 16/16, and Ruff, format,
 byte-compilation and commit hooks were clean. The patch-identical clean
 current-base companion series ends at
 [`d344da36`](https://github.com/malaiwah/vllm-voipmonitor/commit/d344da368da4496eeb308a75faf314cb6376dc62),
-and abnormal-finalizer lifecycle is tracked publicly in
+is public for review as
+[vLLM #216](https://github.com/local-inference-lab/vllm/pull/216), and
+abnormal-finalizer lifecycle is tracked publicly in
 [vLLM #215](https://github.com/local-inference-lab/vllm/issues/215).
 
 The runtime-only successor patches are hash-locked to those two source heads
@@ -1458,7 +1460,8 @@ completed memory profiling and graph capture, became API-ready, and exposed
 294.6 MiB target Trellis, 414.1 MiB native MTP draft, 83.28 GiB weights,
 1.32 GiB peak activation, 0.14 GiB CUDA graphs and 1.87 GiB available KV. No
 semantic stream-key collision recurred. The complete server log and result
-artifacts are fixed by `<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`.
+artifacts are fixed by
+[`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
 
 Both the initial and post-prime feature suites passed **13/13 checks**: all 12
 required checks plus optional required tool choice. Health/model discovery,
@@ -1563,8 +1566,10 @@ and [SHA-256 manifest](artifacts/field-review-final-bc62980-f99e1e7-mtp3-c8-v2-s
 
 Final release records: GSM8K **96/100**; GPQA **44/50** with 44/44 normal
 stops correct and six 32K truncations; complete GPU release within 19 seconds;
-appliance `<FINAL_IMAGE_TAG>@<FINAL_IMAGE_DIGEST>`;
-immutable evidence `<EVIDENCE_COMMIT>` / `<EVIDENCE_URL>`. With those records
-fixed, the corrected pair is production-qualified. Section L's rejection
+appliance
+`ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7`;
+immutable evidence
+[`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
+With those records fixed, the corrected pair is production-qualified. Section L's rejection
 continues to apply only to the exact `31fa6a4` / `be1e289` predecessor and its
 SHA-only image.
