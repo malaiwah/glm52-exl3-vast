@@ -775,11 +775,14 @@ explicit resolution retains #102's `route_pack_capacity` import. Runtime
 changes merged automatically. Candidate
 `e2205cba8d78db03427a3945a75a1f647b51ef5a` (tree
 `1d378d599538daecfc1e8c11a44010b27d3ddfe5`) passed Ruff, `diff --check`,
-and its no-GPU union with **89 passed / 259 expected CUDA skips**. Compared
-with the independently approved exact #100/#102 tree `cae3aad1`, its only
-runtime differences are r14's paged planner and native mixed-K Trellis module;
-the common repaired source is otherwise identical. Final #101/#103 replay
-composition and the r14 GPU union remain pending.
+and its no-GPU union with **89 passed / 259 expected CUDA skips**. The complete
+seven-file GPU union then passed **332 passed / 16 intentional skips** cold
+in 237.03 seconds and identically warm in 10.03 seconds on physical GPU 2,
+using a fresh candidate-specific extension cache. Compared with the
+independently approved exact #100/#102 tree `cae3aad1`, its only runtime
+differences are r14's paged planner and native mixed-K Trellis module; the
+common repaired source is otherwise identical. Final #101/#103 replay
+composition remains pending.
 
 The exact r14 LMCache tree accepted #18/#19/#20 plus the lifecycle repair
 without a conflict. Candidate
@@ -807,6 +810,8 @@ Evidence:
 [vLLM CPU/static](artifacts/vllm-r14-210-211-static-cpu-v2.log),
 [vLLM GPU cold/warm](artifacts/vllm-r14-210-211-gpu0-cold-warm.log),
 [SparkInfer CPU/static](artifacts/sparkinfer-r14-w4-100-102-static-cpu.log),
+[SparkInfer GPU cold](artifacts/sparkinfer-r14-w4-e2205cba-gpu2-cold.log),
+[SparkInfer GPU warm](artifacts/sparkinfer-r14-w4-e2205cba-gpu2-warm.log),
 [LMCache CPU/static](artifacts/lmcache-r14-00563612-static-cpu-v2.log),
 [LMCache CUDA cold](artifacts/lmcache-r14-00563612-gpu3-cold.log), and
 [LMCache warm split](artifacts/lmcache-r14-00563612-gpu3-warm-split.log).

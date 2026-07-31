@@ -1,0 +1,15 @@
+utc=2026-07-31T09:11:37+00:00 head=e2205cba8d78db03427a3945a75a1f647b51ef5a tree=1d378d599538daecfc1e8c11a44010b27d3ddfe5 gpu=physical-2 cache=/workspace/field-review-tests/cache/sparkinfer-r14-w4-e2205cba-gpu2-cold warm=1
+........................................................................ [ 20%]
+..................................ssss....ssss....ssss....ssss.......... [ 41%]
+........................................................................ [ 62%]
+........................................................................ [ 82%]
+............................................................             [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /workspace/field-review-tests/artifacts/sparkinfer-r14-w4-e2205cba-gpu2-warm.xml -
+332 passed, 16 skipped, 1 warning in 10.03s
+rc=0 end=2026-07-31T09:11:49+00:00
