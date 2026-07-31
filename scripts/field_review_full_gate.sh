@@ -15,6 +15,17 @@ CANDIDATE_PYTHONPATH="${CANDIDATE_PYTHONPATH:-}"
 PREFILL_CAPACITY="${PREFILL_CAPACITY:-unset}"
 MTP_TOKENS_VALUE="${MTP_TOKENS_VALUE:-0}"
 GPU_MEMORY_UTILIZATION_VALUE="${GPU_MEMORY_UTILIZATION_VALUE:-0.90}"
+MAX_MODEL_LEN_VALUE="${MAX_MODEL_LEN_VALUE:-131072}"
+MAX_NUM_SEQS_VALUE="${MAX_NUM_SEQS_VALUE:-1}"
+MAX_NUM_BATCHED_TOKENS_VALUE="${MAX_NUM_BATCHED_TOKENS_VALUE:-3072}"
+MAX_CUDAGRAPH_CAPTURE_SIZE_VALUE="${MAX_CUDAGRAPH_CAPTURE_SIZE_VALUE:-6}"
+CUDAGRAPH_CAPTURE_SIZES_VALUE="${CUDAGRAPH_CAPTURE_SIZES_VALUE:-1,2,3,4,5,6}"
+VLLM_EXL3_TRELLIS_MAX_M_VALUE="${VLLM_EXL3_TRELLIS_MAX_M_VALUE:-6}"
+GPU_BLOCKS_OVERRIDE_VALUE="${GPU_BLOCKS_OVERRIDE_VALUE:-0}"
+OFFLOAD_FRACTION_VALUE="${OFFLOAD_FRACTION_VALUE:-0}"
+PREFIX_CACHE_BACKEND_VALUE="${PREFIX_CACHE_BACKEND_VALUE:-lmcache}"
+PREFIX_CACHE_DISK_GB_VALUE="${PREFIX_CACHE_DISK_GB_VALUE:-0}"
+VISION_VALUE="${VISION_VALUE:-0}"
 FIELD_REVIEW_SCRIPTS_DIR="${FIELD_REVIEW_SCRIPTS_DIR:-/workspace/field-review-tests/turnkey-scripts}"
 FIELD_REVIEW_STATE_DIR="${FIELD_REVIEW_STATE_DIR:-/tmp/field-review-$RUN_LABEL/state}"
 
@@ -67,9 +78,58 @@ case "$MTP_TOKENS_VALUE" in
     ;;
 esac
 
+for positive_setting in \
+  MAX_MODEL_LEN_VALUE \
+  MAX_NUM_SEQS_VALUE \
+  MAX_NUM_BATCHED_TOKENS_VALUE \
+  MAX_CUDAGRAPH_CAPTURE_SIZE_VALUE \
+  VLLM_EXL3_TRELLIS_MAX_M_VALUE; do
+  positive_value="${!positive_setting}"
+  case "$positive_value" in
+    *[!0-9]*|""|0)
+      echo "FATAL: $positive_setting must be a positive integer" >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "$GPU_BLOCKS_OVERRIDE_VALUE" in
+  *[!0-9]*|"")
+    echo "FATAL: GPU_BLOCKS_OVERRIDE_VALUE must be a non-negative integer" >&2
+    exit 2
+    ;;
+esac
+
+case "$PREFIX_CACHE_DISK_GB_VALUE" in
+  *[!0-9]*|"")
+    echo "FATAL: PREFIX_CACHE_DISK_GB_VALUE must be a non-negative integer" >&2
+    exit 2
+    ;;
+esac
+
+case "$VISION_VALUE" in
+  0|1) ;;
+  *)
+    echo "FATAL: VISION_VALUE must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
+
 if ! awk -v value="$GPU_MEMORY_UTILIZATION_VALUE" \
   'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value > 0 && value <= 1) }'; then
   echo "FATAL: GPU_MEMORY_UTILIZATION_VALUE must be greater than 0 and at most 1" >&2
+  exit 2
+fi
+
+if ! awk -v value="$OFFLOAD_FRACTION_VALUE" \
+  'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value >= 0 && value <= 0.9) }'; then
+  echo "FATAL: OFFLOAD_FRACTION_VALUE must be between 0 and 0.9" >&2
+  exit 2
+fi
+
+if [ "$PREFILL_CAPACITY" != unset ] &&
+   [ "$PREFILL_CAPACITY" -gt "$MAX_NUM_BATCHED_TOKENS_VALUE" ]; then
+  echo "FATAL: PREFILL_CAPACITY cannot exceed MAX_NUM_BATCHED_TOKENS_VALUE" >&2
   exit 2
 fi
 
@@ -124,16 +184,19 @@ export MODEL_REVISION=d7d79c2d14599dfce7a5d12b85f7ad73f40e623d
 export MODEL_REPO=willfalco/GLM-5.2-EXL3-TR3-3.25bpw
 export TENSOR_PARALLEL_SIZE=4 DCP=4
 export MTP_TOKENS="$MTP_TOKENS_VALUE" MTP_DRAFT_SAMPLE_METHOD=probabilistic
-export MAX_MODEL_LEN=131072 MAX_NUM_SEQS=1
-export MAX_NUM_BATCHED_TOKENS=3072
-export MAX_CUDAGRAPH_CAPTURE_SIZE=6
-export CUDAGRAPH_CAPTURE_SIZES=1,2,3,4,5,6
-export VLLM_EXL3_TRELLIS_MAX_M=6
+export MAX_MODEL_LEN="$MAX_MODEL_LEN_VALUE"
+export MAX_NUM_SEQS="$MAX_NUM_SEQS_VALUE"
+export MAX_NUM_BATCHED_TOKENS="$MAX_NUM_BATCHED_TOKENS_VALUE"
+export MAX_CUDAGRAPH_CAPTURE_SIZE="$MAX_CUDAGRAPH_CAPTURE_SIZE_VALUE"
+export CUDAGRAPH_CAPTURE_SIZES="$CUDAGRAPH_CAPTURE_SIZES_VALUE"
+export VLLM_EXL3_TRELLIS_MAX_M="$VLLM_EXL3_TRELLIS_MAX_M_VALUE"
 export GPU_MEMORY_UTILIZATION="$GPU_MEMORY_UTILIZATION_VALUE"
-export GPU_BLOCKS_OVERRIDE=0
+export GPU_BLOCKS_OVERRIDE="$GPU_BLOCKS_OVERRIDE_VALUE"
 export KV_CACHE_DTYPE=nvfp4_ds_mla KV_SCALE_MODE=dynamic-token
-export OFFLOAD_FRACTION=0 PREFIX_CACHE_BACKEND=lmcache
-export PREFIX_CACHE_DISK_GB=0 VISION=0
+export OFFLOAD_FRACTION="$OFFLOAD_FRACTION_VALUE"
+export PREFIX_CACHE_BACKEND="$PREFIX_CACHE_BACKEND_VALUE"
+export PREFIX_CACHE_DISK_GB="$PREFIX_CACHE_DISK_GB_VALUE"
+export VISION="$VISION_VALUE"
 export DCP_CKV_GATHER_MAX_TOKENS=140000
 export DCP_PREFILL_WORKSPACE_MIB=1024
 export DCP_CKV_PREFETCH_DEPTH=0
@@ -156,12 +219,18 @@ unset CONTAINER_API_KEY RUNPOD_API_KEY HF_TOKEN HUGGING_FACE_HUB_TOKEN
 unset VLLM_API_KEY
 
 echo ">>> field-review run: label=$RUN_LABEL mode=$MODE capacity=$PREFILL_CAPACITY mtp=$MTP_TOKENS"
+echo ">>> serving shape: model_len=$MAX_MODEL_LEN seqs=$MAX_NUM_SEQS batch=$MAX_NUM_BATCHED_TOKENS graph=$MAX_CUDAGRAPH_CAPTURE_SIZE"
+echo ">>> cache shape: gpu_blocks=$GPU_BLOCKS_OVERRIDE offload_fraction=$OFFLOAD_FRACTION disk_gib=$PREFIX_CACHE_DISK_GB"
 echo ">>> JIT/cache root: $JIT_ROOT"
 echo ">>> EXL3 extension path: ${VLLM_EXL3_EXT_PATH:-unset}"
 echo ">>> NCCL preload: ${LD_PRELOAD:-unset}"
 if [ "$MODE" = "candidate" ]; then
   python3 - <<'PY'
+import lmcache
+import sparkinfer
 import vllm
+print(f">>> candidate LMCache import: {lmcache.__file__}")
+print(f">>> candidate SparkInfer import: {sparkinfer.__file__}")
 print(f">>> candidate vLLM import: {vllm.__file__}")
 PY
 fi
