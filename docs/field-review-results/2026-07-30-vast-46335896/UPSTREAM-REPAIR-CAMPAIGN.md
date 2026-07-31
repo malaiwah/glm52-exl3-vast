@@ -1002,6 +1002,35 @@ release every rejected frame even under schema/type skew, keep the daemon
 alive, complete malformed-response futures, and make the direct-wire GPU tests
 model sender and receiver ownership explicitly.
 
+SparkInfer successor `025c7e1549aee0b37ad24ca8545251b9a7344774`
+(parent `cfb257b`) is likewise **rejected before GPU promotion** after its
+independent frozen-SHA review. Its focused CPU/static gate passed 98 tests
+with one skip and Ruff/`diff --check` clean, but positive unit evidence does
+not discharge these integration/lifecycle blockers:
+
+1. distributed one-shot and DCP capture now require a semantic channel ID, so
+   this SparkInfer commit is usable only atomically with a reviewed vLLM
+   caller patch covering target/draft and profile/production owners;
+2. handle/verdict exchange and peer-unmap failures can deliberately leave a
+   CUDA export/import alive while losing the Python object that could retry or
+   diagnose its release; only `cudaFree` failure currently enters the retry
+   registry;
+3. logical-ID normalization/rejection can happen locally before a collective,
+   so one invalid rank can strand peers that entered first-use allocation;
+4. the legacy `default` eager channel still binds to the first stream and
+   rejects a second stream; every production multi-stream caller therefore
+   needs an explicit stable ID or another collectively safe contract;
+5. real `del` plus `gc.collect()` ownership is not proven for DCP/two-shot;
+   manually invoking `__del__` on a still-referenced object is insufficient;
+6. the single-grid residency proof does not yet cover concurrently resident
+   opposite-order channels at their maximum worker-grid sizes.
+
+The next successor must retain every unresolved allocation with exactly-once
+retry ownership, collectively preflight malformed/unknown IDs, close the
+eager-callsite contract with its matching vLLM patch, and add bounded
+asymmetric-failure, real-GC and maximum-overlap tests before any fresh-cache
+GPU run.
+
 ### H. Fail-closed appliance packaging
 
 The first deployable appliance boundary was exercised before adding either
