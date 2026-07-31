@@ -963,6 +963,45 @@ unknown-handler and frame-count failures must decode/release every known or
 generic extension frame; and async forwarding must pin the export before the
 handler's `finally` cleanup can run.
 
+SparkInfer replacement `cfb257b` is now frozen for independent review. Its
+112-test CPU/static gate passed with five expected CUDA skips, Ruff and
+`diff --check` clean. It adds full Torch-owner quarantine, LIFO alias
+restoration, collective pre-allocation and constructor verdicts, canonical
+logical channels, and a collectively checked monotonic compatibility path for
+r14's existing no-argument `capture(stream=...)` callers. The capture ordinal
+is part of checkpoint/rollback state so disposable profiling does not consume
+or collide with later target/draft graph identities. No GPU result is
+attributed to this SHA until the independent source review approves it.
+
+LMCache ownership candidate `0da021f6` is **rejected before GPU promotion**.
+Independent review produced deterministic counterexamples that its passing
+203-test CPU suite did not cover:
+
+1. the sender encoded one payload graph but committed ownership by re-walking
+   the caller's mutable object after send, so a concurrent mutation could drop
+   the producer reservation after the receiver owned the wire copy;
+2. a typed-decode failure in a known frame position skipped generic fallback
+   for that same frame, leaking a transferred CUDA extension under schema
+   skew;
+3. an unknown/malformed request type escaped before rejection cleanup, killing
+   the server loop and leaking all trailing IPC frames;
+4. an early transfer-participant discovery failure quarantined only the
+   wrappers already visited, then an async lease released another accepted
+   wrapper;
+5. normal-response decode failure removed a future from tracking without
+   completing either the future or its retained transport resources; and
+6. direct CUDA wire tests did not mark the encoded sender as transferred,
+   permitting a false-positive two-decrement ownership sequence; and
+7. the new opt-in participation probe defaulted to false, silently excluding
+   third-party wrappers that implemented the older public mark/release
+   contract from strict ownership transfer.
+
+The successor must bind an immutable ownership snapshot to the encoded frames,
+quarantine that entire snapshot on any post-send ambiguity, generically
+release every rejected frame even under schema/type skew, keep the daemon
+alive, complete malformed-response futures, and make the direct-wire GPU tests
+model sender and receiver ownership explicitly.
+
 ### H. Fail-closed appliance packaging
 
 The first deployable appliance boundary was exercised before adding either
