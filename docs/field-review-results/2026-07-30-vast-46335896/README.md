@@ -308,3 +308,18 @@ to the turnkey repository. Promotion should wait for:
    `MessagingFuture` lifecycle.
 
 The complete raw evidence set is in [`artifacts/`](artifacts/).
+
+## Rental hand-back
+
+The retained turnkey appliance was restored after testing. At
+2026-07-31 03:10:57 UTC:
+
+- `/health` returned HTTP 200;
+- authenticated `/v1/models` returned `GLM-5.2`;
+- an authenticated non-thinking chat request returned exactly
+  `FIELD REVIEW RESTORE OK` with `finish_reason=stop`;
+- all four vLLM workers were present;
+- each GPU had about 514 MiB free after model initialization.
+
+The instance was deliberately left running for the next patch cycle, as
+requested; it was not terminated.
