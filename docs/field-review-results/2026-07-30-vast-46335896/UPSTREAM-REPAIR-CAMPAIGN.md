@@ -962,3 +962,38 @@ ambiguous post-send state must retain the full payload for process lifetime;
 unknown-handler and frame-count failures must decode/release every known or
 generic extension frame; and async forwarding must pin the export before the
 handler's `finally` cleanup can run.
+
+### H. Fail-closed appliance packaging
+
+The first deployable appliance boundary was exercised before adding either
+still-pending IPC repair. Branch `codex/field-review-combined` at
+`384c013fdc2942da74faabeab206364291084c68` contains only the independently
+accepted exact-r14 vLLM #210/#211 delta. The Docker build:
+
+- copies a content-addressed field-repair manifest and patch bundle;
+- preflights every component, source/runtime target and patch dry run before
+  mutating any tree;
+- applies the vLLM repair to both `/opt/vllm` and the active virtual
+  environment's `site-packages`;
+- fails the image build on a missing target, base-tree mismatch, patch
+  mismatch, partial component, or post-apply verification failure;
+- invalidates the GitHub image cache when any file below `patches/` changes;
+  and
+- moves the runtime compile-cache namespace to
+  `turnkey-exl3native-field1`, preventing an older compiled extension from
+  hiding source changes.
+
+The local applicator contract passed 4/4 tests, the appliance family suite
+passed 275 tests, and ShellCheck was clean. Manual GitHub Actions run
+[30623908189](https://github.com/malaiwah/glm52-exl3-vast/actions/runs/30623908189)
+completed every lint/test/build job and pushed:
+
+```text
+ghcr.io/malaiwah/glm52-exl3-vast:384c013fdc2942da74faabeab206364291084c68
+sha256:de0e912e15c3345f65988a677442d0ea271f6103f911f24a5e7cb3b29c66bf79
+```
+
+The build log explicitly records successful application at both vLLM target
+trees. This image is packaging evidence, **not** the final candidate:
+SparkInfer #101/#103 and LMCache #18/#19/#20 remain excluded until their
+second-stage lifecycle reviews and fresh-GPU gates pass.
