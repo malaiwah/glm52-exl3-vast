@@ -67,6 +67,10 @@ WEIGHTS_STATE_CACHE_S = 5.0
 # Serializes the check-then-spawn sequence in start_termination so two
 # concurrent POSTs cannot both pass the "already in progress" check.
 _terminate_lock = threading.Lock()
+# Serializes the config state file's read-validate-write sequence (apply,
+# import, reset) so two tabs cannot interleave and persist a state neither
+# was shown; each individual write stays atomic regardless.
+_config_lock = threading.Lock()
 _weights_state_lock = threading.Lock()
 _weights_state_cache = {"directory": "", "sampled": 0.0, "bytes": 0}
 
@@ -74,9 +78,19 @@ _weights_state_cache = {"directory": "", "sampled": 0.0, "bytes": 0}
 _ssl_ctx = None
 
 
-def is_secure_connection(connection) -> bool:
-    """Runpod's managed proxy terminates TLS before forwarding to this port."""
-    return isinstance(connection, ssl.SSLSocket) or ALLOW_INSECURE or TRUST_PROXY_HTTPS
+def is_secure_connection(connection, headers=None) -> bool:
+    """Runpod's managed proxy terminates TLS before forwarding to this port.
+
+    Trusting that proxy is opt-in AND per-request: the flag alone must not
+    mark a direct plain-TCP hit "secure" (the API key would be embedded over
+    cleartext when the same port is also exposed as a direct mapping), so it
+    only counts when the request actually arrived through the proxy, which
+    stamps X-Forwarded-Proto."""
+    if isinstance(connection, ssl.SSLSocket) or ALLOW_INSECURE:
+        return True
+    if TRUST_PROXY_HTTPS and headers is not None:
+        return headers.get("X-Forwarded-Proto", "").strip().lower() == "https"
+    return False
 
 
 def ssl_ctx():
@@ -206,7 +220,7 @@ def render_soul(tok, secure, message="", cls="", before="") -> bytes:
                  f"<p class=sub>Startup ceiling: level {int(doc.get('maximumLevel', 0))}. "
                  "A landing-page override can lower or raise the request only within "
                  "that ceiling; changing it does not restart vLLM.</p>"
-                 f"<form method=post action='/soul/config?token={tok_q}'>"
+                 f"<form method=post action='/soul/config'>"
                  f"<input type=hidden name=token value='{tok_q}'>"
                  "<label>Level <select name=autonomyLevel>")
     labels = {
@@ -902,9 +916,15 @@ def boot_notes(limit=40):
         return []
     try:
         with open(os.path.join(gc.runtime_dir(), "boot-notes.log")) as f:
-            return [ln.rstrip() for ln in f][-limit:]
+            notes = [ln.rstrip() for ln in f][-limit:]
     except OSError:
         return []
+    if soul is not None:
+        # This card renders for tokenless visitors too; apply the repo's
+        # standard redaction so a future boot_note echoing a credentialed URL
+        # or env value cannot ship it to strangers.
+        notes = [soul.redact(ln) for ln in notes]
+    return notes
 
 
 def deployment() -> dict:
@@ -927,7 +947,9 @@ def deployment() -> dict:
         return out
     fam = gc.family(eff.get("MODEL_FAMILY"))
     variant = gc.VARIANTS.get(eff.get("MODEL_VARIANT"), {})
-    served = str(eff.get("SERVED_MODEL_NAME", "")).split()[0] or "model"
+    # The resolver refuses a blank name, but a page render must never crash on
+    # whatever is on disk: an IndexError here took down every dashboard route.
+    served = (str(eff.get("SERVED_MODEL_NAME", "")).split() or ["model"])[0]
     out["model"] = served
     out["family"] = fam["label"]
     out["title"] = f"{served} turnkey"
@@ -1157,7 +1179,9 @@ def render_config(tok: str, secure: bool, banner=None, banner_cls="",
     if findings:
         parts.append("<h2>Pre-validation</h2>" + _findings_html(findings))
 
-    parts.append(f"<form method=post action='/config/apply?token={tok_q}'>"
+    # POSTs carry the token in the hidden body field only: a query-string copy
+    # lands in reverse-proxy access logs, which outlive the page.
+    parts.append(f"<form method=post action='/config/apply'>"
                  f"<input type=hidden name=token value='{tok_q}'>")
     group = None
     parts.append("<table class=cfg>")
@@ -1188,14 +1212,14 @@ def render_config(tok: str, secure: bool, banner=None, banner_cls="",
         "automatically.</p></form>")
 
     parts.append(
-        f"<h2>Import</h2><form method=post action='/config/import?token={tok_q}'>"
+        f"<h2>Import</h2><form method=post action='/config/import'>"
         f"<input type=hidden name=token value='{tok_q}'>"
         "<textarea class=imp name=doc placeholder='Paste a previously exported "
         "config JSON here'></textarea>"
         "<p><button type=submit>Import, validate &amp; restart</button></p></form>")
 
     parts.append(
-        f"<h2>Reset</h2><form method=post action='/config/reset?token={tok_q}'>"
+        f"<h2>Reset</h2><form method=post action='/config/reset'>"
         f"<input type=hidden name=token value='{tok_q}'>"
         "<p class=sub>Deletes the state file, returning to the template environment "
         "and the built-in defaults.</p>"
@@ -1256,40 +1280,44 @@ def apply_values(values: dict):
         return False, [{"id": "forbidden-key", "level": "error",
                         "keys": list(gc.FORBIDDEN_STATE_KEYS), "message": str(e)}], \
             "Nothing was applied."
-    dropped = []
-    minimal = gc.minimize(values, dropped)
-    effective, _sources, notes = gc.resolve(state_values=minimal)
-    ctx = _val_ctx()
-    ctx["state_keys"] = list(minimal)
-    findings = gc.validate(effective, ctx)
-    if gc.errors(findings):
-        return False, findings, "Nothing was applied — fix the errors below."
-    # Report dropped knobs on EVERY path, including "no change" — otherwise a
-    # user who submits a GLM knob while on Qwen is told nothing happened, which
-    # is true but hides the more useful fact of WHY.
-    drop_msg = ""
-    if dropped:
-        drop_msg = ("<p><b>Not applicable to this model family, so not saved:</b> "
-                    + html.escape(", ".join(sorted(set(dropped)))) + "</p>")
-    good = gc.read_json(gc.p_known_good())
-    current, _s, _n = gc.resolve()
-    if not gc.diff(current, effective):
-        return True, findings, ("No change: the submitted configuration is the one "
-                                "running." + drop_msg)
-    gc.write_json_atomic(gc.p_state(), {
-        "values": minimal,
-        "written_at": gc.utcnow_iso()}, mode=0o600)
-    gc.set_apply_state("trial", since=gc.utcnow_iso(),
-                       detail="restarting into a candidate configuration",
-                       baseline=good.get("ts"))
-    os.makedirs(gc.runtime_dir(), exist_ok=True)
-    with open(gc.p_restart_flag(), "w") as f:
-        f.write("landing-page\n")
-    msg = ("Applied. vLLM is restarting with:<br><pre>"
-           + html.escape(gc.diff_text(current, effective)) + "</pre>")
-    # Not silently ignored: the user is told which knobs the selected family
-    # does not have and that they were not written.
-    return True, findings, msg + drop_msg
+    # The whole read-validate-write sequence runs under one lock so two tabs
+    # (or an apply racing a reset) cannot interleave: the state that persists
+    # must be a state one of them was actually shown.
+    with _config_lock:
+        dropped = []
+        minimal = gc.minimize(values, dropped)
+        effective, _sources, notes = gc.resolve(state_values=minimal)
+        ctx = _val_ctx()
+        ctx["state_keys"] = list(minimal)
+        findings = gc.validate(effective, ctx)
+        if gc.errors(findings):
+            return False, findings, "Nothing was applied — fix the errors below."
+        # Report dropped knobs on EVERY path, including "no change" — otherwise a
+        # user who submits a GLM knob while on Qwen is told nothing happened, which
+        # is true but hides the more useful fact of WHY.
+        drop_msg = ""
+        if dropped:
+            drop_msg = ("<p><b>Not applicable to this model family, so not saved:</b> "
+                        + html.escape(", ".join(sorted(set(dropped)))) + "</p>")
+        good = gc.read_json(gc.p_known_good())
+        current, _s, _n = gc.resolve()
+        if not gc.diff(current, effective):
+            return True, findings, ("No change: the submitted configuration is the one "
+                                    "running." + drop_msg)
+        gc.write_json_atomic(gc.p_state(), {
+            "values": minimal,
+            "written_at": gc.utcnow_iso()}, mode=0o600)
+        gc.set_apply_state("trial", since=gc.utcnow_iso(),
+                           detail="restarting into a candidate configuration",
+                           baseline=good.get("ts"))
+        os.makedirs(gc.runtime_dir(), exist_ok=True)
+        with open(gc.p_restart_flag(), "w") as f:
+            f.write("landing-page\n")
+        msg = ("Applied. vLLM is restarting with:<br><pre>"
+               + html.escape(gc.diff_text(current, effective)) + "</pre>")
+        # Not silently ignored: the user is told which knobs the selected family
+        # does not have and that they were not written.
+        return True, findings, msg + drop_msg
 
 
 # ==========================================================================
@@ -1473,7 +1501,7 @@ def render_terminate(tok: str, secure: bool, banner=None, banner_cls="") -> byte
 
     dis = "" if allowed else " disabled"
     parts.append(
-        f"<form method=post action='/terminate?token={tok_q}'>"
+        f"<form method=post action='/terminate'>"
         f"<input type=hidden name=token value='{tok_q}'>"
         "<h2>Optional: erase this session first</h2>"
         f"<p><label><input type=checkbox name=erase value=1{dis}> "
@@ -1509,7 +1537,7 @@ def render_terminate(tok: str, secure: bool, banner=None, banner_cls="") -> byte
         "life of this container, for anyone holding this token — including you. It "
         "clears only by restarting the container with <code>TERMINATE_LOCKED</code> "
         "unset, which needs provider-dashboard access.</p>"
-        f"<form method=post action='/terminate/lock?token={tok_q}'>"
+        f"<form method=post action='/terminate/lock'>"
         f"<input type=hidden name=token value='{tok_q}'>"
         "<p><label><input type=checkbox name=understand value=1> I understand this "
         "cannot be undone from this page.</label></p>"
@@ -1758,21 +1786,28 @@ class DualProtocolServer(ThreadingHTTPServer):
         self.server_port = port
 
     def get_request(self):
+        # Accept only. The first-byte peek and the TLS handshake happen in the
+        # worker thread (process_request_thread below): doing either here ran
+        # on the single accept loop and serialized every client behind one
+        # silent connection for LANDING_TIMEOUT seconds — an unauthenticated
+        # denial of service on the appliance's own recovery surface.
         sock, addr = self.socket.accept()
         sock.settimeout(LANDING_TIMEOUT)
-        try:
-            first = sock.recv(1, socket.MSG_PEEK)
-        except (socket.timeout, OSError):
-            sock.close()
-            raise
-        ctx = ssl_ctx()
-        if ctx and first == b"\x16":
-            try:
-                sock = ctx.wrap_socket(sock, server_side=True)
-            except (socket.timeout, ssl.SSLError):
-                sock.close()
-                raise OSError("TLS handshake failed")
         return sock, addr
+
+    def process_request_thread(self, request, client_address):
+        try:
+            first = request.recv(1, socket.MSG_PEEK)
+            ctx = ssl_ctx()
+            if ctx and first == b"\x16":
+                request = ctx.wrap_socket(request, server_side=True)
+        except (socket.timeout, OSError, ssl.SSLError):
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
+        super().process_request_thread(request, client_address)
 
 
 GET_PATHS = ("/", "/chat", "/config", "/config/export", "/config/status",
@@ -1855,7 +1890,7 @@ class Handler(BaseHTTPRequestHandler):
         tok = form.get("token", [""])[0] or parse_qs(url.query).get("token", [""])[0]
         if not self._config_guard(tok):
             return
-        secure = is_secure_connection(self.connection)
+        secure = is_secure_connection(self.connection, self.headers)
         try:
             if url.path == "/config/apply":
                 values, errs = _form_values(form)
@@ -1885,14 +1920,15 @@ class Handler(BaseHTTPRequestHandler):
                         body = render_config(tok, secure, msg, "good" if ok else "bad",
                                              [] if ok else findings)
             elif url.path == "/config/reset":
-                try:
-                    os.remove(gc.p_state())
-                except OSError:
-                    pass
-                gc.set_apply_state("trial", detail="reset to template env + defaults")
-                os.makedirs(gc.runtime_dir(), exist_ok=True)
-                with open(gc.p_restart_flag(), "w") as f:
-                    f.write("reset\n")
+                with _config_lock:
+                    try:
+                        os.remove(gc.p_state())
+                    except OSError:
+                        pass
+                    gc.set_apply_state("trial", detail="reset to template env + defaults")
+                    os.makedirs(gc.runtime_dir(), exist_ok=True)
+                    with open(gc.p_restart_flag(), "w") as f:
+                        f.write("reset\n")
                 body = render_config(tok, secure,
                                      "State file removed; restarting on the template "
                                      "environment and the built-in defaults.", "good")
@@ -1967,7 +2003,7 @@ class Handler(BaseHTTPRequestHandler):
                     "logs, or open / without a token for read-only status)",
                 )
                 return
-        secure = is_secure_connection(self.connection)
+        secure = is_secure_connection(self.connection, self.headers)
         hostport = status().get("https_hostport", "")
         if not secure and ssl_ctx() and hostport:
             # Upgrade the Open button's plain-HTTP hit to the TLS view of this page
