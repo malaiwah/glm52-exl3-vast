@@ -1,0 +1,134 @@
+case=base-warmup-excluded head=0959fe807d366628380f41933244e3ccce0a8ae0 start=2026-07-31T06:12:56Z
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+W0731 06:12:57.490000 157066 torch/distributed/run.py:862]
+W0731 06:12:57.490000 157066 torch/distributed/run.py:862] *****************************************
+W0731 06:12:57.490000 157066 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed.
+W0731 06:12:57.490000 157066 torch/distributed/run.py:862] *****************************************
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+pcie_twoshot correctness OK
+[2 ranks, 4096x6144, payload 25 MB bf16-equiv]
+  sparkinfer rs_fp8     334.3 us
+  sparkinfer ag_fp8     337.8 us
+  nccl rs bf16       852.0 us
+  nccl ag bf16       805.9 us
+case=base-1 head=0959fe807d366628380f41933244e3ccce0a8ae0 start=2026-07-31T06:13:34Z
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+W0731 06:13:34.951000 157209 torch/distributed/run.py:862]
+W0731 06:13:34.951000 157209 torch/distributed/run.py:862] *****************************************
+W0731 06:13:34.951000 157209 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed.
+W0731 06:13:34.951000 157209 torch/distributed/run.py:862] *****************************************
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+pcie_twoshot correctness OK
+[2 ranks, 4096x6144, payload 25 MB bf16-equiv]
+  sparkinfer rs_fp8     332.8 us
+  sparkinfer ag_fp8     341.6 us
+  nccl rs bf16       854.8 us
+  nccl ag bf16       805.0 us
+case=base-2 head=0959fe807d366628380f41933244e3ccce0a8ae0 start=2026-07-31T06:13:40Z
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+W0731 06:13:41.109000 157311 torch/distributed/run.py:862]
+W0731 06:13:41.109000 157311 torch/distributed/run.py:862] *****************************************
+W0731 06:13:41.109000 157311 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed.
+W0731 06:13:41.109000 157311 torch/distributed/run.py:862] *****************************************
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+pcie_twoshot correctness OK
+[2 ranks, 4096x6144, payload 25 MB bf16-equiv]
+  sparkinfer rs_fp8     335.0 us
+  sparkinfer ag_fp8     337.0 us
+  nccl rs bf16       855.6 us
+  nccl ag bf16       805.5 us
+case=base-3 head=0959fe807d366628380f41933244e3ccce0a8ae0 start=2026-07-31T06:13:46Z
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+W0731 06:13:47.182000 157410 torch/distributed/run.py:862]
+W0731 06:13:47.182000 157410 torch/distributed/run.py:862] *****************************************
+W0731 06:13:47.182000 157410 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed.
+W0731 06:13:47.182000 157410 torch/distributed/run.py:862] *****************************************
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+pcie_twoshot correctness OK
+[2 ranks, 4096x6144, payload 25 MB bf16-equiv]
+  sparkinfer rs_fp8     334.5 us
+  sparkinfer ag_fp8     342.4 us
+  nccl rs bf16       854.5 us
+  nccl ag bf16       813.7 us
+case=candidate-1 head=6e947cc2528005cb744a6371959344dd9ff80d5b start=2026-07-31T06:13:52Z
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+W0731 06:13:53.241000 157509 torch/distributed/run.py:862]
+W0731 06:13:53.241000 157509 torch/distributed/run.py:862] *****************************************
+W0731 06:13:53.241000 157509 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed.
+W0731 06:13:53.241000 157509 torch/distributed/run.py:862] *****************************************
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+pcie_twoshot correctness OK
+[2 ranks, 4096x6144, payload 25 MB bf16-equiv]
+  sparkinfer rs_fp8     333.1 us
+  sparkinfer ag_fp8     338.7 us
+  nccl rs bf16       862.7 us
+  nccl ag bf16       805.4 us
+case=candidate-2 head=6e947cc2528005cb744a6371959344dd9ff80d5b start=2026-07-31T06:13:58Z
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+W0731 06:13:59.257000 157608 torch/distributed/run.py:862]
+W0731 06:13:59.257000 157608 torch/distributed/run.py:862] *****************************************
+W0731 06:13:59.257000 157608 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed.
+W0731 06:13:59.257000 157608 torch/distributed/run.py:862] *****************************************
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+pcie_twoshot correctness OK
+[2 ranks, 4096x6144, payload 25 MB bf16-equiv]
+  sparkinfer rs_fp8     334.0 us
+  sparkinfer ag_fp8     337.1 us
+  nccl rs bf16       854.2 us
+  nccl ag bf16       815.1 us
+case=candidate-3 head=6e947cc2528005cb744a6371959344dd9ff80d5b start=2026-07-31T06:14:04Z
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+W0731 06:14:05.387000 157707 torch/distributed/run.py:862]
+W0731 06:14:05.387000 157707 torch/distributed/run.py:862] *****************************************
+W0731 06:14:05.387000 157707 torch/distributed/run.py:862] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed.
+W0731 06:14:05.387000 157707 torch/distributed/run.py:862] *****************************************
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+/opt/venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+pcie_twoshot correctness OK
+[2 ranks, 4096x6144, payload 25 MB bf16-equiv]
+  sparkinfer rs_fp8     333.8 us
+  sparkinfer ag_fp8     337.2 us
+  nccl rs bf16       860.0 us
+  nccl ag bf16       806.4 us
+gpu_processes_after=0

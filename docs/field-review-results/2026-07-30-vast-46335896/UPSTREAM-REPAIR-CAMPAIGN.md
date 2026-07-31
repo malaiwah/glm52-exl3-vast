@@ -125,12 +125,21 @@ Both exact lineages additionally passed a warm 1,025-graph-replay stress
 cycle on four GPUs (6.86 s for #101, 6.73 s for #103), with 64 eager and 64
 multistream iterations and zero residual GPU processes.
 
+The initial four-rank two-shot timing was correctly withheld from the
+two-rank historical control. A matched world-size-2 A/B then excluded one
+base compile/warmup and ran three repeats per exact head. Median
+reduce-scatter was 334.5 us at base `0959fe8` versus 333.8 us at candidate
+`6e947cc` (-0.21%); all-gather was 341.6 versus 337.2 us (-1.29%). These are
+noise-sized improvements, so the repair is throughput-neutral on the
+non-clamped full-host shape rather than a performance claim.
+
 [Exact #103 residency GPU gate](artifacts/sparkinfer-replay-residency-103-9db41aa-gpu-cold.log)
 and
 [corrected static gate](artifacts/sparkinfer-replay-residency-103-9db41aa-static-corrected.log).
 [Warm #101 stress](artifacts/sparkinfer-replay-residency-101-6e947cc-gpu-warm1025.log)
 and
 [warm #103 stress](artifacts/sparkinfer-replay-residency-103-9db41aa-gpu-warm1025.log).
+[Matched world-size-2 A/B](artifacts/sparkinfer-replay-residency-101-twoshot-world2-ab.log).
 Independent review is still required before publication.
 
 ### B. SparkInfer W4A16 scratch lifetime
