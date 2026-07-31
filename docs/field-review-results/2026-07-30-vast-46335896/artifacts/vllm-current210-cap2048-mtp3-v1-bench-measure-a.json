@@ -1,0 +1,221 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T06:02:33Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 3072,
+  "output_tokens": 64,
+  "concurrency": [
+   1
+  ],
+  "requests_per_level": 3,
+  "prefill_tokens": [
+   3072,
+   3073,
+   3074
+  ],
+  "warmup": 0,
+  "temperature": 0.0,
+  "seed": null,
+  "prompt_seed": "field-review-capacity-measure-a"
+ },
+ "metadata": {},
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.7233,
+   "request_throughput_rps": 0.5803,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1788.459,
+   "output_throughput_tok_s": 0.58,
+   "mean_ttft_ms": 1722.264,
+   "p50_ttft_ms": 1722.264,
+   "p95_ttft_ms": 1722.264,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.722315,
+     "ttft_ms": 1722.264,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.7248,
+   "request_throughput_rps": 0.5798,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1786.925,
+   "output_throughput_tok_s": 0.58,
+   "mean_ttft_ms": 1724.449,
+   "p50_ttft_ms": 1724.449,
+   "p95_ttft_ms": 1724.449,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.724497,
+     "ttft_ms": 1724.449,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "batch"
+    }
+   ],
+   "target_prompt_tokens": 3073
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.7235,
+   "request_throughput_rps": 0.5802,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1788.213,
+   "output_throughput_tok_s": 0.58,
+   "mean_ttft_ms": 1723.251,
+   "p50_ttft_ms": 1723.251,
+   "p95_ttft_ms": 1723.251,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.723291,
+     "ttft_ms": 1723.251,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "batch"
+    }
+   ],
+   "target_prompt_tokens": 3074
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 3,
+   "completed": 3,
+   "failed": 0,
+   "duration_s": 8.5323,
+   "request_throughput_rps": 0.3516,
+   "prompt_tokens": 9231,
+   "output_tokens": 192,
+   "prompt_throughput_tok_s": 1081.892,
+   "output_throughput_tok_s": 22.503,
+   "mean_ttft_ms": 1642.195,
+   "p50_ttft_ms": 1642.203,
+   "p95_ttft_ms": 1642.58,
+   "mean_tpot_ms": 19.076,
+   "p50_tpot_ms": 15.971,
+   "p95_tpot_ms": 25.182,
+   "mean_itl_ms": 58.456,
+   "metric_prompt_tokens": 9231,
+   "metric_generation_tokens": 192,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 62,
+    "draft_tokens": 186,
+    "accepted_tokens": 134,
+    "mean_acceptance_length": 3.1613,
+    "draft_token_acceptance_rate": 0.7204
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 2.590338,
+     "ttft_ms": 1642.203,
+     "tpot_ms": 15.05,
+     "mean_itl_ms": 59.256,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 2.648769,
+     "ttft_ms": 1642.622,
+     "tpot_ms": 15.971,
+     "mean_itl_ms": 59.183,
+     "output_head": "batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the record.\nba"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.292762,
+     "ttft_ms": 1641.761,
+     "tpot_ms": 26.206,
+     "mean_itl_ms": 56.93,
+     "output_head": "apple banana cherry date elderberry fig grape honey ice jelly kiwi lemon mango nectarine orange papaya quince raspberry "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

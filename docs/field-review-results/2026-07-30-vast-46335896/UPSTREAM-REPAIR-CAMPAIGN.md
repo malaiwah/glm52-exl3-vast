@@ -177,7 +177,21 @@ and
 
 At GLM's `I=1856`, both row counts are already divisible by 64, so the scale
 allocation and reader stride are unchanged. The final independent review is
-pending before upstream publication.
+**REQUEST CHANGES**, so neither repair head has been published upstream.
+The review confirmed that the scale-padding repair and operator spy are sound,
+but found two remaining generic non-64 gaps:
+
+1. wide FC2 still derives validity from `ceil(n/64)`; at supported `I=352`,
+   its final chunk has 12 logical lanes/plane while the guard admits 16,
+   allowing stale scratch and cross-row W2/scale consumption;
+2. narrow `I=32/224` masks scratch inputs exactly but still guards W2 and
+   block-scale loads with coarse `w_valid`, leaving logically out-of-bounds
+   reads hidden by zero activation and allocator padding.
+
+The existing narrow numerical and Compute Sanitizer evidence therefore does
+not discharge generic tensor-bound safety. A new repair must guard scratch,
+W2, and scale reads with exact logical validity in both narrow and wide paths,
+then reproduce/pass `I=144/352`, M=1/3, ReLU2/SiLU before re-review.
 
 Review also found a separate generic-shape bug for ModelOpt intermediates
 divisible by 16 but not 64 (for example `I=144`): padded-grid validity can
@@ -347,6 +361,15 @@ Thus #210 changed this exact MTP3 shape from a deterministic boot failure into
 a correct 126K-capable service. The negative control exited without an OOM,
 Xid, or residual allocation.
 
+A capacity-2,048 follow-up was also healthy, with 519.7 MiB target and
+734.1 MiB draft arenas, 1.37 GiB available KV, and 183,552 KV tokens. It
+improved median 3,072-token prefill by only 0.29% over capacity 1,024
+(1,788.2 versus 1,783.0 tok/s), while returning 73,472 fewer KV tokens.
+Median TPOT was unchanged (15.971 versus 15.967 ms); MAL/draft acceptance
+were 3.161/72.04% versus 3.111/70.37%, well within this three-request sample's
+content variance. Capacity 1,024 therefore remains the measured balanced
+choice; 2,048 is not promoted on a performance claim that small.
+
 Evidence:
 [server](artifacts/vllm-current210-cap1024-mtp3-v3-server.log),
 [arithmetic](artifacts/vllm-current210-cap1024-mtp3-v3-correctness.json),
@@ -354,6 +377,9 @@ Evidence:
 [GPU telemetry](artifacts/vllm-current210-cap1024-mtp3-v3-gpu.csv), and
 [126K retrieval](artifacts/vllm-current210-cap1024-mtp3-v3-needle-126k.json).
 [Unset-capacity MTP3 control](artifacts/vllm-current210-unset-mtp3-v1-server.log).
+[Capacity-2,048 benchmark](artifacts/vllm-current210-cap2048-mtp3-v1-bench-measure-a.json)
+and
+[server](artifacts/vllm-current210-cap2048-mtp3-v1-server.log).
 
 ### E. PCIe calibration launcher reliability
 

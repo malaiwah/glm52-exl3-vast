@@ -1,0 +1,113 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T06:02:18Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 3072,
+  "output_tokens": 64,
+  "concurrency": [
+   1
+  ],
+  "requests_per_level": 1,
+  "prefill_tokens": [
+   3072
+  ],
+  "warmup": 0,
+  "temperature": 0.0,
+  "seed": null,
+  "prompt_seed": "field-review-capacity-mtp3-prime"
+ },
+ "metadata": {},
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 7.6791,
+   "request_throughput_rps": 0.1302,
+   "prompt_tokens": 3084,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 401.608,
+   "output_throughput_tok_s": 0.13,
+   "mean_ttft_ms": 7678.006,
+   "p50_ttft_ms": 7678.006,
+   "p95_ttft_ms": 7678.006,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3084,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3084,
+     "output_tokens": 1,
+     "elapsed_s": 7.678075,
+     "ttft_ms": 7678.006,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "batch"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 7.0324,
+   "request_throughput_rps": 0.1422,
+   "prompt_tokens": 3079,
+   "output_tokens": 64,
+   "prompt_throughput_tok_s": 437.832,
+   "output_throughput_tok_s": 9.101,
+   "mean_ttft_ms": 6078.725,
+   "p50_ttft_ms": 6078.725,
+   "p95_ttft_ms": 6078.725,
+   "mean_tpot_ms": 15.131,
+   "p50_tpot_ms": 15.131,
+   "p95_tpot_ms": 15.131,
+   "mean_itl_ms": 59.573,
+   "metric_prompt_tokens": 3079,
+   "metric_generation_tokens": 64,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 16,
+    "draft_tokens": 48,
+    "accepted_tokens": 48,
+    "mean_acceptance_length": 4.0,
+    "draft_token_acceptance_rate": 1.0
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3079,
+     "output_tokens": 64,
+     "elapsed_s": 7.031948,
+     "ttft_ms": 6078.725,
+     "tpot_ms": 15.131,
+     "mean_itl_ms": 59.573,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}
