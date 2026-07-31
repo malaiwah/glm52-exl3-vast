@@ -18,6 +18,7 @@ the [changelog](CHANGELOG.md).
 
 - [Why this exists](#why-this-exists)
 - [Quick start](#quick-start)
+  - [Self-serve with Docker or Podman](#self-serve-with-docker-or-podman)
 - [Model profiles](#model-profiles)
 - [What startup looks like](#what-startup-looks-like)
 - [Launch GLM-5.2 on Vast.ai](#launch-glm-52-on-vastai)
@@ -63,6 +64,8 @@ answers only to you.
 | GLM-5.2 flagship | JarvisLabs | [▶ VM guide](#launch-on-jarvislabs) | 4x RTX-PRO6000 VM | 500 GB | ~30 min |
 | Qwen3.6 vision (low-cost) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=214d2e120a6718558fa207d4579d4316) | 1x RTX 5090 32 GB | 100 GB | ~6–20 min |
 | Qwen3.6 vision (low-cost) | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=7ufac3b4zw&ref=4ahycj93) | 1x RTX 5090 32 GB | 100 GB | ~30 min |
+| GLM-5.2 flagship | self-serve (own hardware) | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | 450 GB | 2–12 min once weights are local |
+| Qwen3.6 vision (low-cost) | self-serve (own hardware) | [▶ docker/podman](#self-serve-with-docker-or-podman) | 1x RTX 5090 32 GB | 100 GB | ~1 min warm |
 
 **Requirements that fail fast:** Blackwell (`sm120+`) GPUs only, and the
 qualified pair **NVIDIA driver 590.48.01+ / CUDA 13.2+** — both are checked
@@ -71,6 +74,46 @@ cold-start cost deadline before renting. Wait for `Application startup
 complete` plus the verification result in the instance logs, then use the
 generated API key and labeled endpoint. Measured per-provider timings are
 under [What startup looks like](#what-startup-looks-like).
+
+### Self-serve with Docker or Podman
+
+The same appliance image runs on hardware you own. With Docker and the NVIDIA
+container toolkit, this downloads the selected profile's weights into
+`/srv/turnkey` on first boot and prints the API key and dashboard token in
+the container logs:
+
+```bash
+sudo docker run -d --name glm52-turnkey \
+  --restart unless-stopped \
+  --gpus all --ipc=host --network host \
+  --ulimit memlock=-1:-1 \
+  -e MODEL_PROFILE=glm52-exl3 \
+  -v /srv/turnkey:/workspace \
+  ghcr.io/malaiwah/glm52-exl3-vast:latest
+```
+
+This is the same shape the JarvisLabs VM launcher uses. Select
+`MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU profile, add
+`-e HF_TOKEN=...` for authenticated downloads, and follow first boot with
+`sudo docker logs -f glm52-turnkey`. The endpoint is
+`http://localhost:8000/v1` and the tokenized dashboard is on `:1111`; keep
+both behind your LAN or an SSH tunnel, or configure TLS as described in
+[Security](#security).
+
+For rootless Podman against a checkpoint already on disk — no download, the
+checkpoint mounted read-only — use the checked-in runner:
+
+```bash
+export MODEL_DIR_HOST=/path/to/complete/checkpoint
+export DOWNLOAD_MARKER_HOST=/path/to/flags/.download-complete
+bash scripts/run-local-podman.sh
+```
+
+Cache volumes, draft/vision mounts, and the LMCache NVMe tier are documented
+in [Running it on your own hardware](#running-it-on-your-own-hardware). Both
+paths have a dry run that prints the resolved vLLM argv and exits without
+downloading anything or touching a GPU: add `-e CONFIG_SMOKE=1` to the Docker
+command, or prefix the runner with `CONFIG_SMOKE=1`.
 
 ## Model profiles
 
