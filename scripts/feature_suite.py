@@ -40,8 +40,20 @@ def message(doc):
 
 
 def visible_text(msg):
-    return str(msg.get("content") or msg.get("reasoning_content")
-               or msg.get("reasoning") or "").strip()
+    """The client-visible answer: `content` ONLY.
+
+    The suite exists to catch a miswired reasoning parser, and that failure
+    mode routes everything into `reasoning_content` while `content` stays
+    empty. Falling back to the reasoning fields here let five release-gating
+    checks pass on responses every real client would see as empty — the exact
+    lie verify_serving.py's complete() already refuses to tell. Reasoning
+    presence is asserted separately where it matters."""
+    return str(msg.get("content") or "").strip()
+
+
+def reasoning_text(msg):
+    """The reasoning channel, for checks that assert on thinking itself."""
+    return str(msg.get("reasoning_content") or msg.get("reasoning") or "").strip()
 
 
 def chat(base, key, model, messages, **extra):
@@ -117,9 +129,9 @@ def stream_chat(base, key, model):
             choices = packet.get("choices") or []
             if choices:
                 delta = choices[0].get("delta") or {}
-                pieces.append(str(
-                    delta.get("content") or delta.get("reasoning_content")
-                    or delta.get("reasoning") or ""))
+                # Client-visible stream only: reasoning deltas must not let
+                # the streaming gate pass when `content` never arrives.
+                pieces.append(str(delta.get("content") or ""))
     return "".join(pieces), usage
 
 

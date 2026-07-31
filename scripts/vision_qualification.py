@@ -12,6 +12,7 @@ import base64
 import io
 import json
 import os
+import re
 import time
 import urllib.request
 
@@ -207,12 +208,24 @@ def main():
         "73", "09:42", "09:47", "09:53", "b-12", "2031-04-18",
         "mira chen", "cobalt-917", "ca-east-4", "6.12.3",
     ]
+
+    def term_matched(term, text):
+        # Bare numbers self-match inside other required values ("12" inside
+        # "b-12" or "6.12.3") and silently eat the 2-miss budget the >=16
+        # threshold represents. Anchor purely numeric terms on
+        # non-alphanumeric/dot/dash boundaries; compound terms keep plain
+        # substring search.
+        if re.fullmatch(r"[0-9.:]+", term):
+            return re.search(r"(?<![0-9a-z.-])" + re.escape(term)
+                             + r"(?![0-9a-z.-])", text) is not None
+        return term in text
+
     lower = first_text.lower()
     checks = {
         "image_dimensions_5k": image.size == (5120, 2880),
         "first_turn_detail_recall": {
-            "passed": sum(term in lower for term in required) >= 16,
-            "matched": [term for term in required if term in lower],
+            "passed": sum(term_matched(term, lower) for term in required) >= 16,
+            "matched": [term for term in required if term_matched(term, lower)],
             "required": required,
         },
         "multi_turn_image_recall": all(

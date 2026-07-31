@@ -235,7 +235,12 @@ def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
         "elapsed_s": round(elapsed, 6),
         "ttft_ms": round(ttft * 1000, 3),
         "tpot_ms": round(tpot * 1000, 3),
-        "mean_itl_ms": round(statistics.mean(itls) * 1000, 3) if itls else 0.0,
+        # Inter-CHUNK, not inter-token: one SSE delta carries several tokens
+        # under speculative decoding (~3.5 with the MTP-5 default), so calling
+        # this "ITL" overstated per-token latency by the acceptance length
+        # while tpot_ms (usage-based) told a different story in the same doc.
+        "mean_inter_chunk_ms":
+            round(statistics.mean(itls) * 1000, 3) if itls else 0.0,
         "output_head": "".join(pieces)[:120],
     }
 
@@ -258,7 +263,7 @@ def summarize_requests(results, wall_s, before, after, concurrency):
     output_tokens = sum(item["output_tokens"] for item in good)
     ttft = [item["ttft_ms"] for item in good]
     tpot = [item["tpot_ms"] for item in good]
-    itl = [item["mean_itl_ms"] for item in good]
+    itl = [item["mean_inter_chunk_ms"] for item in good]
     prompt_metric = metric_delta(
         before, after, "vllm:prompt_tokens_total", "vllm:prompt_tokens")
     generation_metric = metric_delta(
@@ -282,7 +287,7 @@ def summarize_requests(results, wall_s, before, after, concurrency):
         "mean_tpot_ms": round(statistics.mean(tpot), 3) if tpot else 0.0,
         "p50_tpot_ms": round(percentile(tpot, 50), 3),
         "p95_tpot_ms": round(percentile(tpot, 95), 3),
-        "mean_itl_ms": round(statistics.mean(itl), 3) if itl else 0.0,
+        "mean_inter_chunk_ms": round(statistics.mean(itl), 3) if itl else 0.0,
         "metric_prompt_tokens": round(prompt_metric),
         "metric_generation_tokens": round(generation_metric),
         "preemptions": round(preemptions),

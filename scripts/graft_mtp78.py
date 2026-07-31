@@ -82,8 +82,12 @@ cfg = json.load(open(os.path.join(model_dir, CFG + ".orig")))
 t = cfg.get("hybrid_tr3_tail")
 if t and int(t["moe_layers"][1]) < 78:
     t["moe_layers"] = [int(t["moe_layers"][0]), 78]
-ig = cfg.get("quantization_config", {}).get("ignore", [])
-cfg["quantization_config"]["ignore"] = [p for p in ig if "layers.78" not in p]
+# A checkpoint without quantization_config has nothing ignoring layer 78;
+# indexing into it unconditionally crashed mid-graft with the shard and index
+# already rewritten — exactly the half-applied state --revert exists to fix.
+if "quantization_config" in cfg:
+    ig = cfg["quantization_config"].get("ignore", [])
+    cfg["quantization_config"]["ignore"] = [p for p in ig if "layers.78" not in p]
 # Glm5v wrapper nests the text config; keep its MTP fields in sync too
 if isinstance(cfg.get("text_config"), dict):
     _tc = cfg["text_config"]

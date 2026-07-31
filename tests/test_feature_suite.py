@@ -15,12 +15,18 @@ import feature_suite as feature  # noqa: E402
 
 
 class FeatureSuiteTests(unittest.TestCase):
-    def test_visible_text_supports_content_and_reasoning_fields(self):
+    def test_visible_text_is_content_only(self):
+        # The regression this pins down: a miswired reasoning parser routes
+        # everything into reasoning_content with an empty content, and the
+        # release-gating checks must FAIL on that, not read the reasoning.
         self.assertEqual(feature.visible_text({"content": "answer"}), "answer")
         self.assertEqual(
-            feature.visible_text({"content": None, "reasoning_content": "thought"}),
-            "thought")
-        self.assertEqual(feature.visible_text({"reasoning": "legacy"}), "legacy")
+            feature.visible_text({"content": None,
+                                  "reasoning_content": "thought"}), "")
+        self.assertEqual(feature.visible_text({"reasoning": "legacy"}), "")
+        self.assertEqual(
+            feature.reasoning_text({"reasoning_content": "thought"}), "thought")
+        self.assertEqual(feature.reasoning_text({"reasoning": "legacy"}), "legacy")
 
     def test_generated_png_is_valid_data_uri(self):
         value = feature.red_png_data_uri()

@@ -95,7 +95,14 @@ def tensor_names(path):
 
 
 def observe_layer78(model_dir):
-    """-> 'trellis' | 'bf16' | 'absent'
+    """-> 'trellis' | 'bf16' | 'absent' | 'unreadable'
+
+    'absent' means the shard is not there (normal for non-GLM checkpoints);
+    'unreadable' means it IS there but cannot be parsed — a truncated or
+    interrupted download. The two must not be conflated: an unreadable shard
+    is an unusable checkpoint and the caller exits 1 on it, while classifying
+    it 'absent' let the reconciler bless the directory and defer the failure
+    to an opaque engine loader crash.
 
     BF16 layer 78 stores one `.weight` tensor per expert. Current rank-sliced
     EXL3 overlays are also per-expert, but store one
@@ -110,7 +117,7 @@ def observe_layer78(model_dir):
     try:
         names = tensor_names(path)
     except (OSError, ValueError, struct.error):
-        return "absent"
+        return "unreadable"
     if any(TRELLIS_EXPERT_RE.match(n) or PACKED_TRELLIS_RE.match(n)
            for n in names):
         return "trellis"
@@ -288,9 +295,13 @@ def build_wrapper(model_dir, text, current_wrapper, log):
     return merged
 
 
-def reconcile_index(model_dir, vision_on, log, dry_run=False):
+def reconcile_index(model_dir, vision_on, log, dry_run=False, problems=None):
     """Rebuild weight_map from the shards that exist. vLLM loads every tensor in
-    every referenced file, so the map must reference exactly the right files."""
+    every referenced file, so the map must reference exactly the right files.
+
+    `problems` (a list, when supplied) collects unreadable-shard messages so
+    main() can distinguish "nothing to rebuild" from "the checkpoint is
+    damaged" — both leave the index alone, but only one may exit 0."""
     idx_path = os.path.join(model_dir, IDX)
     if not os.path.exists(idx_path):
         return False
@@ -309,6 +320,8 @@ def reconcile_index(model_dir, vision_on, log, dry_run=False):
                 wm[name] = shard
         except (OSError, ValueError, struct.error) as e:
             log(f"!!! reconcile: cannot read {shard} ({e}); leaving the index alone")
+            if problems is not None:
+                problems.append(f"shard {shard} is unreadable ({e})")
             return False
         total += os.path.getsize(path)
     try:
@@ -434,8 +447,14 @@ def main(argv):
             "disk — reconciling to text-only")
     log(f">>> reconcile: layer 78 on disk = {layer78}, vision shards = "
         f"{'present' if vision_assets else 'absent'}, vision wanted = {args.vision}")
+    if layer78 == "unreadable":
+        log("!!! reconcile: the layer-78 shard exists but cannot be read — a "
+            "truncated or interrupted download. Refusing to reconcile an "
+            "unusable checkpoint; re-run the download or delete the damaged "
+            "shard.")
+        return 1
     if layer78 == "absent":
-        log("!!! reconcile: layer-78 shard missing or unreadable; leaving the MTP fields "
+        log("!!! reconcile: layer-78 shard missing; leaving the MTP fields "
             "untouched")
 
     base = baseline(model_dir, text, log)
@@ -456,9 +475,17 @@ def main(argv):
             with open(tmp, "w") as f:
                 json.dump(new_cfg, f, indent=1)
             os.replace(tmp, cfg_path)
-    reconcile_index(model_dir, vision_on, log, args.dry_run)
+    problems = []
+    reconcile_index(model_dir, vision_on, log, args.dry_run, problems=problems)
     reconcile_chat_template(model_dir, vision_on, log, args.dry_run)
     markers(model_dir, layer78, vision_on, log, args.dry_run)
+    if problems:
+        for item in problems:
+            log(f"!!! reconcile: {item}")
+        log("!!! reconcile: the checkpoint is UNUSABLE (unreadable shard); "
+            "refusing to bless it — re-run the download or remove the damaged "
+            "file")
+        return 1
     log(">>> reconcile: checkpoint config now matches the weights on disk")
     return 0
 

@@ -105,7 +105,7 @@ not_a_number NaN
     def test_summary_reports_failures_throughput_and_preemptions(self):
         results = [
             {"ok": True, "prompt_tokens": 100, "output_tokens": 20,
-             "ttft_ms": 40, "tpot_ms": 5, "mean_itl_ms": 6},
+             "ttft_ms": 40, "tpot_ms": 5, "mean_inter_chunk_ms": 6},
             {"ok": False, "error": "timeout"},
         ]
         before = {"vllm:num_preemptions_total": 2}
@@ -164,7 +164,7 @@ not_a_number NaN
 
         ok = {
             "ok": True, "prompt_tokens": 32, "output_tokens": 1,
-            "ttft_ms": 1, "tpot_ms": 0, "mean_itl_ms": 0,
+            "ttft_ms": 1, "tpot_ms": 0, "mean_inter_chunk_ms": 0,
         }
         with mock.patch.object(bench, "make_prompt", side_effect=fake_prompt), \
              mock.patch.object(bench, "get_metrics", return_value={}), \
@@ -178,7 +178,7 @@ not_a_number NaN
     def test_temperature_and_seed_reach_each_matched_request(self):
         ok = {
             "ok": True, "prompt_tokens": 32, "output_tokens": 1,
-            "ttft_ms": 1, "tpot_ms": 0, "mean_itl_ms": 0,
+            "ttft_ms": 1, "tpot_ms": 0, "mean_inter_chunk_ms": 0,
         }
         with mock.patch.object(
                 bench, "make_prompt", return_value=("prompt", 32)), \
