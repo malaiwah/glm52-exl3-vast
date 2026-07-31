@@ -302,6 +302,18 @@ shutdown. The harness now restores the immutable image paths
 and will rerun under a fresh evidence label/cache.
 [Failed first MTP3 boot](artifacts/vllm-current210-cap1024-mtp3-v1-server.log).
 
+The corrected MTP3 rerun reached the intended candidate code, completed PCIe
+calibration, loaded the target and rank-sliced draft, and captured all graphs.
+The measured 1,024-token Trellis arenas were 279.7 MiB/rank for the target and
+414.1 MiB/rank for the draft. It then failed the standard GMU 0.90 profile's
+KV-capacity check: only 0.01 GiB remained while the 131,072-token gate needed
+0.98 GiB (estimated maximum length 1,792). This is a valid negative result for
+the 3.25-bpw + MTP3 + GMU 0.90 shape, not an OOM, Xid, or #210 functional
+failure. The engine shut down cleanly and released all four GPUs. A follow-up
+uses GMU 0.92 while keeping the candidate, model, MTP, graph, and capacity
+controls fixed.
+[Standard-GMU MTP3 capacity failure](artifacts/vllm-current210-cap1024-mtp3-v2-server.log).
+
 ### E. PCIe calibration launcher reliability
 
 The full-model gates independently exposed a release-launcher defect outside

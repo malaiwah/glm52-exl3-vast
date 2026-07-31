@@ -14,7 +14,9 @@ MODEL_ROOT="${MODEL_ROOT:-/workspace}"
 CANDIDATE_PYTHONPATH="${CANDIDATE_PYTHONPATH:-}"
 PREFILL_CAPACITY="${PREFILL_CAPACITY:-unset}"
 MTP_TOKENS_VALUE="${MTP_TOKENS_VALUE:-0}"
+GPU_MEMORY_UTILIZATION_VALUE="${GPU_MEMORY_UTILIZATION_VALUE:-0.90}"
 FIELD_REVIEW_SCRIPTS_DIR="${FIELD_REVIEW_SCRIPTS_DIR:-/workspace/field-review-tests/turnkey-scripts}"
+FIELD_REVIEW_STATE_DIR="${FIELD_REVIEW_STATE_DIR:-/tmp/field-review-$RUN_LABEL/state}"
 
 # An interactive SSH shell on a rental does not necessarily inherit the OCI
 # image's virtualenv-first PATH even though PID 1 did.  Pin it here so the
@@ -65,6 +67,12 @@ case "$MTP_TOKENS_VALUE" in
     ;;
 esac
 
+if ! awk -v value="$GPU_MEMORY_UTILIZATION_VALUE" \
+  'BEGIN { exit !(value ~ /^[0-9]+([.][0-9]+)?$/ && value > 0 && value <= 1) }'; then
+  echo "FATAL: GPU_MEMORY_UTILIZATION_VALUE must be greater than 0 and at most 1" >&2
+  exit 2
+fi
+
 if nvidia-smi --query-compute-apps=pid --format=csv,noheader |
    grep -q '[0-9]'; then
   echo "FATAL: a GPU process is already running; refusing a polluted gate" >&2
@@ -72,7 +80,7 @@ if nvidia-smi --query-compute-apps=pid --format=csv,noheader |
 fi
 
 mkdir -p "$JIT_ROOT" \
-  "/tmp/field-review-$RUN_LABEL/state" \
+  "$FIELD_REVIEW_STATE_DIR" \
   "/tmp/field-review-$RUN_LABEL/runtime"
 
 export CUDA_VISIBLE_DEVICES=0,1,2,3
@@ -80,7 +88,7 @@ export TORCH_EXTENSIONS_DIR="$JIT_ROOT/torch-extensions"
 export VLLM_CACHE_ROOT="$JIT_ROOT/vllm"
 export TRITON_CACHE_DIR="$JIT_ROOT/triton"
 export XDG_CACHE_HOME="$JIT_ROOT/xdg"
-export GLM_STATE_DIR="/tmp/field-review-$RUN_LABEL/state"
+export GLM_STATE_DIR="$FIELD_REVIEW_STATE_DIR"
 export GLM_RUNTIME_DIR="/tmp/field-review-$RUN_LABEL/runtime"
 
 # SSH-launched processes inside the retained appliance do not inherit every
@@ -121,7 +129,7 @@ export MAX_NUM_BATCHED_TOKENS=3072
 export MAX_CUDAGRAPH_CAPTURE_SIZE=6
 export CUDAGRAPH_CAPTURE_SIZES=1,2,3,4,5,6
 export VLLM_EXL3_TRELLIS_MAX_M=6
-export GPU_MEMORY_UTILIZATION=0.90
+export GPU_MEMORY_UTILIZATION="$GPU_MEMORY_UTILIZATION_VALUE"
 export GPU_BLOCKS_OVERRIDE=0
 export KV_CACHE_DTYPE=nvfp4_ds_mla KV_SCALE_MODE=dynamic-token
 export OFFLOAD_FRACTION=0 PREFIX_CACHE_BACKEND=lmcache
