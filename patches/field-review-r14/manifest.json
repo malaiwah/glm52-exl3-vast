@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "release": {
+    "image": "voipmonitor/vllm:gilded-gnosis-v20-vllm749050e-si8110e3e-fi801d57a-cu132-20260730-r14",
+    "blackwell_llm_docker_commit": "2464cc03",
+    "qualification_host": "Vast.ai 46335896"
+  },
+  "components": [
+    {
+      "name": "vllm-210-211",
+      "base_commit": "5a6979f17",
+      "base_tree": "749050edab1b6664937c52fa1b0be360be632c1e",
+      "tested_head": "5a7ac1481e1fc24b0bbc35efe160b2ff34797bee",
+      "tested_tree": "46f6f5bf387ee2c07712808cfe64f722fa2b99f3",
+      "upstream": {
+        "merged_pr_211": "30038602b71395f481ef4a6edfe4fcf8551d9c15",
+        "pr_210": "47dc47d87f428e195f66cd8e7beffd24946a415b"
+      },
+      "patch": "vllm.patch",
+      "patch_sha256": "0f2c10110fc9bc0701003a46c8379c335dd9018cecbf64722e0db64eea748fb1",
+      "targets": [
+        "vllm-source",
+        "site-packages"
+      ],
+      "files": {
+        "vllm/envs.py": {
+          "before": "784b3981a373d7b6fcd990ce34061614760deca39baeb7f21cfdc043bc4b0308",
+          "after": "d797b16340d6aab840d9d06c64e486661d712efc93c4e05170098a3af14edb2c"
+        },
+        "vllm/model_executor/layers/quantization/exl3.py": {
+          "before": "6181cecd32792f2f747052496ee0f8b33cbbccff8ae9092f78d0e8acbb33491a",
+          "after": "bd084b55d0e8ce949e5402762ce35d67a73736ab057bfbf0ee64154f4d76fef4"
+        },
+        "vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py": {
+          "before": "126a1cf87f8d6d925877f041a21ca11aed3cbf5432716a57eac13cc687c8604c",
+          "after": "570947fa8d076c98424b34695d4310a567b1d1c5dc34413f429b2eb8c0e08cb4"
+        },
+        "vllm/v1/worker/gpu/spec_decode/dspark/speculator.py": {
+          "before": "47a041c9d68c7e92f9d56c0c0a73282799f2735361817293dbaa6318fe340276",
+          "after": "a27c7d80afbca78f423af4a653944d065ac51ca8bf37d49eb745b7637f2e6bcd"
+        },
+        "vllm/v1/worker/gpu/spec_decode/speculator.py": {
+          "before": "c25f0312983bcf0a902c332026a37522628c377864b46e35784cb97fc2e63e37",
+          "after": "d11ed0ee0911f40d4d259c5f66c7696ef50f26e164d0e6f8cc04826be78d41f8"
+        }
+      }
+    }
+  ]
+}
