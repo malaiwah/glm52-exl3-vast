@@ -39,6 +39,7 @@ result to this stack.
 | runtime | PyTorch `2.12.0+cu132`; CUDA runtime `13.2.1`; FlashInfer `801d57a`; XGrammar `0.2.5` |
 | turnkey manifest | [`patches/field-review-r14/manifest.json`](../../../patches/field-review-r14/manifest.json), SHA-256 `6ba55c5f39711b875dbd044e310ee5a2473ae597cbc4b57a85911e9a4ba868eb` |
 | immutable evidence commit | `5c76a2536e7fc9a5f1cb6bf182531889f5385e65` |
+| immutable reviewer-guide commit | `a1376ed23030941a8df69325bc6324e2dad7b8f2` |
 | runtime release commit | `fa52eda06ab516cd7e1a6628d915d2fd2478478f` |
 | runtime image | `ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7` |
 
@@ -613,5 +614,5 @@ immutable evidence 5c76a2536e7fc9a5f1cb6bf182531889f5385e65 / https://github.com
 
 Canonical commands, patch digests, expected startup lines, controls and
 evidence ledger:
-https://github.com/malaiwah/glm52-exl3-vast/blob/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md
+https://github.com/malaiwah/glm52-exl3-vast/blob/a1376ed23030941a8df69325bc6324e2dad7b8f2/docs/field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md
 ```
