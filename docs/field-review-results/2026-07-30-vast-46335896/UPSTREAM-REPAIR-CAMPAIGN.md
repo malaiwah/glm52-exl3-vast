@@ -335,8 +335,17 @@ The matched steady 3,072-token C1 sample reported:
 The deliberately fresh JIT cache exposed the already tracked appliance warmup
 gap: four first-request and four first-3,072-prefill kernels compiled after
 readiness. A separate prime absorbed them; the measured sample and 126K
-retrieval caused no further JIT. An unset-capacity MTP3 run at the same GMU is
-the direct memory control and is recorded separately rather than inferred.
+retrieval caused no further JIT.
+
+The direct unset-capacity MTP3 control at the same GMU 0.92 then made the
+memory result conclusive. Its target and draft arenas were respectively
+759.8 MiB and 1,054.2 MiB/rank, versus 279.7 MiB and 414.1 MiB with capacity
+1,024: **1,120.2 MiB/rank returned**. The control exposed only 0.82 GiB for
+KV, failed the 131,072-token validation, and estimated a 110,080-token
+maximum. The capacity-1,024 candidate exposed 1.91 GiB and 257,024 tokens.
+Thus #210 changed this exact MTP3 shape from a deterministic boot failure into
+a correct 126K-capable service. The negative control exited without an OOM,
+Xid, or residual allocation.
 
 Evidence:
 [server](artifacts/vllm-current210-cap1024-mtp3-v3-server.log),
@@ -344,6 +353,7 @@ Evidence:
 [steady benchmark](artifacts/vllm-current210-cap1024-mtp3-v3-bench-measure-a.json),
 [GPU telemetry](artifacts/vllm-current210-cap1024-mtp3-v3-gpu.csv), and
 [126K retrieval](artifacts/vllm-current210-cap1024-mtp3-v3-needle-126k.json).
+[Unset-capacity MTP3 control](artifacts/vllm-current210-unset-mtp3-v1-server.log).
 
 ### E. PCIe calibration launcher reliability
 
@@ -376,7 +386,12 @@ Published upstream as
 [blackwell-llm-docker issue #12](https://github.com/local-inference-lab/blackwell-llm-docker/issues/12)
 and
 [repair PR #13](https://github.com/local-inference-lab/blackwell-llm-docker/pull/13)
-at exact head `b4a2f25`. The immutable r14 image remains affected.
+at current exact head `5eee240d6c32e08516287380131c96ca7493f0f6`. The
+implementation was independently approved at `b4a2f25`; the current commit
+only adds the peer-suggested unexported-unrelated and space-separated preload
+tests. The exact current head passed the complete release helper on Vast.
+[Current-head Vast gate](artifacts/blackwell-ldpreload-5eee240-vast-gate.log).
+The immutable r14 image remains affected.
 
 ## Public status
 
