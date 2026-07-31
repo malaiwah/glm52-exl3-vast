@@ -1264,4 +1264,7 @@ remaining truncation rate separately. No additional scorecard run will
 displace GPU qualification work.
 
 [8K-cap matched GPQA JSON](artifacts/vllm210211-control-gpqa50-v2.json) and
-[progress log](artifacts/vllm210211-control-gpqa50-v2.log).
+[progress log](artifacts/vllm210211-control-gpqa50-v2.log). The
+[complete compressed control serving log](artifacts/scorecard-control-v1-server.log.gz)
+contains zero ERROR, traceback, OOM, Xid, preemption, or failed-FSM record
+through graceful shutdown; all four GPU workers exited.
