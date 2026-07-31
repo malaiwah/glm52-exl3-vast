@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Unit tests for the paid-runtime qualification harnesses."""
+import hashlib
 import json
 import os
 import sys
@@ -13,6 +14,7 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 
 import benchmark_serving as bench  # noqa: E402
 import download_progress  # noqa: E402
+import evaluate_scorecard as scorecard  # noqa: E402
 import needle_matrix  # noqa: E402
 import offload_prefix_benchmark as offload  # noqa: E402
 import verify_serving as verify  # noqa: E402
@@ -98,6 +100,7 @@ not_a_number NaN
     def test_percentile_interpolates(self):
         self.assertEqual(bench.percentile([1, 2, 3, 4], 50), 2.5)
         self.assertAlmostEqual(bench.percentile([10, 20], 95), 19.5)
+
 
     def test_summary_reports_failures_throughput_and_preemptions(self):
         results = [
@@ -188,6 +191,35 @@ not_a_number NaN
         self.assertEqual(completion.call_count, 2)
         for call in completion.call_args_list:
             self.assertEqual(call.args[-2:], (1.0, 1776))
+
+
+class ScorecardTests(unittest.TestCase):
+    def test_gsm8k_prefers_last_strict_answer(self):
+        text = "The answer is 12. Correction: The answer is 1,234."
+        self.assertEqual(scorecard.extract_answer("gsm8k_cot", text), "1234")
+
+    def test_gpqa_requires_explicit_answer_marker(self):
+        self.assertIsNone(
+            scorecard.extract_answer("gpqa_diamond", "I considered A and B.")
+        )
+        self.assertEqual(
+            scorecard.extract_answer("gpqa_diamond", "Answer: $c"), "C"
+        )
+
+    def test_hidden_reasoning_is_not_a_visible_answer(self):
+        content = ""
+        reasoning = "After checking the work, The answer is 42."
+        self.assertIsNone(scorecard.extract_answer("gsm8k_cot", content))
+        self.assertEqual(
+            scorecard.extract_answer("gsm8k_cot", reasoning), "42"
+        )
+
+    def test_dataset_content_digest_is_recorded(self):
+        raw = '{"question":"q","answer":"#### 1"}\n'
+        with mock.patch.object(scorecard, "fetch_text", return_value=raw):
+            rows, digest = scorecard.load_gsm8k()
+        self.assertEqual(rows[0]["question"], "q")
+        self.assertEqual(digest, hashlib.sha256(raw.encode()).hexdigest())
 
 
 class OffloadBenchmarkTests(unittest.TestCase):

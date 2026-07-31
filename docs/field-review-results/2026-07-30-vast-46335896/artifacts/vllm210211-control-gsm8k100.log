@@ -1,0 +1,120 @@
+[1/100] correct=1 errors=0 source=788
+[2/100] correct=2 errors=0 source=82
+[3/100] correct=3 errors=0 source=995
+[4/100] correct=4 errors=0 source=733
+[5/100] correct=5 errors=0 source=621
+[6/100] correct=6 errors=0 source=1194
+[7/100] correct=7 errors=0 source=861
+[8/100] correct=8 errors=0 source=829
+[9/100] correct=9 errors=0 source=1047
+[10/100] correct=10 errors=0 source=285
+[11/100] correct=11 errors=0 source=530
+[12/100] correct=12 errors=0 source=447
+[13/100] correct=13 errors=0 source=194
+[14/100] correct=14 errors=0 source=1033
+[15/100] correct=15 errors=0 source=286
+[16/100] correct=16 errors=0 source=577
+[17/100] correct=17 errors=0 source=1232
+[18/100] correct=18 errors=0 source=976
+[19/100] correct=19 errors=0 source=513
+[20/100] correct=20 errors=0 source=1266
+[21/100] correct=21 errors=0 source=300
+[22/100] correct=22 errors=0 source=1090
+[23/100] correct=23 errors=0 source=202
+[24/100] correct=24 errors=0 source=676
+[25/100] correct=25 errors=0 source=889
+[26/100] correct=26 errors=0 source=635
+[27/100] correct=27 errors=0 source=151
+[28/100] correct=28 errors=0 source=966
+[29/100] correct=29 errors=0 source=206
+[30/100] correct=30 errors=0 source=1146
+[31/100] correct=31 errors=0 source=647
+[32/100] correct=32 errors=0 source=724
+[33/100] correct=33 errors=0 source=418
+[34/100] correct=34 errors=0 source=1311
+[35/100] correct=35 errors=0 source=127
+[36/100] correct=36 errors=0 source=906
+[37/100] correct=37 errors=0 source=1131
+[38/100] correct=38 errors=0 source=28
+[39/100] correct=39 errors=0 source=191
+[40/100] correct=40 errors=0 source=1123
+[41/100] correct=41 errors=0 source=533
+[42/100] correct=42 errors=0 source=1280
+[43/100] correct=43 errors=0 source=1067
+[44/100] correct=44 errors=0 source=816
+[45/100] correct=45 errors=0 source=1010
+[46/100] correct=46 errors=0 source=1253
+[47/100] correct=47 errors=0 source=1251
+[48/100] correct=48 errors=0 source=499
+[49/100] correct=49 errors=0 source=682
+[50/100] correct=50 errors=0 source=666
+[51/100] correct=51 errors=0 source=391
+[52/100] correct=52 errors=0 source=1162
+[53/100] correct=53 errors=0 source=488
+[54/100] correct=53 errors=0 source=454
+[55/100] correct=54 errors=0 source=128
+[56/100] correct=55 errors=0 source=917
+[57/100] correct=56 errors=0 source=1112
+[58/100] correct=57 errors=0 source=655
+[59/100] correct=58 errors=0 source=1002
+[60/100] correct=59 errors=0 source=164
+[61/100] correct=60 errors=0 source=291
+[62/100] correct=61 errors=0 source=1128
+[63/100] correct=62 errors=0 source=1040
+[64/100] correct=62 errors=0 source=2
+[65/100] correct=63 errors=0 source=617
+[66/100] correct=64 errors=0 source=223
+[67/100] correct=65 errors=0 source=186
+[68/100] correct=66 errors=0 source=1121
+[69/100] correct=67 errors=0 source=1106
+[70/100] correct=68 errors=0 source=596
+[71/100] correct=69 errors=0 source=1235
+[72/100] correct=70 errors=0 source=681
+[73/100] correct=71 errors=0 source=416
+[74/100] correct=72 errors=0 source=1120
+[75/100] correct=73 errors=0 source=911
+[76/100] correct=74 errors=0 source=589
+[77/100] correct=75 errors=0 source=1178
+[78/100] correct=76 errors=0 source=1203
+[79/100] correct=77 errors=0 source=187
+[80/100] correct=77 errors=0 source=649
+[81/100] correct=78 errors=0 source=495
+[82/100] correct=79 errors=0 source=1221
+[83/100] correct=80 errors=0 source=376
+[84/100] correct=81 errors=0 source=387
+[85/100] correct=82 errors=0 source=594
+[86/100] correct=82 errors=0 source=141
+[87/100] correct=83 errors=0 source=67
+[88/100] correct=84 errors=0 source=1254
+[89/100] correct=84 errors=0 source=255
+[90/100] correct=85 errors=0 source=975
+[91/100] correct=86 errors=0 source=382
+[92/100] correct=87 errors=0 source=79
+[93/100] correct=88 errors=0 source=183
+[94/100] correct=89 errors=0 source=532
+[95/100] correct=89 errors=0 source=306
+[96/100] correct=90 errors=0 source=1074
+[97/100] correct=91 errors=0 source=1107
+[98/100] correct=92 errors=0 source=266
+[99/100] correct=93 errors=0 source=801
+[100/100] correct=93 errors=0 source=564
+{
+ "requests": 100,
+ "completed": 100,
+ "errors": 0,
+ "correct": 93,
+ "accuracy": 0.93,
+ "wall_s": 126.78758,
+ "prompt_tokens": 72250,
+ "completion_tokens": 32118,
+ "prompt_throughput_tok_s": 569.851,
+ "output_throughput_tok_s": 253.321,
+ "mean_request_s": 9.026633,
+ "speculative": {
+  "drafts": 9050,
+  "draft_tokens": 27150,
+  "accepted_tokens": 23041,
+  "mean_acceptance_length": 3.546,
+  "draft_token_acceptance_rate": 0.8487
+ }
+}

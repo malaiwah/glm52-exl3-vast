@@ -1196,3 +1196,72 @@ Evidence:
 [clean warm-window log audit](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-warm-log-audit.json),
 and
 [steady prefill control](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-steady-prefill.json).
+
+### J. Reproducible scorecard control
+
+A dependency-free generation scorecard now records the exact dataset bytes,
+harness bytes, source indices, choice permutations, raw visible/reasoning
+fields, API usage, latency and before/after speculative counters. GSM8K uses
+the EleutherAI v3 fixed eight-shot CoT prompt adapted to a chat endpoint; GPQA
+Diamond uses OpenAI simple-evals' deterministic zero-shot permutation and
+answer format. The accepted harness scores only user-visible `content`—a
+tentative value in hidden thinking is diagnostic, not a completed answer.
+
+The first harness iteration is retained but not accepted as the matched
+control. Completion-only GSM stop strings could occur inside GLM's thinking
+trace, and its fallback could score hidden reasoning when visible content was
+empty. It reported 93/100 GSM8K. Its 4,096-token GPQA run reported 32/50, but
+19/50 responses reached the length cap and only 1 of those 19 was correct.
+Those records explain the harness correction; they are not silently folded
+into the final score.
+
+The corrected exact harness
+`c1028f59c73f8f86c27cac6fe95dfb8066244d5a738cfa54501b3edc8b59e46c`
+then ran the same fixed-seed 100-question GSM8K subset at concurrency 8 with a
+2,048-token ceiling. Dataset bytes were
+`3730d312f6e3440559ace48831e51066acaca737f6eabec99bccb9e4b3c39d14`.
+Results:
+
+| metric | control |
+|---|---:|
+| strict exact score | **96/100** |
+| API errors / preemptions | **0 / 0** |
+| wall time | 121.244 s |
+| prompt throughput | 595.906 tok/s |
+| aggregate output throughput | 264.978 tok/s |
+| mean acceptance length | 3.5444 |
+| draft-token acceptance | 84.81% |
+
+All four misses completed normally rather than truncating or failing the
+backend. Source 454 is a known data inconsistency: its question says both
+people eat four apples per day, while the reference solution silently changes
+one person to one apple; the model answered the literal question. The strict
+score remains 96/100 without hand-adjustment. Sources 255, 306 and 649 are
+retained as ordinary model misses. The complete serving log had zero ERROR,
+traceback, OOM, Xid, CUDA-IPC warning or preemption through this control.
+
+Evidence:
+[exact harness](artifacts/evaluate_scorecard-c1028f59.py),
+[accepted GSM8K JSON](artifacts/vllm210211-control-gsm8k100-v2.json),
+[accepted progress log](artifacts/vllm210211-control-gsm8k100-v2.log),
+[superseded GSM8K JSON](artifacts/vllm210211-control-gsm8k100.json), and
+[4K-cap GPQA diagnostic](artifacts/vllm210211-control-gpqa50.json).
+
+The same exact harness then repeated the fixed-seed 50-question GPQA Diamond
+subset with an 8,192-token ceiling. It completed all 50 API requests without
+an error or preemption and scored **28/50 (56%)** in 806.031 seconds. Aggregate
+output throughput was 299.691 tok/s, pooled mean acceptance length was 3.1788,
+and pooled draft-token acceptance was 72.63%. This is reproducible matched
+control evidence, but it is not a clean unconstrained quality estimate:
+21/50 requests exhausted even the 8,192-token ceiling while still reasoning,
+returned no user-visible `content`, and were correctly scored as misses. The
+raw reasoning traces remain in the artifact; the harness neither promotes a
+hidden tentative choice to an answer nor hides the model-behavior limitation.
+The 56% result is therefore a cap-constrained lower bound, not an unconstrained
+GLM-5.2 quality claim. A future matched run must give both control and
+candidate at least 16K, preferably 32K, completion tokens and report the
+remaining truncation rate separately. No additional scorecard run will
+displace GPU qualification work.
+
+[8K-cap matched GPQA JSON](artifacts/vllm210211-control-gpqa50-v2.json) and
+[progress log](artifacts/vllm210211-control-gpqa50-v2.log).
