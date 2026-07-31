@@ -13,12 +13,16 @@ JIT_ROOT="${JIT_ROOT:-/workspace/field-review-tests/jit/$RUN_LABEL}"
 MODEL_ROOT="${MODEL_ROOT:-/workspace}"
 CANDIDATE_PYTHONPATH="${CANDIDATE_PYTHONPATH:-}"
 PREFILL_CAPACITY="${PREFILL_CAPACITY:-unset}"
+FIELD_REVIEW_SCRIPTS_DIR="${FIELD_REVIEW_SCRIPTS_DIR:-/workspace/field-review-tests/turnkey-scripts}"
 
 # An interactive SSH shell on a rental does not necessarily inherit the OCI
 # image's virtualenv-first PATH even though PID 1 did.  Pin it here so the
 # candidate import and the entrypoint's Python helpers use the same torch/vLLM
 # environment as serving.
 export PATH="/opt/venv/bin:$PATH"
+if [ -d "$FIELD_REVIEW_SCRIPTS_DIR" ]; then
+  export SCRIPTS_DIR="$FIELD_REVIEW_SCRIPTS_DIR"
+fi
 
 case "$MODE" in
   baseline)
@@ -92,6 +96,7 @@ export MAX_CUDAGRAPH_CAPTURE_SIZE=6
 export CUDAGRAPH_CAPTURE_SIZES=1,2,3,4,5,6
 export VLLM_EXL3_TRELLIS_MAX_M=6
 export GPU_MEMORY_UTILIZATION=0.90
+export GPU_BLOCKS_OVERRIDE=0
 export KV_CACHE_DTYPE=nvfp4_ds_mla KV_SCALE_MODE=dynamic-token
 export OFFLOAD_FRACTION=0 PREFIX_CACHE_BACKEND=lmcache
 export PREFIX_CACHE_DISK_GB=0 VISION=0
@@ -105,6 +110,12 @@ export LANDING_PAGE=0 SSHD=0 SOUL_LEVEL=0
 export SUPERVISOR=0 VERIFY=0
 export STATUS_FILE="/tmp/field-review-$RUN_LABEL/status.json"
 export PORT
+
+# The retained r14 appliance predates the r610 "CUDA UMD Version" parser fix
+# already present in this repository, so its installed entrypoint reports this
+# qualified 610.43.02 / 13.3 host as CUDA "unknown".  The field gate records
+# the actual nvidia-smi header and bypasses only that stale admission parser.
+export ALLOW_UNSUPPORTED_NVIDIA_DRIVER=1
 
 unset DESEC_TOKEN DESEC_DOMAIN ACME_DOMAIN ACME_DNS_PROVIDER
 unset CONTAINER_API_KEY RUNPOD_API_KEY HF_TOKEN HUGGING_FACE_HUB_TOKEN
