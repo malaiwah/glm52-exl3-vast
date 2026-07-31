@@ -418,9 +418,26 @@ Evidence:
 [final static gate](artifacts/lmcache-3d22b3ce-static.log), and
 [final CPU union](artifacts/lmcache-3d22b3ce-cpu.log).
 
-Independent lifecycle review and exact-head CUDA STORE/RETRIEVE,
-timeout/late-reply, outage/recovery and shutdown gates remain mandatory before
-this repair can be accepted.
+The exact final head then passed both cold and warm CUDA-visible unions:
+**148/148** in 76.63/77.41 s. A focused **20/20** gate exercised callback
+failure containment, one-shot observability, concurrent event
+materialization, pre-send versus in-flight timeout, late transport reply,
+reset/close release, saturated dead-client progress, stop-during-recovery,
+context replacement/failure, and unregister-error cleanup. A real native
+server round trip completed REGISTER, three 512-token STORE/RETRIEVE pairs
+with three exact checksum matches, and UNREGISTER. Cold STORE averaged
+2.85 ms; warm RETRIEVE averaged 2.51 ms. No test failed, and physical GPU 3
+returned to idle after server teardown.
+
+Evidence:
+[cold CUDA union](artifacts/lmcache-3d22b3ce-gpu3-cold.log),
+[warm CUDA union](artifacts/lmcache-3d22b3ce-gpu3-warm.log),
+[focused lifecycle gate](artifacts/lmcache-3d22b3ce-lifecycle-gpu3.log),
+[real server](artifacts/lmcache-3d22b3ce-real-server.log), and
+[real round trip](artifacts/lmcache-3d22b3ce-real-roundtrip-gpu3.log).
+
+Independent lifecycle review remains mandatory before this repair can be
+accepted.
 
 ### D. vLLM/full appliance
 

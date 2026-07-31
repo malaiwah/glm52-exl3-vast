@@ -1,0 +1,157 @@
+UTC=2026-07-31T08:06:25Z head=3d22b3ceb215b1173f262f6ac3a60ad913960dc6 gpu=physical-3
+[32;20m[2026-07-31 08:06:26,948] LMCache INFO:[0m torch_dev=<module 'torch.cuda' from '/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py'>, torch_device_type=cuda [3m(__init__.py:249:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 08:06:27,039] LMCache INFO:[0m Using backend: lmcache.c_ops [3m(__init__.py:239:lmcache.v1.platform)[0m
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.1, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /workspace/field-review-tests/worktrees/lmcache-lifecycle-3d22b3ce
+configfile: pytest.ini
+plugins: anyio-4.14.2
+collecting ... [32;20m[2026-07-31 08:06:28,952] LMCache INFO:[0m multi_layer_block_kv_transfer mode: ptr [3m(base.py:94:lmcache.v1.multiprocess.transfer_context.base)[0m
+collected 101 items / 81 deselected / 20 selected
+
+tests/v1/multiprocess/test_futures.py::test_timeout_releases_resources_once_and_rejects_late_reply PASSED
+tests/v1/multiprocess/test_futures.py::test_first_success_releases_resources_once_and_rejects_late_failure PASSED
+tests/v1/multiprocess/test_futures.py::test_completion_timeout_race_has_one_terminal_owner PASSED
+tests/v1/multiprocess/test_futures.py::test_cuda_timeout_quarantines_exporter_until_late_transport_reply PASSED
+tests/v1/multiprocess/test_futures.py::test_timeout_callback_failure_does_not_replace_terminal_timeout [31;20m[2026-07-31 08:06:42,991] LMCache ERROR:[0m MessagingFuture timeout callback failed [3m(futures.py:177:lmcache.v1.multiprocess.futures)[0m
+Traceback (most recent call last):
+  File "/workspace/field-review-tests/worktrees/lmcache-lifecycle-3d22b3ce/lmcache/v1/multiprocess/futures.py", line 172, in _expire
+    self._on_timeout()
+  File "/workspace/field-review-tests/worktrees/lmcache-lifecycle-3d22b3ce/tests/v1/multiprocess/test_futures.py", line 427, in failing_callback
+    raise RuntimeError("notifier failed")
+RuntimeError: notifier failed
+PASSED
+tests/v1/multiprocess/test_futures.py::test_repeated_timeout_consumption_publishes_one_observability_event PASSED
+tests/v1/multiprocess/test_futures.py::test_cuda_future_materializes_ipc_event_once_for_concurrent_consumers PASSED
+tests/v1/multiprocess/test_mq.py::test_full_dead_client_queue_does_not_block_healthy_client [31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=1: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=2: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=3: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=4: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=5: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=6: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=7: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=8: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=9: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=10: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=11: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=12: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=13: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=14: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=15: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,197] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=16: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=17: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=18: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=19: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=20: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=21: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=22: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=23: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=24: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=25: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=26: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=27: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=28: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=29: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=30: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 08:06:43,198] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=31: send queue full [3m(mq.py:473:lmcache.v1.multiprocess.mq)[0m
+PASSED
+tests/v1/multiprocess/test_mq.py::test_sent_timeout_stays_pending_until_late_response_is_transport_safe PASSED
+tests/v1/multiprocess/test_mq.py::test_timeout_before_send_releases_transport_resources_without_sending PASSED
+tests/v1/multiprocess/test_mq.py::test_transport_teardown_releases_timed_out_inflight_cuda_exporter[reset] PASSED
+tests/v1/multiprocess/test_mq.py::test_transport_teardown_releases_timed_out_inflight_cuda_exporter[close] PASSED
+tests/v1/multiprocess/test_mq.py::test_connection_reset_discards_stale_pending_and_unsent_work PASSED
+tests/v1/test_vllm_mp_adapter.py::test_heartbeat_retires_outage_session_then_recovers [33;20m[2026-07-31 08:06:44,928] LMCache WARNING:[0m LMCache server is unhealthy — entering degraded mode [3m(vllm_multi_process_adapter.py:573:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[33;20m[2026-07-31 08:06:44,929] LMCache WARNING:[0m LMCache server is healthy again, triggering recovery callback [3m(vllm_multi_process_adapter.py:549:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[33;20m[2026-07-31 08:06:44,929] LMCache WARNING:[0m LMCache server is healthy again — resuming normal operation [3m(vllm_multi_process_adapter.py:567:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+PASSED
+tests/v1/test_vllm_mp_adapter.py::test_stop_during_blocked_recovery_callback_prevents_health_resurrection [32;20m[2026-07-31 08:06:44,930] LMCache INFO:[0m PeriodicThread lmcache-heartbeat entering main loop (interval=60.0s) [3m(periodic_thread.py:284:lmcache.v1.periodic_thread)[0m
+[33;20m[2026-07-31 08:06:44,930] LMCache WARNING:[0m LMCache server is healthy again, triggering recovery callback [3m(vllm_multi_process_adapter.py:549:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[32;20m[2026-07-31 08:06:44,930] LMCache INFO:[0m Started PeriodicThread: lmcache-heartbeat (level=critical, interval=60.0s, init_wait=0.0s) [3m(periodic_thread.py:244:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 08:06:44,930] LMCache INFO:[0m Stopping PeriodicThread: lmcache-heartbeat [3m(periodic_thread.py:263:lmcache.v1.periodic_thread)[0m
+[33;20m[2026-07-31 08:06:44,980] LMCache WARNING:[0m PeriodicThread lmcache-heartbeat did not terminate within 0.1s timeout [3m(periodic_thread.py:270:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 08:06:44,980] LMCache INFO:[0m PeriodicThread lmcache-heartbeat loop stopped [3m(periodic_thread.py:349:lmcache.v1.periodic_thread)[0m
+PASSED
+tests/v1/test_vllm_mp_adapter.py::test_recover_callback_replaces_and_closes_previous_transfer_ctx [32;20m[2026-07-31 08:06:44,991] LMCache INFO:[0m LMCache MP worker adapter created with instance_id=1688576094830474066 [3m(vllm_multi_process_adapter.py:1179:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[32;20m[2026-07-31 08:06:44,992] LMCache INFO:[0m Registering kv caches [3m(vllm_multi_process_adapter.py:1327:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[31;20m[2026-07-31 08:06:46,190] LMCache ERROR:[0m vLLM is not available but tried to query kv cache layout information, cannot get KV cache layout [3m(utils.py:68:lmcache.integration.vllm.utils)[0m
+[31;20m[2026-07-31 08:06:46,190] LMCache ERROR:[0m vLLM is not available but tried to query kv cache layout information, cannot get KV cache layout [3m(utils.py:68:lmcache.integration.vllm.utils)[0m
+[33;20m[2026-07-31 08:06:46,190] LMCache WARNING:[0m Finished re-registering KV caches after server recovery [3m(vllm_multi_process_adapter.py:1493:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[31;20m[2026-07-31 08:06:46,190] LMCache ERROR:[0m vLLM is not available but tried to query kv cache layout information, cannot get KV cache layout [3m(utils.py:68:lmcache.integration.vllm.utils)[0m
+[33;20m[2026-07-31 08:06:46,191] LMCache WARNING:[0m Finished re-registering KV caches after server recovery [3m(vllm_multi_process_adapter.py:1493:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+PASSED
+tests/v1/test_vllm_mp_adapter.py::test_failed_recovery_closes_candidate_and_preserves_previous_context [32;20m[2026-07-31 08:06:46,192] LMCache INFO:[0m LMCache MP worker adapter created with instance_id=279367323396276780 [3m(vllm_multi_process_adapter.py:1179:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[32;20m[2026-07-31 08:06:46,193] LMCache INFO:[0m Registering kv caches [3m(vllm_multi_process_adapter.py:1327:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[31;20m[2026-07-31 08:06:46,193] LMCache ERROR:[0m vLLM is not available but tried to query kv cache layout information, cannot get KV cache layout [3m(utils.py:68:lmcache.integration.vllm.utils)[0m
+[31;20m[2026-07-31 08:06:46,193] LMCache ERROR:[0m vLLM is not available but tried to query kv cache layout information, cannot get KV cache layout [3m(utils.py:68:lmcache.integration.vllm.utils)[0m
+[31;20m[2026-07-31 08:06:46,193] LMCache ERROR:[0m Unexpected error during KV cache re-registration; will retry on next heartbeat [3m(vllm_multi_process_adapter.py:1481:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+Traceback (most recent call last):
+  File "/workspace/field-review-tests/worktrees/lmcache-lifecycle-3d22b3ce/lmcache/integration/vllm/vllm_multi_process_adapter.py", line 1473, in _reregister_kv_caches_callback
+    self._send_register_kv_caches_request(self.kv_caches)
+  File "/workspace/field-review-tests/worktrees/lmcache-lifecycle-3d22b3ce/lmcache/integration/vllm/vllm_multi_process_adapter.py", line 1367, in _send_register_kv_caches_request
+    transfer_ctx.register(
+  File "/usr/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1193, in _execute_mock_call
+    raise effect
+RuntimeError: register failed
+PASSED
+tests/v1/test_vllm_mp_adapter.py::test_shutdown_orders_unregister_after_blocked_recovery_register [32;20m[2026-07-31 08:06:46,195] LMCache INFO:[0m LMCache MP worker adapter created with instance_id=931790028278401619 [3m(vllm_multi_process_adapter.py:1179:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[32;20m[2026-07-31 08:06:46,195] LMCache INFO:[0m Registering kv caches [3m(vllm_multi_process_adapter.py:1327:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[31;20m[2026-07-31 08:06:46,195] LMCache ERROR:[0m vLLM is not available but tried to query kv cache layout information, cannot get KV cache layout [3m(utils.py:68:lmcache.integration.vllm.utils)[0m
+[31;20m[2026-07-31 08:06:46,196] LMCache ERROR:[0m vLLM is not available but tried to query kv cache layout information, cannot get KV cache layout [3m(utils.py:68:lmcache.integration.vllm.utils)[0m
+[32;20m[2026-07-31 08:06:46,196] LMCache INFO:[0m Heartbeat stop requested during KV cache re-registration [3m(vllm_multi_process_adapter.py:1491:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[32;20m[2026-07-31 08:06:46,197] LMCache INFO:[0m Unregistering kv caches [3m(vllm_multi_process_adapter.py:1924:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+PASSED
+tests/v1/test_vllm_mp_adapter.py::test_shutdown_closes_all_local_resources_when_unregister_raises[unregister_error0] [32;20m[2026-07-31 08:06:46,198] LMCache INFO:[0m LMCache MP worker adapter created with instance_id=423705125916388949 [3m(vllm_multi_process_adapter.py:1179:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[32;20m[2026-07-31 08:06:46,198] LMCache INFO:[0m Unregistering kv caches [3m(vllm_multi_process_adapter.py:1924:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[31;20m[2026-07-31 08:06:46,198] LMCache ERROR:[0m LMCache unregister failed; continuing local shutdown [3m(vllm_multi_process_adapter.py:1944:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+Traceback (most recent call last):
+  File "/workspace/field-review-tests/worktrees/lmcache-lifecycle-3d22b3ce/lmcache/integration/vllm/vllm_multi_process_adapter.py", line 1935, in shutdown
+    ).result(timeout=self._mq_timeout)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1193, in _execute_mock_call
+    raise effect
+RuntimeError: local unregister failure
+PASSED
+tests/v1/test_vllm_mp_adapter.py::test_shutdown_closes_all_local_resources_when_unregister_raises[unregister_error1] [32;20m[2026-07-31 08:06:46,200] LMCache INFO:[0m LMCache MP worker adapter created with instance_id=4411636919434354235 [3m(vllm_multi_process_adapter.py:1179:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[32;20m[2026-07-31 08:06:46,200] LMCache INFO:[0m Unregistering kv caches [3m(vllm_multi_process_adapter.py:1924:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[31;20m[2026-07-31 08:06:46,200] LMCache ERROR:[0m LMCache unregister failed; continuing local shutdown [3m(vllm_multi_process_adapter.py:1944:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+Traceback (most recent call last):
+  File "/workspace/field-review-tests/worktrees/lmcache-lifecycle-3d22b3ce/lmcache/integration/vllm/vllm_multi_process_adapter.py", line 1935, in shutdown
+    ).result(timeout=self._mq_timeout)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1134, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1138, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/mock.py", line 1193, in _execute_mock_call
+    raise effect
+lmcache.v1.multiprocess.mq.RemoteHandlerError: UNREGISTER_KV_CACHE handler failed: RuntimeError: remote unregister failure
+PASSED
+
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+../../../../opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: 121 warnings
+  /opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: DeprecationWarning: `LoggingHandler` in `opentelemetry-sdk` is deprecated. Use the handler from `opentelemetry-instrumentation-logging` instead.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /workspace/field-review-tests/artifacts/lmcache-3d22b3ce-lifecycle-gpu3.xml -
+=============== 20 passed, 81 deselected, 122 warnings in 17.80s ===============
+rc=0 end=2026-07-31T08:06:48Z

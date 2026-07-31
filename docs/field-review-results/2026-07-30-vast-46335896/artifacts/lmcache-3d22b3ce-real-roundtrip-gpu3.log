@@ -1,0 +1,95 @@
+UTC=2026-07-31T08:07:08Z head=3d22b3ceb215b1173f262f6ac3a60ad913960dc6 gpu=physical-3 rpc=tcp://127.0.0.1:15558 http=http://127.0.0.1:18081
+server_pid=188409
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+[32;20m[2026-07-31 08:07:13,806] LMCache INFO:[0m torch_dev=<module 'torch.cuda' from '/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py'>, torch_device_type=cuda [3m(__init__.py:249:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 08:07:13,935] LMCache INFO:[0m Using backend: lmcache.c_ops [3m(__init__.py:239:lmcache.v1.platform)[0m
+
+ _     __  __    ____           _          
+| |   |  \/  |  / ___|__ _  ___| |__   ___      LMCache vunknown
+| |   | |\/| | | |   / _` |/ __| '_ \ / _ \     Website:  https://lmcache.ai/
+| |___| |  | | | |__| (_| | (__| | | |  __/     Recipes:  https://docs.lmcache.ai/recipes
+|_____|_|  |_|  \____\__,_|\___|_| |_|\___|     LinkedIn: https://www.linkedin.com/company/lmcache-lab
+Set LMCACHE_DISABLE_BANNER=1 to hide this banner.
+
+[32;20m[2026-07-31 08:07:14,443] LMCache INFO:[0m multi_layer_block_kv_transfer mode: ptr [3m(base.py:94:lmcache.v1.multiprocess.transfer_context.base)[0m
+Connecting to LMCache MP Server at tcp://127.0.0.1:15558 (mode=gpu) ...
+Server chunk_size = 256
+Resolved KV shape spec: (2,1024,16,8,128):float16:32
+Each request: 513 tokens (2 full chunks)
+KV shape: 32 layers, 8 heads x 128, dtype=float16, blocks=1024x16, kv=2
+Allocated 32 GPU tensors on cuda:0
+REGISTER_KV_CACHE: OK
+
+=== Request seq=0 ===
+  [seq 0/cold] LOOKUP: 0/2 chunks hit (1.3 ms)
+  [seq 0/cold] STORE: stored (512 tokens, 4.5 ms)
+  [seq 0/cold] CHECKSUM: efda1bcc1c7489a0 (2 chunks)
+  [seq 0/warm] LOOKUP: 2/2 chunks hit (6.5 ms)
+  [seq 0/warm] RETRIEVE: retrieved (512 tokens, 2.9 ms)
+  [seq 0/warm] CHECKSUM: efda1bcc1c7489a0 (2 chunks)
+  [seq 0] CHECKSUM MATCH OK
+
+=== Request seq=1 ===
+  [seq 1/cold] LOOKUP: 0/2 chunks hit (0.8 ms)
+  [seq 1/cold] STORE: stored (512 tokens, 2.1 ms)
+  [seq 1/cold] CHECKSUM: d559767dc5fd67f2 (2 chunks)
+  [seq 1/warm] LOOKUP: 2/2 chunks hit (0.9 ms)
+  [seq 1/warm] RETRIEVE: retrieved (512 tokens, 2.3 ms)
+  [seq 1/warm] CHECKSUM: d559767dc5fd67f2 (2 chunks)
+  [seq 1] CHECKSUM MATCH OK
+
+=== Request seq=2 ===
+  [seq 2/cold] LOOKUP: 0/2 chunks hit (0.7 ms)
+  [seq 2/cold] STORE: stored (512 tokens, 2.0 ms)
+  [seq 2/cold] CHECKSUM: c41280d166c9edc8 (2 chunks)
+  [seq 2/warm] LOOKUP: 2/2 chunks hit (0.8 ms)
+  [seq 2/warm] RETRIEVE: retrieved (512 tokens, 2.3 ms)
+  [seq 2/warm] CHECKSUM: c41280d166c9edc8 (2 chunks)
+  [seq 2] CHECKSUM MATCH OK
+
+UNREGISTER_KV_CACHE: OK
+===================== Server Bench Result ======================
+------------------------ Configuration -------------------------
+RPC URL:                                   tcp://127.0.0.1:15558
+Mode:                                                        gpu
+Transfer mode:                                    lmcache_driven
+Tokens / request:                                            512
+Interval (s):                                               0.10
+--------------------------- Results ----------------------------
+Total requests:                                                3
+Checksum OK:                                                   3
+Checksum FAIL:                                                 0
+Pass rate (%):                                            100.00
+----------------------- Cold Lookup (ms) -----------------------
+count:                                                         3
+mean:                                                       0.93
+min:                                                        0.65
+max:                                                        1.32
+p50:                                                        0.82
+p99:                                                        1.32
+----------------------- Cold Store (ms) ------------------------
+count:                                                         3
+mean:                                                       2.85
+min:                                                        2.00
+max:                                                        4.46
+p50:                                                        2.10
+p99:                                                        4.46
+----------------------- Warm Lookup (ms) -----------------------
+count:                                                         3
+mean:                                                       2.72
+min:                                                        0.75
+max:                                                        6.55
+p50:                                                        0.87
+p99:                                                        6.55
+---------------------- Warm Retrieve (ms) ----------------------
+count:                                                         3
+mean:                                                       2.51
+min:                                                        2.30
+max:                                                        2.91
+p50:                                                        2.32
+p99:                                                        2.91
+================================================================
+Done.
+[W731 08:07:17.501313789 CudaIPCTypes.cpp:16] Producer process has been terminated before all shared CUDA tensors released. See Note [Sharing CUDA tensors]
+bench_rc=0 end=2026-07-31T08:07:18Z
