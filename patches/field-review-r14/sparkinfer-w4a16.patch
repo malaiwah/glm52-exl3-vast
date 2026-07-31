@@ -1,0 +1,1017 @@
+diff --git a/sparkinfer/_lib/compiler.py b/sparkinfer/_lib/compiler.py
+index 3357d377d044a3450d87f2e384aa831c7a3b8256..9bba8af21c6a6cc27e164aadee9a1d1f3275292b 100644
+--- a/sparkinfer/_lib/compiler.py
++++ b/sparkinfer/_lib/compiler.py
+@@ -2648,6 +2648,15 @@ def compile(
+     compiled = _memory_cache_get(memory_cache_key)
+     if compiled is not None:
+         return compiled
++    from sparkinfer._lib.runtime_control import (
++        raise_if_kernel_resolution_frozen,
++    )
++
++    raise_if_kernel_resolution_frozen(
++        "cute.compile",
++        target=func,
++        cache_key=compile_spec if compile_spec is not None else memory_cache_key,
++    )
+ 
+     post_engine_start_log = _cute_compile_post_engine_start_log_enabled()
+     payload = _compile_disk_cache_payload(
+@@ -2720,15 +2729,6 @@ def compile(
+ 
+             with _MEMORY_CACHE_LOCK:
+                 _COMPILE_MISSES += 1
+-            from sparkinfer._lib.runtime_control import (
+-                raise_if_kernel_resolution_frozen,
+-            )
+-
+-            raise_if_kernel_resolution_frozen(
+-                "cute.compile",
+-                target=func,
+-                cache_key=compile_spec if compile_spec is not None else payload,
+-            )
+             call_kwargs = {
+                 k: v for k, v in kwargs.items() if k != "__dsl_compile_options_key"
+             }
+@@ -2770,15 +2770,6 @@ def compile(
+ 
+     with _MEMORY_CACHE_LOCK:
+         _COMPILE_MISSES += 1
+-    from sparkinfer._lib.runtime_control import (
+-        raise_if_kernel_resolution_frozen,
+-    )
+-
+-    raise_if_kernel_resolution_frozen(
+-        "cute.compile",
+-        target=func,
+-        cache_key=compile_spec if compile_spec is not None else payload,
+-    )
+     call_kwargs = {k: v for k, v in kwargs.items() if k != "__dsl_compile_options_key"}
+     compiled = _call_cute_compile(
+         compile_callable,
+diff --git a/sparkinfer/moe/_shared/kernels/dynamic.py b/sparkinfer/moe/_shared/kernels/dynamic.py
+index b7f6191d61b4dbb4ed8ff3dc277ec63bdf5556a2..581545fa13a083ef086f092d6f847f19ef8940b4 100644
+--- a/sparkinfer/moe/_shared/kernels/dynamic.py
++++ b/sparkinfer/moe/_shared/kernels/dynamic.py
+@@ -822,7 +822,11 @@ class MoEDynamicKernelBackend:
+             source_tile_m=materialized_source_tile_m,
+             deterministic_output=bool(deterministic_output),
+             num_topk=self.num_topk,
+-            activation=self.activation,
++            # This helper is gated-only and is never launched unless the split
++            # materialized path is active.  Use a valid inert specialization for
++            # non-split activations (notably ReLU2) instead of rejecting them
++            # during otherwise valid monolithic-kernel construction.
++            activation=self.activation if self.w4a8_split_materialized else "silu",
+         )
+         self.materialized_phase2_kernel = W4A8MaterializedPhase2Kernel(
+             source_tile_m=materialized_source_tile_m,
+@@ -4196,15 +4200,7 @@ class MoEDynamicKernelBackend:
+             # region; A bufs in sA past the FC2-intermediate bytes; FC1
+             # residual bufs in sC (dead until the epilogue rendezvous); FC2
+             # residual bufs alias the (FC1-only) A-buf region.
+-            if cutlass.const_expr(self.w4a8_repacked):
+-                w4a8_sa0 = (
+-                    ctrl_base_addr
+-                    + Int32(Storage._offsets["sA"])
+-                    + Int32(self.tile_shape_mnk[0] * self.tile_shape_mnk[2])
+-                )
+-                w4a8_res0 = ctrl_base_addr + Int32(Storage._offsets["sC"])
+-                w4a8_res2 = w4a8_sa0
+-            elif cutlass.const_expr(self.w4a8_small):
++            if cutlass.const_expr(self.w4a8_repacked or self.w4a8_small):
+                 w4a8_sa0 = (
+                     ctrl_base_addr
+                     + Int32(Storage._offsets["sA"])
+diff --git a/sparkinfer/moe/_shared/kernels/micro.py b/sparkinfer/moe/_shared/kernels/micro.py
+index 37bdd339fd7cd616c02c58aa33fe26ac474df25b..8892e215d878f3a9c7800d395a693326d3887c20 100644
+--- a/sparkinfer/moe/_shared/kernels/micro.py
++++ b/sparkinfer/moe/_shared/kernels/micro.py
+@@ -106,9 +106,7 @@ def _fp6_micro_enabled() -> bool:
+     Keeps the validated dynamic FP6 fused path as the only FP6 backend until
+     the micro kernel is wired into dispatch and numerically proven.
+     """
+-    return os.environ.get(
+-        "SPARKINFER_ENABLE_FP6_MICRO", "0"
+-    ).strip().lower() not in (
++    return os.environ.get("SPARKINFER_ENABLE_FP6_MICRO", "0").strip().lower() not in (
+         "",
+         "0",
+         "false",
+@@ -562,7 +560,11 @@ class MoEMicroKernelBackend:
+         col: Int32,
+         n_cols: Int32,
+     ) -> Float32:
+-        addr = base_addr + ebase + Int64(kb16) * Int64(n_cols) + Int64(col)
++        # ModelOpt's E4M3 scale permutation is tiled in 64 output rows. Direct
++        # micro preparation retains the final padded tile so every permuted
++        # logical scale remains addressable.
++        packed_n_cols = (n_cols + Int32(63)) & ~Int32(63)
++        addr = base_addr + ebase + Int64(kb16) * Int64(packed_n_cols) + Int64(col)
+         word = ld_global_nc_u32(addr & ~Int64(3))
+         byte = (word >> Uint32((addr & Int64(3)) * Int64(8))) & Uint32(0xFF)
+         return cvt_w4a16_packed_e4m3_scale_to_f32(byte)
+@@ -712,11 +714,32 @@ class MoEMicroKernelBackend:
+                 rows_per_warp_div = 4
+             elif cfg.k_segments_aligned and cfg.k_segments == 12 and self.is_gated:
+                 rows_per_warp_div = 1
+-            num_fc1_chunks = min(num_fc1_chunks, n // (rows_per_warp_div * _BLOCK_SIZE))
++            num_fc1_chunks = min(
++                num_fc1_chunks,
++                max(1, n // (rows_per_warp_div * _BLOCK_SIZE)),
++            )
++            # The retile cap is a floor division, so it can choose a chunk
++            # count that no longer partitions a merely 16-aligned native
++            # ModelOpt intermediate (for example, n=144 caps 9 chunks at 4,
++            # yielding a truncated 36-value chunk). Walk down to the largest
++            # valid divisor so every FC1 chunk covers whole 16-value blocks.
++            # Aligned production shapes retain their existing geometry.
++            while num_fc1_chunks > 1 and (
++                n % num_fc1_chunks != 0 or (n // num_fc1_chunks) % _BLOCK_SIZE != 0
++            ):
++                num_fc1_chunks -= 1
+         if self.w4a16_mode and m > 1:
+             # Keep W4A16 multi-token FC1 chunks narrow enough to stay within
+-            # the 512-thread launch register limit.
+-            num_fc1_chunks = max(num_fc1_chunks, n // (_BLOCK_SIZE * 2))
++            # the 512-thread launch register limit. The chunk count must still
++            # divide n into whole 16-value blocks: floor(n/32) silently made
++            # i_chunk non-integral at shapes such as n=144 (four 36-value
++            # chunks), so FC1 wrote only 128 of 144 logical values.
++            num_fc1_chunks = max(
++                num_fc1_chunks,
++                (n + (_BLOCK_SIZE * 2) - 1) // (_BLOCK_SIZE * 2),
++            )
++            while n % num_fc1_chunks != 0 or (n // num_fc1_chunks) % _BLOCK_SIZE != 0:
++                num_fc1_chunks += 1
+         if self.a8_mx_mode:
+             # Per-32 self-ranging blocks: chunks must hold whole 32-blocks
+             # (the default policy picks i_chunk=16 at m<=2).
+@@ -752,9 +775,7 @@ class MoEMicroKernelBackend:
+             # Likewise FC2 can expose every output-row task directly once
+             # FC1 has completed in a prior launch.
+             grid_x = max(1, fc2_tasks)
+-        elif m == 1:
+-            grid_x = max(1, min(int(max_active_ctas), max(fc1_tasks, fc2_tasks)))
+-        elif m == 2:
++        elif m in (1, 2):
+             grid_x = max(1, min(int(max_active_ctas), max(fc1_tasks, fc2_tasks)))
+         elif num_fc1_chunks < 16:
+             grid_x = max(1, min(int(max_active_ctas), fc2_tasks))
+@@ -815,11 +836,18 @@ class MoEMicroKernelBackend:
+         k_row1 = k_row0 + Int32(1)
+ 
+         lane_byte_off = Int64(lane) * Int64(4)
+-        n_u32_per_expert = Int32(cfg.fc2_n_chunks * 128)
+         sf_cols = Int32(cfg.w2_sf_cols)
+         num_cb = sf_cols >> Int32(2)
+         lane_cb = lane >> Int32(3)
+         w_valid = Int32(1) if lane_cb < num_cb else Int32(0)
++        if cutlass.const_expr(self.w4a16_mode and cfg.n % 64 != 0):
++            # Native ModelOpt rows contain exactly n/8 packed u32 values.
++            # w2_sf_cols is padded to four scale columns, so its control-block
++            # count overstates the physical W2/packed-scale extent when n is a
++            # multiple of 16 but not 64 (for example, n=144). Keep the existing
++            # predicate byte-for-byte for the aligned production shapes, and
++            # gate odd-shape loads against the logical packed row instead.
++            w_valid = Int32(1) if lane < Int32(cfg.n // 8) else Int32(0)
+         lane_mode_c = (lane >> Int32(1)) & Int32(3)
+         bsf_byte_shift = lane_mode_c * Int32(8)
+         out_acc0 = Float32(0.0)
+@@ -857,10 +885,38 @@ class MoEMicroKernelBackend:
+             row_mode_32_1 = k_row1 & Int32(31)
+ 
+             kk_off = Int32(kk) * Int32(128)
+-            xh0 = Uint32(intermediate[kk_off + Int32(0 * 32) + lane])
+-            xh1 = Uint32(intermediate[kk_off + Int32(1 * 32) + lane])
+-            xh2 = Uint32(intermediate[kk_off + Int32(2 * 32) + lane])
+-            xh3 = Uint32(intermediate[kk_off + Int32(3 * 32) + lane])
++            if cutlass.const_expr(cfg.n < 256):
++                # The 128-u32 swizzle block pads narrow intermediates to 256
++                # logical values. FC1 writes only n/8 lanes in each 32-lane
++                # plane. Mask the remaining lanes before the dot: their
++                # weights are zero, but stale NaN scratch would make 0*NaN
++                # contaminate the warp reduction.
++                inter_valid = Int32(1) if lane < Int32(cfg.n // 8) else Int32(0)
++                xh0 = (
++                    Uint32(intermediate[kk_off + Int32(0 * 32) + lane])
++                    if inter_valid > Int32(0)
++                    else Uint32(0)
++                )
++                xh1 = (
++                    Uint32(intermediate[kk_off + Int32(1 * 32) + lane])
++                    if inter_valid > Int32(0)
++                    else Uint32(0)
++                )
++                xh2 = (
++                    Uint32(intermediate[kk_off + Int32(2 * 32) + lane])
++                    if inter_valid > Int32(0)
++                    else Uint32(0)
++                )
++                xh3 = (
++                    Uint32(intermediate[kk_off + Int32(3 * 32) + lane])
++                    if inter_valid > Int32(0)
++                    else Uint32(0)
++                )
++            else:
++                xh0 = Uint32(intermediate[kk_off + Int32(0 * 32) + lane])
++                xh1 = Uint32(intermediate[kk_off + Int32(1 * 32) + lane])
++                xh2 = Uint32(intermediate[kk_off + Int32(2 * 32) + lane])
++                xh3 = Uint32(intermediate[kk_off + Int32(3 * 32) + lane])
+ 
+             u_packed0 = (
+                 ld_global_nc_u32(
+@@ -1058,12 +1114,23 @@ class MoEMicroKernelBackend:
+                 kk_off = Int32(kk) * n_u32_per_expert + chunk_base
+                 cb_idx = Int32(nc) * Int32(4) + lane_cb
+                 w_valid = Int32(1) if cb_idx < num_cb else Int32(0)
+-                # If the last 256-wide chunk overhangs a non-256-aligned n
+-                # (e.g. n=384), lanes past num_cb index the uninitialized
+-                # intermediate tail. The weight there is already masked to 0,
+-                # but 0 * NaN = NaN, so mask the activation read too. Gated by
+-                # constexpr so 256-aligned shapes emit no extra runtime work.
+-                if cutlass.const_expr((cfg.w2_sf_cols >> 2) < cfg.fc2_n_chunks * 4):
++                if cutlass.const_expr(self.w4a16_mode and cfg.n % 64 != 0):
++                    packed_u32 = Int32(nc * 32) + lane
++                    w_valid = Int32(1) if packed_u32 < Int32(cfg.n // 8) else Int32(0)
++                # If the last 256-value chunk overhangs logical n, lanes past
++                # the exact native row read an unwritten intermediate tail.
++                # The padded scale grid can look full at widths such as n=496,
++                # so its control-block count is not a valid activation bound.
++                # The weight is zero there, but 0 * NaN still poisons the sum.
++                # Preserve the legacy predicate for non-W4A16 modes and emit
++                # no extra work for 256-aligned native ModelOpt shapes.
++                if cutlass.const_expr(
++                    (self.w4a16_mode and cfg.n % 256 != 0)
++                    or (
++                        (not self.w4a16_mode)
++                        and (cfg.w2_sf_cols >> 2) < cfg.fc2_n_chunks * 4
++                    )
++                ):
+                     xh0 = (
+                         Uint32(intermediate[kk_off + Int32(0 * 32) + lane])
+                         if w_valid > Int32(0)
+@@ -1246,7 +1313,6 @@ class MoEMicroKernelBackend:
+         k_row3 = k_row0 + Int32(3)
+ 
+         lane_byte_off = Int64(lane) * Int64(4)
+-        n_u32_per_expert = Int32(cfg.fc2_n_chunks * 128)
+         token_inter_base = t * Int32(cfg.inter_u32)
+         sf_cols = Int32(cfg.w2_sf_cols)
+         num_cb = sf_cols >> Int32(2)
+@@ -1471,6 +1537,8 @@ class MoEMicroKernelBackend:
+         num_cb = sf_cols >> Int32(2)
+         lane_cb = lane >> Int32(3)
+         w_valid = Int32(1) if lane_cb < num_cb else Int32(0)
++        if cutlass.const_expr(self.w4a16_mode and cfg.n % 64 != 0):
++            w_valid = Int32(1) if lane < Int32(cfg.n // 8) else Int32(0)
+         lane_mode_c = (lane >> Int32(1)) & Int32(3)
+         bsf_byte_shift = lane_mode_c * Int32(8)
+         out_acc0 = Float32(0.0)
+@@ -1508,10 +1576,36 @@ class MoEMicroKernelBackend:
+             ebase_sf_packed_e4m3 = Int64(eid) * Int64((cfg.n // 16) * cfg.k_dim)
+ 
+             kk_off = token_inter_base + Int32(kk) * Int32(128)
+-            xh0 = Uint32(intermediate[kk_off + Int32(0 * 32) + lane])
+-            xh1 = Uint32(intermediate[kk_off + Int32(1 * 32) + lane])
+-            xh2 = Uint32(intermediate[kk_off + Int32(2 * 32) + lane])
+-            xh3 = Uint32(intermediate[kk_off + Int32(3 * 32) + lane])
++            if cutlass.const_expr(cfg.n < 256):
++                # Match the m==1 path above: the packed 128-u32 swizzle has
++                # unwritten padding whenever the logical intermediate is
++                # narrower than 256 values.
++                inter_valid = Int32(1) if lane < Int32(cfg.n // 8) else Int32(0)
++                xh0 = (
++                    Uint32(intermediate[kk_off + Int32(0 * 32) + lane])
++                    if inter_valid > Int32(0)
++                    else Uint32(0)
++                )
++                xh1 = (
++                    Uint32(intermediate[kk_off + Int32(1 * 32) + lane])
++                    if inter_valid > Int32(0)
++                    else Uint32(0)
++                )
++                xh2 = (
++                    Uint32(intermediate[kk_off + Int32(2 * 32) + lane])
++                    if inter_valid > Int32(0)
++                    else Uint32(0)
++                )
++                xh3 = (
++                    Uint32(intermediate[kk_off + Int32(3 * 32) + lane])
++                    if inter_valid > Int32(0)
++                    else Uint32(0)
++                )
++            else:
++                xh0 = Uint32(intermediate[kk_off + Int32(0 * 32) + lane])
++                xh1 = Uint32(intermediate[kk_off + Int32(1 * 32) + lane])
++                xh2 = Uint32(intermediate[kk_off + Int32(2 * 32) + lane])
++                xh3 = Uint32(intermediate[kk_off + Int32(3 * 32) + lane])
+ 
+             u_packed0 = (
+                 ld_global_nc_u32(
+@@ -1726,9 +1820,20 @@ class MoEMicroKernelBackend:
+                 chunk_base = Int32(nc) * Int32(128)
+                 cb_idx = Int32(nc) * Int32(4) + lane_cb
+                 w_valid = Int32(1) if cb_idx < num_cb else Int32(0)
++                if cutlass.const_expr(self.w4a16_mode and cfg.n % 64 != 0):
++                    packed_u32 = Int32(nc * 32) + lane
++                    w_valid = Int32(1) if packed_u32 < Int32(cfg.n // 8) else Int32(0)
+                 if cutlass.const_expr(nc + 1 < cfg.fc2_n_chunks):
+                     next_cb_idx = Int32(nc + 1) * Int32(4) + lane_cb
+-                    if next_cb_idx < num_cb:
++                    next_w_valid = Int32(1) if next_cb_idx < num_cb else Int32(0)
++                    if cutlass.const_expr(self.w4a16_mode and cfg.n % 64 != 0):
++                        next_packed_u32 = Int32((nc + 1) * 32) + lane
++                        next_w_valid = (
++                            Int32(1)
++                            if next_packed_u32 < Int32(cfg.n // 8)
++                            else Int32(0)
++                        )
++                    if next_w_valid > Int32(0):
+                         next_chunk_base = Int32(nc + 1) * Int32(128)
+                         prefetch_global_l2(
+                             w2_base_addr
+@@ -1766,7 +1871,12 @@ class MoEMicroKernelBackend:
+                         cfg.w2_sf_rows * cfg.w2_sf_cols
+                     )
+                     next_cb_idx = lane_cb
+-                    if next_cb_idx < num_cb:
++                    next_w_valid = Int32(1) if next_cb_idx < num_cb else Int32(0)
++                    if cutlass.const_expr(self.w4a16_mode and cfg.n % 64 != 0):
++                        next_w_valid = (
++                            Int32(1) if lane < Int32(cfg.n // 8) else Int32(0)
++                        )
++                    if next_w_valid > Int32(0):
+                         prefetch_global_l2(
+                             w2_base_addr
+                             + next_ebase_w
+@@ -1831,9 +1941,15 @@ class MoEMicroKernelBackend:
+                                 w2s_base_addr + next_ebase_sf + next_bsf_off3
+                             )
+                 kk_off = token_inter_base + Int32(kk) * n_u32_per_expert + chunk_base
+-                # See _m1_fc2_rowpair_wide: mask the intermediate tail read for
+-                # non-256-aligned n (0 weight * NaN tail = NaN). constexpr-gated.
+-                if cutlass.const_expr((cfg.w2_sf_cols >> 2) < cfg.fc2_n_chunks * 4):
++                # See _m1_fc2_rowpair_wide: logical n, not the padded scale
++                # grid, determines whether the native intermediate tail is live.
++                if cutlass.const_expr(
++                    (self.w4a16_mode and cfg.n % 256 != 0)
++                    or (
++                        (not self.w4a16_mode)
++                        and (cfg.w2_sf_cols >> 2) < cfg.fc2_n_chunks * 4
++                    )
++                ):
+                     xh0 = (
+                         Uint32(intermediate[kk_off + Int32(0 * 32) + lane])
+                         if w_valid > Int32(0)
+@@ -2366,8 +2482,11 @@ class MoEMicroKernelBackend:
+             # ---- FC1 weight load + dot product ----
+             ebase_w = Int64(eid) * Int64(cfg.two_n) * Int64(cfg.k_half)
+             ebase_sf = Int64(eid) * Int64(cfg.w1_sf_rows * cfg.w1_sf_cols)
+-            ebase_sf_packed = Int64(eid) * Int64((cfg.k_dim // 32) * cfg.two_n)
+-            ebase_sf_packed_e4m3 = Int64(eid) * Int64((cfg.k_dim // 16) * cfg.two_n)
++            e8m0_w1_n_cols = _align_up(cfg.two_n, 64)
++            ebase_sf_packed = Int64(eid) * Int64((cfg.k_dim // 32) * e8m0_w1_n_cols)
++            ebase_sf_packed_e4m3 = Int64(eid) * Int64(
++                (cfg.k_dim // 16) * _align_up(cfg.two_n, 64)
++            )
+             thread_byte_off = Int64(lane) * Int64(cfg.k_half // 32)
+             xh_buf_base = Int32(0)
+             if cutlass.const_expr(cfg.k_segments == 2):
+@@ -2537,7 +2656,7 @@ class MoEMicroKernelBackend:
+ 
+                         if cutlass.const_expr(self.scale_format_e8m0_k32):
+                             kbb = (lane * Int32(cfg.k_segments)) >> Int32(1)
+-                            nc1 = Int32(cfg.two_n)
++                            nc1 = Int32(e8m0_w1_n_cols)
+                             u_k0 = self._ld_e8m0_scale(
+                                 w1s_base_addr,
+                                 ebase_sf_packed,
+@@ -2661,7 +2780,7 @@ class MoEMicroKernelBackend:
+ 
+                     if cutlass.const_expr(self.scale_format_e8m0_k32):
+                         kbbg = (lane * Int32(cfg.k_segments)) >> Int32(1)
+-                        nc1g = Int32(cfg.two_n)
++                        nc1g = Int32(e8m0_w1_n_cols)
+                         g_k0 = self._ld_e8m0_scale(
+                             w1s_base_addr,
+                             ebase_sf_packed,
+@@ -2978,7 +3097,7 @@ class MoEMicroKernelBackend:
+                         sf_u5 = Float32(0.0)
+                         if cutlass.const_expr(self.scale_format_e8m0_k32):
+                             kbb_u = lane_seg_base >> Int32(1)
+-                            nc_u = Int32(cfg.two_n)
++                            nc_u = Int32(e8m0_w1_n_cols)
+                             u_k0 = self._ld_e8m0_scale(
+                                 w1s_base_addr,
+                                 ebase_sf_packed,
+@@ -3118,7 +3237,7 @@ class MoEMicroKernelBackend:
+                     sf_g5 = Float32(0.0)
+                     if cutlass.const_expr(self.scale_format_e8m0_k32):
+                         kbb_g = lane_seg_base >> Int32(1)
+-                        nc_g = Int32(cfg.two_n)
++                        nc_g = Int32(e8m0_w1_n_cols)
+                         g_k0 = self._ld_e8m0_scale(
+                             w1s_base_addr,
+                             ebase_sf_packed,
+@@ -3356,7 +3475,7 @@ class MoEMicroKernelBackend:
+ 
+                         if cutlass.const_expr(self.scale_format_e8m0_k32):
+                             kbb_u = (lane * Int32(cfg.k_segments)) >> Int32(1)
+-                            nc_u = Int32(cfg.two_n)
++                            nc_u = Int32(e8m0_w1_n_cols)
+                             u_k0 = self._ld_e8m0_scale(
+                                 w1s_base_addr,
+                                 ebase_sf_packed,
+@@ -3538,7 +3657,7 @@ class MoEMicroKernelBackend:
+ 
+                     if cutlass.const_expr(self.scale_format_e8m0_k32):
+                         kbb_g = (lane * Int32(cfg.k_segments)) >> Int32(1)
+-                        nc_g = Int32(cfg.two_n)
++                        nc_g = Int32(e8m0_w1_n_cols)
+                         g_k0 = self._ld_e8m0_scale(
+                             w1s_base_addr,
+                             ebase_sf_packed,
+@@ -3833,7 +3952,7 @@ class MoEMicroKernelBackend:
+                                 ebase_sf_packed,
+                                 lane,
+                                 row_u,
+-                                Int32(cfg.two_n),
++                                Int32(e8m0_w1_n_cols),
+                                 Int32(cfg.k_dim // 32),
+                             )
+                             sf_u1 = sf_u0
+@@ -3869,7 +3988,7 @@ class MoEMicroKernelBackend:
+                             ebase_sf_packed,
+                             lane,
+                             row_g,
+-                            Int32(cfg.two_n),
++                            Int32(e8m0_w1_n_cols),
+                             Int32(cfg.k_dim // 32),
+                         )
+                         sf_g1 = sf_g0
+@@ -4363,7 +4482,7 @@ class MoEMicroKernelBackend:
+                                         ebase_sf_packed,
+                                         scale_col >> Int32(1),
+                                         row_g,
+-                                        Int32(cfg.two_n),
++                                        Int32(e8m0_w1_n_cols),
+                                         Int32(cfg.k_dim // 32),
+                                     )
+                                     if valid_seg > Int32(0)
+@@ -4420,7 +4539,7 @@ class MoEMicroKernelBackend:
+                                             ebase_sf_packed,
+                                             scale_col >> Int32(1),
+                                             row_u,
+-                                            Int32(cfg.two_n),
++                                            Int32(e8m0_w1_n_cols),
+                                             Int32(cfg.k_dim // 32),
+                                         )
+                                         if valid_seg > Int32(0)
+diff --git a/sparkinfer/moe/_shared/kernels/w4a16/host.py b/sparkinfer/moe/_shared/kernels/w4a16/host.py
+index b7970ade5661db0690106998fd241166220f312a..40c3eecd5e2804e427498778c9adb6bc41e555f6 100644
+--- a/sparkinfer/moe/_shared/kernels/w4a16/host.py
++++ b/sparkinfer/moe/_shared/kernels/w4a16/host.py
+@@ -219,6 +219,20 @@ def select_route_block_size_m(m: int, topk: int, num_experts: int) -> int:
+     return _W4A16_ALLOWED_ROUTED_SIZES[-1]
+ 
+ 
++def route_block_sizes_for_capacity(
++    max_tokens: int,
++    topk: int,
++    num_experts: int,
++) -> tuple[int, ...]:
++    """Conservative block-size set reachable within a token capacity."""
++    max_tokens = max(int(max_tokens), 1)
++    first = select_route_block_size_m(1, topk, num_experts)
++    last = select_route_block_size_m(max_tokens, topk, num_experts)
++    first_idx = _W4A16_ALLOWED_ROUTED_SIZES.index(first)
++    last_idx = _W4A16_ALLOWED_ROUTED_SIZES.index(last)
++    return _W4A16_ALLOWED_ROUTED_SIZES[first_idx : last_idx + 1]
++
++
+ def max_packed_route_slots(numel: int, block_size: int, num_experts: int) -> int:
+     max_packed_routes = int(numel) + int(num_experts) * (int(block_size) - 1)
+     if int(numel) < int(num_experts):
+@@ -240,6 +254,27 @@ def route_pack_token_capacity(tokens: int, topk: int) -> int:
+     return 1 << (max(int(tokens), 1) - 1).bit_length()
+ 
+ 
++def route_pack_capacity(
++    numel: int,
++    block_size: int,
++    num_experts: int,
++    *,
++    topk: int = 1,
++    bucket_tokens: bool = True,
++) -> tuple[int, int, int]:
++    """Return the canonical routed-row, packed-slot, and block capacities."""
++    numel_capacity = (
++        route_pack_numel_capacity(numel, topk=topk)
++        if bucket_tokens
++        else max(int(numel), 1)
++    )
++    packed_routes = max_packed_route_slots(
++        numel_capacity, int(block_size), int(num_experts)
++    )
++    route_blocks = (packed_routes + int(block_size) - 1) // int(block_size)
++    return max(numel_capacity, 1), max(packed_routes, 1), max(route_blocks, 1)
++
++
+ def max_w4a16_route_capacity(routed_rows: int, num_experts: int) -> tuple[int, int]:
+     route_slots = 0
+     route_blocks = 0
+@@ -424,6 +459,7 @@ __all__ = [
+     "plan_w4a16_buffers",
+     "reorder_w13_to_gate_up",
+     "route_pack_numel_capacity",
++    "route_pack_capacity",
+     "route_pack_token_capacity",
+     "select_route_block_size_m",
+     "unswizzle_block_scale",
+diff --git a/sparkinfer/moe/_shared/kernels/w4a16/kernel.py b/sparkinfer/moe/_shared/kernels/w4a16/kernel.py
+index fc4ac543722370258c5452cec10732bf50654dcc..bd40a83fe164b11f5f3a6d909eb5a79fc316438a 100644
+--- a/sparkinfer/moe/_shared/kernels/w4a16/kernel.py
++++ b/sparkinfer/moe/_shared/kernels/w4a16/kernel.py
+@@ -7054,6 +7054,7 @@ def compile_w4a16_fused_moe(
+     full_rotation: bool = False,
+     rotation_input_dtype: str | None = None,
+     broadcast_suh: bool = False,
++    _require_cached: bool = False,
+ ) -> W4A16FusedMoeCompileResult:
+     scale_format = _normalize_scale_format(scale_format)
+     intermediate_rotation = bool(intermediate_rotation)
+@@ -7433,6 +7434,13 @@ def compile_w4a16_fused_moe(
+             max_m_blocks=max_m_blocks,
+             blocks_per_sm=kernel.blocks_per_sm,
+         )
++    if _require_cached:
++        raise RuntimeError(
++            "W4A16 fused MoE launch is not resolved for CUDA graph capture "
++            f"(m={size_m}, moe_block_size={moe_block_size}, "
++            f"max_m_blocks={max_m_blocks}); run an eager warmup at this token "
++            "count before capturing"
++        )
+ 
+     if (not collect_activation_amax) and _small_m_direct_supported(
+         m=size_m,
+@@ -9737,6 +9745,23 @@ def _resolve_route_block_size_m(
+     return compiled
+ 
+ 
++def _w4a16_stream_is_capturing(
++    stream: cuda.CUstream,
++    *,
++    current_stream: cuda.CUstream,
++) -> bool:
++    """Observe capture on either Torch's current stream or an explicit stream."""
++    current_capturing = torch.cuda.is_current_stream_capturing()
++    if current_capturing or int(stream) == int(current_stream):
++        return current_capturing
++    result, status = cuda.cuStreamIsCapturing(stream)
++    if result != cuda.CUresult.CUDA_SUCCESS:
++        raise RuntimeError(
++            f"cuStreamIsCapturing failed for the selected W4A16 stream: {result}"
++        )
++    return int(status) != 0
++
++
+ def run_w4a16_moe(
+     a_input: torch.Tensor,
+     prepared,
+@@ -10005,7 +10030,8 @@ def run_w4a16_moe(
+     if block_size_m not in _ALLOWED_ROUTED_SIZES:
+         raise ValueError(f"unsupported W4A16 moe_block_size={block_size_m}")
+ 
+-    stream = current_cuda_stream() if stream is None else stream
++    current_stream = current_cuda_stream()
++    stream = current_stream if stream is None else stream
+     if (not collect_activation_amax) and _small_m_direct_supported(
+         m=m,
+         hidden_size=hidden_size,
+@@ -10274,6 +10300,10 @@ def run_w4a16_moe(
+             intermediate_rotation=intermediate_rotation_scales is not None,
+             full_rotation=full_rotation,
+             rotation_input_dtype=rotation_input_dtype,
++            _require_cached=_w4a16_stream_is_capturing(
++                stream,
++                current_stream=current_stream,
++            ),
+         )
+     else:
+         if int(fused_launch.size_m) < m:
+diff --git a/sparkinfer/moe/_shared/kernels/w4a16/prepare.py b/sparkinfer/moe/_shared/kernels/w4a16/prepare.py
+index 66cd8f634a6631487b8e3f550623f6d9d4bf223b..cc2fb2b96b41b493bda5ffdd84920cbf1fe86b47 100644
+--- a/sparkinfer/moe/_shared/kernels/w4a16/prepare.py
++++ b/sparkinfer/moe/_shared/kernels/w4a16/prepare.py
+@@ -669,6 +669,7 @@ def _permute_nvfp4_scales(
+     size_n: int,
+     a_dtype: torch.dtype,
+     row_rotation: int | None = None,
++    output_size_n: int | None = None,
+ ) -> tuple[torch.Tensor, torch.Tensor]:
+     combined_scale_factor = _nvfp4_compute_scale_factor(scales, a_dtype)
+     packed_scales: torch.Tensor | None = None
+@@ -684,6 +685,7 @@ def _permute_nvfp4_scales(
+             size_k=size_k,
+             size_n=size_n,
+             group_size=16,
++            output_size_n=output_size_n,
+         )
+         expert_packed = _process_nvfp4_packed_scales(
+             expert_scales,
+@@ -697,8 +699,9 @@ def _permute_nvfp4_scales(
+             )
+         packed_scales[expert].copy_(expert_packed)
+     if packed_scales is None:
++        packed_size_n = int(size_n) if output_size_n is None else int(output_size_n)
+         packed_scales = torch.empty(
+-            (0, size_k // _PACKED_TILE_SIZE, size_n // 2),
++            (0, size_k // _PACKED_TILE_SIZE, packed_size_n // 2),
+             dtype=torch.float8_e4m3fn,
+             device=scales.device,
+         )
+@@ -1098,6 +1101,24 @@ def prepare_w4a16_modelopt_native_weights(
+         size_n=hidden_size,
+         a_dtype=params_dtype,
+     )
++    micro_w13_scale = packed_w13_scale
++    micro_w13_global_scale = packed_w13_global_scale
++    if w13_rows % _PACKED_TILE_N_SIZE != 0:
++        # The direct micro reader uses the native 64-row scale permutation.
++        # Keep the final tile intact: truncating it after permutation discards
++        # logical rows whose permuted columns land above ``w13_rows``.
++        micro_scale_n = (
++            (w13_rows + _PACKED_TILE_N_SIZE - 1) // _PACKED_TILE_N_SIZE
++        ) * _PACKED_TILE_N_SIZE
++        micro_w13_scale, micro_w13_global_scale = _permute_nvfp4_scales(
++            w13_scale,
++            native_w13_global_scale,
++            size_k=hidden_size,
++            size_n=w13_rows,
++            a_dtype=params_dtype,
++            row_rotation=w13_row_rotation,
++            output_size_n=micro_scale_n,
++        )
+ 
+     return W4A16ModelOptWeights(
+         w13=w13_fp4,
+@@ -1113,9 +1134,9 @@ def prepare_w4a16_modelopt_native_weights(
+         is_gated=is_gated,
+         params_dtype=params_dtype,
+         source_format=source_format,
+-        micro_w13_scale=packed_w13_scale,
++        micro_w13_scale=micro_w13_scale,
+         micro_w13_global_scale=_process_nvfp4_micro_global_scale_from_packed(
+-            packed_w13_global_scale,
++            micro_w13_global_scale,
+             a_dtype=params_dtype,
+         ),
+         micro_w2_scale=packed_w2_scale,
+@@ -1162,9 +1183,12 @@ def prepare_w4a16_e8m0_native_weights(
+     w13_rows = shape.w13_rows
+     is_gated = shape.is_gated
+     allow_w2_k_tail = intermediate_size % 32 != 0
+-    padded_w13_scale_n = (
+-        _e8m0_logical_tail_scale_n(w13_rows) if allow_w2_k_tail else w13_rows
+-    )
++    # Packed E8M0 scale rows are permuted in 64-row blocks independently of
++    # whether W2 has a compact K tail.  Ungated 32-aligned intermediates such
++    # as I=224 therefore still need W13's 224 scale rows padded to 256; tying
++    # this padding to ``allow_w2_k_tail`` advertised the direct shape and then
++    # rejected it during preparation.
++    padded_w13_scale_n = _e8m0_logical_tail_scale_n(w13_rows)
+ 
+     w13_scale = _validate_e8m0_k32_scales(
+         w13_e8m0_scale,
+diff --git a/sparkinfer/moe/_shared/kernels/w4a16/route_pack.py b/sparkinfer/moe/_shared/kernels/w4a16/route_pack.py
+index 580078413cbe34599615d9904c7235f73146a4bf..63dfcf687b495bcf4350fed27c2727d400efed64 100644
+--- a/sparkinfer/moe/_shared/kernels/w4a16/route_pack.py
++++ b/sparkinfer/moe/_shared/kernels/w4a16/route_pack.py
+@@ -6,10 +6,7 @@ import triton
+ import triton.language as tl
+ import torch
+ 
+-from sparkinfer.moe._shared.kernels.w4a16.host import (
+-    max_packed_route_slots,
+-    route_pack_numel_capacity,
+-)
++from sparkinfer.moe._shared.kernels.w4a16.host import route_pack_capacity
+ 
+ 
+ _COUNT_BLOCK_T = 256
+@@ -306,25 +303,30 @@ def pack_topk_routes_by_expert(
+ ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+     numel = int(topk_ids.numel())
+     topk = int(topk_ids.shape[-1]) if topk_ids.ndim >= 2 else 1
+-    numel_capacity = route_pack_numel_capacity(numel, topk=topk)
+-    capacity_packed_routes = max_packed_route_slots(
+-        numel_capacity, int(block_size), int(num_experts)
+-    )
+-    capacity_route_blocks = (capacity_packed_routes + int(block_size) - 1) // int(
+-        block_size
++    numel_capacity, capacity_packed_routes, capacity_route_blocks = (
++        route_pack_capacity(
++            numel,
++            int(block_size),
++            int(num_experts),
++            topk=topk,
++        )
+     )
+     if packed_route_indices is not None and block_expert_ids is not None:
+         if (
+             int(packed_route_indices.numel()) < capacity_packed_routes
+             or int(block_expert_ids.numel()) < capacity_route_blocks
+         ):
+-            numel_capacity = numel
+-            capacity_packed_routes = max_packed_route_slots(
+-                numel, int(block_size), int(num_experts)
++            (
++                numel_capacity,
++                capacity_packed_routes,
++                capacity_route_blocks,
++            ) = route_pack_capacity(
++                numel,
++                int(block_size),
++                int(num_experts),
++                topk=topk,
++                bucket_tokens=False,
+             )
+-            capacity_route_blocks = (
+-                capacity_packed_routes + int(block_size) - 1
+-            ) // int(block_size)
+     max_packed_routes = capacity_packed_routes
+     max_route_blocks = capacity_route_blocks
+     max_packed_routes = max(max_packed_routes, 1)
+diff --git a/sparkinfer/moe/ep_moe/_impl.py b/sparkinfer/moe/ep_moe/_impl.py
+index f1df49f4cbe9c9fb4a6adbd5b00c1f926e171da6..cd8e7ade4de404dc3a4eee6e17482f262f7a9bce 100644
+--- a/sparkinfer/moe/ep_moe/_impl.py
++++ b/sparkinfer/moe/ep_moe/_impl.py
+@@ -32,9 +32,9 @@ from sparkinfer.moe._shared.kernels.activations import (
+     moe_activation_w1_rows,
+ )
+ from sparkinfer.moe._shared.kernels.w4a16.host import (
+-    _W4A16_ALLOWED_ROUTED_SIZES,
+     max_packed_route_slots,
+     packed_gemm_scratch_elements,
++    route_block_sizes_for_capacity,
+     route_pack_token_capacity,
+ )
+ 
+@@ -379,7 +379,12 @@ def plan_ep_moe_scratch(caps: EPMoEScratchCaps) -> EPMoEScratchPlan:
+     route_blocks = 1
+     fc1_tmp = 1
+     fc2_tmp = 1
+-    for block_size in _W4A16_ALLOWED_ROUTED_SIZES:
++    block_sizes = route_block_sizes_for_capacity(
++        caps.max_tokens,
++        caps.num_topk,
++        caps.global_num_experts,
++    )
++    for block_size in block_sizes:
+         slots = max_packed_route_slots(
+             route_capacity_rows,
+             int(block_size),
+diff --git a/sparkinfer/moe/fused_moe/__init__.py b/sparkinfer/moe/fused_moe/__init__.py
+index f53f77b1515d2fcf362262c8259a1150981cb75f..18241439854217c30292dea98b233d3a41a99182 100644
+--- a/sparkinfer/moe/fused_moe/__init__.py
++++ b/sparkinfer/moe/fused_moe/__init__.py
+@@ -14,6 +14,8 @@ Runtime lifecycle:
+     ``plan(Caps)`` -> ``bind`` / ``bind_sparse`` / ``bind_route``
+     (allocation-free views) -> ``run`` / ``run_sparse`` / ``route``
+     (CUDA-graph capture safe)
++``required_nbytes(Caps)`` prices that scratch without compiling launches or
++retaining storage.
+ ``route_topk`` is a standalone one-shot top-k router; ``run_sparse`` fuses
+ gate -> top-k -> experts from router logits.
+ 
+@@ -52,6 +54,7 @@ META = OpMeta(
+         "Routing",
+         "WeightsPlan",
+         "plan",
++        "required_nbytes",
+         "plan_execution",
+         "plan_weights",
+         "prepare_weights",
+@@ -101,6 +104,7 @@ if TYPE_CHECKING:  # static analysis only; runtime resolution is lazy
+         clear_caches,
+         is_supported,
+         plan,
++        required_nbytes,
+         plan_execution,
+         plan_weights,
+         prepare_weights,
+diff --git a/sparkinfer/moe/fused_moe/_impl.py b/sparkinfer/moe/fused_moe/_impl.py
+index 185419719a9c7ae7bd9e59358c5b7f3dd172c976..bb9dee339daf2532568b4a8456acfe53ee3522ef 100644
+--- a/sparkinfer/moe/fused_moe/_impl.py
++++ b/sparkinfer/moe/fused_moe/_impl.py
+@@ -2533,11 +2533,14 @@ def _plan_core_workspace(
+     )
+     if implementation == "w4a16":
+         from sparkinfer.moe._shared.kernels.w4a16.host import (
+-            _W4A16_ALLOWED_ROUTED_SIZES,
+             max_packed_route_slots,
+             packed_gemm_scratch_elements,
++            route_block_sizes_for_capacity,
++            select_route_block_size_m,
+         )
+         from sparkinfer.moe._shared.kernels.w4a16.kernel import (
++            _MAX_DIRECT_TOPK_ROUTE_M,
++            _TC_DECODE_MAX_M,
+             _small_m_direct_supported,
+         )
+ 
+@@ -2552,8 +2555,9 @@ def _plan_core_workspace(
+             if w4a16_weight_layout is not None
+             else _w4a16_weight_layout_for_source(source_format)
+         )
+-        route_E = int(route_num_experts or weight_E)
++        requested_route_E = int(route_num_experts or weight_E)
+         full_rotation = weight_layout == "trellis3_t256"
++        route_E = requested_route_E if full_rotation else int(weight_E)
+         if full_rotation:
+             if source_format != "exl3_trellis_mcg":
+                 raise ValueError(
+@@ -2574,10 +2578,31 @@ def _plan_core_workspace(
+         fc1_c_tmp_elements = 1
+         fc2_c_tmp_elements = 1
+         sms = max(1, int(get_num_sm(device)))
++        topk = max(int(num_topk), 1)
++        token_capacity = (routed_capacity + topk - 1) // topk
++        direct_route_slots_by_block: dict[int, int] = {}
++        if weight_layout == "packed":
++            direct_m_cap = _MAX_DIRECT_TOPK_ROUTE_M
++            if dtype == torch.bfloat16 and is_gated_moe_activation(activation):
++                direct_m_cap = _TC_DECODE_MAX_M
++            for direct_m in range(1, min(token_capacity, direct_m_cap) + 1):
++                direct_block_size = (
++                    int(w4a16_block_size_m)
++                    if w4a16_block_size_m is not None
++                    else select_route_block_size_m(direct_m, topk, route_E)
++                )
++                direct_route_slots_by_block[direct_block_size] = max(
++                    direct_route_slots_by_block.get(direct_block_size, 0),
++                    direct_m * topk * direct_block_size,
++                )
+         block_sizes = (
+             (int(w4a16_block_size_m),)
+             if w4a16_block_size_m is not None
+-            else _W4A16_ALLOWED_ROUTED_SIZES
++            else route_block_sizes_for_capacity(
++                max_tokens=token_capacity,
++                topk=topk,
++                num_experts=route_E,
++            )
+         )
+         for block_size in block_sizes:
+             route_slots = max_packed_route_slots(
+@@ -2585,6 +2610,10 @@ def _plan_core_workspace(
+                 int(block_size),
+                 route_E,
+             )
++            scratch_route_slots = max(
++                route_slots,
++                direct_route_slots_by_block.get(int(block_size), 0),
++            )
+             route_blocks = (route_slots + int(block_size) - 1) // int(block_size)
+             route_slots_capacity = max(route_slots_capacity, route_slots)
+             route_blocks_capacity = max(route_blocks_capacity, route_blocks)
+@@ -2592,7 +2621,7 @@ def _plan_core_workspace(
+                 fc1_c_tmp_elements,
+                 packed_gemm_scratch_elements(
+                     size_n=fc1_cols,
+-                    route_slots=route_slots,
++                    route_slots=scratch_route_slots,
+                     moe_block_size=int(block_size),
+                     sms=sms,
+                 ),
+@@ -2601,7 +2630,7 @@ def _plan_core_workspace(
+                 fc2_c_tmp_elements,
+                 packed_gemm_scratch_elements(
+                     size_n=int(k),
+-                    route_slots=route_slots,
++                    route_slots=scratch_route_slots,
+                     moe_block_size=int(block_size),
+                     sms=sms,
+                 ),
+@@ -6185,9 +6214,7 @@ def _plan_full_rotation_w4a16_launches(
+     if torch.cuda.is_current_stream_capturing():
+         raise RuntimeError("Trellis launch planning cannot run during capture")
+ 
+-    from sparkinfer.moe._shared.kernels.w4a16.host import (
+-        max_packed_route_slots,
+-    )
++    from sparkinfer.moe._shared.kernels.w4a16.host import route_pack_capacity
+     from sparkinfer.moe._shared.kernels.w4a16.kernel import (
+         _DEFAULT_MAX_SHARED_MEM,
+         compile_w4a16_fused_moe,
+@@ -6216,14 +6243,13 @@ def _plan_full_rotation_w4a16_launches(
+             f"got weight_layout={weight_layout!r}, scale_format={scale_format!r}"
+         )
+     w13_layout = "trellis3_t256_proj"
+-    capacity_route_slots = max_packed_route_slots(
++    _, capacity_route_slots, capacity_m_blocks = route_pack_capacity(
+         capacity_tokens * core_plan.num_topk,
+         block_size_m,
+         core_plan.route_E,
++        topk=core_plan.num_topk,
++        bucket_tokens=False,
+     )
+-    capacity_m_blocks = (
+-        capacity_route_slots + block_size_m - 1
+-    ) // block_size_m
+     rotation_input_dtype = _w4a16_element_dtype(core_plan.dtype)
+ 
+     with torch.cuda.device(core_plan.device):
+@@ -6365,14 +6391,16 @@ def _plan_full_rotation_w4a16_launches(
+     return fused_launches, topk_sum_launches
+ 
+ 
+-def plan_tp_moe_scratch(caps: TPMoEScratchCaps) -> TPMoEScratchPlan:
+-    deterministic_output = caps.deterministic_output
++def _plan_tp_moe_arena_layout_from_caps(
++    caps: TPMoEScratchCaps,
++    *,
++    deterministic_output: bool | None = None,
++) -> TPMoEArenaLayout:
++    if not isinstance(caps, TPMoEScratchCaps):
++        raise TypeError("caps must be a TPMoEScratchCaps")
+     if deterministic_output is None:
+-        deterministic_output = _dynamic_deterministic_output_enabled(
+-            quant_mode=caps.quant_mode,
+-            device=torch.device(caps.device),
+-        )
+-    layout = plan_tp_moe_arena_layout(
++        deterministic_output = caps.deterministic_output
++    return plan_tp_moe_arena_layout(
+         max_tokens=caps.max_tokens,
+         num_topk=caps.num_topk,
+         device=caps.device,
+@@ -6389,6 +6417,19 @@ def plan_tp_moe_scratch(caps: TPMoEScratchCaps) -> TPMoEScratchPlan:
+         deterministic_output=deterministic_output,
+         w4a16_block_size_m=caps.w4a16_block_size_m,
+     )
++
++
++def tp_moe_required_nbytes(caps: TPMoEScratchCaps) -> int:
++    """Return the planned arena bytes without compiling launches or retaining storage."""
++    return _plan_tp_moe_arena_layout_from_caps(caps).total_nbytes
++
++
++def plan_tp_moe_scratch(caps: TPMoEScratchCaps) -> TPMoEScratchPlan:
++    deterministic_output = caps.deterministic_output
++    layout = _plan_tp_moe_arena_layout_from_caps(
++        caps,
++        deterministic_output=deterministic_output,
++    )
+     capacity_tokens = max(layout.core_token_counts or (int(caps.max_tokens),))
+     launch_plan = plan_tp_moe_execution(
+         num_tokens=capacity_tokens,
+@@ -6497,7 +6538,7 @@ def _prewarm_w4a16_planned_launches(
+     collect_activation_amax = bool(collect_activation_amax)
+ 
+     from sparkinfer.moe._shared.kernels.w4a16.host import (
+-        max_packed_route_slots,
++        route_pack_capacity,
+         select_route_block_size_m,
+     )
+     from sparkinfer.moe._shared.kernels.w4a16.kernel import (
+@@ -6543,12 +6584,13 @@ def _prewarm_w4a16_planned_launches(
+                 token_count, workspace.num_topk, workspace.route_E
+             )
+             routed_rows = int(token_count) * int(workspace.num_topk)
+-            route_slots = max_packed_route_slots(
++            _, _, max_m_blocks = route_pack_capacity(
+                 routed_rows,
+                 block_size_m,
+                 workspace.route_E,
++                topk=workspace.num_topk,
++                bucket_tokens=not full_rotation,
+             )
+-            max_m_blocks = (route_slots + block_size_m - 1) // block_size_m
+             t_shape = time.perf_counter() if _SPARKINFER_TIMING else 0.0
+             fused_key = (
+                 weight_layout,
+diff --git a/sparkinfer/moe/fused_moe/api.py b/sparkinfer/moe/fused_moe/api.py
+index 5aa30de8a602601967ca64734264c62c393772a1..1c57ad6dbf48ca2571ace1bd4a88ae4155a48948 100644
+--- a/sparkinfer/moe/fused_moe/api.py
++++ b/sparkinfer/moe/fused_moe/api.py
+@@ -51,6 +51,9 @@ from ._impl import (
+ from ._impl import (
+     plan_tp_moe_scratch as plan,
+ )
++from ._impl import (
++    tp_moe_required_nbytes as required_nbytes,
++)
+ from ._impl import (
+     prepare_sparkinfer_fp4_moe_weights as prepare_weights,
+ )
+@@ -91,6 +94,7 @@ __all__ = [
+     "Routing",
+     "WeightsPlan",
+     "plan",
++    "required_nbytes",
+     "plan_execution",
+     "plan_weights",
+     "prepare_weights",

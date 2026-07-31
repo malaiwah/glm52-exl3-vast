@@ -44,6 +44,69 @@
           "after": "d11ed0ee0911f40d4d259c5f66c7696ef50f26e164d0e6f8cc04826be78d41f8"
         }
       }
-    }
-  ]
+        },
+        {
+            "name": "sparkinfer-w4a16-100-102",
+            "base_commit": "9b852b281250123fe323f63ccb1df3cac0f3bbca",
+            "base_tree": "8110e3ea417794bfb08aff1fba20135102e5536b",
+            "tested_head": "e2205cba8d78db03427a3945a75a1f647b51ef5a",
+            "tested_tree": "1d378d599538daecfc1e8c11a44010b27d3ddfe5",
+            "upstream": {
+                "pr_100": "c2f135c66032ac5e9d0778067dd19ae1910cff47",
+                "pr_102": "2bed880a7e9edbd9f2d976ba1a8ee88c9ba6e338",
+                "reviewed_composition": "cae3aad137bd739881833c064e1912177698156f"
+            },
+            "patch": "sparkinfer-w4a16.patch",
+            "patch_sha256": "247fa59a633144933e5993299dab35ee079b1dd3e4f7c12f113f1103c2ad2c69",
+            "targets": [
+                "site-packages"
+            ],
+            "files": {
+                "sparkinfer/_lib/compiler.py": {
+                    "before": "c3bb055a34d38318a21401928939747577165a11cbf00563ce3915f92f2897e0",
+                    "after": "b3373b56da8073949f32613f2e0fb97f6f7c4934752811f2745ea9b63bd0e9e7"
+                },
+                "sparkinfer/moe/_shared/kernels/dynamic.py": {
+                    "before": "97899f0fb41d55aa09b5332194ea87939122fa8e42365da840ebb728104b8705",
+                    "after": "923d12d6f1137516d5c1c4a7bb5a396b04f47c2b39fdf80f94bddc03e99c84f3"
+                },
+                "sparkinfer/moe/_shared/kernels/micro.py": {
+                    "before": "4315399cd6e7f1cd38c56ebc171da5f649b81390b1be2ebe2edc82807d0ee6f5",
+                    "after": "90ec1def3b50bd8c1138aaf543804f8b66ad0f2d55c0902cf99d1581c107d97e"
+                },
+                "sparkinfer/moe/_shared/kernels/w4a16/host.py": {
+                    "before": "3e6ec95566beccd0f743948b7b8837b97cc5474bc49ed11f74e72f663c4f860d",
+                    "after": "2c7531def4604432f2b02ff35e4a533062d74f030d0332b297d775ec36e567dc"
+                },
+                "sparkinfer/moe/_shared/kernels/w4a16/kernel.py": {
+                    "before": "8776c45295d29491b2d198986e6b9e943284c444ee67caf8ba3fff7a5343b9f7",
+                    "after": "ea6104aa25ceff0a39a6dd464946b8e9937dc6ea7fee3cd829230763803aa163"
+                },
+                "sparkinfer/moe/_shared/kernels/w4a16/prepare.py": {
+                    "before": "fb22f9ddc276819a7269046a90fed35a140b0b31d76aeafe94dca0ba80865846",
+                    "after": "ccbc58afaa22856458a7e19f05807057640738d26f7ebce4db2a401ec852e846"
+                },
+                "sparkinfer/moe/_shared/kernels/w4a16/route_pack.py": {
+                    "before": "5bb6a5321dd9d53f0b838cc19307bad3bcf4594d6a738f000f5cdaa3b10d4be9",
+                    "after": "f878f1d56c81cff4a38d1cdadaac5add25c70954fbc999a70961190daf4e6fb1"
+                },
+                "sparkinfer/moe/ep_moe/_impl.py": {
+                    "before": "83e2f47128d79170983256e00082e06614792a3c1038ac50f8b99c85adba752d",
+                    "after": "848d1f2ad2d54fa899178aa12d37398d306ae8b1806df2e2a62d2e8a981c9631"
+                },
+                "sparkinfer/moe/fused_moe/__init__.py": {
+                    "before": "c5d80f8caed5bcc4f8d2c36ea3b8cf2782a7af51cb4dfc8088b2a518ee44f81b",
+                    "after": "26e718927adc3c0058110bce37204fe6d1c5e9f1e7c7aaca492496774221c0e5"
+                },
+                "sparkinfer/moe/fused_moe/_impl.py": {
+                    "before": "13dcd5b3536f70d14a38d0a10cdf4d4c4211724d8f90cb1f0ec7d4707aa20dfa",
+                    "after": "cb5e4e9a6f7dddb5397445a4412d860814756b8ec6029cd713269eec02e4b9d5"
+                },
+                "sparkinfer/moe/fused_moe/api.py": {
+                    "before": "0f365097620980f902fd8cf1a0e3ede812326c94f6baa4bd428033ab712ae61f",
+                    "after": "efdbfa1bae6662e24bf17a4b041f478b46bc5e6c4362353ab0511d5aa20da16c"
+                }
+            }
+        }
+    ]
 }
