@@ -18,6 +18,9 @@ import gpu_detect as g  # noqa: E402
 
 SMI4 = "0, GPU-aaa, NVIDIA RTX PRO 6000 Blackwell\n1, GPU-bbb, NVIDIA RTX PRO 6000 Blackwell\n2, GPU-ccc, NVIDIA RTX PRO 6000 Blackwell\n3, GPU-ddd, NVIDIA RTX PRO 6000 Blackwell\n"
 SMI1 = "0, GPU-zzz, NVIDIA H200\n"
+# What nvidia-smi shows inside a container launched with --gpus '"device=2,3"'
+# on a 4-GPU host: two survivors, renumbered from zero.
+SMI2 = "0, GPU-aaa, NVIDIA RTX PRO 6000 Blackwell\n1, GPU-bbb, NVIDIA RTX PRO 6000 Blackwell\n"
 FAILS, OKS = [], []
 
 
@@ -43,6 +46,16 @@ CASES = [
     ("the two compose (runtime 0,1 then CUDA 1)", SMI4,
      {"NVIDIA_VISIBLE_DEVICES": "0,1", "CUDA_VISIBLE_DEVICES": "1"}, 1),
     ("selection by UUID", SMI4, {"CUDA_VISIBLE_DEVICES": "GPU-ccc"}, 1),
+    # The runtime that honoured an index list renumbers survivors 0..N-1, so
+    # host indices must not be re-applied against the container index space.
+    ("runtime-applied offset subset (device=2,3 renumbered to 0,1)", SMI2,
+     {"NVIDIA_VISIBLE_DEVICES": "2,3"}, 2),
+    ("runtime-applied partial-overlap subset (device=0,2 renumbered)", SMI2,
+     {"NVIDIA_VISIBLE_DEVICES": "0,2"}, 2),
+    ("full visibility still filters by host indices (2,3 of 4)", SMI4,
+     {"NVIDIA_VISIBLE_DEVICES": "2,3"}, 2),
+    ("UUID lists are stable under renumbering", SMI2,
+     {"NVIDIA_VISIBLE_DEVICES": "GPU-bbb"}, 1),
     ("no nvidia-smi at all", "", {}, 0),
     ("nvidia-smi -L output format", "GPU 0: NVIDIA H200 (UUID: GPU-x)\n"
      "GPU 1: NVIDIA H200 (UUID: GPU-y)", {}, 2),

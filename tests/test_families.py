@@ -808,6 +808,69 @@ def test_env_layer_still_wins_over_family():
           src["TENSOR_PARALLEL_SIZE"] == "default")
 
 
+def test_shipped_variants_validate_clean():
+    section("every shipped tested variant passes its own pre-validation")
+    # The regression that motivated this test: madeby561-hybrid's 2048-token
+    # scheduler chunk sat below the registry-default 3072-row EXL3 arena, and
+    # the EXL3-arena rule (wrongly scoped to all of GLM) refused the
+    # documented qualified profile at every apply — and no test asserted the
+    # shipped variants resolve error-free.
+    for name, variant in gc.VARIANTS.items():
+        if not variant.get("tested"):
+            continue
+        fam = variant.get("family", "glm52")
+        gpus = 1 if fam == "qwen36" else 4
+        eff, _, _ = resolved(family=fam, gpus=gpus, MODEL_VARIANT=name)
+        found = errs(gc.validate(eff, {"gpu_count": gpus}))
+        check(f"{name} resolves with zero error-level findings",
+              not found, f"{name}: {sorted(found)}")
+
+
+def test_validation_scoping_fixes():
+    section("validation rules stay scoped to the kernel/family they bound")
+    eff, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3-3.25bpw",
+                         VLLM_EXL3_PREFILL_CAPACITY=4096)
+    check("the EXL3 arena rule still fires on an EXL3 variant",
+          "exl3-prefill-capacity-above-scheduler" in errs(gc.validate(eff)))
+    eff, _, _ = resolved(gpus=4, MODEL_VARIANT="madeby561-hybrid",
+                         VLLM_EXL3_PREFILL_CAPACITY=4096)
+    check("the EXL3 arena rule is silent for the NVFP4/NF3 hybrid",
+          "exl3-prefill-capacity-above-scheduler"
+          not in ids(gc.validate(eff)))
+    eff, _, _ = resolved(gpus=4, MTP_TOKENS=0, MAX_NUM_SEQS=128)
+    check("the decode-width window still applies with MTP off",
+          "concurrency-window" in errs(gc.validate(eff)))
+    eff, _, _ = resolved(gpus=4, MODEL_VARIANT="madeby561-hybrid",
+                         MAX_NUM_SEQS=8, VLLM_EXL3_TRELLIS_MAX_M=8)
+    check("the trellis window does not bound the hybrid decode width",
+          "concurrency-window" not in ids(gc.validate(eff)))
+    eff, _, _ = resolved(family="qwen36", gpus=1,
+                         GPU_BLOCKS_OVERRIDE=1024, MAX_MODEL_LEN=196608)
+    check("a pinned Qwen pool smaller than the context is refused",
+          "pool-smaller-than-context" in errs(gc.validate(eff)))
+    eff, src, _ = resolved(gpus=8, MODEL_VARIANT="madeby561-hybrid",
+                           TENSOR_PARALLEL_SIZE=4)
+    check("detected DCP follows the resolved TP, not the raw GPU count",
+          eff["DCP"] == "4"
+          and "dcp-divides-tp" not in errs(gc.validate(eff, {"gpu_count": 8})),
+          f"DCP={eff['DCP']}")
+    eff, _, _ = resolved(gpus=6)
+    check("a 6-GPU host resolves a legal DCP choice that divides TP",
+          eff["DCP"] == "2", f"DCP={eff['DCP']}")
+    eff, _, _ = resolved(gpus=4, SERVED_MODEL_NAME="  ")
+    check("a blank SERVED_MODEL_NAME is refused",
+          "served-name-empty" in errs(gc.validate(eff)))
+    eff, _, _ = resolved(gpus=4, MTP_DRAFT="nvfp4")
+    check("the nvfp4 draft's registry autofill satisfies the quant rule",
+          "draft-quant-inherit" not in ids(gc.validate(eff)))
+    eff, _, _ = resolved(gpus=4, MTP_DRAFT="nvfp4", DRAFT_QUANTIZATION="exl3")
+    check("an explicit wrong draft quantization is still refused",
+          "draft-quant-inherit" in errs(gc.validate(eff)))
+    eff, _, _ = resolved(gpus=4, DRAFT_MODEL='/x/"y')
+    check("a quote in DRAFT_MODEL is refused before it corrupts the JSON",
+          "draft-model-quoting" in errs(gc.validate(eff)))
+
+
 def run(test):
     """Run one test_* function. A failing check() raises AssertionError
     after recording the failure; swallow it here so the rest of the
@@ -839,6 +902,8 @@ def main():
         run(test_gpu_count_gate)
         run(test_long_context_gate_is_family_independent)
         run(test_env_layer_still_wins_over_family)
+        run(test_shipped_variants_validate_clean)
+        run(test_validation_scoping_fixes)
     finally:
         os.environ.clear()
         os.environ.update(saved)

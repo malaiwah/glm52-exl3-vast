@@ -59,10 +59,16 @@ def _context():
     """Validation context the shell can supply: how many GPUs this host has,
     and which keys the state file actually persisted."""
     ctx = {}
-    try:
-        ctx["gpu_count"] = int(os.environ["GLM_GPU_COUNT"])
-    except (KeyError, ValueError):
-        pass
+    # A fresh SSH shell does not inherit the boot exports, so fall back to
+    # PID 1's environment and then to the frozen startup snapshot — the same
+    # sources the rest of the config layer reads — before giving up and
+    # silently skipping the gpu-count validations.
+    for source in (os.environ, gc.effective_env(), gc.load_startup_env()):
+        try:
+            ctx["gpu_count"] = int(str(source.get("GLM_GPU_COUNT", "")).strip())
+            break
+        except (TypeError, ValueError):
+            continue
     try:
         ctx["state_keys"] = list(gc.load_state_file())
     except Exception:

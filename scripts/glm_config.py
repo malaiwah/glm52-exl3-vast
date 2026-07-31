@@ -1137,8 +1137,12 @@ def write_json_atomic(path, obj, mode=0o600):
     os.replace(tmp, path)
 
 
-def env_layer(env=None) -> dict:
-    """Knob values present in the (startup) environment, incl. legacy spellings."""
+def env_layer(env=None, invalid=None) -> dict:
+    """Knob values present in the (startup) environment, incl. legacy spellings.
+
+    A malformed value falls back to the default, but it must not do so
+    silently: pass `invalid` (a list) to collect one message per rejected
+    value so the snapshot/boot log can say the knob was ignored."""
     env = os.environ if env is None else env
     out = {}
     for knob in KNOBS:
@@ -1146,8 +1150,10 @@ def env_layer(env=None) -> dict:
             if env.get(name, "") != "":
                 try:
                     out[knob["key"]] = coerce(knob, env[name])
-                except ConfigError:
-                    pass          # a bad env value falls back to the default
+                except ConfigError as e:
+                    # a bad env value falls back to the default — loudly
+                    if invalid is not None:
+                        invalid.append(str(e))
                 break
     # legacy draft spellings: MTP78_MODE / MTP78_TRELLIS / DRAFT_MODEL predate
     # the MTP_DRAFT knob and are still documented in the README.
@@ -1180,8 +1186,14 @@ def snapshot_startup_env(env=None) -> dict:
     """Freeze the env layer for the life of the container (called once by the
     entrypoint). Everything after that reads the snapshot, so the layering can
     never be perturbed by something the entrypoint exports later."""
-    layer = env_layer(env)
-    write_json_atomic(p_startup_env(), layer, mode=0o644)
+    invalid = []
+    layer = env_layer(env, invalid=invalid)
+    doc = dict(layer)
+    if invalid:
+        # Persist the rejections alongside the frozen layer so resolve() can
+        # report them on every later read; a template typo must not vanish.
+        doc["__invalid_env__"] = invalid
+    write_json_atomic(p_startup_env(), doc, mode=0o644)
     return layer
 
 
@@ -1428,6 +1440,9 @@ def resolve(state_values=None, env_values=None):
     notes = []
     if env_values is None:
         env_values = load_startup_env()
+    if isinstance(env_values, dict):
+        for bad in env_values.get("__invalid_env__", []):
+            notes.append(f"startup env value ignored ({bad}); the default applies")
     if state_values is None:
         try:
             state_values = load_state_file()
@@ -1503,6 +1518,19 @@ def resolve(state_values=None, env_values=None):
             and sources.get("MTP_DRAFT") in ("default", "family")):
         effective["MTP_DRAFT"] = variant["default_draft"]
         sources["MTP_DRAFT"] = "variant"
+    # The detected DCP must follow the *resolved* TP, not the raw GPU count:
+    # an operator may deliberately under-subscribe TP on a bigger host, and a
+    # raw count (e.g. 6) may not even be a legal DCP choice. This runs after
+    # every layer so an explicit env/file/variant DCP is never touched.
+    if sources.get("DCP") == "detected":
+        try:
+            tp_res = int(effective.get("TENSOR_PARALLEL_SIZE") or 1)
+        except (TypeError, ValueError):
+            tp_res = 1
+        legal = sorted((int(c) for c in KNOB_BY_KEY["DCP"]["choices"]),
+                       reverse=True)
+        effective["DCP"] = str(next(
+            (c for c in legal if c <= tp_res and tp_res % c == 0), 1))
     return effective, sources, notes
 
 
@@ -1707,6 +1735,11 @@ def validate(cfg: dict, context=None):
             f"model variant '{cfg['MODEL_VARIANT']}' belongs to the "
             f"{variant['family']} family, not {fam_name}. Pick one of: "
             + ", ".join(k for k, v in VARIANTS.items() if v.get("family") == fam_name))
+    if not str(cfg.get("SERVED_MODEL_NAME", "")).strip():
+        err("served-name-empty", ["SERVED_MODEL_NAME"],
+            "SERVED_MODEL_NAME cannot be blank: it is the id clients pass in "
+            "the OpenAI 'model' field and the name every dashboard page "
+            "displays. Set at least one alias (the profile default is fine).")
     if cfg["KV_CACHE_DTYPE"] not in fam.get("kv_dtypes", []):
         err("kv-dtype-family", ["KV_CACHE_DTYPE", "MODEL_FAMILY"],
             f"KV dtype '{cfg['KV_CACHE_DTYPE']}' is not available for {fam['label']}. "
@@ -1747,8 +1780,15 @@ def validate(cfg: dict, context=None):
     m = seqs * (1 + toks)
     cap_max = cfg["MAX_CUDAGRAPH_CAPTURE_SIZE"]
     trellis_max = cfg["VLLM_EXL3_TRELLIS_MAX_M"]
-    window = min(cap_max, trellis_max)
-    if is_glm and toks > 0 and m > window:
+    # The trellis window belongs to the EXL3 kernel; on a non-EXL3 GLM target
+    # only the CUDA-graph capture window bounds the decode width. The width
+    # rule applies with speculation off too: m = MAX_NUM_SEQS is still a
+    # per-kernel batch width that silently leaves the captured path.
+    if variant.get("quantization") == "exl3":
+        window = min(cap_max, trellis_max)
+    else:
+        window = cap_max
+    if is_glm and m > window:
         err("concurrency-window", ["MAX_NUM_SEQS", "MTP_TOKENS",
                                    "MAX_CUDAGRAPH_CAPTURE_SIZE", "VLLM_EXL3_TRELLIS_MAX_M"],
             f"MAX_NUM_SEQS x (1 + MTP_TOKENS) = {seqs} x {1 + toks} = {m} query tokens per "
@@ -1778,13 +1818,23 @@ def validate(cfg: dict, context=None):
             "native in-checkpoint draft or an external nvfp4 draft dir.")
 
     # 3. a draft inherits the target's quantization --------------------------
-    if is_glm and draft == "nvfp4" and cfg.get("DRAFT_QUANTIZATION") != "modelopt_fp4":
+    # derive() fills DRAFT_QUANTIZATION from the draft registry when the knob
+    # is left empty (the documented behavior), so the rule must judge the
+    # value that will actually be served, not the raw knob.
+    effective_draft_quant = (cfg.get("DRAFT_QUANTIZATION")
+                             or DRAFTS.get(draft, {}).get("draft_quantization", ""))
+    if is_glm and draft == "nvfp4" and effective_draft_quant != "modelopt_fp4":
         err("draft-quant-inherit", ["DRAFT_QUANTIZATION", "MTP_DRAFT"],
             "a draft inherits the target's --quantization unless its speculative config "
             "carries its own, so an NVFP4 draft against an EXL3 target is loaded through "
             "the EXL3 path and throws the identical 'capture (m=3)' error as the v20 "
             "rank-sliced bug. Set DRAFT_QUANTIZATION=modelopt_fp4. This is a config trap, "
             "not a bug.")
+    if re.search(r'["\\]', str(cfg.get("DRAFT_MODEL") or "")):
+        err("draft-model-quoting", ["DRAFT_MODEL"],
+            "DRAFT_MODEL may not contain double quotes or backslashes: the "
+            "path is embedded verbatim in the --speculative-config JSON "
+            "literal and would corrupt it at engine start.")
     if is_glm and cfg.get("DRAFT_MODEL") and draft in (
             "tr3-graft", "native", "bf16", "off"):
         warn("draft-model-overrides", ["DRAFT_MODEL", "MTP_DRAFT"],
@@ -1929,6 +1979,7 @@ def validate(cfg: dict, context=None):
              "2048 blocks. Keep that pin, or re-run the 32K and near-maximum needle "
              "gates before trusting this configuration.")
     if (is_glm
+            and variant.get("quantization") == "exl3"
             and cfg["VLLM_EXL3_PREFILL_CAPACITY"]
             > cfg["MAX_NUM_BATCHED_TOKENS"]):
         err("exl3-prefill-capacity-above-scheduler",
@@ -1951,13 +2002,17 @@ def validate(cfg: dict, context=None):
             "3,072-token shape OOMed its first 128K request after a successful "
             "boot. Keep MAX_NUM_BATCHED_TOKENS<=2048 for full-context offload, "
             "or re-run the cold 128K and near-maximum request gates.")
-    logical_tokens_per_block = 64 * int(cfg.get("DCP", "1"))
+    # DCP multiplies logical KV capacity only on the MLA/DCP (GLM) path; for
+    # other families a block is 64 tokens, full stop — using the inapplicable
+    # GLM DCP value here would wave through a pool 4x too small.
+    dcp_mult = int(cfg.get("DCP", "1") or "1") if is_glm else 1
+    logical_tokens_per_block = 64 * dcp_mult
     if (cfg["GPU_BLOCKS_OVERRIDE"]
             and cfg["GPU_BLOCKS_OVERRIDE"] * logical_tokens_per_block
             < cfg["MAX_MODEL_LEN"]):
         err("pool-smaller-than-context", ["GPU_BLOCKS_OVERRIDE", "MAX_MODEL_LEN"],
             f"the pinned KV pool is {cfg['GPU_BLOCKS_OVERRIDE']} blocks x 64 tokens "
-            f"x DCP={cfg.get('DCP')} = "
+            f"x DCP={dcp_mult} = "
             f"{cfg['GPU_BLOCKS_OVERRIDE'] * logical_tokens_per_block} tokens, "
             f"smaller than MAX_MODEL_LEN "
             f"({cfg['MAX_MODEL_LEN']}). vLLM refuses to start when it cannot fit one "

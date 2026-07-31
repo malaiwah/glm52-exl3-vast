@@ -145,8 +145,25 @@ def visible(devices, env=None):
         if nvd.strip() == "none":
             notes.append("NVIDIA_VISIBLE_DEVICES=none: the runtime exposed no GPUs")
             return [], notes
-        sel = _select(sel, nvd)
-        notes.append(f"NVIDIA_VISIBLE_DEVICES={nvd} narrowed the set to {len(sel)}")
+        requested = [x.strip() for x in nvd.split(",") if x.strip()]
+        narrowed = _select(sel, nvd)
+        index_spec = all(re.fullmatch(r"\d+", x) for x in requested)
+        if (index_spec and len(narrowed) < len(requested)
+                and 0 < len(sel) <= len(requested)):
+            # This variable carries *host* indices, but the container runtime
+            # that honoured it renumbers the surviving GPUs 0..N-1: with
+            # `--gpus '"device=2,3"'` nvidia-smi here shows indices 0 and 1,
+            # and re-applying "2,3" would discard both usable devices. When
+            # the observed set is already no bigger than the request, the
+            # restriction has been applied for us — nvidia-smi remains the
+            # primary observation, as with the `void` sentinel above.
+            notes.append(
+                f"NVIDIA_VISIBLE_DEVICES={nvd} appears already applied by the "
+                f"container runtime ({len(sel)} device(s) visible, renumbered "
+                "from the host indices); keeping the observed set")
+        else:
+            sel = narrowed
+            notes.append(f"NVIDIA_VISIBLE_DEVICES={nvd} narrowed the set to {len(sel)}")
 
     cvd = env.get("CUDA_VISIBLE_DEVICES")
     if cvd is not None and cvd.strip() != "":
