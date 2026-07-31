@@ -144,10 +144,40 @@ preserved in
 [pure #100 boundary evidence](artifacts/sparkinfer-w4a16-boundaries-pure-d4d101e-cold.log)
 and
 [#100 + #102 boundary evidence](artifacts/sparkinfer-w4a16-boundaries-composed-3382e15-cold.log).
-Root-cause analysis is active in a separate branch; these new failures do not
-invalidate the already-proven GLM shape (`I=1856`) or the stale-tail fix at
-`I=128`, but the upstream repair will not be published with a red supported-
-shape test.
+
+Root cause: ModelOpt's E4M3 scale grid permutes output rows in 64-row tiles.
+For ungated ReLU2, preparation padded a 32-row tail, permuted it, and truncated
+the packed result back to the logical row count. That discarded 16 valid
+tail-row scales; the micro reader then addressed those missing permuted
+positions in following storage. SiLU happened to avoid the defect because its
+gated W13 row count is `2I`, a multiple of 64 at both filed boundaries.
+
+Final pure #100 repair head `691995de` retains the final 64-row-padded scale
+tile only in the direct-micro representation and makes its reader/expert stride
+match. The main packed ABI is unchanged. Exact #100 + #102 composition
+`5ab78a09` contains the identical repair.
+
+- Boundary cold: **12/12 passed** on both exact lineages.
+- Boundary warm: **12/12 passed**.
+- Compute Sanitizer: **12/12 passed, 0 errors**.
+- Pure #100 affected union: **124/124 passed** cold and warm.
+- #100 + #102 union: **120 passed, 8 intentional skips** cold and warm.
+- Ruff and `git diff --check`: clean.
+
+Evidence:
+[pure boundary cold](artifacts/sparkinfer-w4a16-boundaries-pure-691995d-cold.log),
+[composed boundary cold](artifacts/sparkinfer-w4a16-boundaries-composed-5ab78a0-cold.log),
+[composed boundary warm](artifacts/sparkinfer-w4a16-boundaries-composed-5ab78a0-warm.log),
+[Compute Sanitizer](artifacts/sparkinfer-w4a16-boundaries-pure-691995d-memcheck.log),
+[pure union cold](artifacts/sparkinfer-w4a16-pr100-final-691995d-union-cold.log),
+[pure union warm](artifacts/sparkinfer-w4a16-pr100-final-691995d-union-warm.log),
+[composed union cold](artifacts/sparkinfer-w4a16-pr100-102-final-5ab78a0-union-cold.log),
+and
+[composed union warm](artifacts/sparkinfer-w4a16-pr100-102-final-5ab78a0-union-warm.log).
+
+At GLM's `I=1856`, both row counts are already divisible by 64, so the scale
+allocation and reader stride are unchanged. The final independent review is
+pending before upstream publication.
 
 Review also found a separate generic-shape bug for ModelOpt intermediates
 divisible by 16 but not 64 (for example `I=144`): padded-grid validity can
@@ -259,6 +289,18 @@ Evidence:
 [512 server](artifacts/vllm-current210-cap512-mtp0-v1-server.log),
 and
 [512 steady repeat](artifacts/vllm-current210-cap512-mtp0-v1-bench-measure-b.json).
+
+The first MTP3/1,024 boot was correctly attributed as a **harness failure**,
+not a candidate failure. SSH-launched processes inside the retained container
+did not inherit PID 1's OCI `VLLM_EXL3_EXT_PATH`; MTP0 never imports the native
+draft extension, while MTP3 failed at its first draft call with
+`Unable to import exllamav3_ext`. The same SSH environment also omitted the
+image's NCCL `LD_PRELOAD`, triggering the independently filed calibration
+launcher bug. No Xid or residual GPU allocation followed the clean engine
+shutdown. The harness now restores the immutable image paths
+`/opt/exllamav3` and `/opt/libnccl-local-inference.so.2.30.4`, prints both,
+and will rerun under a fresh evidence label/cache.
+[Failed first MTP3 boot](artifacts/vllm-current210-cap1024-mtp3-v1-server.log).
 
 ### E. PCIe calibration launcher reliability
 

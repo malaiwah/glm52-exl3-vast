@@ -13,6 +13,7 @@ JIT_ROOT="${JIT_ROOT:-/workspace/field-review-tests/jit/$RUN_LABEL}"
 MODEL_ROOT="${MODEL_ROOT:-/workspace}"
 CANDIDATE_PYTHONPATH="${CANDIDATE_PYTHONPATH:-}"
 PREFILL_CAPACITY="${PREFILL_CAPACITY:-unset}"
+MTP_TOKENS_VALUE="${MTP_TOKENS_VALUE:-0}"
 FIELD_REVIEW_SCRIPTS_DIR="${FIELD_REVIEW_SCRIPTS_DIR:-/workspace/field-review-tests/turnkey-scripts}"
 
 # An interactive SSH shell on a rental does not necessarily inherit the OCI
@@ -57,6 +58,13 @@ case "$PREFILL_CAPACITY" in
   *) export VLLM_EXL3_PREFILL_CAPACITY="$PREFILL_CAPACITY" ;;
 esac
 
+case "$MTP_TOKENS_VALUE" in
+  *[!0-9]*|"")
+    echo "FATAL: MTP_TOKENS_VALUE must be a non-negative integer" >&2
+    exit 2
+    ;;
+esac
+
 if nvidia-smi --query-compute-apps=pid --format=csv,noheader |
    grep -q '[0-9]'; then
   echo "FATAL: a GPU process is already running; refusing a polluted gate" >&2
@@ -74,6 +82,19 @@ export TRITON_CACHE_DIR="$JIT_ROOT/triton"
 export XDG_CACHE_HOME="$JIT_ROOT/xdg"
 export GLM_STATE_DIR="/tmp/field-review-$RUN_LABEL/state"
 export GLM_RUNTIME_DIR="/tmp/field-review-$RUN_LABEL/runtime"
+
+# SSH-launched processes inside the retained appliance do not inherit every
+# OCI environment value from PID 1. Reconstitute the two immutable runtime
+# paths needed by the release image so an MTP/source gate exercises the same
+# EXL3 extension and NCCL shim as a normal appliance boot.
+if [ -z "${VLLM_EXL3_EXT_PATH:-}" ] &&
+   [ -d /opt/exllamav3 ]; then
+  export VLLM_EXL3_EXT_PATH=/opt/exllamav3
+fi
+if [ -z "${LD_PRELOAD:-}" ] &&
+   [ -e /opt/libnccl-local-inference.so.2.30.4 ]; then
+  export LD_PRELOAD=/opt/libnccl-local-inference.so.2.30.4
+fi
 
 if [ "$MODE" = "candidate" ]; then
   export PYTHONPATH="$CANDIDATE_PYTHONPATH${PYTHONPATH:+:$PYTHONPATH}"
@@ -94,7 +115,7 @@ export MODEL_ID=
 export MODEL_REVISION=d7d79c2d14599dfce7a5d12b85f7ad73f40e623d
 export MODEL_REPO=willfalco/GLM-5.2-EXL3-TR3-3.25bpw
 export TENSOR_PARALLEL_SIZE=4 DCP=4
-export MTP_TOKENS=0 MTP_DRAFT_SAMPLE_METHOD=probabilistic
+export MTP_TOKENS="$MTP_TOKENS_VALUE" MTP_DRAFT_SAMPLE_METHOD=probabilistic
 export MAX_MODEL_LEN=131072 MAX_NUM_SEQS=1
 export MAX_NUM_BATCHED_TOKENS=3072
 export MAX_CUDAGRAPH_CAPTURE_SIZE=6
@@ -126,8 +147,10 @@ unset DESEC_TOKEN DESEC_DOMAIN ACME_DOMAIN ACME_DNS_PROVIDER
 unset CONTAINER_API_KEY RUNPOD_API_KEY HF_TOKEN HUGGING_FACE_HUB_TOKEN
 unset VLLM_API_KEY
 
-echo ">>> field-review run: label=$RUN_LABEL mode=$MODE capacity=$PREFILL_CAPACITY"
+echo ">>> field-review run: label=$RUN_LABEL mode=$MODE capacity=$PREFILL_CAPACITY mtp=$MTP_TOKENS"
 echo ">>> JIT/cache root: $JIT_ROOT"
+echo ">>> EXL3 extension path: ${VLLM_EXL3_EXT_PATH:-unset}"
+echo ">>> NCCL preload: ${LD_PRELOAD:-unset}"
 if [ "$MODE" = "candidate" ]; then
   python3 - <<'PY'
 import vllm
