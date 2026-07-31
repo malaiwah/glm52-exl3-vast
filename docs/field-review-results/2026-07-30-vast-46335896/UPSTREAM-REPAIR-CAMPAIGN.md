@@ -141,6 +141,39 @@ gate has substantial occupancy slack and cannot refute that case. This
 candidate remains withheld pending an aggregate-overlap safety design or a
 proof that such channel launches cannot overlap.
 
+An attempted follow-up converted every rendezvous path to an occupancy-bounded
+cooperative launch:
+
+- #101 `f85aff393377f952cb99929f10a51c6e9da68d31`;
+- #103 `10d79f3616078d1839c4fff0d0e728aaa4cc9c0b`.
+
+Both exact heads compiled from fresh JIT caches. Their first use inside CUDA
+graph capture passed at two ranks. Their independent four-GPU gates also
+passed: 15/16 static and lifecycle tests respectively, 1,025 one-shot graph
+replays plus multistream stress, fused add+RMSNorm, DCP4, and two-shot
+reduce-scatter/all-gather. No GPU process remained after either gate.
+
+Those positive full-GPU smokes are retained but the cooperative candidates
+are **rejected** after independent review. They leave two distributed
+deadlocks:
+
+1. each rank derives its block count from its local SM/occupancy capacity, so
+   heterogeneous partitions can launch unequal grids while peer barriers are
+   indexed by `blockIdx.x`;
+2. cooperative admission is local to one device. Different GPUs can admit
+   separate full channel grids in opposite order, leaving each grid waiting
+   for its peer behind the other grid.
+
+The new aggregate-overcommit test only modeled the arithmetic and checked
+source strings; it did not exercise either distributed schedule. The reviewer
+confirmed the cooperative argument ABI, exact-kernel occupancy specialization,
+fused specialization, graph support, and header packaging, but returned
+**REQUEST CHANGES** on these two P1 findings. The repair direction is now to
+remove the all-CTA rendezvous: publish the channel's dynamic slab selection
+from a one-CTA control node immediately before the worker in the same
+stream/graph. This chronology must remain visible; neither cooperative head is
+safe to publish.
+
 The initial four-rank two-shot timing was correctly withheld from the
 two-rank historical control. A matched world-size-2 A/B then excluded one
 base compile/warmup and ran three repeats per exact head. Median
@@ -159,6 +192,11 @@ and
 [Cold-capture #101](artifacts/sparkinfer-replay-residency-101-cold-capture.log)
 and
 [cold-capture #103](artifacts/sparkinfer-replay-residency-103-cold-capture.log).
+[Rejected cooperative #101 cold capture](artifacts/sparkinfer-coop-101-f85aff3-cold-capture.log),
+[#101 four-GPU smoke](artifacts/sparkinfer-coop-101-f85aff3-gpu-cold.log),
+[#103 cold capture](artifacts/sparkinfer-coop-103-10d79f3-cold-capture.log),
+and
+[#103 four-GPU smoke](artifacts/sparkinfer-coop-103-10d79f3-gpu-cold.log).
 Independent review is still required before publication.
 
 ### B. SparkInfer W4A16 scratch lifetime
