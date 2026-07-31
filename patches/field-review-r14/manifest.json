@@ -46,6 +46,65 @@
       }
         },
         {
+            "name": "vllm-semantic-pcie-channels",
+            "base_commit": "5a7ac1481e1fc24b0bbc35efe160b2ff34797bee",
+            "base_tree": "46f6f5bf387ee2c07712808cfe64f722fa2b99f3",
+            "tested_head": "be1e289a8ca6cc043b582b26c788efc4b1f5d0a8",
+            "tested_tree": "b2374b5a26eb8acd6d8f961eff8b700701f2255d",
+            "patch": "vllm-semantic-pcie.patch",
+            "patch_sha256": "25ef7b7a56ac82ddcdddcf7c4ae3a57cc6af33995af2464fb97cf7f7315e1ee7",
+            "targets": [
+                "vllm-source",
+                "site-packages"
+            ],
+            "files": {
+                "vllm/distributed/device_communicators/custom_all_reduce.py": {
+                    "before": "ac3d5dcd4bf1f933e98576ca2c0c0ff64a9436d27c1d790c144012346f6d43b5",
+                    "after": "3867ec1abfa849bcefcc5edb50a9bd4fc031fe1b8ff12504fa3aae1fd2352b11"
+                },
+                "vllm/distributed/parallel_state.py": {
+                    "before": "76de09a1ea23fd923a251bf37dc611f6afec394f24d136ceab4fcf540dfdd30a",
+                    "after": "abf5c59dae41d9a15607ffb21f6c721cf5f9af1883aee1ce5c7f16b532fb3b4d"
+                },
+                "vllm/v1/attention/ops/dcp_alltoall.py": {
+                    "before": "3b3ee3b54f361cc473acf46c74e3fb8c7a4abaa4e90a6fa9bd6c31067358b77c",
+                    "after": "04537dcbb15ae64e07bb5b161a11d4657f41d62b7ea50f124820304ea195d6e9"
+                },
+                "vllm/v1/worker/gpu/cudagraph_utils.py": {
+                    "before": "c82a956cb3df0827c9aae090a05fa3b2326601ae0f5323808ca1669c26a6ef91",
+                    "after": "a55362bcaa8c31b111c88d083a0a015f401d516d2623f171a0080cc978dc08d5"
+                },
+                "vllm/v1/worker/gpu/model_runner.py": {
+                    "before": "236ea5af9f1dd7accc894b54adef1d68a37ce96bf02b12f90cab867b4d5fbc66",
+                    "after": "b82d5072b01d24bbd64471ee77da7cbfcdc6018e8fa65a0339b3d56cf7111e51"
+                },
+                "vllm/v1/worker/gpu/spec_decode/autoregressive/cudagraph_utils.py": {
+                    "before": "6068779f5719999ba6a9516727b0a0246e4a821c70b35c2878a3af9046052d48",
+                    "after": "4d0258ab29724ec374cfc266474ebd381a9a26047a8c5b09f1500d64e2ea2dc7"
+                },
+                "vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py": {
+                    "before": "570947fa8d076c98424b34695d4310a567b1d1c5dc34413f429b2eb8c0e08cb4",
+                    "after": "a4e2c807ed0cfa8305d5724765c185cea3786d254648710e2cb9bdb5b9d1ce13"
+                },
+                "vllm/v1/worker/gpu/spec_decode/dflash/cudagraph.py": {
+                    "before": "ebb4abcd30b3f53f25e650eaeea1fc55b55d86142a6bc3753dd8eed345fdd893",
+                    "after": "d77b440d4c14ee3fc32b5578a9547b730c6901f7859a77794df6ea56c8b79108"
+                },
+                "vllm/v1/worker/gpu/spec_decode/dflash/speculator.py": {
+                    "before": "1401a6d7453e86988f648ed796dcd1a8b93ef56470d39ed3dcda31bff1c74cc8",
+                    "after": "941809924f911cfb95fa445a1e06a930a7959c1ab00913c74546215080e85a63"
+                },
+                "vllm/v1/worker/gpu/spec_decode/speculator.py": {
+                    "before": "d11ed0ee0911f40d4d259c5f66c7696ef50f26e164d0e6f8cc04826be78d41f8",
+                    "after": "db3b948cb500076e6a3c15251b5cc1b60dfc591f75ff4e7bcb8e8ae4b31fbc4a"
+                },
+                "vllm/v1/worker/gpu_model_runner.py": {
+                    "before": "0e0a68353d275a25fd900c52e6f8a093ad3ae5e2939d063afbbd29f3def8c5f0",
+                    "after": "947ae51080870ee52fba9f3bee626e93c09b67bf23a0d9731272c88676aa9d6e"
+                }
+            }
+        },
+        {
             "name": "sparkinfer-w4a16-100-102",
             "base_commit": "9b852b281250123fe323f63ccb1df3cac0f3bbca",
             "base_tree": "8110e3ea417794bfb08aff1fba20135102e5536b",
@@ -105,6 +164,130 @@
                 "sparkinfer/moe/fused_moe/api.py": {
                     "before": "0f365097620980f902fd8cf1a0e3ede812326c94f6baa4bd428033ab712ae61f",
                     "after": "efdbfa1bae6662e24bf17a4b041f478b46bc5e6c4362353ab0511d5aa20da16c"
+                }
+            }
+        },
+        {
+            "name": "sparkinfer-pcie-ipc-hardening",
+            "base_commit": "9b852b281250123fe323f63ccb1df3cac0f3bbca",
+            "base_tree": "8110e3ea417794bfb08aff1fba20135102e5536b",
+            "tested_head": "31fa6a48116471ce423f0338047453ec1032c202",
+            "tested_tree": "0f1f3f9d01889cc7177956510657b578f7cb83db",
+            "patch": "sparkinfer-pcie-ipc.patch",
+            "patch_sha256": "114c782ce99da46394b8110de68cb72b368cc7257e88693e405375218384c720",
+            "targets": [
+                "site-packages"
+            ],
+            "files": {
+                "sparkinfer/comm/pcie/ipc_handle_registry.h": {
+                    "before": null,
+                    "after": "6ab94c3e575126ae13292209978dbe5a6d071ccc01870214ddf6a62f26b39fdd"
+                },
+                "sparkinfer/comm/pcie/pcie_dcp_a2a.cu": {
+                    "before": "39020584808d49e4f53428f6b435078a6298836b4e3f7acdcd3ed2041a8d442e",
+                    "after": "806d64c3485e28ea574948ce192a88ec4c48f5a01630e57061aca49ca06bdaa7"
+                },
+                "sparkinfer/comm/pcie/pcie_dcp_a2a.py": {
+                    "before": "7ed306b61bf218754b7f71bf133a6f8ba5b0c485011c970eab55a20e1731d581",
+                    "after": "fc9b7e7f12a28c9dffd916a583e39b19b59134c434d4e6dbae42a2375c81c1bd"
+                },
+                "sparkinfer/comm/pcie/pcie_oneshot.cu": {
+                    "before": "1919de30b692a40313011705c2bc6e6eb4865b3f3ff792ab0c9268f92bc7275c",
+                    "after": "1ace3974f04a56e7c27a8c8e53e8440fbf039f78755d54ed64ae1565a200fbd2"
+                },
+                "sparkinfer/comm/pcie/pcie_oneshot.py": {
+                    "before": "b55ecf01bff2480f03f44a96a25d738d8131fb22417492313d4e031588878acd",
+                    "after": "83f4ca93446bd74e849b67e906a5dd1a86e2ffbda0f3af943cc76eb984ed8670"
+                },
+                "sparkinfer/comm/pcie/pcie_twoshot.cu": {
+                    "before": "ca2564aa1b2a6ca5f283e679199d3ef83fad74eb3a8ca98f34efd26b21a87742",
+                    "after": "e134f888ce130ae242fe8914559ec3cb6f940c008f92e5e4fc983dabe2fee6fc"
+                },
+                "sparkinfer/comm/pcie/pcie_twoshot.py": {
+                    "before": "de155562239506265dbe34b504544e6572d389787ac56ea6bfd22c6a7dc44c8e",
+                    "after": "f708c0f34f8d268934e5a0e322e22f246b0a191b3b50cbfa68c398143205a85e"
+                }
+            }
+        },
+        {
+            "name": "lmcache-lifecycle-hardening",
+            "base_commit": "8e2857e6306bb05882c7e4035337733ff1a01cfb",
+            "base_tree": "a5aa59cc8edca462a3f4c198d17fd2b9c1a7ffaa",
+            "tested_head": "f24812ee33dc9196e788d1004b1d68f473741e2b",
+            "tested_tree": "801ef626cd62f6b6d51b3e07932268ced6cd8f5d",
+            "patch": "lmcache-lifecycle.patch",
+            "patch_sha256": "faea3c4ffd73789b54f251fef50073a0765d7af826c1edac92fd70b5fc1c4540",
+            "targets": [
+                "site-packages"
+            ],
+            "files": {
+                "lmcache/cli/commands/bench/server_bench/command.py": {
+                    "before": "e975e65b073188f195d8bc8ff6b6747721730fb8ea7ebb7e943d7a697527b06b",
+                    "after": "54afa914f4b4d842764f706b83570070a23495a3772580e809f225464c592b12"
+                },
+                "lmcache/cli/commands/bench/server_bench/helpers.py": {
+                    "before": "1a065b907dc0c795b2a67ce40a0ad6262d3aa7f7cb18634d47d95d42217adba4",
+                    "after": "b4513c6563253bd74988abe688672e4530eb83b7a7a16441802ee5bc2fb085d2"
+                },
+                "lmcache/integration/sglang/multi_process_adapter.py": {
+                    "before": "529a9e2dfd4222eaa9c782d541a619d0ed85058de4dbf5410c15167d6c7ec536",
+                    "after": "d1e8108adfab55925963ef184ed56691309038227cd71cdb227d505010d8c299"
+                },
+                "lmcache/integration/tensorrt_llm/tensorrt_mp_adapter.py": {
+                    "before": "0b5327e5d430278a35294b67c9e8b611898d75a4ae414f0b79ef7be6bb0f2208",
+                    "after": "ee4218f848aaad273934c9cd62a0ef48404be014625738926e58045b0e1989fd"
+                },
+                "lmcache/integration/vllm/vllm_multi_process_adapter.py": {
+                    "before": "ea580badefb9a0fad5fa2ac1bdcff4f2b36fc85138d95a5be4b180f07dd2c874",
+                    "after": "738d68e739468ec09ebba2f7682eff977f8972b4d59f751d34ebea261f18c6ef"
+                },
+                "lmcache/v1/distributed/l1_manager.py": {
+                    "before": "81f5d235b0887c3efa372f63fa6f11ce7c3c979fd8f680f8f144dd1c53ff4dee",
+                    "after": "23a937a9b6d48eb136e54be1f8079f65f6355768011f7d0af10a4aa35e911701"
+                },
+                "lmcache/v1/mp_observability/errors.py": {
+                    "before": "178486a1ac2cec3f14fa041c9861316dc30483a59692d5698e6400d18f242749",
+                    "after": "90e4173beb951bcd5bcd9282b2281abb0ca6f00ce64b7f343439eaabf5dc0ed7"
+                },
+                "lmcache/v1/multiprocess/affinity_pool.py": {
+                    "before": "dc84db4d9973e81076278b84ba8cc3003864067a5ac3c8ea3603a4dac99973d0",
+                    "after": "456717c55b1dfdfe3e340b1a891327f62edcaa238586084f0af7b5ce3293d055"
+                },
+                "lmcache/v1/multiprocess/futures.py": {
+                    "before": "0f942c8c1bd65d9d76b8c4c5c1daec803e1575916a9b96f5789b03acc8a0b731",
+                    "after": "5c74f3301450d88b75541a92f91c4835f3e1a150168196daffa12f16f25046bf"
+                },
+                "lmcache/v1/multiprocess/http_server.py": {
+                    "before": "47b452ac183de3a3d7e2410edd1624d8d5ddbbd09998dc7af7149a58da22fc67",
+                    "after": "378cb0dd8ca5a34a0ee0e48ec933b49b865163910909242e1fc389ef9bac14f3"
+                },
+                "lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py": {
+                    "before": "7efb335c6dc4a45b5fb686688d667679a237488101c300b8299caef392f8c4e8",
+                    "after": "34551634e76c41e610280949d00209006157b455d1e7173a43d59382d12f96cc"
+                },
+                "lmcache/v1/multiprocess/mq.py": {
+                    "before": "3be87a10a549b4a4c11aae8c8e51ecf6d44ea2f5bda19c5f10cfe49094a73cbf",
+                    "after": "eb87005ec9824106b51c53b3003e6e97600b6d6573e25939ca00c180821dd3db"
+                },
+                "lmcache/v1/multiprocess/server.py": {
+                    "before": "ab87692474e5fac20b85052fd5fecd8bcdac5df8752fd930d5a449c6f65956ec",
+                    "after": "7203c1325153bd175ec76386b9231296c209066cb373995a43f55cfd761a1499"
+                },
+                "lmcache/v1/multiprocess/transfer_context/worker_transfer.py": {
+                    "before": "4e851a51d799bb9e33a7444bec1fc1be7a20082af6260877e6945c411992fe0e",
+                    "after": "e5fc6b0d4e1c1d9afa77ac4c9f1cb09ce9a7fb4617a79bb002f911321475aa37"
+                },
+                "lmcache/v1/platform/base_ipc_wrapper.py": {
+                    "before": "e91d78986bad06805ee32b91b3e4c2b2d6d050fed1b77f6edd3a1945cc4c8ad9",
+                    "after": "7166a37ebf6c4dbfbf62ada983ebef5b5826aa938ffb4d55e6bf77372192ac1b"
+                },
+                "lmcache/v1/platform/cache_context.py": {
+                    "before": "162b308733cdff72b5374a5f21d51921d19e42f2222247279b32195250e3633b",
+                    "after": "c1445838297b1c5c8758866b78f46af17c7c7c7b546e9703aca5bffb5853a191"
+                },
+                "lmcache/v1/platform/cuda/ipc_wrapper.py": {
+                    "before": "46d41772b15edf6887d763c414576465ce525365de7f30868604022cc4d38dbe",
+                    "after": "0a73b63a1520bf2653bbcc75664fb2760dcb722c76aba324f3da89e87b29eb23"
                 }
             }
         },

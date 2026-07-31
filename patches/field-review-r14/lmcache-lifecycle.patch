@@ -1,0 +1,3549 @@
+diff --git a/lmcache/cli/commands/bench/server_bench/command.py b/lmcache/cli/commands/bench/server_bench/command.py
+index eeb3e73bf821980c8f6b3bac61e357619b6108fb..76ccfdedabfe51e0172042a922f75ec8811b14d0 100644
+--- a/lmcache/cli/commands/bench/server_bench/command.py
++++ b/lmcache/cli/commands/bench/server_bench/command.py
+@@ -545,13 +545,18 @@ def run_server_bench(
+         shm_names: list[str] = []
+         if use_gpu:
+             # First Party
++            from lmcache.v1.platform.base_ipc_wrapper import (
++                wrap_ipc_tensors_rollback_safe,
++            )
+             from lmcache.v1.platform.cuda.ipc_wrapper import CudaIPCWrapper
+ 
+             allocated = _allocate_gpu_kv_cache(groups=layer_groups)
+             log(
+                 "Allocated %d GPU tensors on %s" % (len(allocated), allocated[0].device)
+             )
+-            kv_wrappers: KVCache = [CudaIPCWrapper(t) for t in allocated]
++            kv_wrappers: KVCache = wrap_ipc_tensors_rollback_safe(
++                allocated, CudaIPCWrapper
++            )
+             # Keep the CUDA tensors alive for the lifetime of the
+             # bench process -- storage may be reclaimed otherwise --
+             # and reuse the same list as the client-side data-mode
+diff --git a/lmcache/cli/commands/bench/server_bench/helpers.py b/lmcache/cli/commands/bench/server_bench/helpers.py
+index 77a5d41a0b9591565dbd3a62de018d0acb8fd107..566c6d26706fa544ad24c040ab6db63159a99d50 100644
+--- a/lmcache/cli/commands/bench/server_bench/helpers.py
++++ b/lmcache/cli/commands/bench/server_bench/helpers.py
+@@ -135,6 +135,11 @@ _DEFAULT_RPC_TIMEOUT_S = 10.0
+ # can disambiguate it from a legitimate ``None`` (void) reply.
+ _TIMEOUT = object()
+ 
++# A timed-out handle request may still be using its exported event in the
++# server. Retain those rare events for the remaining lifetime of the bench
++# process rather than destroying an exporter that another process may open.
++_TIMED_OUT_IPC_EVENTS: list[Any] = []
++
+ 
+ def _call(
+     client: MessageQueueClient,
+@@ -486,19 +491,18 @@ def _poll_prefetch_status(
+     return None
+ 
+ 
+-def _make_event_handle(use_gpu: bool = True) -> bytes:
+-    """Create a CUDA event IPC handle for GPU mode.
++def _make_event(use_gpu: bool = True) -> Any | None:
++    """Create and retain a worker-owned CUDA event for a handle request.
+ 
+-    CPU mode does not need a cross-process event (SHM mappings are
+-    coherent without device-side sync), so an empty handle is
+-    returned and the server treats it as a no-op.
++    CPU mode does not need a cross-process event because SHM mappings are
++    coherent without device-side synchronization.
+     """
+     if not use_gpu:
+-        return b""
++        return None
+     check_interprocess_event_support()
+     event = torch_dev.Event(interprocess=True)
+     event.record()
+-    return event.ipc_handle()
++    return event
+ 
+ 
+ def _build_server_slot_views(
+@@ -701,15 +705,20 @@ def _send_store(
+         num_tokens = key.end - key.start
+         num_blocks = num_tokens // block_size
+         block_ids = list(range(block_offset, block_offset + num_blocks))
++        completion_event = _make_event()
+         payloads = [
+             key,
+-            _INSTANCE_ID,
++            0,
+             [block_ids] * num_engine_group_infos,
+-            _make_event_handle(),
++            completion_event.ipc_handle() if completion_event is not None else b"",
+         ]
+         result = _call(client, RequestType.STORE, payloads)
++        if result is _TIMEOUT and completion_event is not None:
++            _TIMED_OUT_IPC_EVENTS.append(completion_event)
+         if result is _TIMEOUT:
+             return "timeout"
++        if completion_event is not None:
++            completion_event.synchronize()
+         return "stored" if result[1] else "store_failed"
+ 
+     # CPU mode: PREPARE_STORE -> COMMIT_STORE
+@@ -770,16 +779,21 @@ def _send_retrieve(
+         hit_tokens = hit_chunks * chunk_size
+         num_blocks = hit_tokens // block_size
+         block_ids = list(range(block_offset, block_offset + num_blocks))
++        completion_event = _make_event()
+         payloads = [
+             key,
+-            _INSTANCE_ID,
++            0,
+             [block_ids] * num_engine_group_infos,
+-            _make_event_handle(),
++            completion_event.ipc_handle() if completion_event is not None else b"",
+             0,  # skip_first_n_tokens
+         ]
+         result = _call(client, RequestType.RETRIEVE, payloads)
++        if result is _TIMEOUT and completion_event is not None:
++            _TIMED_OUT_IPC_EVENTS.append(completion_event)
+         if result is _TIMEOUT:
+             return "timeout"
++        if completion_event is not None:
++            completion_event.synchronize()
+         return "retrieved" if result[1] else "retrieve_failed"
+ 
+     # CPU mode: PREPARE_RETRIEVE -> COMMIT_RETRIEVE
+diff --git a/lmcache/integration/sglang/multi_process_adapter.py b/lmcache/integration/sglang/multi_process_adapter.py
+index 53a4529928db244f99a5c181ea96b1993985dd54..72a131a025be1e61687131967b10f389d3f396b1 100644
+--- a/lmcache/integration/sglang/multi_process_adapter.py
++++ b/lmcache/integration/sglang/multi_process_adapter.py
+@@ -36,6 +36,7 @@ from lmcache.v1.multiprocess.custom_types import (
+ )
+ from lmcache.v1.multiprocess.mq import MessageQueueClient
+ from lmcache.v1.multiprocess.protocol import RequestType
++from lmcache.v1.platform.base_ipc_wrapper import wrap_ipc_tensors_rollback_safe
+ from lmcache.v1.platform.cuda.ipc_wrapper import CudaIPCWrapper
+ 
+ logger = init_logger(__name__)
+@@ -56,10 +57,9 @@ def _wrap_sglang_kv_caches(
+     ``EngineType.SGLANG`` plus a ``tokens_per_block`` ``LayoutHints`` field
+     and splits it back at its midpoint before format detection.
+     """
+-    wrapped: KVCache = []
+-    wrapped.extend(CudaIPCWrapper(tensor) for tensor in k_pool)
+-    wrapped.extend(CudaIPCWrapper(tensor) for tensor in v_pool)
+-    return wrapped
++    # Each completed _share_cuda_ owns one producer reservation. Roll back a
++    # partial K/V batch if a later wrapper fails to construct.
++    return wrap_ipc_tensors_rollback_safe((*k_pool, *v_pool), CudaIPCWrapper)  # type: ignore[return-value]
+ 
+ 
+ @dataclass
+@@ -409,7 +409,7 @@ class LMCacheMPConnector:
+                 event.ipc_handle(),
+                 skip_prefix_n_blocks,
+             ],
+-        ).to_cuda_future(device=self.device)
++        ).to_cuda_future(device=self.device, completion_event=event)
+ 
+     def retrieve_kv(self, load_metadata: LoadMetadata) -> int:
+         """Phase 2 of the two-phase load — fires RETRIEVE only.
+@@ -525,7 +525,7 @@ class LMCacheMPConnector:
+                     event.ipc_handle(),
+                 ],
+             )
+-            .to_cuda_future(device=self.device)
++            .to_cuda_future(device=self.device, completion_event=event)
+             .result(timeout=self._mq_timeout)
+         )
+         # END_SESSION is owned by ``LMCRadixCache.cache_finished_req`` so
+diff --git a/lmcache/integration/tensorrt_llm/tensorrt_mp_adapter.py b/lmcache/integration/tensorrt_llm/tensorrt_mp_adapter.py
+index 4fd8992320b0413e2b50f0d064a846fa91e859de..dfd9da5003642625f39632c38e84fd7d0c21177d 100644
+--- a/lmcache/integration/tensorrt_llm/tensorrt_mp_adapter.py
++++ b/lmcache/integration/tensorrt_llm/tensorrt_mp_adapter.py
+@@ -397,13 +397,14 @@ class LMCacheMPKvConnectorWorker(KvCacheConnectorWorker):
+         t0 = time.perf_counter()
+         # Not all backends support interprocess Events (CUDA IPC specific)
+         check_interprocess_event_support()
+-        event = torch_dev.Event(interprocess=True)
+-        event.record(stream)
+ 
+         for req_id, spec in meta.loads.items():
+             if not spec.tokens or not spec.block_ids:
+                 continue
+ 
++            event = torch_dev.Event(interprocess=True)
++            event.record(stream)
++
+             key = self._create_key(spec.tokens, req_id)
+             try:
+                 _send_request(
+@@ -416,7 +417,9 @@ class LMCacheMPKvConnectorWorker(KvCacheConnectorWorker):
+                         event.ipc_handle(),
+                         0,  # skip_first_n_tokens
+                     ],
+-                ).result(timeout=self._mq_timeout)
++                ).to_cuda_future(completion_event=event).result(
++                    timeout=self._mq_timeout
++                )
+             except Exception as e:
+                 logger.warning(
+                     "LMCache MP worker: retrieve failed for req %d: %s",
+@@ -447,13 +450,14 @@ class LMCacheMPKvConnectorWorker(KvCacheConnectorWorker):
+         t0 = time.perf_counter()
+         # Not all backends support interprocess Events (CUDA IPC specific)
+         check_interprocess_event_support()
+-        event = torch_dev.Event(interprocess=True)
+-        event.record(stream)
+ 
+         for req_id, spec in meta.saves.items():
+             if not spec.tokens or not spec.block_ids:
+                 continue
+ 
++            event = torch_dev.Event(interprocess=True)
++            event.record(stream)
++
+             key = self._create_key(spec.tokens, req_id)
+             try:
+                 _send_request(
+@@ -465,7 +469,9 @@ class LMCacheMPKvConnectorWorker(KvCacheConnectorWorker):
+                         [spec.block_ids],
+                         event.ipc_handle(),
+                     ],
+-                ).result(timeout=self._mq_timeout)
++                ).to_cuda_future(completion_event=event).result(
++                    timeout=self._mq_timeout
++                )
+             except Exception as e:
+                 logger.warning(
+                     "LMCache MP worker: store failed for req %d: %s",
+diff --git a/lmcache/integration/vllm/vllm_multi_process_adapter.py b/lmcache/integration/vllm/vllm_multi_process_adapter.py
+index dd5aa0e6033292eaad06dd8f0b7961d58cf6b2f1..6e6cfeb44dd9a1e30f93b3588f03c232bfb18738 100644
+--- a/lmcache/integration/vllm/vllm_multi_process_adapter.py
++++ b/lmcache/integration/vllm/vllm_multi_process_adapter.py
+@@ -36,6 +36,7 @@ from lmcache.v1.multiprocess.transfer_context import (
+ )
+ from lmcache.v1.periodic_thread import PeriodicThread, ThreadLevel, ThreadRunSummary
+ from lmcache.v1.platform import resolve_kv_wrapper_factory
++from lmcache.v1.platform.base_ipc_wrapper import release_ipc_exports
+ 
+ logger = init_logger(__name__)
+ 
+@@ -151,11 +152,9 @@ def wrap_kv_caches(kv_caches: dict[str, torch.Tensor]) -> KVCache:
+         ),
+     )
+     logger.info("Wrapping %d KV cache tensors for IPC", len(kv_caches))
+-    # Per-iteration resource management: if wrapping the N-th tensor
+-    # raises, ``shm_unlink`` whatever earlier iterations already
+-    # registered with POSIX SHM so the named segments do not outlive
+-    # the failed batch. CUDA wrappers do not own a named segment and
+-    # are skipped via the duck-typed ``shm_name`` check.
++    # Per-iteration resource management: if wrapping the N-th tensor raises,
++    # return earlier CUDA export reservations and unlink any POSIX SHM names
++    # so no resource from the rejected batch outlives this call.
+     wrappers: KVCache = []
+     try:
+         for tensor in kv_caches.values():
+@@ -167,16 +166,20 @@ def wrap_kv_caches(kv_caches: dict[str, torch.Tensor]) -> KVCache:
+ 
+ 
+ def _release_partial_kv_wrappers(wrappers: list[Any]) -> None:
+-    """Best-effort unlink of SHM segments owned by partially built wrappers.
++    """Best-effort release of a partially built IPC wrapper batch.
+ 
+     Used by :func:`wrap_kv_caches` to roll back a half-finished batch
+-    when a later iteration raises. Only POSIX-SHM-backed wrappers carry
+-    a ``shm_name`` attribute, so other wrapper kinds (e.g. CUDA-IPC)
+-    are silently skipped.
++    when a later iteration raises. CUDA wrappers return their unconsumed
++    PyTorch IPC refcounter; POSIX-SHM-backed wrappers unlink their names.
+     """
+     # First Party
+     from lmcache.v1.multiprocess.posix_shm import shm_unlink
+ 
++    try:
++        release_ipc_exports(wrappers)
++    except Exception:  # pragma: no cover - best effort
++        logger.debug("CUDA IPC release failed during rollback", exc_info=True)
++
+     for w in wrappers:
+         name = getattr(w, "shm_name", None)
+         if name is None:
+@@ -525,6 +528,21 @@ class HeartbeatThread(PeriodicThread):
+                 message="stop requested; skipping health update",
+             )
+ 
++        if not healthy:
++            # Gate worker/scheduler callers before failing old futures so they
++            # take their established degraded-mode cleanup path.
++            self._health_event.clear()
++            # Retire the old ZeroMQ transport session before any later
++            # heartbeat can mark the adapter healthy again. This discards
++            # buffered STORE/RETRIEVE work whose GPU block IDs belong to the
++            # request lifecycle that just entered degraded mode.
++            try:
++                self._mq_client.reset_connection()
++            except Exception:
++                logger.exception(
++                    "Failed to reset LMCache MQ connection after heartbeat failure"
++                )
++
+         need_trigger_recover = (
+             healthy and not was_healthy and self._recover_callback is not None
+         )
+@@ -537,6 +555,15 @@ class HeartbeatThread(PeriodicThread):
+             # If the callback fails, it should not become healthy
+             healthy = self._recover_callback()
+ 
++        # stop() may have arrived while a recovery callback was blocked.
++        # Shutdown owns the final state even when the callback eventually
++        # succeeds; never resurrect health after the stop boundary.
++        if self.stop_requested:
++            return ThreadRunSummary(
++                success=True,
++                message="stop requested during recovery; skipping health update",
++            )
++
+         if healthy:
+             self._health_event.set()
+             if not was_healthy:
+@@ -726,13 +753,15 @@ class LMCacheMPSchedulerAdapter:
+         return all(ev.is_set() for ev in self._health_events.values())
+ 
+     def _ensure_heartbeat_started(self) -> None:
+-        """Lazily start the heartbeat thread on first use."""
+-        if self._heartbeats is not None:
++        """Lazily start one heartbeat thread per server on first use."""
++        if len(self._heartbeats) == len(self.mq_clients):
+             return
+         with self._heartbeat_lock:
+-            if self._heartbeats is not None:
++            if len(self._heartbeats) == len(self.mq_clients):
+                 return
+             for url, client in self.mq_clients.items():
++                if url in self._heartbeats:
++                    continue
+                 hb = HeartbeatThread(
+                     mq_client=client,
+                     health_event=self._health_events[url],
+@@ -956,11 +985,11 @@ class LMCacheMPSchedulerAdapter:
+ 
+     def shutdown(self) -> None:
+         """Shutdown the scheduler adapter and its resources."""
+-        for client in self.mq_clients.values():
+-            client.close()
+         with self._heartbeat_lock:
+             for hb in self._heartbeats.values():
+                 hb.stop()
++        for client in self.mq_clients.values():
++            client.close()
+ 
+     def free_lookup_locks(
+         self,
+@@ -1161,6 +1190,11 @@ class LMCacheMPWorkerAdapter:
+ 
+         # Transport context for transfer operations.
+         self.transfer_ctx: TransferContext | None = None
++        # Serializes transfer-context publication/use/replacement with
++        # shutdown.  In particular, shutdown must not send UNREGISTER while a
++        # recovery REGISTER is still in flight.
++        self._lifecycle_lock = threading.RLock()
++        self._shutdown_requested = threading.Event()
+ 
+         # Request futures
+         self.store_futures: dict[str, list[MessagingFuture[StoreResult]]] = {}
+@@ -1330,29 +1364,52 @@ class LMCacheMPWorkerAdapter:
+         self.kv_caches = kv_caches
+         transfer_ctx = create_transfer_context(kv_caches, mode=self._mp_transfer_mode)
+         layout_hints = vllm_layout_hints()
+-        self.transfer_ctx = transfer_ctx
++        previous_ctx: TransferContext | None = None
+         try:
+-            # Register on the local, not self.transfer_ctx: a concurrent
+-            # shutdown() may null self.transfer_ctx between publish and this
+-            # call. The local is always non-None.
+-            transfer_ctx.register(
+-                self.instance_id,
+-                kv_caches,
+-                self.model_name,
+-                self.world_size,
+-                self.blocks_in_chunk,
+-                self.mq_client,
+-                self._mq_timeout,
+-                send_request=send_lmcache_request,
+-                layout_hints=layout_hints,
+-                engine_group_infos=self.engine_group_infos,
+-            )
++            with self._lifecycle_lock:
++                transfer_ctx.register(
++                    self.instance_id,
++                    kv_caches,
++                    self.model_name,
++                    self.world_size,
++                    self.blocks_in_chunk,
++                    self.mq_client,
++                    self._mq_timeout,
++                    send_request=send_lmcache_request,
++                    layout_hints=layout_hints,
++                    engine_group_infos=self.engine_group_infos,
++                )
++                # Publish only a fully registered context.  Operations take
++                # the same lock, so none can retain the old context while it
++                # is retired below.
++                previous_ctx = self.transfer_ctx
++                self.transfer_ctx = transfer_ctx
++                if previous_ctx is not None and previous_ctx is not transfer_ctx:
++                    try:
++                        previous_ctx.close()
++                    except Exception:
++                        # The replacement is already registered and published;
++                        # an old-context cleanup failure must not hide a
++                        # successful recovery.
++                        logger.exception(
++                            "Failed to close replaced LMCache transfer context"
++                        )
+         except TimeoutError:
++            try:
++                transfer_ctx.close()
++            except Exception:
++                logger.exception("Failed to close timed-out transfer context")
+             raise ConnectionError(
+                 "LMCache server did not respond to "
+                 "register_kv_caches within "
+                 f"{self._mq_timeout}s. Is the server running?"
+             ) from None
++        except BaseException:
++            try:
++                transfer_ctx.close()
++            except Exception:
++                logger.exception("Failed to close rejected transfer context")
++            raise
+ 
+     def _ensure_heartbeat_started(self) -> None:
+         """Lazily start the heartbeat thread on first store/retrieve.
+@@ -1404,25 +1461,38 @@ class LMCacheMPWorkerAdapter:
+             # health event can be set.
+             return True
+ 
+-        # Skip the rebuild if a shutdown already requested the heartbeat stop.
+-        if self._heartbeat_stop_requested():
+-            logger.info("Heartbeat stop requested; skipping KV cache re-registration")
+-            return False
++        # Hold the lifecycle boundary from the stop check through REGISTER.
++        # shutdown() requests stop first and then takes this same lock, which
++        # gives only two safe orderings: recovery finishes before UNREGISTER,
++        # or recovery observes stop and sends no REGISTER.
++        with self._lifecycle_lock:
++            if self._shutdown_requested.is_set() or self._heartbeat_stop_requested():
++                logger.info(
++                    "Heartbeat stop requested; skipping KV cache re-registration"
++                )
++                return False
+ 
+-        try:
+-            self._send_register_kv_caches_request(self.kv_caches)
+-        except ConnectionError:
+-            logger.exception(
+-                "Failed to re-register KV caches after server recovery; "
+-                "will retry on next heartbeat"
+-            )
+-            return False
+-        except Exception:
+-            logger.exception(
+-                "Unexpected error during KV cache re-registration; "
+-                "will retry on next heartbeat"
+-            )
+-            return False
++            try:
++                self._send_register_kv_caches_request(self.kv_caches)
++            except ConnectionError:
++                logger.exception(
++                    "Failed to re-register KV caches after server recovery; "
++                    "will retry on next heartbeat"
++                )
++                return False
++            except Exception:
++                logger.exception(
++                    "Unexpected error during KV cache re-registration; "
++                    "will retry on next heartbeat"
++                )
++                return False
++
++            # stop() may have arrived while REGISTER was waiting for its ACK.
++            # The context remains published so shutdown can close it after its
++            # ordered UNREGISTER, but health must stay false.
++            if self._shutdown_requested.is_set() or self._heartbeat_stop_requested():
++                logger.info("Heartbeat stop requested during KV cache re-registration")
++                return False
+         logger.warning("Finished re-registering KV caches after server recovery")
+         return True
+ 
+@@ -1460,20 +1530,22 @@ class LMCacheMPWorkerAdapter:
+             request_id=request_id,
+             cache_salt=cache_salt,
+         )
+-        if self.transfer_ctx is None:
+-            raise RuntimeError(
+-                "Transfer context is not initialized. "
+-                "Call register_kv_caches() before submitting store requests."
++        with self._lifecycle_lock:
++            transfer_ctx = self.transfer_ctx
++            if transfer_ctx is None:
++                raise RuntimeError(
++                    "Transfer context is not initialized. "
++                    "Call register_kv_caches() before submitting store requests."
++                )
++            future = transfer_ctx.submit_store(
++                request_id,
++                key,
++                self.instance_id,
++                self.kv_caches,
++                self._block_ids_per_group(op),
++                event,
++                self.blocks_in_chunk,
+             )
+-        future = self.transfer_ctx.submit_store(
+-            request_id,
+-            key,
+-            self.instance_id,
+-            self.kv_caches,
+-            self._block_ids_per_group(op),
+-            event,
+-            self.blocks_in_chunk,
+-        )
+         # Chunked prefill can submit multiple stores for one request before
+         # earlier stores finish. Keep every future and its exporting event.
+         self.finished_stores.discard(request_id)
+@@ -1517,21 +1589,23 @@ class LMCacheMPWorkerAdapter:
+             request_id=request_id,
+             cache_salt=cache_salt,
+         )
+-        if self.transfer_ctx is None:
+-            raise RuntimeError(
+-                "Transfer context is not initialized. "
+-                "Call register_kv_caches() before submitting retrieve requests."
++        with self._lifecycle_lock:
++            transfer_ctx = self.transfer_ctx
++            if transfer_ctx is None:
++                raise RuntimeError(
++                    "Transfer context is not initialized. "
++                    "Call register_kv_caches() before submitting retrieve requests."
++                )
++            future = transfer_ctx.submit_retrieve(
++                request_id,
++                key,
++                self.instance_id,
++                self.kv_caches,
++                self._block_ids_per_group(op),
++                event,
++                self.blocks_in_chunk,
++                skip_first_n_tokens=op.skip_first_n_tokens,
+             )
+-        future = self.transfer_ctx.submit_retrieve(
+-            request_id,
+-            key,
+-            self.instance_id,
+-            self.kv_caches,
+-            self._block_ids_per_group(op),
+-            event,
+-            self.blocks_in_chunk,
+-            skip_first_n_tokens=op.skip_first_n_tokens,
+-        )
+         self.retrieve_futures[request_id] = (future, op.flat_block_ids)
+         self.retrieve_events[request_id] = event
+ 
+@@ -1620,11 +1694,24 @@ class LMCacheMPWorkerAdapter:
+             pending_futures: list[MessagingFuture[StoreResult]] = []
+             pending_events: list[_IpcEvent] = []
+             for future, event in zip(futures, events, strict=True):
+-                if not future.query():
+-                    pending_futures.append(future)
+-                    pending_events.append(event)
++                try:
++                    if not future.query():
++                        pending_futures.append(future)
++                        pending_events.append(event)
++                        continue
++                    store_succeeded = future.result()
++                except Exception as exc:
++                    # Remote/CUDA failures are completed store attempts. Do not
++                    # let one failed cache write terminate the engine step or
++                    # retain its blocks forever.
++                    logger.error(
++                        "LMCache store future raised for request_id=%s: %r "
++                        "-- treating as failed store.",
++                        request_id,
++                        exc,
++                    )
+                     continue
+-                if not future.result():
++                if not store_succeeded:
+                     logger.error(
+                         "Something went wrong when processing the "
+                         "store request for request_id=%s",
+@@ -1708,15 +1795,15 @@ class LMCacheMPWorkerAdapter:
+         finished_stores = self._poll_store_futures()
+         finished_retrieves = set()
+         for request_id, (r_future, r_block_ids) in self.retrieve_futures.items():
+-            if not r_future.query():
+-                continue
+-
+             try:
++                if not r_future.query():
++                    continue
+                 r_result = r_future.result()
+             except Exception as exc:
+                 # A raising future must not propagate out of get_finished
+                 # (that would kill the engine step); contain it as a failed
+-                # retrieve on the standard failure path.
++                # retrieve on the standard failure path. query() can raise
++                # while materializing a remote error from its raw future.
+                 logger.error(
+                     "LMCache retrieve future raised for request_id=%s: %r "
+                     "-- treating as failed retrieve.",
+@@ -1810,9 +1897,11 @@ class LMCacheMPWorkerAdapter:
+         """
+         if not need_flush_before_forward:
+             return
+-        if not self.is_healthy or self.transfer_ctx is None:
+-            return
+-        self.transfer_ctx.flush_inflight_stores()
++        with self._lifecycle_lock:
++            transfer_ctx = self.transfer_ctx
++            if not self.is_healthy or transfer_ctx is None:
++                return
++            transfer_ctx.flush_inflight_stores()
+         # Force device sync here, compare to preemption, perf panelty is trivial
+         torch_dev.synchronize()
+ 
+@@ -1824,35 +1913,56 @@ class LMCacheMPWorkerAdapter:
+         on the closing mq_client, and a straggler in-flight cycle cannot
+         re-register or flip the health event after unregistration.
+         """
++        self._shutdown_requested.set()
++        self._health_event.clear()
+         with self._heartbeat_lock:
+             if self._heartbeat is not None:
+                 self._heartbeat.stop()
+ 
+-        logger.info("Unregistering kv caches")
+-        try:
+-            unregister_type = (
+-                RequestType.UNREGISTER_KV_CACHE_ENGINE_DRIVEN_CONTEXT
+-                if isinstance(self.transfer_ctx, EngineDrivenTransferContext)
+-                else RequestType.UNREGISTER_KV_CACHE
+-            )
+-            send_lmcache_request(
+-                self.mq_client,
+-                unregister_type,
+-                [self.instance_id],
+-            ).result(timeout=self._mq_timeout)
+-        except TimeoutError:
+-            logger.warning(
+-                "LMCache server did not respond to unregister within %ss. "
+-                "Proceeding with shutdown.",
+-                self._mq_timeout,
+-            )
+-
+-        if self.transfer_ctx is not None:
+-            self.transfer_ctx.close()
++        shutdown_error: Exception | None = None
++        with self._lifecycle_lock:
++            transfer_ctx = self.transfer_ctx
+             self.transfer_ctx = None
+ 
+-        self.mq_client.close()
+-        self.request_telemetry.close()
++            logger.info("Unregistering kv caches")
++            try:
++                unregister_type = (
++                    RequestType.UNREGISTER_KV_CACHE_ENGINE_DRIVEN_CONTEXT
++                    if isinstance(transfer_ctx, EngineDrivenTransferContext)
++                    else RequestType.UNREGISTER_KV_CACHE
++                )
++                send_lmcache_request(
++                    self.mq_client,
++                    unregister_type,
++                    [self.instance_id],
++                ).result(timeout=self._mq_timeout)
++            except TimeoutError:
++                logger.warning(
++                    "LMCache server did not respond to unregister within %ss. "
++                    "Proceeding with shutdown.",
++                    self._mq_timeout,
++                )
++            except Exception as exc:
++                shutdown_error = exc
++                logger.exception("LMCache unregister failed; continuing local shutdown")
++
++            cleanup_steps = (
++                ("transfer context", transfer_ctx.close if transfer_ctx else None),
++                ("message queue client", self.mq_client.close),
++                ("request telemetry", self.request_telemetry.close),
++            )
++            for component, close in cleanup_steps:
++                if close is None:
++                    continue
++                try:
++                    close()
++                except Exception as exc:
++                    logger.exception("Failed to close LMCache %s", component)
++                    if shutdown_error is None:
++                        shutdown_error = exc
++
++        if shutdown_error is not None:
++            raise shutdown_error
+ 
+     # Helper functions
+     def _update_and_get_finished_store(
+diff --git a/lmcache/v1/distributed/l1_manager.py b/lmcache/v1/distributed/l1_manager.py
+index 4a2be000b86a576759cb3d5579acbc45181b14e7..4b3aa6a1ee0e1e166f05ee09b0c86e5ee9b76e6f 100644
+--- a/lmcache/v1/distributed/l1_manager.py
++++ b/lmcache/v1/distributed/l1_manager.py
+@@ -802,12 +802,23 @@ class L1Manager:
+                 write-locked and read-locked objects intact.
+         """
+         if force:
+-            logger.warning(
+-                "L1Manager: force-clearing all %d objects "
+-                "(including locked ones). This may corrupt in-flight "
+-                "store/prefetch operations — use with caution.",
+-                len(self._objects),
++            locked_count = sum(
++                entry.write_lock.is_locked() or entry.read_lock.is_locked()
++                for entry in self._objects.values()
+             )
++            if locked_count:
++                logger.warning(
++                    "L1Manager: force-clearing all %d objects, including %d "
++                    "locked object(s). This may corrupt in-flight "
++                    "store/prefetch operations — use with caution.",
++                    len(self._objects),
++                    locked_count,
++                )
++            else:
++                logger.info(
++                    "L1Manager: force-clearing all %d unlocked object(s).",
++                    len(self._objects),
++                )
+             all_keys = list(self._objects.keys())
+             all_memory_objs = [entry.memory_obj for entry in self._objects.values()]
+             self._memory_manager.free(all_memory_objs)
+diff --git a/lmcache/v1/mp_observability/errors.py b/lmcache/v1/mp_observability/errors.py
+index 6ec5d2589120599c55aed41f17d56e192b087909..6f3d8c0836c8435c5791b383b8546398d482d881 100644
+--- a/lmcache/v1/mp_observability/errors.py
++++ b/lmcache/v1/mp_observability/errors.py
+@@ -46,6 +46,19 @@ class LMCacheTimeoutError(TimeoutError):
+         stacktrace = "".join(traceback.format_stack()[:-1])
+         self._publish_timeout_event(message, stacktrace, session_id)
+ 
++    @classmethod
++    def from_recorded_timeout(cls, message: str) -> "LMCacheTimeoutError":
++        """Build an exception for a timeout whose event was already recorded.
++
++        A terminal future may be consumed more than once.  Each consumption
++        still needs a fresh exception object so traceback frames are not
++        retained by the future, but it must not publish another
++        ``TIMEOUT_RAISED`` event for the same deadline.
++        """
++        instance = cls.__new__(cls)
++        TimeoutError.__init__(instance, message)
++        return instance
++
+     def _publish_timeout_event(
+         self, message: str, stacktrace: str, session_id: str
+     ) -> None:
+diff --git a/lmcache/v1/multiprocess/affinity_pool.py b/lmcache/v1/multiprocess/affinity_pool.py
+index 98325212cf5053e285ded43fa839ee094389be80..9e93a6cc1ced87b1d73ed477e3332370e33ae7ab 100644
+--- a/lmcache/v1/multiprocess/affinity_pool.py
++++ b/lmcache/v1/multiprocess/affinity_pool.py
+@@ -47,6 +47,8 @@ class AffinityThreadPool:
+         self._key_to_slot: dict[int, int] = {}
+         self._next_slot = 0
+         self._overflow_warned = False
++        self._shutdown = False
++        self._shutdown_lock = threading.Lock()
+         for i in range(max_workers):
+             t = threading.Thread(
+                 target=self._worker,
+@@ -136,19 +138,49 @@ class AffinityThreadPool:
+ 
+         Returns a :class:`concurrent.futures.Future`.
+         """
+-        future: Future = Future()
+-        slot = self._slot_for_key(affinity_key)
+-        self._queues[slot].put((future, fn, args, kwargs))
++        with self._shutdown_lock:
++            if self._shutdown:
++                raise RuntimeError("cannot schedule new futures after shutdown")
++            future: Future = Future()
++            slot = self._slot_for_key(affinity_key)
++            self._queues[slot].put((future, fn, args, kwargs))
+         return future
+ 
+-    def shutdown(self, wait: bool = True) -> None:
++    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+         """Shut down the pool.
+ 
+-        Sends a shutdown sentinel to every worker.  If *wait* is true, blocks
+-        until all workers have exited.
++        Optionally cancels work which has not started, then sends a shutdown
++        sentinel to every worker. Repeated calls are safe; a later
++        ``wait=True`` call joins workers after an earlier non-waiting shutdown.
+         """
+-        for q in self._queues:
+-            q.put(_SHUTDOWN)
++        to_cancel: list[Future] = []
++        with self._shutdown_lock:
++            if not self._shutdown:
++                self._shutdown = True
++                for q in self._queues:
++                    q.put(_SHUTDOWN)
++            if cancel_futures:
++                # A caller may first request a non-waiting graceful shutdown,
++                # then escalate to cancellation. Drain tasks which have not
++                # started while preserving each worker's shutdown sentinel.
++                for q in self._queues:
++                    saw_shutdown = False
++                    while True:
++                        try:
++                            item = q.get_nowait()
++                        except queue.Empty:
++                            break
++                        if item is _SHUTDOWN:
++                            saw_shutdown = True
++                        else:
++                            future, _fn, _args, _kwargs = item
++                            to_cancel.append(future)
++                    if saw_shutdown:
++                        q.put(_SHUTDOWN)
++        # Future callbacks are user code and may attempt another submit. Run
++        # them only after releasing the pool lifecycle lock.
++        for future in to_cancel:
++            future.cancel()
+         if wait:
+             for t in self._threads:
+                 t.join()
+diff --git a/lmcache/v1/multiprocess/futures.py b/lmcache/v1/multiprocess/futures.py
+index ab5195eec56aa3fcd9b52550aac52dc6133680b4..1c8e90a76e5540ed8e91b5c4aa10f4c9eaec5e31 100644
+--- a/lmcache/v1/multiprocess/futures.py
++++ b/lmcache/v1/multiprocess/futures.py
+@@ -1,20 +1,63 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # Standard
+-from typing import Any, Generic, Optional, TypeVar
++from typing import Any, Callable, Generic, Optional, TypeVar
+ import threading
+ 
+ # First Party
+ from lmcache import torch_dev, torch_device_type
++from lmcache.logging import init_logger
+ from lmcache.v1.mp_observability.errors import LMCacheTimeoutError
+ 
+ T = TypeVar("T")
++logger = init_logger(__name__)
++
++
++def _traceback_free_exception_template(exception: BaseException) -> BaseException:
++    """Copy only durable error fields, never a caught exception traceback.
++
++    ``MessagingFuture`` is long-lived and may be retained by callers. Storing
++    an exception caught in a transport frame would retain that frame, its
++    client, and potentially an entire request payload graph. The stored object
++    is therefore a traceback-free template which is itself never raised.
++    """
++    if isinstance(exception, LMCacheTimeoutError):
++        template: BaseException = LMCacheTimeoutError.from_recorded_timeout(
++            str(exception)
++        )
++    else:
++        clone = getattr(exception, "_lmcache_traceback_free_clone", None)
++        if clone is not None:
++            try:
++                template = clone()
++            except Exception:
++                template = RuntimeError(f"{type(exception).__name__}: {exception}")
++        else:
++            try:
++                template = type(exception)(str(exception))
++            except Exception:
++                template = RuntimeError(f"{type(exception).__name__}: {exception}")
++
++    if template is exception or not isinstance(template, BaseException):
++        template = RuntimeError(f"{type(exception).__name__}: {exception}")
++    template.__traceback__ = None
++    template.__cause__ = None
++    template.__context__ = None
++    return template
+ 
+ 
+ class MessagingFuture(Generic[T]):
+-    def __init__(self):
++    def __init__(self, on_timeout: Callable[[], None] | None = None):
+         self.is_done_ = threading.Event()
+         self.result_ = None
+         self.exception_: BaseException | None = None
++        self._completion_lock = threading.Lock()
++        self._retained_resources: list[Any] = []
++        # Caller completion and transport completion are distinct.  A request
++        # can time out for its caller after it was sent while the remote side
++        # still owns CUDA IPC handles embedded in that request.
++        self._transport_complete = False
++        self._transport_resources: list[Any] = []
++        self._on_timeout = on_timeout
+ 
+     def query(self) -> bool:
+         """
+@@ -54,11 +97,72 @@ class MessagingFuture(Generic[T]):
+         """
+         flag = self.wait(timeout)
+         if not flag:
+-            raise LMCacheTimeoutError("Future result not available within timeout")
+-        if self.exception_ is not None:
+-            raise self.exception_
++            timeout_error = LMCacheTimeoutError(
++                "Future result not available within timeout"
++            )
++            if self._expire(timeout_error):
++                # Keep the terminal sentinel traceback-free. Storing and
++                # raising the same exception would make the future retain its
++                # own result() frame and anything reachable from that frame.
++                raise LMCacheTimeoutError.from_recorded_timeout(str(timeout_error))
++            # Completion won the deadline race while wait() was returning.
++            # Fall through and consume that terminal state.
++        self._raise_if_failed()
+         return self.result_
+ 
++    def retain_until_complete(self, resource: Any) -> None:
++        """Keep ``resource`` alive until this future first becomes terminal."""
++        with self._completion_lock:
++            if not self.is_done_.is_set():
++                self._retained_resources.append(resource)
++
++    def retain_until_transport_complete(self, resource: Any) -> None:
++        """Keep ``resource`` alive until the transport is finished with it.
++
++        Unlike :meth:`retain_until_complete`, a caller deadline does not
++        release this lease.  The message queue releases it only after a reply,
++        a send failure, a pre-send cancellation, or transport teardown.
++        """
++        with self._completion_lock:
++            if not self._transport_complete:
++                self._transport_resources.append(resource)
++
++    @property
++    def transport_complete(self) -> bool:
++        """Whether the message transport can no longer access request data."""
++        with self._completion_lock:
++            return self._transport_complete
++
++    def complete_transport(self) -> bool:
++        """Mark transport ownership complete and release its resources once."""
++        with self._completion_lock:
++            if self._transport_complete:
++                return False
++            self._transport_complete = True
++            transport_resources = self._transport_resources
++            self._transport_resources = []
++
++        # CUDA/event destructors may synchronize.  Never run them while
++        # holding the state lock.
++        transport_resources.clear()
++        return True
++
++    def quarantine_transport_resources(self) -> list[Any]:
++        """Detach sent-unanswered resources without destroying them.
++
++        A transport reset has no remote cancellation acknowledgement. The MQ
++        layer moves the returned objects into its process-lifetime quarantine
++        so producer-side CUDA resources cannot be freed under a daemon that
++        may still consume the accepted message.
++        """
++        with self._completion_lock:
++            if self._transport_complete:
++                return []
++            self._transport_complete = True
++            transport_resources = self._transport_resources
++            self._transport_resources = []
++            return transport_resources
++
+     def set_result(self, result: T) -> None:
+         """
+         Set the result of the future and mark it as done. This function is NOT
+@@ -68,61 +172,129 @@ class MessagingFuture(Generic[T]):
+         Args:
+             result (T): The result to set.
+         """
+-        self.result_ = result
+-        self.is_done_.set()
++        self._complete(result=result)
++        self.complete_transport()
+ 
+     def set_exception(self, exception: BaseException) -> None:
+-        """Complete the future with an exception from the messaging system."""
++        """Complete with a traceback-free error template."""
+         if not isinstance(exception, BaseException):
+             raise TypeError("exception must derive from BaseException")
+-        self.exception_ = exception
+-        self.is_done_.set()
++        self._complete(exception=_traceback_free_exception_template(exception))
++        self.complete_transport()
+ 
+     def to_cuda_future(
+         self,
+         device: Any | None = None,
++        completion_event: Any | None = None,
+     ) -> "CUDAMessagingFuture":
+         # TODO: need extra type checking for the future type
+-        return CUDAMessagingFuture.FromMessagingFuture(self, device)  # type: ignore
++        return CUDAMessagingFuture.FromMessagingFuture(  # type: ignore
++            self, device, completion_event
++        )
++
++    def _complete(
++        self,
++        result: T | None = None,
++        exception: BaseException | None = None,
++    ) -> bool:
++        """Commit the first terminal state and release retained resources once."""
++        with self._completion_lock:
++            if self.is_done_.is_set():
++                return False
++            self.result_ = result
++            self.exception_ = exception
++            retained_resources = self._retained_resources
++            self._retained_resources = []
++            self.is_done_.set()
++
++        # Destructors may synchronize or invoke runtime cleanup. Run them
++        # outside the state lock after the terminal state is visible.
++        retained_resources.clear()
++        return True
++
++    def _expire(self, exception: BaseException) -> bool:
++        """Atomically expire an unanswered future and notify its transport."""
++        if not self._complete(exception=exception):
++            return False
++        if self._on_timeout is not None:
++            try:
++                self._on_timeout()
++            except Exception:
++                # Timeout notification is advisory (normally it wakes the MQ
++                # poller).  It must never replace the committed timeout with a
++                # callback implementation failure.
++                logger.exception("MessagingFuture timeout callback failed")
++        return True
++
++    def _raise_if_failed(self) -> None:
++        """Raise a fresh failure without mutating the stored template."""
++        exception = self.exception_
++        if exception is None:
++            return
++        raise _traceback_free_exception_template(exception) from None
+ 
+ 
+ class CUDAMessagingFuture(MessagingFuture[T]):
+     """
+-    The future class that wraps both result and a CUDA IPC event.
+-    The `query`, `wait`, and `result` methods will pend on both the
+-    original future and the CUDA event.
+-    The original future should return tuple[bytes, T], where the first
+-    element is the serialized CUDA event.
++    Wraps a result future and a CUDA IPC completion event. ``query``, ``wait``,
++    and ``result`` first wait for the response and then for device completion.
++    The original future returns ``tuple[bytes, T]``. When the exporter supplies
++    ``completion_event``, this future retains and synchronizes that local event;
++    otherwise it imports the serialized event for legacy callers.
+     """
+ 
+     def __init__(
+         self,
+         raw_future: MessagingFuture[tuple[bytes, T]],
+         device: Any | None = None,
++        completion_event: Any | None = None,
+     ) -> None:
+         super().__init__()
+         self.raw_future_ = raw_future
+         self.event_: Any | None = None
++        self.exported_event_: Any | None = completion_event
+         self.result_: T | None = None
+         self.device_ = device if device is not None else torch_dev.current_device()
++        self._materialization_lock = threading.Lock()
++        if completion_event is not None:
++            # The caller-visible CUDA future may be abandoned after a timeout.
++            # Keep an independent reference on the raw transport future until
++            # its first terminal state so caller abandonment cannot release an
++            # exporter while the request is still pending.
++            raw_future.retain_until_transport_complete(completion_event)
+ 
+     def _on_raw_future_complete(self):
+         """
+         Update the CUDA event and result when the raw future is complete.
+         """
+-        event_bytes, result = self.raw_future_.result()
+-        self.result_ = result
+-
+-        # Not all backends support interprocess Events (CUDA IPC specific)
+-        if not hasattr(torch_dev, "Event") or not hasattr(
+-            torch_dev.Event, "from_ipc_handle"
+-        ):
+-            raise RuntimeError(
+-                f"Backend '{torch_device_type}' does not support interprocess "
+-                "Events (Event.from_ipc_handle not available). "
+-                "Multiprocess IPC requires CUDA."
+-            )
+-        self.event_ = torch_dev.Event.from_ipc_handle(self.device_, event_bytes)
++        if self.event_ is not None:
++            return
++        with self._materialization_lock:
++            # query()/wait()/result() may be called from different engine
++            # threads.  Import or transfer ownership of an IPC handle exactly
++            # once.
++            if self.event_ is not None:
++                return
++
++            event_bytes, result = self.raw_future_.result()
++            self.result_ = result
++
++            if self.exported_event_ is not None:
++                self.event_ = self.exported_event_
++                self.exported_event_ = None
++                return
++
++            # Legacy callers do not retain an exporter-owned event, so import
++            # the completion handle created by the server.
++            if not hasattr(torch_dev, "Event") or not hasattr(
++                torch_dev.Event, "from_ipc_handle"
++            ):
++                raise RuntimeError(
++                    f"Backend '{torch_device_type}' does not support interprocess "
++                    "Events (Event.from_ipc_handle not available). "
++                    "Multiprocess IPC requires CUDA."
++                )
++            self.event_ = torch_dev.Event.from_ipc_handle(self.device_, event_bytes)
+ 
+     def wait(self, timeout: Optional[float] = None) -> bool:
+         """
+@@ -176,9 +348,16 @@ class CUDAMessagingFuture(MessagingFuture[T]):
+         """
+         flag = self.wait(timeout)
+         if not flag:
+-            raise LMCacheTimeoutError(
++            timeout_error = LMCacheTimeoutError(
+                 "CUDAMessagingFuture result not available within timeout"
+             )
++            if self.raw_future_._expire(timeout_error):
++                # The raw future owns the terminal sentinel. Raise a fresh
++                # instance so its traceback cannot retain this CUDA wrapper
++                # and the exporter event reachable from it.
++                raise LMCacheTimeoutError.from_recorded_timeout(str(timeout_error))
++            # The raw response won the timeout race; consume it normally.
++            return self.result()
+ 
+         assert self.result_ is not None
+         return self.result_
+@@ -209,5 +388,6 @@ class CUDAMessagingFuture(MessagingFuture[T]):
+     def FromMessagingFuture(
+         raw_future: MessagingFuture[tuple[bytes, T]],
+         device: Any | None = None,
++        completion_event: Any | None = None,
+     ) -> "CUDAMessagingFuture[T]":
+-        return CUDAMessagingFuture(raw_future, device)
++        return CUDAMessagingFuture(raw_future, device, completion_event)
+diff --git a/lmcache/v1/multiprocess/http_server.py b/lmcache/v1/multiprocess/http_server.py
+index 43a382d5630273cca910e2af607e5d370ea9128b..70fd5c7178f69392f75ad5f0a6afa07bb5d0ae74 100644
+--- a/lmcache/v1/multiprocess/http_server.py
++++ b/lmcache/v1/multiprocess/http_server.py
+@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
+     Manage the lifecycle of the LMCache HTTP server.
+ 
+     On startup: Initialize ZMQ server and cache engine.
+-    On shutdown: Clean up ZMQ server resources.
++    On shutdown: Clean up ZMQ server and cache engine resources.
+     """
+     # Startup
+     logger.info(
+@@ -190,6 +190,7 @@ async def lifespan(app: FastAPI):
+     get_event_bus().stop()
+     if hasattr(app.state, "zmq_server") and app.state.zmq_server is not None:
+         app.state.zmq_server.close()
++    engine.close()
+     logger.info("LMCache HTTP server stopped")
+ 
+ 
+diff --git a/lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py b/lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py
+index 89a7d9f8e01e82c25e74c864b62d761037311ee3..fd3828d3d56e6a89ec918dad799b1535023a6869 100644
+--- a/lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py
++++ b/lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py
+@@ -49,6 +49,7 @@ from lmcache.v1.multiprocess.native_completion import (
+ )
+ from lmcache.v1.multiprocess.protocols.base import RequestType
+ from lmcache.v1.platform.base_cache_context import BaseCacheContext
++from lmcache.v1.platform.base_ipc_wrapper import release_ipc_exports
+ from lmcache.v1.platform.cache_context import create_cache_context
+ import lmcache.c_ops as lmc_ops
+ import lmcache.python_ops_fallback as _python_ops_fallback
+@@ -865,45 +866,67 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+             existing = self._cache_contexts.get(instance_id)
+             if existing is not None:
+                 existing.last_seen = now
+-                logger.info(
+-                    "Instance %d already registered; refreshing liveness",
+-                    instance_id,
+-                )
+-                return
++        if existing is not None:
++            logger.info(
++                "Instance %d already registered; refreshing liveness",
++                instance_id,
++            )
++            # Recovery produced fresh one-shot CUDA exports, but the live
++            # context still owns the original imports. Return the unused
++            # reservations instead of leaking them at count=1.
++            release_ipc_exports(kv_caches)
++            return
+ 
+         # Build the context and layout descriptor outside the lock.
+-        cache_context = create_cache_context(
+-            kv_caches,
+-            self._ctx.chunk_size,
+-            layout_hints=layout_hints or None,
+-            engine_group_infos=engine_group_infos,
+-            engine_type=engine_type,
+-            separate_object_groups=self._ctx.separate_object_groups,
+-            full_sw_kv=self._ctx.full_sw_kv,
+-        )
+-        layout_desc = get_layout_desc(
+-            cache_context, self._ctx.chunk_size, object_group_id=0
+-        )
+-        kv_groups_manager = cache_context.kv_layer_groups_manager
+-        attn_desc = kv_groups_manager.get_attn_desc()
+-        self._ctx.layout_desc_registry.register(
+-            model_name, world_size, layout_desc, attn_desc
+-        )
+-
+-        with self._lock:
+-            self._cache_contexts[instance_id] = ContextEntry(
+-                cache_context=cache_context,
+-                model_name=model_name,
+-                world_size=world_size,
+-                last_seen=now,
+-                has_liveness_signal=False,
++        cache_context: BaseCacheContext | None = None
++        layout_registered = False
++        try:
++            cache_context = create_cache_context(
++                kv_caches,
++                self._ctx.chunk_size,
++                layout_hints=layout_hints or None,
++                engine_group_infos=engine_group_infos,
++                engine_type=engine_type,
++                separate_object_groups=self._ctx.separate_object_groups,
++                full_sw_kv=self._ctx.full_sw_kv,
++            )
++            layout_desc = get_layout_desc(
++                cache_context, self._ctx.chunk_size, object_group_id=0
++            )
++            kv_groups_manager = cache_context.kv_layer_groups_manager
++            attn_desc = kv_groups_manager.get_attn_desc()
++            self._ctx.layout_desc_registry.register(
++                model_name, world_size, layout_desc, attn_desc
+             )
++            layout_registered = True
++
++            with self._lock:
++                self._cache_contexts[instance_id] = ContextEntry(
++                    cache_context=cache_context,
++                    model_name=model_name,
++                    world_size=world_size,
++                    last_seen=now,
++                    has_liveness_signal=False,
++                )
+ 
+-        logger.info(
+-            "Registered KV cache for GPU ID %d with %d layers",
+-            instance_id,
+-            cache_context.num_layers,
+-        )
++            logger.info(
++                "Registered KV cache for GPU ID %d with %d layers",
++                instance_id,
++                cache_context.num_layers,
++            )
++        except BaseException:
++            if layout_registered:
++                self._ctx.layout_desc_registry.unregister(model_name, world_size)
++            if cache_context is not None:
++                try:
++                    cache_context.close()
++                except Exception:
++                    logger.exception("Failed to close rejected GPU cache context")
++            raise
++        finally:
++            # Imported wrappers are already terminal (their retained tensors own
++            # the decrement); any wrapper the backend did not consume is released.
++            release_ipc_exports(kv_caches)
+ 
+     def unregister_kv_cache(self, instance_id: int) -> None:
+         """Unregister the KV cache tensors for a given GPU instance ID.
+@@ -944,14 +967,14 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+             instance_id: The GPU instance ID (such as PID).
+             gpu_block_ids: GPU block IDs to store, indexed by LMCache KV
+                 group index.
+-            event_ipc_handle: The IPC handle of the event to wait on.
++            event_ipc_handle: IPC handle for a worker-owned request event.
++                The server waits on its initial recording before reading GPU
++                blocks, then records it again after the D2H transfer.
+ 
+         Returns:
+-            A tuple where the first element is the IPC handle of the event
+-            that signals the completion of the store operation, and the second
+-            element indicates whether the store operation completed without a
+-            fatal error (not whether every requested chunk was stored; see
+-            Notes).
++            The same worker-owned event handle, re-recorded to signal transfer
++            completion, plus whether the store completed without a fatal error
++            (not whether every requested chunk was stored; see Notes).
+ 
+         Raises:
+             ValueError: If no GPU context is registered for the given instance ID.
+@@ -994,7 +1017,6 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+             torch_dev.stream(cache_context.stream),
+         ):
+             check_interprocess_event_support()
+-            event = torch_dev.Event(interprocess=True)
+ 
+             # Fail closed: every LMCache group must have block IDs covering all
+             # chunks. A short list (e.g. a caller/protocol bug) would otherwise
+@@ -1017,8 +1039,7 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+                     num_chunks,
+                     blocks_per_chunk,
+                 )
+-                event.record()
+-                return event.ipc_handle(), False
++                return event_ipc_handle, False
+ 
+             block_ids_per_group_gpu = downsample_and_stage_block_ids(
+                 cache_context, gpu_block_ids
+@@ -1100,9 +1121,9 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+                 store_succeeded = True
+             except Exception:
+                 logger.exception("Cannot store keys due to exception")
+-                return event.ipc_handle(), False
++                return event_ipc_handle, False
+             finally:
+-                event.record()
++                vllm_event.record()
+                 # Fail closed: commit the reserved objects only when every chunk
+                 # copied successfully; otherwise the whole store is skipped.
+                 stored_count = len(all_dict) if store_succeeded else 0
+@@ -1138,7 +1159,7 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+                 num_chunks * self._ctx.chunk_size,
+                 ed - st,
+             )
+-        return event.ipc_handle(), True
++        return event_ipc_handle, True
+ 
+     @_lmcache_nvtx_annotate
+     def retrieve(
+@@ -1157,16 +1178,17 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+             instance_id: The GPU instance ID (such as PID).
+             gpu_block_ids: GPU block IDs to retrieve into, indexed by LMCache
+                 KV group index.
+-            event_ipc_handle: The IPC handle of the event to wait on.
++            event_ipc_handle: IPC handle for a worker-owned request event.
++                The server waits on its initial recording before writing GPU
++                blocks, then records it again after the H2D transfer.
+             skip_first_n_tokens: Number of tokens to skip writing at
+                 the start of the retrieve range. This avoids overwriting
+                 APC-shared GPU blocks that may be read concurrently by other
+                 requests.
+ 
+         Returns:
+-            A tuple where the first element is the IPC handle of the event
+-            that signals the completion of the retrieve operation, and the
+-            second element indicates whether the key was successfully retrieved.
++            The same worker-owned event handle, re-recorded to signal transfer
++            completion, plus whether the key was successfully retrieved.
+ 
+         Raises:
+             ValueError: If no GPU context is registered for the given instance ID.
+@@ -1221,7 +1243,6 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+             torch_dev.stream(cache_context.stream),
+         ):
+             check_interprocess_event_support()
+-            event = torch_dev.Event(interprocess=True)
+ 
+             # Fail closed: a short block-id list would drive the transfer
+             # kernel to write out-of-bounds GPU memory. Checked on the raw
+@@ -1242,8 +1263,18 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+                     num_chunks,
+                     blocks_per_chunk,
+                 )
+-                event.record()
+-                return event.ipc_handle(), False
++                return event_ipc_handle, False
++
++            if not hasattr(torch_dev.Event, "from_ipc_handle"):
++                raise RuntimeError(
++                    f"Backend '{torch_device_type}' does not support IPC event "
++                    "handles (Event.from_ipc_handle not available). "
++                    "Multiprocess IPC requires CUDA."
++                )
++            vllm_event = torch_dev.Event.from_ipc_handle(
++                cache_context.device, event_ipc_handle
++            )
++            vllm_event.wait(stream=cache_context.stream)
+ 
+             # Cut and stage all block_ids to GPU once before the transfer
+             block_ids_per_group_gpu = downsample_and_stage_block_ids(
+@@ -1260,7 +1291,7 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+                     ) as memory_objs:
+                         if not memory_objs or len(memory_objs) != len(obj_keys):
+                             logger.error("Some keys not found during retrieve!")
+-                            return event.ipc_handle(), False
++                            return event_ipc_handle, False
+ 
+                         total_bytes += sum(mo.get_size() for mo in memory_objs)
+ 
+@@ -1279,9 +1310,9 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+                         prefetched_keys.extend(obj_keys)
+             except Exception:
+                 logger.exception("Cannot retrieve keys due to exception")
+-                return event.ipc_handle(), False
++                return event_ipc_handle, False
+             finally:
+-                event.record()
++                vllm_event.record()
+                 if prefetched_keys:
+                     submit_callback_to_stream(
+                         cache_context.cupy_stream,
+@@ -1317,4 +1348,4 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+             ed - st,
+         )
+ 
+-        return event.ipc_handle(), True
++        return event_ipc_handle, True
+diff --git a/lmcache/v1/multiprocess/mq.py b/lmcache/v1/multiprocess/mq.py
+index a5d0d0cf7322a523a9a8b89a0c5af2e2466109b1..e7a7c55d2389268a7ef155f3ec453420ebe491d7 100644
+--- a/lmcache/v1/multiprocess/mq.py
++++ b/lmcache/v1/multiprocess/mq.py
+@@ -1,13 +1,18 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # Standard
+-from concurrent.futures import Future, ThreadPoolExecutor
+-from dataclasses import dataclass
++from concurrent.futures import (
++    Future,
++    ThreadPoolExecutor,
++)
++from concurrent.futures import TimeoutError as FutureTimeoutError
++from dataclasses import dataclass, field
+ from typing import Any, Callable, Generic, Optional, TypeVar, get_type_hints
+ import enum
+ import inspect
+ import itertools
+ import queue
+ import threading
++import time
+ 
+ # Third Party
+ import msgspec
+@@ -32,6 +37,13 @@ from lmcache.v1.multiprocess.protocol import (
+     get_response_class,
+ )
+ from lmcache.v1.platform import EventNotifier, create_event_notifier
++from lmcache.v1.platform.base_ipc_wrapper import (
++    IPCExportLease,
++    acquire_ipc_export_lease,
++    mark_ipc_exports_transferred_strict,
++    release_ipc_exports,
++    snapshot_ipc_exports,
++)
+ 
+ logger = init_logger(__name__)
+ 
+@@ -42,6 +54,114 @@ RequestUID = int
+ 
+ _ERROR_RESPONSE_MARKER = b"LMCACHE_RPC_ERROR_V1"
+ _MAX_REMOTE_ERROR_MESSAGE_BYTES = 4096
++_CLIENT_SNDHWM = 1000
++_CLIENT_CONTROL_TIMEOUT_S = 5.0
++_CLIENT_THREAD_JOIN_TIMEOUT_S = 5.0
++_SERVER_CLOSE_TIMEOUT_S = 30.0
++
++# A sent request that loses its transport session has no cancellation/consume
++# acknowledgement. Releasing its CUDA IPC reservation could race a daemon that
++# received the bytes just before disconnect. Retain the payload (and therefore
++# producer tensor) for process lifetime instead. This is deliberately a safe
++# quarantine, not a leak-free reset protocol.
++_SENT_UNANSWERED_IPC_QUARANTINE: list[Any] = []
++_SENT_UNANSWERED_IPC_QUARANTINE_LOCK = threading.Lock()
++# Completion events and other future-owned transport resources are not IPC
++# export ownership records. Keep their outage quarantine separate so ordinary
++# requests never manufacture an empty ``_IPCTransportOwnership`` merely to pin
++# an event.
++_SENT_UNANSWERED_TRANSPORT_QUARANTINE: list[Any] = []
++_SENT_UNANSWERED_TRANSPORT_QUARANTINE_LOCK = threading.Lock()
++
++
++def _quarantine_sent_unanswered_ipc_exports(value: Any) -> None:
++    """Retain sent-but-unacknowledged exports until process teardown."""
++    with _SENT_UNANSWERED_IPC_QUARANTINE_LOCK:
++        if any(retained is value for retained in _SENT_UNANSWERED_IPC_QUARANTINE):
++            return
++        _SENT_UNANSWERED_IPC_QUARANTINE.append(value)
++
++
++def _remove_provisional_ipc_quarantine(value: Any) -> bool:
++    """Remove the newest identity-matching provisional quarantine entry.
++
++    The sender installs this lifetime pin immediately before ``send_multipart``.
++    It is removed only after either a rejected send (the producer releases the
++    reservation) or a fully committed ownership transfer.  A failed post-send
++    commit deliberately leaves it behind for process lifetime.
++    """
++    with _SENT_UNANSWERED_IPC_QUARANTINE_LOCK:
++        for index in range(len(_SENT_UNANSWERED_IPC_QUARANTINE) - 1, -1, -1):
++            if _SENT_UNANSWERED_IPC_QUARANTINE[index] is value:
++                del _SENT_UNANSWERED_IPC_QUARANTINE[index]
++                return True
++    return False
++
++
++def _quarantine_sent_unanswered_transport_resources(value: Any) -> None:
++    """Retain non-IPC transport resources after an ambiguous session loss."""
++    with _SENT_UNANSWERED_TRANSPORT_QUARANTINE_LOCK:
++        _SENT_UNANSWERED_TRANSPORT_QUARANTINE.append(value)
++
++
++def _snapshot_request_payloads(values: list[Any]) -> tuple[Any, ...]:
++    """Detach built-in protocol containers from caller mutation.
++
++    Device wrappers and opaque leaf objects retain identity; list/dict/tuple/
++    set containers (the same graph shapes traversed by IPC ownership helpers)
++    are recursively copied. The polling thread serializes only this private
++    graph, and ownership is captured from it once at submission.
++    """
++    in_progress = object()
++    memo: dict[int, Any] = {}
++
++    def clone(value: Any) -> Any:
++        if isinstance(value, DeviceIPCWrapper):
++            return value
++        identity = id(value)
++        if identity in memo:
++            cloned = memo[identity]
++            if cloned is in_progress:
++                raise ValueError("Recursive immutable MQ payload container")
++            return cloned
++        if isinstance(value, list):
++            cloned_list: list[Any] = []
++            memo[identity] = cloned_list
++            cloned_list.extend(clone(item) for item in value)
++            return cloned_list
++        if isinstance(value, dict):
++            cloned_dict: dict[Any, Any] = {}
++            memo[identity] = cloned_dict
++            for key, item in value.items():
++                cloned_dict[key] = clone(item)
++            return cloned_dict
++        if isinstance(value, tuple):
++            memo[identity] = in_progress
++            cloned_tuple = tuple(clone(item) for item in value)
++            memo[identity] = cloned_tuple
++            return cloned_tuple
++        if isinstance(value, set):
++            cloned_set: set[Any] = set()
++            memo[identity] = cloned_set
++            for item in value:
++                cloned_set.add(clone(item))
++            return cloned_set
++        if isinstance(value, frozenset):
++            memo[identity] = in_progress
++            cloned_frozenset = frozenset(clone(item) for item in value)
++            memo[identity] = cloned_frozenset
++            return cloned_frozenset
++        return value
++
++    return tuple(clone(value) for value in values)
++
++
++@dataclass(frozen=True)
++class _IPCTransportOwnership:
++    """Immutable wrapper identity set and its asynchronous lifetime lease."""
++
++    exports: tuple[DeviceIPCWrapper, ...]
++    lease: IPCExportLease
+ 
+ 
+ class RemoteHandlerError(RuntimeError):
+@@ -55,6 +175,14 @@ class RemoteHandlerError(RuntimeError):
+         self.remote_message = message
+         super().__init__(f"{request_type.name} handler failed: {error_type}: {message}")
+ 
++    def _lmcache_traceback_free_clone(self) -> "RemoteHandlerError":
++        """Rebuild the typed remote error without traceback-owned frames."""
++        return type(self)(self.request_type, self.error_type, self.remote_message)
++
++
++class _RetireResponseSession(RuntimeError):
++    """A response cannot be correlated safely; replace the DEALER session."""
++
+ 
+ class _RemoteErrorPayload(msgspec.Struct, frozen=True):
+     error_type: str
+@@ -74,15 +202,106 @@ def unwrap_request_payloads(
+     b_payloads: list[bytes], payload_clss: list[Any]
+ ) -> list[Any]:
+     if len(b_payloads) != len(payload_clss):
++        _decode_and_release_known_wire_payloads(b_payloads, payload_clss)
+         raise ValueError("Payload count does not match expected count")
+ 
+-    decoded_payloads = [
+-        msgspec_decode(payload, cls=cls)
+-        for payload, cls in zip(b_payloads, payload_clss, strict=False)
+-    ]
++    decoded_payloads: list[Any] = []
++    try:
++        for payload, cls in zip(b_payloads, payload_clss, strict=False):
++            decoded_payloads.append(msgspec_decode(payload, cls=cls))
++    except BaseException:
++        # A later payload can fail after a CUDA wrapper was already decoded.
++        # Deterministically return every still-unconsumed export reservation.
++        release_ipc_exports(decoded_payloads)
++        raise
+     return decoded_payloads
+ 
+ 
++def _decode_and_release_known_wire_payloads(
++    b_payloads: list[bytes], payload_clss: list[Any]
++) -> None:
++    """Best-effort consume/release wrappers in rejected wire payloads.
++
++    A sender transfers CUDA IPC ownership when ZeroMQ accepts the multipart
++    message. Even when the receiver has no handler, rejects the frame count, or
++    cannot decode the request type, every frame must be decoded exactly once so
++    one-shot wrappers can explicitly return the producer reservation.
++
++    Rejection cleanup intentionally ignores the declared schema and uses the
++    customized ``Any`` decoder for *all* frames. A typed decoder can materialize
++    a wrapper and then fail on a later field; retrying that same frame as Any
++    would create a second receiver for one refcounter reservation.
++    """
++    del payload_clss  # Kept in the signature for compatibility with callers.
++    decoded_payloads: list[Any] = []
++    generic_decoder = get_customized_decoder(Any)
++    for payload in b_payloads:
++        try:
++            decoded_payloads.append(generic_decoder.decode(payload))
++        except BaseException:
++            logger.exception("Failed to decode rejected MQ payload frame")
++    release_ipc_exports(decoded_payloads)
++
++
++def _invoke_handler_with_ipc_cleanup(
++    handler: Callable[..., Any], decoded_payloads: list[Any]
++) -> Any:
++    """Run a handler and release any IPC wrappers it did not import."""
++    try:
++        return handler(*decoded_payloads)
++    finally:
++        release_ipc_exports(decoded_payloads)
++
++
++class _BlockingPayloadCleanupOwner:
++    """Exactly-once owner for decoded payloads queued to an executor.
++
++    The MQ thread has already materialized receiver-owned IPC exports before
++    ``submit``. A queued task may be cancelled without ever invoking its
++    callable, so cleanup cannot live only in the callable's ``finally`` block.
++    The cancellation callback and task entry race for this owner: cancellation
++    may release only ``pending`` payloads, while a started task transitions the
++    owner to ``running`` and becomes the sole cleanup path.
++    """
++
++    def __init__(self, decoded_payloads: list[Any]) -> None:
++        self._decoded_payloads: list[Any] | None = decoded_payloads
++        self._state = "pending"
++        self._lock = threading.Lock()
++
++    def invoke(self, handler: Callable[..., Any]) -> Any:
++        """Transfer cleanup ownership to this worker and run ``handler``."""
++        with self._lock:
++            if self._state != "pending" or self._decoded_payloads is None:
++                raise RuntimeError("Blocking payload cleanup owner is unavailable")
++            self._state = "running"
++            decoded_payloads = self._decoded_payloads
++
++        try:
++            return handler(*decoded_payloads)
++        finally:
++            self._release_running(decoded_payloads)
++
++    def release_if_pending(self) -> bool:
++        """Release a cancelled/rejected task only if no worker started it."""
++        with self._lock:
++            if self._state != "pending" or self._decoded_payloads is None:
++                return False
++            decoded_payloads = self._decoded_payloads
++            self._decoded_payloads = None
++            self._state = "released"
++        release_ipc_exports(decoded_payloads)
++        return True
++
++    def _release_running(self, decoded_payloads: list[Any]) -> None:
++        with self._lock:
++            if self._state != "running":
++                return
++            self._decoded_payloads = None
++            self._state = "released"
++        release_ipc_exports(decoded_payloads)
++
++
+ _SPECIAL_ENCODER_DECODERS = {
+     DeviceIPCWrapper: (
+         get_customized_encoder(DeviceIPCWrapper),
+@@ -131,13 +350,16 @@ def msgspec_decode(b_obj: bytes, cls: Any) -> Any:
+ class _OpKind(enum.Enum):
+     REGISTER = "register"
+     UNREGISTER = "unregister"
++    RESET = "reset"
+ 
+ 
+ @dataclass
+ class _PollOp:
+     kind: _OpKind
+     client: "MessageQueueClient"
+-    done: threading.Event
++    completion: Future[None]
++    abandoned: bool = False
++    state_lock: threading.Lock = field(default_factory=threading.Lock)
+ 
+ 
+ class ClientPollingLoop:
+@@ -195,84 +417,187 @@ class ClientPollingLoop:
+             inst._notifier.notify()
+             cls._instance = None
+ 
+-        inst._thread.join()
+-        inst._notifier.close()
+-        logger.debug("ClientPollingLoop shut down")
+-
+-    def register(self, client: "MessageQueueClient") -> None:
+-        """Register a client's DEALER socket with the shared poller.
+-
+-        Blocks until the loop thread has completed the registration.
++        inst._thread.join(timeout=_CLIENT_THREAD_JOIN_TIMEOUT_S)
++        if inst._thread.is_alive():
++            # The notifier must outlive a thread that may still resume and use
++            # it. The polling thread closes its notifier when it eventually
++            # exits.
++            logger.error(
++                "ClientPollingLoop did not stop within %.1fs; "
++                "deferring notifier close to polling thread",
++                _CLIENT_THREAD_JOIN_TIMEOUT_S,
++            )
++            return
+ 
+-        Args:
+-            client: The MessageQueueClient to register.
+-        """
+-        done = threading.Event()
+-        self._ops_queue.put(_PollOp(kind=_OpKind.REGISTER, client=client, done=done))
++    def _queue_op(
++        self, kind: _OpKind, client: "MessageQueueClient"
++    ) -> tuple[bool, bool]:
++        completion: Future[None] = Future()
++        op = _PollOp(kind=kind, client=client, completion=completion)
++        self._ops_queue.put(op)
+         self._notifier.notify()
+-        done.wait()
+-
+-    def unregister(self, client: "MessageQueueClient") -> None:
+-        """Unregister a client's DEALER socket from the shared poller.
+-
+-        Blocks until the loop thread has completed the unregistration.
++        try:
++            completion.result(timeout=_CLIENT_CONTROL_TIMEOUT_S)
++        except FutureTimeoutError:
++            with op.state_lock:
++                # Resolve the deadline race with _process_ops. If it completed
++                # while result() raised, consume that result as normal.
++                if completion.done():
++                    completion.result()
++                    return True, False
++                op.abandoned = True
++                # An unclaimed REGISTER can be cancelled and closed by its
++                # constructor. UNREGISTER and RESET must remain queued so the
++                # polling thread eventually stops using the old socket before
++                # it is closed with zero linger.
++                cancelled = completion.cancel() if kind is _OpKind.REGISTER else False
++            logger.error(
++                "Timed out after %.1fs waiting to %s MessageQueueClient",
++                _CLIENT_CONTROL_TIMEOUT_S,
++                kind.value,
++            )
++            return False, cancelled
++        return True, False
+ 
+-        Args:
+-            client: The MessageQueueClient to unregister.
+-        """
+-        done = threading.Event()
+-        self._ops_queue.put(_PollOp(kind=_OpKind.UNREGISTER, client=client, done=done))
+-        self._notifier.notify()
+-        done.wait()
++    def register(self, client: "MessageQueueClient") -> None:
++        """Register a client without allowing construction to hang forever."""
++        completed, cancelled = self._queue_op(_OpKind.REGISTER, client)
++        if not completed:
++            if cancelled:
++                client._close_socket()
++            raise TimeoutError("Timed out registering MessageQueueClient")
++
++    def unregister(self, client: "MessageQueueClient") -> bool:
++        """Unregister a client, returning false rather than hanging shutdown."""
++        completed, _cancelled = self._queue_op(_OpKind.UNREGISTER, client)
++        return completed
++
++    def reset(self, client: "MessageQueueClient") -> bool:
++        """Replace one client's socket without blocking the shared loop."""
++        completed, _cancelled = self._queue_op(_OpKind.RESET, client)
++        return completed
+ 
+     def notify(self) -> None:
+         """Wake the polling loop to process outbound tasks."""
+         self._notifier.notify()
+ 
+-    def _process_ops(self) -> None:
+-        """Drain the ops queue and apply register/unregister to the poller."""
++    def _retire_client(self, client: "MessageQueueClient") -> None:
++        """Remove a client from this poller before closing its socket."""
++        try:
++            if client.socket in self._socket_to_client:
++                self._poller.unregister(client.socket)
++        finally:
++            self._socket_to_client.pop(client.socket, None)
++            client._fail_outstanding("LMCache MQ client closed")
++            client._close_socket()
++
++    def _reset_client(self, client: "MessageQueueClient") -> None:
++        """Discard one transport session and register a fresh DEALER socket."""
++        old_socket = client.socket
+         try:
+-            while True:
++            if old_socket in self._socket_to_client:
++                self._poller.unregister(old_socket)
++        finally:
++            self._socket_to_client.pop(old_socket, None)
++
++        client._fail_outstanding(
++            "LMCache MQ request abandoned after server became unhealthy"
++        )
++        client._replace_socket()
++        self._poller.register(client.socket, zmq.POLLIN)
++        self._socket_to_client[client.socket] = client
++
++    def _process_ops(self) -> None:
++        """Drain queued control operations and wake every waiting caller."""
++        while True:
++            try:
+                 op = self._ops_queue.get_nowait()
++            except queue.Empty:
++                return
++            if not op.completion.set_running_or_notify_cancel():
++                continue
++            try:
+                 if op.kind is _OpKind.REGISTER:
+-                    self._poller.register(op.client.socket, zmq.POLLIN)
+-                    self._socket_to_client[op.client.socket] = op.client
+-                    logger.debug("Registered client socket %s", op.client.socket)
++                    with op.state_lock:
++                        abandoned = op.abandoned
++                    if not abandoned:
++                        self._poller.register(op.client.socket, zmq.POLLIN)
++                        self._socket_to_client[op.client.socket] = op.client
++                        logger.debug("Registered client socket %s", op.client.socket)
++                    with op.state_lock:
++                        if op.abandoned:
++                            self._retire_client(op.client)
++                        op.completion.set_result(None)
+                 elif op.kind is _OpKind.UNREGISTER:
+-                    self._poller.unregister(op.client.socket)
+-                    self._socket_to_client.pop(op.client.socket, None)
++                    self._retire_client(op.client)
++                    with op.state_lock:
++                        op.completion.set_result(None)
+                     logger.debug("Unregistered client socket %s", op.client.socket)
+-                op.done.set()
+-        except queue.Empty:
+-            pass
++                elif op.kind is _OpKind.RESET:
++                    self._reset_client(op.client)
++                    with op.state_lock:
++                        op.completion.set_result(None)
++                    logger.debug("Reset client socket %s", op.client.socket)
++            except Exception as exc:
++                op.client._close_socket()
++                with op.state_lock:
++                    op.completion.set_exception(exc)
+ 
+     def _main_loop(self) -> None:
+         """Unified poll loop for all registered clients."""
+         notifier_fd = self._notifier.fileno()
+ 
+-        while not self._is_finished.is_set():
++        try:
++            while not self._is_finished.is_set():
++                self._process_ops()
++
++                socks = dict(self._poller.poll(1000))
++
++                # Outbound: shared notifier woke us — drain it, then flush
++                # all clients' output queues.
++                if socks.get(notifier_fd) and socks[notifier_fd] & zmq.POLLIN:
++                    self._notifier.consume()
++                    # Operations queued while poll() slept (especially RESET)
++                    # must take effect before any old-session outbound work.
++                    self._process_ops()
++                    for client in self._socket_to_client.values():
++                        try:
++                            client.process_outbound_task()
++                        except Exception:
++                            # One bad socket/client must not kill the singleton loop
++                            # and strand every other client's futures/control ops.
++                            logger.exception("Unhandled outbound client error")
++
++                # Inbound: dispatch each ready DEALER socket to its client.
++                for sock, event in socks.items():
++                    if sock is notifier_fd:
++                        continue
++                    if event & zmq.POLLIN:
++                        owner = self._socket_to_client.get(sock)
++                        if owner is not None:
++                            self._process_inbound_client(owner)
++        finally:
++            # Drain remaining ops so waiting threads unblock, then close the
++            # notifier here so even a delayed thread exit releases it safely.
+             self._process_ops()
++            self._notifier.close()
++            logger.debug("ClientPollingLoop shut down")
+ 
+-            socks = dict(self._poller.poll(1000))
+-
+-            # Outbound: shared notifier woke us — drain it, then flush
+-            # all clients' output queues.
+-            if socks.get(notifier_fd) and socks[notifier_fd] & zmq.POLLIN:
+-                self._notifier.consume()
+-                for client in self._socket_to_client.values():
+-                    client.process_outbound_task()
+-
+-            # Inbound: dispatch each ready DEALER socket to its client.
+-            for sock, event in socks.items():
+-                if sock is notifier_fd:
+-                    continue
+-                if event & zmq.POLLIN:
+-                    owner = self._socket_to_client.get(sock)
+-                    if owner is not None:
+-                        owner.process_inbound()
+-
+-        # Drain remaining ops so any waiting threads unblock.
+-        self._process_ops()
++    def _process_inbound_client(self, client: "MessageQueueClient") -> None:
++        """Dispatch one response and retire an uncorrelatable session."""
++        try:
++            client.process_inbound()
++        except _RetireResponseSession as exc:
++            error_message = str(exc)
++            logger.error(
++                "Retiring malformed LMCache MQ response session: %s", error_message
++            )
++            try:
++                self._reset_client(client)
++            except Exception:
++                logger.exception("Failed to retire malformed response session")
++        except Exception:
++            logger.exception("Unhandled inbound client error")
+ 
+ 
+ # Main classes
+@@ -282,13 +607,23 @@ class MessageQueueClient:
+         request_uid: RequestUID
+         future: MessagingFuture[Any]
+         request_type: RequestType
+-        request_payloads: list[Any]
++        request_payloads: tuple[Any, ...] | list[Any]
++        ipc_ownership: _IPCTransportOwnership | None = None
++
++        def __post_init__(self) -> None:
++            # Compatibility for lightweight tests/callers that construct this
++            # internal record directly rather than through submit_request().
++            if self.ipc_ownership is None:
++                exports = snapshot_ipc_exports(self.request_payloads)
++                if exports:
++                    self.ipc_ownership = _IPCTransportOwnership(
++                        exports, acquire_ipc_export_lease(exports)
++                    )
+ 
+     def __init__(self, server_url: str, context: zmq.Context):
+-        # Socket
+         self.ctx = context
+-        self.socket = self.ctx.socket(zmq.DEALER)
+-        self.socket.connect(server_url)
++        self.server_url = server_url
++        self.socket = self._create_socket()
+ 
+         # Input queue
+         self.input_queue: queue.Queue = queue.Queue()
+@@ -296,21 +631,55 @@ class MessageQueueClient:
+         # Pending job's futures
+         self._request_counter = itertools.count()
+         self.pending_futures: dict[int, MessagingFuture[Any]] = {}
++        self._pending_request_types: dict[int, RequestType] = {}
++        self._inflight_ownership: dict[int, _IPCTransportOwnership] = {}
++        self._closed = False
++        self._socket_closed = False
++        self._socket_close_lock = threading.Lock()
+ 
+-        # Register with the shared polling loop
++        # Register with the shared polling loop.
+         self._polling_loop = ClientPollingLoop.get_instance()
+-        self._polling_loop.register(self)
+-
+-    def process_outbound_task(self):
+         try:
+-            while wrapped_request := self.input_queue.get_nowait():
+-                # wrapped_request = self.input_queue.get_nowait()
+-
+-                # Update the pending futures
+-                request_uid = wrapped_request.request_uid
+-                self.pending_futures[request_uid] = wrapped_request.future
+-
+-                # Send the request
++            self._polling_loop.register(self)
++        except Exception:
++            ClientPollingLoop.release_instance()
++            raise
++
++    def process_outbound_task(self) -> None:
++        # Some tests and compatibility callers allocate lightweight clients
++        # through __new__; initialize the additive tracking map lazily too.
++        if not hasattr(self, "_inflight_ownership"):
++            self._inflight_ownership = {}
++        if not hasattr(self, "_pending_request_types"):
++            self._pending_request_types = {}
++        # Reclaim only transport-complete futures here. A caller timeout after
++        # send is terminal to the caller but the remote side may still open,
++        # wait on, or re-record CUDA IPC handles embedded in the request.
++        for request_uid, future in list(self.pending_futures.items()):
++            if future.transport_complete:
++                self.pending_futures.pop(request_uid, None)
++                self._pending_request_types.pop(request_uid, None)
++                self._inflight_ownership.pop(request_uid, None)
++
++        while True:
++            try:
++                wrapped_request = self.input_queue.get_nowait()
++            except queue.Empty:
++                return
++            ownership = wrapped_request.ipc_ownership
++            if wrapped_request.future.query():
++                # The caller's deadline elapsed before this request left the
++                # lifecycle-aware input queue. The remote never saw its
++                # transport resources, so they are safe to release now.
++                if ownership is not None:
++                    release_ipc_exports(ownership.exports)
++                    ownership.lease.release()
++                wrapped_request.future.complete_transport()
++                continue
++
++            request_uid = wrapped_request.request_uid
++            provisionally_quarantined = False
++            try:
+                 b_request_uid = msgspec_encode(request_uid, cls=RequestUID)
+                 b_request_type = msgspec_encode(
+                     wrapped_request.request_type, cls=RequestType
+@@ -322,7 +691,7 @@ class MessageQueueClient:
+                         type(p).__name__ for p in wrapped_request.request_payloads
+                     ]
+                     raise ValueError(
+-                        f"Payload count mismatch for request "
++                        f"Payload count mismatch for "
+                         f"{wrapped_request.request_type}: "
+                         f"expected {len(payload_classes)} payloads "
+                         f"{expected_classes}, "
+@@ -340,9 +709,126 @@ class MessageQueueClient:
+                         strict=False,
+                     )
+                 ]
+-                self.socket.send_multipart([b_request_uid, b_request_type] + b_payloads)
+-        except queue.Empty:
+-            pass
++                # Register immediately before the atomic nonblocking send so a
++                # fast response cannot race pending-future publication.
++                self.pending_futures[request_uid] = wrapped_request.future
++                self._pending_request_types[request_uid] = wrapped_request.request_type
++                if ownership is not None:
++                    self._inflight_ownership[request_uid] = ownership
++                    # Establish a strong, process-lifetime producer pin
++                    # *before* the atomic send. If any post-send ownership
++                    # bookkeeping is ambiguous, the pin stays installed even
++                    # after a fast reply removes ordinary in-flight tracking.
++                    _quarantine_sent_unanswered_ipc_exports(ownership)
++                    provisionally_quarantined = True
++                self.socket.send_multipart(
++                    [b_request_uid, b_request_type] + b_payloads,
++                    flags=zmq.NOBLOCK,
++                )
++            except zmq.Again:
++                self.pending_futures.pop(request_uid, None)
++                self._pending_request_types.pop(request_uid, None)
++                self._inflight_ownership.pop(request_uid, None)
++                if ownership is not None:
++                    if provisionally_quarantined:
++                        _remove_provisional_ipc_quarantine(ownership)
++                    release_ipc_exports(ownership.exports)
++                    ownership.lease.release()
++                wrapped_request.future.set_exception(
++                    RuntimeError("LMCache MQ send queue is full; server is unreachable")
++                )
++                logger.error(
++                    "Nonblocking LMCache MQ send failed for request_uid=%d: "
++                    "send queue full",
++                    request_uid,
++                )
++            except Exception as exc:
++                self.pending_futures.pop(request_uid, None)
++                self._pending_request_types.pop(request_uid, None)
++                self._inflight_ownership.pop(request_uid, None)
++                if ownership is not None:
++                    if provisionally_quarantined:
++                        _remove_provisional_ipc_quarantine(ownership)
++                    release_ipc_exports(ownership.exports)
++                    ownership.lease.release()
++                wrapped_request.future.set_exception(exc)
++                # Do not hand a traceback-owning exception to asynchronous
++                # log handlers: that would retain this frame, the client, and
++                # its payload graph independently of the sanitized future.
++                error_message = str(exc)
++                logger.error(
++                    "Cannot send LMCache MQ request_uid=%d: %s: %s",
++                    request_uid,
++                    type(exc).__name__,
++                    error_message,
++                )
++            else:
++                if ownership is None:
++                    continue
++                # send_multipart is atomic: after it returns, the receiver owns
++                # every one-shot IPC export embedded in the request.  The
++                # strict helper is itself noexcept, but keep this boundary
++                # defensive because releasing on any post-send exception would
++                # race the receiver and could double-decrement the CUDA IPC
++                # refcounter.
++                try:
++                    transfer_recorded = mark_ipc_exports_transferred_strict(
++                        ownership.exports
++                    )
++                except BaseException:
++                    transfer_recorded = False
++                    try:
++                        logger.exception(
++                            "Accepted LMCache MQ send escaped ownership "
++                            "bookkeeping for request_uid=%d; retaining producer "
++                            "payload for process lifetime",
++                            request_uid,
++                        )
++                    except BaseException:
++                        pass
++                if transfer_recorded:
++                    try:
++                        _remove_provisional_ipc_quarantine(ownership)
++                    except BaseException:
++                        # Failure to remove only leaks the already-transferred
++                        # producer payload; it must never enter pre-send
++                        # release cleanup after an accepted send.
++                        try:
++                            logger.exception(
++                                "Failed to remove committed IPC quarantine "
++                                "for request_uid=%d",
++                                request_uid,
++                            )
++                        except BaseException:
++                            pass
++                else:
++                    try:
++                        logger.error(
++                            "Accepted LMCache MQ send has ambiguous IPC ownership "
++                            "for request_uid=%d; retaining producer payload for "
++                            "process lifetime",
++                            request_uid,
++                        )
++                    except BaseException:
++                        pass
++                try:
++                    if transfer_recorded:
++                        ownership.lease.release()
++                    # On ambiguity, retain the ownership record *with its live
++                    # lease* process-lifetime. This suppresses deferred handler
++                    # cleanup even if a wrapper-specific quarantine hook failed
++                    # or strict discovery stopped before visiting later exports.
++                except BaseException:
++                    # Lease cleanup failures are also non-fatal post-send. The
++                    # accepted transport must remain eligible for its reply.
++                    try:
++                        logger.exception(
++                            "Failed to release accepted-send IPC lease for "
++                            "request_uid=%d",
++                            request_uid,
++                        )
++                    except BaseException:
++                        pass
+ 
+     def process_inbound(self) -> None:
+         """Process one inbound response from the server.
+@@ -351,47 +837,121 @@ class MessageQueueClient:
+         is readable.  Only touches ``pending_futures``, which is
+         exclusively accessed from the loop thread.
+         """
++        if not hasattr(self, "_inflight_ownership"):
++            self._inflight_ownership = {}
++        if not hasattr(self, "_pending_request_types"):
++            self._pending_request_types = {}
+         msg = self.socket.recv_multipart()
+-        if len(msg) < 2:
+-            logger.error(
+-                "Malformed response: expected at least 2 message parts "
+-                "[request_uid, request_type, *response], got %d",
+-                len(msg),
++        if not msg:
++            raise _RetireResponseSession(
++                "empty response header cannot identify a pending request"
++            )
++
++        b_request_uid, *remaining = msg
++        try:
++            request_uid = decode_request_uid(b_request_uid)
++        except Exception as exc:
++            raise _RetireResponseSession(
++                f"invalid response request UID ({type(exc).__name__}: {exc})"
++            ) from None
++
++        if not remaining:
++            self._terminalize_response_error(
++                request_uid,
++                "Malformed LMCache MQ response: truncated header after request UID",
++            )
++            raise _RetireResponseSession(
++                f"truncated response header for request_uid={request_uid}"
++            )
++
++        b_request_type, *b_response = remaining
++        try:
++            request_type = msgspec_decode(b_request_type, cls=RequestType)
++        except Exception as exc:
++            correlated = self._terminalize_response_error(
++                request_uid,
++                "Malformed LMCache MQ response request type: "
++                f"{type(exc).__name__}: {exc}",
++            )
++            if not correlated:
++                raise _RetireResponseSession(
++                    "invalid response request type for unknown "
++                    f"request_uid={request_uid}"
++                ) from None
++            return
++
++        expected_type = self._pending_request_types.get(request_uid)
++        if expected_type is not None and request_type is not expected_type:
++            self._terminalize_response_error(
++                request_uid,
++                "Malformed LMCache MQ response request type mismatch: "
++                f"expected {expected_type.name}, got {request_type.name}",
+             )
+             return
+-        b_request_uid, b_request_type, *b_response = msg
+-        request_uid = msgspec_decode(b_request_uid, cls=RequestUID)
+-        request_type = msgspec_decode(b_request_type, cls=RequestType)
++
+         response_cls = get_response_class(request_type)
+ 
+         if request_uid in self.pending_futures:
+-            future = self.pending_futures.pop(request_uid)
+-            if b_response and b_response[0] == _ERROR_RESPONSE_MARKER:
+-                if len(b_response) != 2:
+-                    future.set_exception(
+-                        RuntimeError("Malformed LMCache RPC error response")
+-                    )
+-                    return
+-                try:
++            future = self.pending_futures[request_uid]
++            try:
++                if b_response and b_response[0] == _ERROR_RESPONSE_MARKER:
++                    if len(b_response) != 2:
++                        raise RuntimeError("Malformed LMCache RPC error response")
+                     error = msgspec_decode(b_response[1], cls=_RemoteErrorPayload)
+-                except Exception:
+                     future.set_exception(
+-                        RuntimeError("Failed to decode LMCache RPC error response")
++                        RemoteHandlerError(
++                            request_type=request_type,
++                            error_type=error.error_type,
++                            message=error.message,
++                        )
+                     )
+-                    logger.exception("Failed to decode RPC error response")
+-                    return
++                elif b_response:
++                    response = msgspec_decode(b_response[0], cls=response_cls)
++                    future.set_result(response)
++                else:
++                    future.set_result(None)
++            except Exception as exc:
++                # A response proves the remote transport is finished even if
++                # this client cannot decode it. Resolve the future with the
++                # decode error instead of dropping its only tracking entry and
++                # leaving it permanently unresolved.
++                error_message = str(exc)
++                logger.error(
++                    "Failed to decode LMCache MQ response for request_uid=%d: %s: %s",
++                    request_uid,
++                    type(exc).__name__,
++                    error_message,
++                )
++                # Never store the caught exception itself: its traceback owns
++                # this process_inbound frame, which owns ``self`` and would
++                # keep the complete MessageQueueClient graph alive as long as
++                # callers retain the failed future.
+                 future.set_exception(
+-                    RemoteHandlerError(
+-                        request_type=request_type,
+-                        error_type=error.error_type,
+-                        message=error.message,
++                    RuntimeError(
++                        "Failed to decode LMCache MQ response: "
++                        f"{type(exc).__name__}: {exc}"
+                     )
+                 )
+-            elif b_response:
+-                response = msgspec_decode(b_response[0], cls=response_cls)
+-                future.set_result(response)
+-            else:
+-                future.set_result(None)
++            finally:
++                future.complete_transport()
++                self.pending_futures.pop(request_uid, None)
++                self._pending_request_types.pop(request_uid, None)
++                self._inflight_ownership.pop(request_uid, None)
++
++    def _terminalize_response_error(
++        self, request_uid: RequestUID, message: str
++    ) -> bool:
++        """Fail one correlatable response and release its ordinary tracking."""
++        future = self.pending_futures.get(request_uid)
++        if future is None:
++            logger.error("%s (unknown request_uid=%d)", message, request_uid)
++            return False
++        future.set_exception(RuntimeError(message))
++        future.complete_transport()
++        self.pending_futures.pop(request_uid, None)
++        self._pending_request_types.pop(request_uid, None)
++        self._inflight_ownership.pop(request_uid, None)
++        return True
+ 
+     def submit_request(
+         self,
+@@ -410,23 +970,129 @@ class MessageQueueClient:
+         Returns:
+             MessagingFuture[T]: A future that will hold the response.
+         """
+-        future: MessagingFuture[T] = MessagingFuture()
+         request_uid = next(self._request_counter)
+-        self.input_queue.put(
+-            MessageQueueClient.WrappedRequest(
+-                request_uid=request_uid,
+-                future=future,
+-                request_type=request_type,
+-                request_payloads=request_payloads,
+-            )
++        future: MessagingFuture[T] = MessagingFuture(
++            on_timeout=self._polling_loop.notify
+         )
++        # Detach the complete built-in container graph before leasing or
++        # encoding it. The polling thread and immutable export tuple then refer
++        # to the same private snapshot even if the caller clears/reorders a
++        # payload list while send_multipart accepts the already-encoded frames.
++        transport_payloads = _snapshot_request_payloads(request_payloads)
++        ipc_exports = snapshot_ipc_exports(transport_payloads)
++        ipc_ownership: _IPCTransportOwnership | None = None
++        if ipc_exports:
++            # Lease at submission—not later in the polling thread. A
++            # forwarding handler may return immediately after enqueueing; its
++            # finally-cleanup must not release wrappers before serialization.
++            ipc_ownership = _IPCTransportOwnership(
++                ipc_exports, acquire_ipc_export_lease(ipc_exports)
++            )
++        try:
++            self.input_queue.put(
++                MessageQueueClient.WrappedRequest(
++                    request_uid=request_uid,
++                    future=future,
++                    request_type=request_type,
++                    request_payloads=transport_payloads,
++                    ipc_ownership=ipc_ownership,
++                )
++            )
++        except BaseException:
++            if ipc_ownership is not None:
++                release_ipc_exports(ipc_ownership.exports)
++                ipc_ownership.lease.release()
++            raise
+         self._polling_loop.notify()
+         return future
+ 
++    def reset_connection(self) -> bool:
++        """Discard queued work after a server outage and reconnect.
++
++        The reset runs on the shared polling thread. Closing the old DEALER
++        with zero linger disposes requests buffered by ZeroMQ, while a fresh
++        socket identity prevents late responses from matching new work.
++
++        Returns:
++            bool: True when the reset completed within the control timeout.
++        """
++        if self._closed:
++            return False
++        return self._polling_loop.reset(self)
++
++    def _create_socket(self) -> zmq.Socket:
++        """Create a configured DEALER for the current server URL."""
++        socket = self.ctx.socket(zmq.DEALER)
++        socket.setsockopt(zmq.SNDHWM, _CLIENT_SNDHWM)
++        socket.setsockopt(zmq.LINGER, 0)
++        socket.connect(self.server_url)
++        return socket
++
++    def _fail_outstanding(self, message: str) -> None:
++        """Fail work while preserving unsafe-to-release sent exports.
++
++        Pending requests were atomically accepted by ZeroMQ, but reset/close
++        provides no proof that the daemon did not receive them. Their payloads
++        are retained in a process-lifetime quarantine. Only requests still in
++        ``input_queue`` are known unsent and may be released.
++        """
++        inflight_ownership = getattr(self, "_inflight_ownership", {})
++        pending_request_types = getattr(self, "_pending_request_types", {})
++        sent_futures = list(self.pending_futures.items())
++        for request_uid, future in sent_futures:
++            ownership = inflight_ownership.get(request_uid)
++            if ownership is not None:
++                _quarantine_sent_unanswered_ipc_exports(ownership)
++            retained = future.quarantine_transport_resources()
++            if retained:
++                _quarantine_sent_unanswered_transport_resources(retained)
++        self.pending_futures.clear()
++        pending_request_types.clear()
++        inflight_ownership.clear()
++        unsent_futures: list[MessagingFuture[Any]] = []
++        while True:
++            try:
++                wrapped_request = self.input_queue.get_nowait()
++            except queue.Empty:
++                break
++            ownership = wrapped_request.ipc_ownership
++            if ownership is not None:
++                release_ipc_exports(ownership.exports)
++                ownership.lease.release()
++            unsent_futures.append(wrapped_request.future)
++        for _request_uid, future in sent_futures:
++            future.set_exception(ConnectionError(message))
++        for future in unsent_futures:
++            future.set_exception(ConnectionError(message))
++
++    def _replace_socket(self) -> None:
++        """Close the unregistered socket and install a fresh one."""
++        with self._socket_close_lock:
++            self.socket.close(linger=0)
++            self.socket = self._create_socket()
++            self._socket_closed = False
++
++    def _close_socket(self) -> None:
++        """Close only after this socket is absent from the shared poller."""
++        with self._socket_close_lock:
++            if self._socket_closed:
++                return
++            self._socket_closed = True
++            self.socket.close(linger=0)
++
+     def close(self) -> None:
+-        self._polling_loop.unregister(self)
+-        ClientPollingLoop.release_instance()
+-        self.socket.close()
++        if self._closed:
++            return
++        self._closed = True
++        try:
++            self._polling_loop.unregister(self)
++        except Exception:
++            logger.exception("Failed to unregister MessageQueueClient")
++        finally:
++            # unregister() owns socket retirement, even after a timeout. This
++            # caller may return while the live polling thread still references
++            # the client, so it must not close the socket itself.
++            ClientPollingLoop.release_instance()
+ 
+ 
+ ResponseType = TypeVar("ResponseType", covariant=True)
+@@ -460,7 +1126,8 @@ class SyncRequestHandler(RequestHandlerBase[ResponseType]):
+         self.handler = handler
+ 
+     def __call__(self, payloads: list[bytes]) -> ResponseType:
+-        return self.handler(*unwrap_request_payloads(payloads, self.payload_clss))
++        decoded_payloads = unwrap_request_payloads(payloads, self.payload_clss)
++        return _invoke_handler_with_ipc_cleanup(self.handler, decoded_payloads)
+ 
+     def get_response_class(self) -> ResponseType:
+         return self.response_cls
+@@ -498,11 +1165,31 @@ class BlockingRequestHandler(RequestHandlerBase[ResponseType]):
+             "Call add_normal_thread_pool or add_affinity_thread_pool first."
+         )
+         decoded_payloads = unwrap_request_payloads(payloads, self.payload_clss)
+-        if isinstance(self.executor, AffinityThreadPool):
+-            return self.executor.submit(
+-                self.handler, *decoded_payloads, affinity_key=affinity_key
+-            )
+-        return self.executor.submit(self.handler, *decoded_payloads)
++        cleanup_owner = _BlockingPayloadCleanupOwner(decoded_payloads)
++        try:
++            if isinstance(self.executor, AffinityThreadPool):
++                future = self.executor.submit(
++                    cleanup_owner.invoke,
++                    self.handler,
++                    affinity_key=affinity_key,
++                )
++            else:
++                future = self.executor.submit(cleanup_owner.invoke, self.handler)
++        except BaseException:
++            # The worker never took ownership when task submission failed.
++            cleanup_owner.release_if_pending()
++            raise
++
++        # ThreadPoolExecutor and AffinityThreadPool both complete cancelled
++        # futures without invoking the queued callable. Install this callback
++        # before returning the future to the server's shutdown tracker so a
++        # concurrent close cannot observe/cancel it first.
++        def _release_cancelled_payloads(completed: Future[Any]) -> None:
++            if completed.cancelled():
++                cleanup_owner.release_if_pending()
++
++        future.add_done_callback(_release_cancelled_payloads)
++        return future
+ 
+     def get_response_class(self) -> ResponseType:
+         return self.response_cls
+@@ -550,12 +1237,19 @@ class MessageQueueServer:
+         self.worker_thread = threading.Thread(
+             target=self._main_loop, daemon=True, name="mq-server-thread"
+         )
++        # Linearizes the last possible recv() against close()'s stop-intake
++        # boundary without holding a lock while a handler executes.
++        self._intake_lock = threading.Lock()
+ 
+         # Registered handlers: request_type -> (payload_cls, handler)
+         self.handlers: dict[RequestType, RequestHandlerBase[Any]] = {}
+ 
+         # Thread pools assigned via add_normal_thread_pool / add_affinity_thread_pool
+         self.extra_pools: list[ThreadPoolExecutor | AffinityThreadPool] = []
++        self._handler_futures: set[Future[Any]] = set()
++        self._handler_futures_cv = threading.Condition()
++        self._close_lock = threading.Lock()
++        self._closed = False
+ 
+     def _queue_error_response(
+         self, prefix_frames: list[bytes], exception: BaseException
+@@ -615,9 +1309,13 @@ class MessageQueueServer:
+         """
+         affinity_key = hash(prefix_frames[0])
+         future = handler_entry(payloads, affinity_key=affinity_key)
++        with self._handler_futures_cv:
++            self._handler_futures.add(future)
+ 
+         def _notify_response(fut: Future):
+             try:
++                if self.is_finished.is_set():
++                    return
+                 response = fut.result()
+                 response_cls = handler_entry.get_response_class()
+                 b_response = msgspec_encode(response, cls=response_cls)
+@@ -633,6 +1331,10 @@ class MessageQueueServer:
+             except Exception as exc:
+                 logger.exception("Error in blocking handler")
+                 self._queue_error_response(prefix_frames, exc)
++            finally:
++                with self._handler_futures_cv:
++                    self._handler_futures.discard(fut)
++                    self._handler_futures_cv.notify_all()
+ 
+         future.add_done_callback(_notify_response)
+ 
+@@ -658,19 +1360,42 @@ class MessageQueueServer:
+         output_fd = self._output_efd.fileno()
+         while not self.is_finished.is_set():
+             socks = dict(self.poller.poll(1000))
++            # close() sets the flag before waking poll(). Never accept another
++            # request from the readiness snapshot observed during shutdown.
++            if self.is_finished.is_set():
++                break
+             inbound_state = socks.get(self.socket, None)
+             outbound_state = socks.get(output_fd, None)
+ 
+             # Process the incoming requests
+             if inbound_state and inbound_state & zmq.POLLIN:
+-                msg = self.socket.recv_multipart()
+-                assert len(msg) >= 3, (
+-                    "Expected at least 3 message parts "
+-                    "[identity, request_uid, request_type, *payloads]"
+-                )
++                with self._intake_lock:
++                    if self.is_finished.is_set():
++                        break
++                    msg = self.socket.recv_multipart()
++                if len(msg) < 3:
++                    logger.error(
++                        "Malformed MQ request: expected at least 3 frames "
++                        "[identity, request_uid, request_type, *payloads], got %d",
++                        len(msg),
++                    )
++                    continue
+ 
+                 identity, b_request_uid, b_request_type, *payloads = msg
+-                request_type = msgspec_decode(b_request_type, cls=RequestType)
++                try:
++                    request_type = msgspec_decode(b_request_type, cls=RequestType)
++                except Exception as exc:
++                    # Version skew can make a newer enum value unknown to this
++                    # daemon. The sender already transferred every IPC frame
++                    # after ZeroMQ accepted the multipart message, so routing
++                    # rejection must still materialize/release them exactly
++                    # once and must not terminate the serving loop.
++                    logger.exception("Cannot decode LMCache MQ request type")
++                    _decode_and_release_known_wire_payloads(payloads, [])
++                    self._queue_error_response(
++                        [identity, b_request_uid, b_request_type], exc
++                    )
++                    continue
+ 
+                 if handler_entry := self.handlers.get(request_type):
+                     try:
+@@ -689,6 +1414,7 @@ class MessageQueueServer:
+                         "No handler registered for request type %s", request_type
+                     )
+                     logger.error("Available handlers: %s", list(self.handlers.keys()))
++                    _decode_and_release_known_wire_payloads(payloads, [])
+                     self._queue_error_response(
+                         [identity, b_request_uid, b_request_type],
+                         RuntimeError(
+@@ -935,11 +1661,55 @@ class MessageQueueServer:
+                 )
+         self.worker_thread.start()
+ 
+-    def close(self) -> None:
+-        self.is_finished.set()
+-        if self.worker_thread.is_alive():
+-            self.worker_thread.join()
+-        self.socket.close()
+-        for pool in self.extra_pools:
+-            pool.shutdown(wait=False)
+-        self._output_efd.close()
++    def close(self, handler_timeout_s: float = _SERVER_CLOSE_TIMEOUT_S) -> None:
++        """Stop intake, drain/cancel handlers, then retire transport resources.
++
++        A timeout deliberately leaves the socket and notifier open and raises:
++        callers must not tear down cache/storage resources under a live handler.
++        Once the blocked handler finishes, ``close`` may be retried safely.
++        """
++        if handler_timeout_s < 0:
++            raise ValueError("handler_timeout_s must be non-negative")
++        with self._close_lock:
++            if self._closed:
++                return
++            deadline = time.monotonic() + handler_timeout_s
++
++            # Stop accepting new work first. Wake poll() so this phase is
++            # bounded even when no socket is active.
++            with self._intake_lock:
++                self.is_finished.set()
++            if self.worker_thread.is_alive():
++                self._output_efd.notify()
++                self.worker_thread.join(timeout=max(0.0, deadline - time.monotonic()))
++                if self.worker_thread.is_alive():
++                    raise TimeoutError(
++                        "Timed out stopping LMCache MQ request intake; "
++                        "transport resources remain open"
++                    )
++
++            # Cancel queued work while allowing already-running handlers to
++            # finish. Pool callbacks remove futures only after they can no
++            # longer touch the response notifier.
++            for pool in self.extra_pools:
++                pool.shutdown(wait=False, cancel_futures=True)
++
++            with self._handler_futures_cv:
++                for future in tuple(self._handler_futures):
++                    future.cancel()
++                while self._handler_futures:
++                    remaining = deadline - time.monotonic()
++                    if remaining <= 0:
++                        raise TimeoutError(
++                            "Timed out draining LMCache MQ handlers; "
++                            "transport resources remain open"
++                        )
++                    self._handler_futures_cv.wait(timeout=remaining)
++
++            # Every task and done callback is now quiescent, so joins are
++            # immediate and no handler can race socket/notifier/cache teardown.
++            for pool in self.extra_pools:
++                pool.shutdown(wait=True, cancel_futures=True)
++            self.socket.close()
++            self._output_efd.close()
++            self._closed = True
+diff --git a/lmcache/v1/multiprocess/server.py b/lmcache/v1/multiprocess/server.py
+index 32951751a4bb8f62ca96817f2649c39e1b870df6..805721e145e0b7a323846bc74ae82fd02532a19b 100644
+--- a/lmcache/v1/multiprocess/server.py
++++ b/lmcache/v1/multiprocess/server.py
+@@ -4,6 +4,7 @@
+ # Standard
+ import argparse
+ import shutil
++import signal
+ import sys
+ import time
+ 
+@@ -438,6 +439,7 @@ def parse_args():
+ 
+ 
+ if __name__ == "__main__":
++    signal.signal(signal.SIGTERM, signal.default_int_handler)
+     args = parse_args()
+     mp_config = parse_args_to_mp_server_config(args)
+     storage_manager_config = parse_args_to_config(args)
+diff --git a/lmcache/v1/multiprocess/transfer_context/worker_transfer.py b/lmcache/v1/multiprocess/transfer_context/worker_transfer.py
+index 2de2783d6b812be6ced486e7adb2075fdef35f59..ccd60761ae236c7df836bdd3becc9f7b5e82371d 100644
+--- a/lmcache/v1/multiprocess/transfer_context/worker_transfer.py
++++ b/lmcache/v1/multiprocess/transfer_context/worker_transfer.py
+@@ -168,6 +168,18 @@ class IPCEvent(Protocol):
+     def wait(self, stream: object | None = None) -> None:
+         """Make ``stream`` wait for this event (async ordering primitive)."""
+ 
++    def record(self, stream: object | None = None) -> None:
++        """Record this event on ``stream``."""
++
++
++def _make_completion_event(predecessor: IPCEvent) -> IPCEvent:
++    """Create a request-owned event ordered after a shared engine fence."""
++    stream = torch_dev.current_stream()
++    completion_event = torch_dev.Event(interprocess=True)
++    predecessor.wait(stream=stream)
++    completion_event.record(stream)
++    return completion_event
++
+ 
+ SendRequest = Callable[[MessageQueueClient, RequestType, list[object]], MessagingFuture]
+ 
+@@ -361,11 +373,12 @@ class LMCacheDrivenTransferContext(TransferContext):
+                 "LMCache-driven transfer context is not registered. "
+                 "Call register() before submit_store()."
+             )
++        completion_event = _make_completion_event(event)
+         return self._send_request(
+             self._mq_client,
+             RequestType.STORE,
+-            [key, instance_id, block_ids, event.ipc_handle()],
+-        ).to_cuda_future()
++            [key, instance_id, block_ids, completion_event.ipc_handle()],
++        ).to_cuda_future(completion_event=completion_event)
+ 
+     def submit_retrieve(
+         self,
+@@ -383,11 +396,18 @@ class LMCacheDrivenTransferContext(TransferContext):
+                 "LMCache-driven transfer context is not registered. "
+                 "Call register() before submit_retrieve()."
+             )
++        completion_event = _make_completion_event(event)
+         return self._send_request(
+             self._mq_client,
+             RequestType.RETRIEVE,
+-            [key, instance_id, block_ids, event.ipc_handle(), skip_first_n_tokens],
+-        ).to_cuda_future()
++            [
++                key,
++                instance_id,
++                block_ids,
++                completion_event.ipc_handle(),
++                skip_first_n_tokens,
++            ],
++        ).to_cuda_future(completion_event=completion_event)
+ 
+     def close(self) -> None:
+         self._mq_client = None
+diff --git a/lmcache/v1/platform/base_ipc_wrapper.py b/lmcache/v1/platform/base_ipc_wrapper.py
+index e9700b5c06f26a5f7c0f2165d941e024908d6108..505ac1c8f80dbe3c59486f4dee854a6eababe132 100644
+--- a/lmcache/v1/platform/base_ipc_wrapper.py
++++ b/lmcache/v1/platform/base_ipc_wrapper.py
+@@ -7,13 +7,20 @@ implementations.  Every concrete wrapper (e.g. :class:`~.cpu.shm.CpuShmTensorWra
+ the single msgspec ext code (1) -- pickle preserves the concrete
+ subclass identity across the wire so ``to_tensor`` dispatches correctly
+ on the receiving side.
++
++Refcounted exports follow a one-shot ownership contract: after export,
++exactly one receiver must either import the handle once or explicitly release
++it. A successful transport send transfers that obligation from sender to
++receiver; failed or abandoned sends leave it with the sender.
+ """
+ 
+ # Future
+ from __future__ import annotations
+ 
+ # Standard
+-from typing import Any, Tuple
++from collections.abc import Iterator
++from contextlib import ExitStack, nullcontext
++from typing import Any, ContextManager, Tuple
+ import pickle
+ import threading
+ 
+@@ -22,6 +29,9 @@ import torch
+ 
+ # First Party
+ from lmcache import torch_dev
++from lmcache.logging import init_logger
++
++logger = init_logger(__name__)
+ 
+ 
+ class DeviceIPCWrapper:
+@@ -111,6 +121,72 @@ class DeviceIPCWrapper:
+         """
+         raise NotImplementedError
+ 
++    def release_ipc_export(self) -> bool:
++        """Release an exported handle that will not be imported.
++
++        Refcounted transports override this method. The default is a no-op
++        because raw device handles and POSIX-SHM wrappers do not use PyTorch's
++        CUDA IPC refcounter.
++
++        Returns:
++            ``True`` when this call released an export reservation.
++        """
++        return False
++
++    def mark_ipc_export_transferred(self) -> bool:
++        """Mark this process's export copy as owned by the receiver.
++
++        Refcounted transports override this method. After a successful
++        transport send, the sender must not release the same reservation that
++        the receiver will import or explicitly release.
++
++        Returns:
++            ``True`` when ownership changed to the receiver.
++        """
++        return False
++
++    def ipc_export_requires_transfer(self) -> bool:
++        """Whether this wrapper participates in refcounted transfer claims.
++
++        Older third-party wrappers implemented the original public
++        ``release_ipc_export`` / ``mark_ipc_export_transferred`` contract but
++        predate this explicit capability probe. Infer participation whenever
++        either legacy hook is overridden. A release-only legacy wrapper then
++        fails closed at strict commit (safe quarantine) instead of being
++        silently treated as a non-refcounted export.
++        """
++        wrapper_type = type(self)
++        return (
++            wrapper_type.release_ipc_export is not DeviceIPCWrapper.release_ipc_export
++            or wrapper_type.mark_ipc_export_transferred
++            is not DeviceIPCWrapper.mark_ipc_export_transferred
++        )
++
++    def ipc_export_transfer_guard(self) -> ContextManager[Any]:
++        """Return the lock/context guarding transfer validation and commit."""
++        return nullcontext()
++
++    def validate_ipc_export_transfer(self) -> None:
++        """Raise unless a post-send ownership transfer can be committed."""
++
++    def quarantine_ipc_export_after_send(self) -> None:
++        """Prevent release after an accepted send with ambiguous bookkeeping."""
++
++    def acquire_ipc_export_lease(self) -> bool:
++        """Pin a one-shot export while asynchronous code takes ownership.
++
++        Refcounted transports override this method.  A successful lease keeps
++        handler-finally cleanup from releasing the reservation before an
++        asynchronous sender has serialized and either sent or rejected it.
++
++        Returns:
++            ``True`` when this wrapper acquired a lease.
++        """
++        return False
++
++    def release_ipc_export_lease(self) -> None:
++        """Release one lease acquired by :meth:`acquire_ipc_export_lease`."""
++
+     def __eq__(self, other: object) -> bool:
+         # ``isinstance`` first so type-checkers can narrow ``other`` to
+         # ``DeviceIPCWrapper`` before we touch its attributes; the
+@@ -145,6 +221,9 @@ class DeviceIPCWrapper:
+         Returns:
+             The pickled bytes payload.
+         """
++        serialize_for_wire = getattr(obj, "_serialize_for_wire", None)
++        if serialize_for_wire is not None:
++            return serialize_for_wire()
+         return pickle.dumps(obj)
+ 
+     @staticmethod
+@@ -159,3 +238,217 @@ class DeviceIPCWrapper:
+             subclass identity preserved.
+         """
+         return pickle.loads(data)
++
++
++def _walk_ipc_wrappers(value: Any) -> Iterator[DeviceIPCWrapper]:
++    """Yield IPC wrappers nested in protocol container payloads."""
++    if isinstance(value, DeviceIPCWrapper):
++        yield value
++        return
++    if isinstance(value, dict):
++        for item in value.values():
++            yield from _walk_ipc_wrappers(item)
++        return
++    if isinstance(value, (list, tuple, set, frozenset)):
++        for item in value:
++            yield from _walk_ipc_wrappers(item)
++
++
++def _unique_ipc_wrappers(value: Any) -> Iterator[DeviceIPCWrapper]:
++    """Yield each wrapper identity once, preserving traversal order."""
++    seen: set[int] = set()
++    for wrapper in _walk_ipc_wrappers(value):
++        identity = id(wrapper)
++        if identity in seen:
++            continue
++        seen.add(identity)
++        yield wrapper
++
++
++def snapshot_ipc_exports(value: Any) -> tuple[DeviceIPCWrapper, ...]:
++    """Capture an identity-deduplicated immutable ownership snapshot.
++
++    Transport code must use the returned tuple for every later ownership
++    action. Re-walking a caller-owned mutable payload after wire encoding can
++    otherwise miss an export removed between ``send_multipart`` acceptance and
++    transfer bookkeeping.
++    """
++    return tuple(_unique_ipc_wrappers(value))
++
++
++class IPCExportLease:
++    """Explicit lifetime pin for asynchronously forwarded IPC exports.
++
++    Callers must retain this object until the queued transport has either
++    transferred or rejected every wrapper.  ``release`` is idempotent, and a
++    destructor fallback prevents an abandoned pre-send lease from stranding a
++    reservation indefinitely.
++    """
++
++    def __init__(self, wrappers: tuple[DeviceIPCWrapper, ...]) -> None:
++        self._wrappers = wrappers
++        self._released = False
++        self._lock = threading.Lock()
++
++    def release(self) -> None:
++        """Drop every wrapper lease exactly once."""
++        with self._lock:
++            if self._released:
++                return
++            self._released = True
++            wrappers = self._wrappers
++            self._wrappers = ()
++        for wrapper in reversed(wrappers):
++            try:
++                wrapper.release_ipc_export_lease()
++            except Exception:
++                logger.exception(
++                    "Failed to release IPC export lease for %s",
++                    type(wrapper).__name__,
++                )
++
++    def __enter__(self) -> "IPCExportLease":
++        return self
++
++    def __exit__(self, *_exc: object) -> None:
++        self.release()
++
++    def __del__(self) -> None:
++        try:
++            self.release()
++        except BaseException:
++            pass
++
++
++def acquire_ipc_export_lease(value: Any) -> IPCExportLease:
++    """Atomically lease all refcounted wrappers nested in ``value``.
++
++    Partial acquisition is rolled back before propagating an error.  The
++    returned object must stay alive until transport success/failure is known.
++    """
++    acquired: list[DeviceIPCWrapper] = []
++    try:
++        for wrapper in snapshot_ipc_exports(value):
++            if wrapper.acquire_ipc_export_lease():
++                acquired.append(wrapper)
++    except BaseException:
++        IPCExportLease(tuple(acquired)).release()
++        raise
++    return IPCExportLease(tuple(acquired))
++
++
++def wrap_ipc_tensors_rollback_safe(
++    tensors: Any, wrapper_factory: Any
++) -> list[DeviceIPCWrapper]:
++    """Build an IPC wrapper batch and release a partial batch on failure."""
++    wrappers: list[DeviceIPCWrapper] = []
++    try:
++        for tensor in tensors:
++            wrappers.append(wrapper_factory(tensor))
++    except BaseException:
++        release_ipc_exports(wrappers)
++        raise
++    return wrappers
++
++
++def release_ipc_exports(value: Any) -> None:
++    """Best-effort release of every unconsumed export nested in a payload.
++
++    Args:
++        value: A wrapper or protocol container containing wrappers.
++    """
++    for wrapper in _unique_ipc_wrappers(value):
++        try:
++            wrapper.release_ipc_export()
++        except Exception:
++            # Cleanup must neither strand later wrappers in the same batch nor
++            # replace the request/handler exception that led us here.
++            logger.exception(
++                "Failed to release IPC export for %s", type(wrapper).__name__
++            )
++
++
++def mark_ipc_exports_transferred(value: Any) -> None:
++    """Transfer nested IPC export ownership after an atomic transport send.
++
++    Args:
++        value: A wrapper or protocol container containing wrappers.
++    """
++    for wrapper in _unique_ipc_wrappers(value):
++        try:
++            wrapper.mark_ipc_export_transferred()
++        except Exception:
++            # The bytes have already been accepted atomically by the transport,
++            # so releasing here could race the receiver and double-decrement.
++            logger.exception(
++                "Failed to record IPC export transfer for %s",
++                type(wrapper).__name__,
++            )
++
++
++def mark_ipc_exports_transferred_strict(value: Any) -> bool:
++    """Atomically commit a refcounted wrapper batch after accepted send.
++
++    All participating wrapper locks are acquired in stable identity order.
++    Validation completes for the entire unique batch before the first state is
++    changed. If validation/commit still fails unexpectedly, every participant
++    is moved to a non-releasable quarantine: the transport already owns the
++    bytes, so leaking until process teardown is safer than a double decrement.
++
++    Returns:
++        ``True`` for a fully recorded transfer, ``False`` for safe quarantine.
++    """
++    # This function runs only *after* an atomic transport send returned.  It is
++    # therefore a noexcept boundary: propagating even an exotic wrapper/guard
++    # failure would route the caller through ordinary pre-send cleanup and
++    # could double-decrement a reservation now visible to the receiver.
++    wrappers: list[DeviceIPCWrapper] = []
++    participants: list[DeviceIPCWrapper] = []
++    try:
++        # Snapshot the complete identity set before invoking the first wrapper
++        # extension hook. If discovery fails on wrapper N, every later wrapper
++        # still needs quarantine: releasing its async lease after an accepted
++        # send could otherwise honor deferred cleanup and decrement a live wire
++        # reservation.
++        wrappers.extend(snapshot_ipc_exports(value))
++        for wrapper in wrappers:
++            if wrapper.ipc_export_requires_transfer():
++                participants.append(wrapper)
++        participants.sort(key=id)
++        if not participants:
++            return True
++
++        with ExitStack() as stack:
++            for wrapper in participants:
++                stack.enter_context(wrapper.ipc_export_transfer_guard())
++            for wrapper in participants:
++                wrapper.validate_ipc_export_transfer()
++            for wrapper in participants:
++                if not wrapper.mark_ipc_export_transferred():
++                    raise RuntimeError(
++                        f"{type(wrapper).__name__} rejected validated transfer"
++                    )
++    except BaseException:
++        try:
++            logger.exception(
++                "Accepted IPC send had ambiguous ownership bookkeeping; "
++                "quarantining %d wrapper(s)",
++                len(wrappers),
++            )
++        except BaseException:
++            # Logging must not turn the post-send noexcept boundary back into
++            # an exception path during interpreter or logger teardown.
++            pass
++        for wrapper in wrappers:
++            try:
++                wrapper.quarantine_ipc_export_after_send()
++            except BaseException:
++                try:
++                    logger.exception(
++                        "Failed to quarantine accepted IPC export for %s",
++                        type(wrapper).__name__,
++                    )
++                except BaseException:
++                    pass
++        return False
++    return True
+diff --git a/lmcache/v1/platform/cache_context.py b/lmcache/v1/platform/cache_context.py
+index ae54c164add5d69008590c4dcdfe8fc37becb3fc..7005cc0038a008c1293869f2b8a68b7f6d94e5f7 100644
+--- a/lmcache/v1/platform/cache_context.py
++++ b/lmcache/v1/platform/cache_context.py
+@@ -142,11 +142,21 @@ def restore_backends(state: dict[str, type]) -> None:
+ def _detect_device_type(kv_caches: KVCache) -> str:
+     """Return the ``torch.device.type`` describing *kv_caches*.
+ 
+-    All wrappers in *kv_caches* must materialize tensors on the same
+-    device type; mixed-device batches are not supported by any
+-    downstream cache-context implementation.
++    Wrappers must expose a class-level ``device_type`` so dispatch never
++    consumes a one-shot IPC export merely to inspect it. Legacy third-party
++    wrappers without that non-consuming metadata are rejected explicitly.
++    Mixed-device batches are not supported by downstream cache contexts.
+     """
+-    device_types = {w.to_tensor().device.type for w in kv_caches}
++    device_types: set[str] = set()
++    for wrapper in kv_caches:
++        declared_type = getattr(type(wrapper), "device_type", "")
++        if not isinstance(declared_type, str) or not declared_type:
++            raise TypeError(
++                f"{type(wrapper).__name__} must declare a non-empty "
++                "class-level device_type; probing via to_tensor() is unsafe "
++                "for one-shot IPC wrappers"
++            )
++        device_types.add(declared_type)
+     if len(device_types) != 1:
+         raise ValueError(
+             "create_cache_context requires all kv_caches to share one "
+diff --git a/lmcache/v1/platform/cuda/ipc_wrapper.py b/lmcache/v1/platform/cuda/ipc_wrapper.py
+index e91636e7b1ee41c076df9f1d652033bf896163ba..16c358a1d92ae2ff60a00e1bc682b2a68c228ce9 100644
+--- a/lmcache/v1/platform/cuda/ipc_wrapper.py
++++ b/lmcache/v1/platform/cuda/ipc_wrapper.py
+@@ -17,20 +17,49 @@ TRT-LLM adapter) instantiate it directly.
+ from __future__ import annotations
+ 
+ # Standard
+-from typing import ClassVar
++from typing import Any, ClassVar, cast
++import pickle
++import threading
+ 
+ # Third Party
+ import torch
+ 
+ # First Party
+ from lmcache import torch_device_type
++from lmcache.logging import init_logger
+ from lmcache.v1.platform.base_ipc_wrapper import DeviceIPCWrapper
+ 
++logger = init_logger(__name__)
++
+ 
+ class CudaIPCWrapper(DeviceIPCWrapper):
++    """One-shot PyTorch CUDA IPC export with process-local ownership state.
++
++    ``_share_cuda_`` creates one producer-refcount reservation. The receiving
++    process must consume it through :meth:`to_tensor` exactly once or return it
++    through :meth:`release_ipc_export`; repeated calls are idempotent or reuse
++    the cached tensor.
++    """
++
+     #: ``torch.device.type`` this wrapper handles. Kept as a class-level
+     #: constant so external tooling / tests can introspect the binding.
+     device_type: ClassVar[str] = "cuda"
++    _UNCONSUMED: ClassVar[str] = "unconsumed"
++    _INITIALIZING: ClassVar[str] = "initializing"
++    _SERIALIZING: ClassVar[str] = "serializing"
++    _ENCODED: ClassVar[str] = "encoded"
++    _NATIVE_IMPORTING: ClassVar[str] = "native_importing"
++    _IMPORTED: ClassVar[str] = "imported"
++    _RELEASED: ClassVar[str] = "released"
++    _TRANSFERRED: ClassVar[str] = "transferred"
++    _QUARANTINED: ClassVar[str] = "quarantined"
++
++    _ipc_state_lock: Any
++    _cached_tensor: torch.Tensor | None
++    _producer_tensor: torch.Tensor | None
++    _ipc_lease_count: int
++    _ipc_release_pending: bool
++    _auto_release: bool
+ 
+     @classmethod
+     def wrap(cls, tensor: torch.Tensor) -> "CudaIPCWrapper":
+@@ -52,41 +81,315 @@ class CudaIPCWrapper(DeviceIPCWrapper):
+             attempt_permute_to_contiguous_view,
+         )
+ 
+-        # Permute any non-contiguous view (e.g. vLLM's NHD-over-HND) so the
+-        # shape/stride we encode across IPC reflects the physical layout.
+-        # Offset is preserved by the wrapper's storage_offset field.
+-        tensor = attempt_permute_to_contiguous_view(tensor)
+-
+-        storage = tensor.untyped_storage()
+-        handle = storage._share_cuda_()
++        # Establish destructor-safe state before any step can raise.  The
++        # reservation only becomes releasable after _share_cuda_ returns and
++        # the handle is installed below.
++        self._initialize_ipc_ownership(
++            auto_release=True, initial_state=self._INITIALIZING
++        )
++        try:
++            # Permute any non-contiguous view (e.g. vLLM's NHD-over-HND) so
++            # shape/stride describe the physical layout on the wire.
++            tensor = cast(torch.Tensor, attempt_permute_to_contiguous_view(tensor))
++            storage = tensor.untyped_storage()
++            handle = storage._share_cuda_()
++
++            with self._ipc_state_lock:
++                self.handle = handle
++                # Keep the exporting allocation alive at least as long as this
++                # wrapper/transport quarantine is retained.
++                self._producer_tensor = tensor
++                self._ipc_state = self._UNCONSUMED
++
++            self.dtype = tensor.dtype
++            self.shape = tuple(tensor.shape)
++            self.stride = tuple(tensor.stride())
++            self.storage_offset = int(tensor.storage_offset())
++
++            device_index = tensor.device.index
++            self.device_uuid = self._get_device_uuid(device_index)
++        except BaseException:
++            # If _share_cuda_ succeeded, release_ipc_export observes
++            # UNCONSUMED and rolls the reservation back.  Earlier failures see
++            # INITIALIZING and are a no-op.
++            self.release_ipc_export()
++            raise
++
++    def _initialize_ipc_ownership(
++        self,
++        *,
++        auto_release: bool,
++        initial_state: str | None = None,
++    ) -> None:
++        """Initialize process-local state excluded from the wire payload."""
++        self._ipc_state = initial_state or self._UNCONSUMED
++        self._ipc_state_lock = threading.RLock()
++        self._cached_tensor = None
++        self._producer_tensor = None
++        self._ipc_lease_count = 0
++        self._ipc_release_pending = False
++        # A deserialized receiver owns the reservation and must release it if
++        # the handler never imports it. The sender transfers ownership only
++        # after the atomic transport send succeeds.
++        self._auto_release = auto_release
++
++    def __getstate__(self) -> dict[str, Any]:
++        """Return metadata only inside the managed one-shot serializer."""
++        with self._ipc_state_lock:
++            if self._ipc_state != self._SERIALIZING:
++                raise RuntimeError(
++                    "CUDA IPC wrappers must be encoded through "
++                    "DeviceIPCWrapper.Serialize exactly once "
++                    f"(state={self._ipc_state})"
++                )
++            return {
++                "handle": self.handle,
++                "dtype": self.dtype,
++                "shape": self.shape,
++                "stride": self.stride,
++                "storage_offset": self.storage_offset,
++                "device_uuid": self.device_uuid,
++            }
++
++    def _serialize_for_wire(self) -> bytes:
++        """Claim and encode this reservation exactly once.
++
++        The re-entrant state lock spans ``pickle.dumps``.  Release and encode
++        therefore have a single atomic winner, and a duplicate object in one
++        payload (or a repeated encode) is rejected before another wire owner
++        can be created.
++        """
++        try:
++            with self._ipc_state_lock:
++                if self._ipc_state != self._UNCONSUMED:
++                    raise RuntimeError(
++                        "Cannot serialize a CUDA IPC wrapper more than once "
++                        f"(state={self._ipc_state})"
++                    )
++                self._ipc_state = self._SERIALIZING
++                encoded = pickle.dumps(self)
++                self._ipc_state = self._ENCODED
++                return encoded
++        except BaseException:
++            should_release = False
++            with self._ipc_state_lock:
++                # A duplicate/repeated call never owned the active reservation
++                # and must not release bytes produced by the first encoder.
++                if self._ipc_state == self._SERIALIZING:
++                    should_release = True
++                    self._ipc_state = self._RELEASED
++                    self._auto_release = False
++            if should_release:
++                self._release_counter_noexcept()
++            raise
++
++    def __setstate__(self, state: dict[str, Any]) -> None:
++        """Restore wire metadata and make this process the reservation owner."""
++        self._initialize_ipc_ownership(
++            auto_release=True, initial_state=self._INITIALIZING
++        )
++        try:
++            with self._ipc_state_lock:
++                self.handle = state["handle"]
++                self._ipc_state = self._UNCONSUMED
++            self.dtype = state["dtype"]
++            self.shape = state["shape"]
++            self.stride = state["stride"]
++            self.storage_offset = state["storage_offset"]
++            self.device_uuid = state["device_uuid"]
++        except BaseException:
++            self.release_ipc_export()
++            raise
++
++    def _open_shared_storage(self, device_index: int) -> torch.UntypedStorage:
++        """Cross the native ownership boundary and build consumer storage.
++
++        At function entry the Python wrapper relinquishes the right to call
++        ``_release_ipc_counter_cuda``.  PyTorch may create a refcounted
++        ``DataPtr`` and then throw while constructing ``StorageImpl``; its C++
++        RAII deleter would already perform the decrement.  Consequently any
++        exception from this call is conservatively quarantined rather than
++        explicitly decremented a second time.
++        """
++        return torch.UntypedStorage._new_shared_cuda(  # noqa: SLF001
++            device_index, *self.handle[1:]
++        )
+ 
+-        self.handle = handle
+-        self.dtype = tensor.dtype
+-        self.shape = tuple(tensor.shape)
+-        self.stride = tuple(tensor.stride())
+-        self.storage_offset = int(tensor.storage_offset())
++    def _release_counter(self) -> None:
++        """Decrement the producer counter without importing the CUDA storage."""
++        torch.UntypedStorage._release_ipc_counter_cuda(  # noqa: SLF001
++            self.handle[4], self.handle[5]
++        )
+ 
+-        device_index = tensor.device.index
+-        self.device_uuid = self._get_device_uuid(device_index)
++    def _release_counter_noexcept(self) -> None:
++        """Best-effort counter release that cannot mask the primary failure."""
++        try:
++            self._release_counter()
++        except Exception:
++            logger.exception("Failed to release CUDA IPC producer refcounter")
+ 
+     def to_tensor(self) -> torch.Tensor:
+-        """
++        """Import and cache the single consumer tensor represented by this handle.
++
++        PyTorch initializes each ``_share_cuda_`` refcounter to one. Re-importing
++        the same handle would attach multiple storage deleters to that one
++        reservation and underflow it during teardown, so repeated and concurrent
++        calls return the same process-local tensor.
++
+         Note:
+             This function may break if the accelerator is not initialized.
+             We should call ``torch_dev.init()`` before using this function
+             (guarded by hasattr since not all backends expose init()).
++
++        Returns:
++            The imported tensor. Repeated calls return the same object.
++
++        Raises:
++            RuntimeError: If ownership was already released or transferred.
+         """
+-        device_index = self._get_device_index_from_uuid(self.device_uuid)
++        with self._ipc_state_lock:
++            if self._ipc_state == self._IMPORTED:
++                assert self._cached_tensor is not None
++                return self._cached_tensor
++            if self._ipc_state != self._UNCONSUMED:
++                raise RuntimeError(
++                    "CUDA IPC export is no longer available for import "
++                    f"(state={self._ipc_state})"
++                )
++
++            # All fallible Python validation happens while this process still
++            # owns the explicit release right.
++            try:
++                device_index = self._get_device_index_from_uuid(self.device_uuid)
++                tensor = torch.empty(
++                    (),
++                    device=f"{torch_device_type}:{device_index}",
++                    dtype=self.dtype,
++                )
++            except BaseException:
++                self._ipc_state = self._RELEASED
++                self._auto_release = False
++                self._release_counter_noexcept()
++                raise
++
++            # The native boundary is intentionally one-way.  Never explicitly
++            # release after entering it: on a mid-construction exception C++
++            # RAII may already own the sole decrement.
++            self._ipc_state = self._NATIVE_IMPORTING
++            self._auto_release = False
++            try:
++                storage = self._open_shared_storage(device_index)
++            except BaseException:
++                self._ipc_state = self._QUARANTINED
++                raise
++
++            try:
++                tensor.set_(storage, self.storage_offset, self.shape, self.stride)
++            except BaseException:
++                # ``storage`` owns the decrement and releases it when unwound.
++                self._ipc_state = self._RELEASED
++                raise
++
++            self._cached_tensor = tensor
++            self._ipc_state = self._IMPORTED
++            return tensor
++
++    def release_ipc_export(self) -> bool:
++        """Release this reservation if no consumer tensor was imported.
+ 
+-        storage = torch.UntypedStorage._new_shared_cuda(  # noqa: SLF001
+-            device_index, *self.handle[1:]
+-        )
++        Returns:
++            ``True`` for the call that claimed the reservation; ``False`` if
++            another terminal action already won.
++        """
++        should_release = False
++        with self._ipc_state_lock:
++            if self._ipc_state not in (self._UNCONSUMED, self._ENCODED):
++                return False
++            if self._ipc_lease_count:
++                self._ipc_release_pending = True
++                return False
++            self._ipc_state = self._RELEASED
++            self._auto_release = False
++            should_release = True
++        if should_release:
++            self._release_counter_noexcept()
++        return should_release
++
++    def mark_ipc_export_transferred(self) -> bool:
++        """Relinquish this process's copy after a successful transport send.
+ 
+-        t = torch.empty(
+-            (), device=f"{torch_device_type}:{device_index}", dtype=self.dtype
+-        )
+-        t.set_(storage, self.storage_offset, self.shape, self.stride)
+-        return t
++        Returns:
++            ``True`` for the call that transferred ownership; ``False`` if
++            another terminal action already won.
++        """
++        with self._ipc_state_lock:
++            if self._ipc_state != self._ENCODED:
++                return False
++            self._ipc_state = self._TRANSFERRED
++            self._ipc_release_pending = False
++            self._auto_release = False
++            return True
++
++    def ipc_export_requires_transfer(self) -> bool:
++        return True
++
++    def ipc_export_transfer_guard(self) -> Any:
++        return self._ipc_state_lock
++
++    def validate_ipc_export_transfer(self) -> None:
++        if self._ipc_state != self._ENCODED:
++            raise RuntimeError(
++                "CUDA IPC export was accepted by transport before a unique "
++                f"encoding claim was ready (state={self._ipc_state})"
++            )
++
++    def quarantine_ipc_export_after_send(self) -> None:
++        # Caller holds ipc_export_transfer_guard across the batch. RLock keeps
++        # this safe if the method is also used directly in a diagnostic path.
++        with self._ipc_state_lock:
++            self._ipc_state = self._QUARANTINED
++            self._ipc_release_pending = False
++            self._auto_release = False
++
++    def acquire_ipc_export_lease(self) -> bool:
++        """Pin an unencoded reservation for asynchronous transport."""
++        with self._ipc_state_lock:
++            if self._ipc_state != self._UNCONSUMED:
++                raise RuntimeError(
++                    f"Cannot lease CUDA IPC export in state {self._ipc_state}"
++                )
++            self._ipc_lease_count += 1
++            return True
++
++    def release_ipc_export_lease(self) -> None:
++        """Drop one transport lease and honor deferred cleanup."""
++        should_release = False
++        with self._ipc_state_lock:
++            if self._ipc_lease_count <= 0:
++                raise RuntimeError("CUDA IPC export lease underflow")
++            self._ipc_lease_count -= 1
++            if (
++                self._ipc_lease_count == 0
++                and self._ipc_release_pending
++                and self._ipc_state in (self._UNCONSUMED, self._ENCODED)
++            ):
++                self._ipc_state = self._RELEASED
++                self._ipc_release_pending = False
++                self._auto_release = False
++                should_release = True
++        if should_release:
++            self._release_counter_noexcept()
++
++    def __del__(self) -> None:
++        """Best-effort fallback for a receiver that never consumed its handle."""
++        if not getattr(self, "_auto_release", False):
++            return
++        try:
++            self.release_ipc_export()
++        except BaseException:
++            # Destructors run during exception unwinding and interpreter
++            # shutdown; cleanup failures must not mask the primary failure.
++            pass
+ 
+ 
+ class RawCudaIPCWrapper(DeviceIPCWrapper):

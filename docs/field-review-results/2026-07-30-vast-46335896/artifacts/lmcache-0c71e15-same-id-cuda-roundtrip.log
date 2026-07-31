@@ -1,0 +1,136 @@
+[32;20m[2026-07-31 13:27:32,327] LMCache INFO:[0m torch_dev=<module 'torch.cuda' from '/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py'>, torch_device_type=cuda [3m(__init__.py:249:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 13:27:32,417] LMCache INFO:[0m Using backend: lmcache.c_ops [3m(__init__.py:239:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 13:27:34,527] LMCache INFO:[0m multi_layer_block_kv_transfer mode: ptr [3m(base.py:94:lmcache.v1.multiprocess.transfer_context.base)[0m
+
+tests/v1/multiprocess/test_cache_server.py::test_same_instance_reregister_after_reset_store_retrieve_unregister /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+[32;20m[2026-07-31 13:27:36,420] LMCache INFO:[0m torch_dev=<module 'torch.cuda' from '/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py'>, torch_device_type=cuda [3m(__init__.py:249:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 13:27:36,540] LMCache INFO:[0m Using backend: lmcache.c_ops [3m(__init__.py:239:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 13:27:36,689] LMCache INFO:[0m multi_layer_block_kv_transfer mode: ptr [3m(base.py:94:lmcache.v1.multiprocess.transfer_context.base)[0m
+[32;20m[2026-07-31 13:27:36,873] LMCache INFO:[0m CudaPinMemoryBackend: using torch cudart [3m(pin_memory.py:89:lmcache.v1.platform.cuda.pin_memory)[0m
+[32;20m[2026-07-31 13:27:36,873] LMCache INFO:[0m Checking if shm capacity is larger than L1 request [3m(server.py:332:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 13:27:37,443] LMCache INFO:[0m Starting L1EvictionController... [3m(eviction_controller.py:63:lmcache.v1.distributed.storage_controllers.eviction_controller)[0m
+[32;20m[2026-07-31 13:27:37,443] LMCache INFO:[0m Starting L2EvictionController... [3m(eviction_controller.py:711:lmcache.v1.distributed.storage_controllers.eviction_controller)[0m
+[32;20m[2026-07-31 13:27:37,444] LMCache INFO:[0m Starting StoreController... [3m(store_controller.py:305:lmcache.v1.distributed.storage_controllers.store_controller)[0m
+[32;20m[2026-07-31 13:27:37,444] LMCache INFO:[0m Starting PrefetchController... [3m(prefetch_controller.py:577:lmcache.v1.distributed.storage_controllers.prefetch_controller)[0m
+[32;20m[2026-07-31 13:27:37,444] LMCache INFO:[0m Using blake3 hash function [3m(token_hasher.py:79:lmcache.v1.multiprocess.token_hasher)[0m
+[32;20m[2026-07-31 13:27:37,445] LMCache INFO:[0m Computed NONE_HASH=b"~>\xff\x9e\xf7a:P4\x0e\xb1&w\xee\x03\xb8:\xc7Y\xfc\xba\x9b\xb3'\x05\xf0rH\xd5mG;" using hash function [3m(token_hasher.py:180:lmcache.v1.multiprocess.token_hasher)[0m
+[32;20m[2026-07-31 13:27:37,445] LMCache INFO:[0m TokenHasher initialized: chunk_size=256, hash_algorithm=blake3 [3m(token_hasher.py:67:lmcache.v1.multiprocess.token_hasher)[0m
+[32;20m[2026-07-31 13:27:37,445] LMCache INFO:[0m PeriodicThread SessionManager-cleanup-thread-7e402a2c8e60 entering main loop (interval=60.0s) [3m(periodic_thread.py:284:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:27:37,445] LMCache INFO:[0m Started PeriodicThread: SessionManager-cleanup-thread-7e402a2c8e60 (level=medium, interval=60.0s, init_wait=0.0s) [3m(periodic_thread.py:244:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:27:37,446] LMCache INFO:[0m Supported transfer mode: auto [3m(server.py:209:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 13:27:37,446] LMCache INFO:[0m PeriodicThread lmcache-mp-worker-reaper entering main loop (interval=30.0s) [3m(periodic_thread.py:284:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:27:37,446] LMCache INFO:[0m Started PeriodicThread: lmcache-mp-worker-reaper (level=medium, interval=30.0s, init_wait=0.0s) [3m(periodic_thread.py:244:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:27:37,448] LMCache INFO:[0m Created AffinityThreadPool 'affinity-pool-0' with 1 worker slots: up to 1 distinct affinity keys each bind to their own thread before slots are shared. Compare this against the number of clients expected to connect to confirm routing. [3m(affinity_pool.py:62:lmcache.v1.multiprocess.affinity_pool)[0m
+[32;20m[2026-07-31 13:27:37,448] LMCache INFO:[0m LMCache ZMQ cache server is running on tcp://localhost:5599 [3m(server.py:395:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 13:27:37,448] LMCache INFO:[0m LMCache cache server is running... [3m(server.py:410:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 13:27:37,590] LMCache INFO:[0m Engine KV Format: EngineKVFormat.NL_X_TWO_NB_BS_NH_HS NL x [2, NB, BS, NH, HS] [3m(detection.py:44:lmcache.v1.gpu_connector.kv_format.detection)[0m
+[32;20m[2026-07-31 13:27:37,591] LMCache INFO:[0m Engine KV Format: EngineKVFormat.NL_X_TWO_NB_BS_NH_HS NL x [2, NB, BS, NH, HS] [3m(detection.py:44:lmcache.v1.gpu_connector.kv_format.detection)[0m
+[32;20m[2026-07-31 13:27:37,591] LMCache INFO:[0m Group 0 first-layer tensor: layer_idx=0 shape=(2, 1024, 16, 8, 128) stride=(16777216, 16384, 1024, 128, 1) is_contiguous=True dtype=torch.bfloat16 device=cuda:0 storage_offset=0 numel=33554432 storage_nbytes=67108864 padding_per_block=0 [3m(utils.py:589:lmcache.v1.gpu_connector.utils)[0m
+[32;20m[2026-07-31 13:27:37,591] LMCache INFO:[0m KV layer groups: ---
+KernelGroupInfo(layers=32, indices=0-31, shape_desc=(kv=2, nl=32, nb=1024, bs=16, nh=8, hs=128, element_size=2, block_stride_elems=0), dtype=torch.bfloat16, tokens_per_block=16, slots_per_block=16, physical_blocks_per_engine_block=1, engine_group_idx=0, sw_size_tokens=-1)
+--- [3m(kv_layer_groups.py:458:lmcache.v1.kv_layer_groups)[0m
+[33;20m[2026-07-31 13:27:37,591] LMCache WARNING:[0m KVLayerGroupsManager.kv_layer_groups is deprecated: `kv_layer_groups` is an outdated alias for `kernel_groups` [3m(utils.py:734:lmcache.utils)[0m
+[32;20m[2026-07-31 13:27:37,661] LMCache INFO:[0m Registered KV cache for GPU ID 268783 with 32 layers [3m(lmcache_driven_transfer.py:912:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+[32;20m[2026-07-31 13:27:37,661] LMCache INFO:[0m Initialized cuda stream on device cuda:0 [3m(cache_context.py:430:lmcache.v1.platform.cuda.cache_context)[0m
+[32;20m[2026-07-31 13:27:37,663] LMCache INFO:[0m Instance 268783 already registered; refreshing liveness [3m(lmcache_driven_transfer.py:870:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+[32;20m[2026-07-31 13:27:37,663] LMCache INFO:[0m AffinityThreadPool: affinity_key=-3262264660335274490 assigned to worker slot 0 of 1 (thread affinity-pool-0-0); 1 distinct key(s) now bound [3m(affinity_pool.py:110:lmcache.v1.multiprocess.affinity_pool)[0m
+[32;20m[2026-07-31 13:27:37,666] LMCache INFO:[0m Stored 256 tokens in 0.003 seconds [3m(lmcache_driven_transfer.py:1157:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m Checking memory allocator consistency [3m(tensor_memory_allocator.py:298:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m  - Total active allocations: 1 [3m(tensor_memory_allocator.py:299:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m  - Total allocated size: 32.000000 MB [3m(tensor_memory_allocator.py:300:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m  - Total free size: 5088.000000 MB [3m(tensor_memory_allocator.py:307:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m L1Manager memcheck: total objects = 1, write-locked = 1, read-locked = 0 [3m(l1_manager.py:1013:lmcache.v1.distributed.l1_manager)[0m
+[33;20m[2026-07-31 13:27:37,668] LMCache WARNING:[0m L1Manager: force-clearing all 1 objects (including locked ones). This may corrupt in-flight store/prefetch operations — use with caution. [3m(l1_manager.py:805:lmcache.v1.distributed.l1_manager)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m L1Manager: cleared 1 objects, 0 remaining. [3m(l1_manager.py:823:lmcache.v1.distributed.l1_manager)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m Checking memory allocator consistency [3m(tensor_memory_allocator.py:298:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m  - Total active allocations: 0 [3m(tensor_memory_allocator.py:299:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m  - Total allocated size: 0.000000 MB [3m(tensor_memory_allocator.py:300:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m  - Total free size: 5120.000000 MB [3m(tensor_memory_allocator.py:307:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:27:37,668] LMCache INFO:[0m L1Manager memcheck: total objects = 0, write-locked = 0, read-locked = 0 [3m(l1_manager.py:1013:lmcache.v1.distributed.l1_manager)[0m
+[32;20m[2026-07-31 13:27:37,671] LMCache INFO:[0m Unregistered KV cache for GPU ID 268783 [3m(lmcache_driven_transfer.py:952:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+FAILED
+
+=================================== FAILURES ===================================
+_____ test_same_instance_reregister_after_reset_store_retrieve_unregister ______
+
+client = <lmcache.v1.multiprocess.mq.MessageQueueClient object at 0x7b2254233950>
+client_context = <tests.v1.multiprocess.test_cache_server.ClientContext object at 0x7b22542338f0>
+
+    @pytest.mark.skipif(
+        not torch.cuda.is_available(),
+        reason="CUDA IPC register/store/retrieve recovery requires CUDA",
+    )
+    def test_same_instance_reregister_after_reset_store_retrieve_unregister(
+        client: MessageQueueClient, client_context: ClientContext
+    ) -> None:
+        """A reset client can reclaim one ID and immediately use CUDA IPC.
+    
+        This is the production recovery sequence: REGISTER, replace the transport,
+        same-ID REGISTER, STORE/RETRIEVE correctness, then
+        confirmed UNREGISTER. It uses real CUDA exporters and the spawned cache
+        server rather than mocked wrapper state.
+        """
+        instance_id = os.getpid()
+        register_payload_suffix = [
+            "testmodel",
+            1,
+            EngineType.VLLM,
+            {},
+            [],
+        ]
+        registered = False
+        try:
+            result = client.submit_request(
+                RequestType.REGISTER_KV_CACHE,
+                [
+                    instance_id,
+                    client_context.get_kv_cache(),
+                    *register_payload_suffix,
+                ],
+                get_response_class(RequestType.REGISTER_KV_CACHE),
+            ).result(timeout=DEFAULT_TIMEOUT)
+            assert result is None
+            registered = True
+    
+            assert client.reset_connection()
+            result = client.submit_request(
+                RequestType.REGISTER_KV_CACHE,
+                [
+                    instance_id,
+                    client_context.get_kv_cache(),
+                    *register_payload_suffix,
+                ],
+                get_response_class(RequestType.REGISTER_KV_CACHE),
+            ).result(timeout=DEFAULT_TIMEOUT)
+            assert result is None
+    
+            key = create_cache_key(98001)
+            source_block_ids = list(range(BLOCKS_PER_KEY))
+            destination_offset = BLOCKS_PER_KEY
+            destination_block_ids = list(
+                range(destination_offset, destination_offset + BLOCKS_PER_KEY)
+            )
+    
+            store_event = torch.cuda.Event(interprocess=True)
+            store_event.record()
+            store_keys(client, [key], instance_id, source_block_ids, store_event)
+>           assert lookup_all(client, [key]) == 1
+E           AssertionError: assert 0 == 1
+E            +  where 0 = lookup_all(<lmcache.v1.multiprocess.mq.MessageQueueClient object at 0x7b2254233950>, [IPCCacheServerKey(model_name='testmodel', world_size=1, worker_id=0, token_ids=(98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001, 98001), start=0, end=256, request_id='test_request_98001', cache_salt='', readers_per_object=0)])
+
+tests/v1/multiprocess/test_cache_server.py:482: AssertionError
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+../../../../opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: 122 warnings
+  /opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: DeprecationWarning: `LoggingHandler` in `opentelemetry-sdk` is deprecated. Use the handler from `opentelemetry-instrumentation-logging` instead.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/v1/multiprocess/test_cache_server.py::test_same_instance_reregister_after_reset_store_retrieve_unregister
+======================= 1 failed, 123 warnings in 4.15s ========================
+[W731 13:27:39.162051610 CudaIPCTypes.cpp:16] Producer process has been terminated before all shared CUDA tensors released. See Note [Sharing CUDA tensors]

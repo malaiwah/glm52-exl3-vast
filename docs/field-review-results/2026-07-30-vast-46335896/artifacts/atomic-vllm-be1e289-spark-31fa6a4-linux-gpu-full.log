@@ -1,0 +1,29 @@
+................................................................         [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+vllm/__init__.py:7
+  /workspace/field-review-tests/worktrees/vllm-semantic-channels-be1e289-test/vllm/__init__.py:7: RuntimeWarning: Failed to read commit hash:
+  No module named 'vllm._version'
+    from .version import __version__, __version_tuple__  # isort:skip
+
+../../../../opt/venv/lib/python3.12/site-packages/astor/op_util.py:92
+  /opt/venv/lib/python3.12/site-packages/astor/op_util.py:92: DeprecationWarning: ast.Num is deprecated and will be removed in Python 3.14; use ast.Constant instead
+    precedence_data = dict((getattr(ast, x, None), z) for x, y, z in op_data)
+
+../../../../opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: 14 warnings
+  /opt/venv/lib/python3.12/site-packages/torch/jit/_script.py:365: DeprecationWarning: `torch.jit.script_method` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+tests/compile/backend.py:47
+  /workspace/field-review-tests/worktrees/vllm-semantic-channels-be1e289-test/tests/compile/backend.py:47: PytestCollectionWarning: cannot collect test class 'TestBackend' because it has a __init__ constructor (from: tests/distributed/test_b12x_fused_all_reduce.py)
+    class TestBackend:
+
+tests/distributed/test_b12x_fused_all_reduce.py::test_b12x_fused_allreduce_gpu
+  /workspace/field-review-tests/worktrees/vllm-semantic-channels-be1e289-test/tests/utils.py:1732: DeprecationWarning: This process (pid=273071) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+64 passed, 19 warnings in 102.17s (0:01:42)

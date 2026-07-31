@@ -20,12 +20,13 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import sysconfig
+import tempfile
 from pathlib import Path
 from typing import Any
-
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DIFF_PATH_RE = re.compile(r"^diff --git a/(.+) b/(.+)$", re.MULTILINE)
@@ -179,74 +180,177 @@ def state_for(
     return all_before, all_after, details
 
 
-def apply_component(
+def apply_component_at_root(
     component: dict[str, Any],
     *,
     manifest_dir: Path,
-    site_packages: Path,
-    vllm_source: Path,
-    launcher_bin: Path,
+    root: Path,
+    announce: bool = True,
 ) -> None:
     name = component["name"]
     patch_path = manifest_dir / safe_relative_path(component["patch"])
     files = component["files"]
-    for target in component["targets"]:
-        root = resolve_target(
-            target,
-            site_packages=site_packages,
-            vllm_source=vllm_source,
-            launcher_bin=launcher_bin,
-        )
-        if not root.is_dir():
-            raise RuntimeError(f"{name}: patch root does not exist: {root}")
+    if not root.is_dir():
+        raise RuntimeError(f"{name}: patch root does not exist: {root}")
 
-        all_before, all_after, details = state_for(root, files)
-        if all_after:
+    all_before, all_after, details = state_for(root, files)
+    if all_after:
+        if announce:
             print(f">>> field review {name}: already applied at {root}")
-            continue
-        if not all_before:
-            rendered = "\n  ".join(details)
-            raise RuntimeError(
-                f"{name}: refusing mixed/unknown source state at {root}:\n"
-                f"  {rendered}"
-            )
-
-        result = subprocess.run(
-            [
-                "patch",
-                "--batch",
-                "--forward",
-                "--fuzz=0",
-                "--no-backup-if-mismatch",
-                "-p1",
-                "-d",
-                str(root),
-                "-i",
-                str(patch_path),
-            ],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+        return
+    if not all_before:
+        rendered = "\n  ".join(details)
+        raise RuntimeError(
+            f"{name}: refusing mixed/unknown source state at {root}:\n"
+            f"  {rendered}"
         )
-        if result.returncode:
-            raise RuntimeError(
-                f"{name}: patch failed at {root} (rc={result.returncode}):\n"
-                f"{result.stdout}"
-            )
 
-        _, all_after, details = state_for(root, files)
-        if not all_after:
-            rendered = "\n  ".join(details)
-            raise RuntimeError(
-                f"{name}: post-patch hash verification failed at {root}:\n"
-                f"  {rendered}"
-            )
+    result = subprocess.run(
+        [
+            "patch",
+            "--batch",
+            "--forward",
+            "--fuzz=0",
+            "--no-backup-if-mismatch",
+            "-p1",
+            "-d",
+            str(root),
+            "-i",
+            str(patch_path),
+        ],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if result.returncode:
+        raise RuntimeError(
+            f"{name}: patch failed at {root} (rc={result.returncode}):\n"
+            f"{result.stdout}"
+        )
+
+    _, all_after, details = state_for(root, files)
+    if not all_after:
+        rendered = "\n  ".join(details)
+        raise RuntimeError(
+            f"{name}: post-patch hash verification failed at {root}:\n"
+            f"  {rendered}"
+        )
+    if announce:
         print(
             f">>> field review {name}: applied at {root} "
             f"(base tree {component['base_tree']}, "
             f"tested head {component['tested_head']})"
         )
+
+
+def target_components(
+    components: list[dict[str, Any]], target: str
+) -> list[dict[str, Any]]:
+    return [component for component in components if target in component["targets"]]
+
+
+def target_component_chains(
+    components: list[dict[str, Any]], target: str
+) -> list[list[dict[str, Any]]]:
+    """Group ordered components that share files on one target.
+
+    Disjoint components are independently resumable.  Components that touch a
+    common file form one ordered chain so a successor can consume the exact
+    output hash of its prerequisite without weakening idempotence.
+    """
+
+    chains: list[list[dict[str, Any]]] = []
+    chain_paths: list[set[str]] = []
+    for component in target_components(components, target):
+        paths = set(component["files"])
+        overlapping = [
+            index for index, existing in enumerate(chain_paths) if paths & existing
+        ]
+        if not overlapping:
+            chains.append([component])
+            chain_paths.append(paths)
+            continue
+
+        first = overlapping[0]
+        merged_components: list[dict[str, Any]] = []
+        merged_paths = set(paths)
+        for index in overlapping:
+            merged_components.extend(chains[index])
+            merged_paths.update(chain_paths[index])
+        merged_components.append(component)
+        chains[first] = merged_components
+        chain_paths[first] = merged_paths
+        for index in reversed(overlapping[1:]):
+            del chains[index]
+            del chain_paths[index]
+    return chains
+
+
+def component_snapshots(
+    ordered: list[dict[str, Any]], target: str
+) -> list[dict[str, str | None]]:
+    """Return exact file-hash snapshots for an ordered target patch chain."""
+
+    initial: dict[str, str | None] = {}
+    for component in ordered:
+        for rel, states in component["files"].items():
+            initial.setdefault(rel, states["before"])
+
+    current = dict(initial)
+    snapshots = [dict(current)]
+    for component in ordered:
+        name = component["name"]
+        for rel, states in component["files"].items():
+            if current[rel] != states["before"]:
+                raise ValueError(
+                    f"{name}: ordered {target} patch chain is discontinuous "
+                    f"for {rel}: previous={current[rel]}, "
+                    f"before={states['before']}"
+                )
+        for rel, states in component["files"].items():
+            current[rel] = states["after"]
+        snapshots.append(dict(current))
+    return snapshots
+
+
+def snapshot_index(
+    root: Path,
+    snapshots: list[dict[str, str | None]],
+    *,
+    target: str,
+) -> int:
+    actual = {rel: file_sha256(root / safe_relative_path(rel)) for rel in snapshots[0]}
+    matches = [index for index, snapshot in enumerate(snapshots) if actual == snapshot]
+    if matches:
+        # Repeated snapshots are possible when a later patch returns every tracked
+        # file to an earlier byte state.  The latest exact state is the only
+        # idempotent interpretation.
+        return matches[-1]
+
+    details = []
+    for rel, actual_hash in sorted(actual.items()):
+        expected = sorted(
+            {snapshot[rel] for snapshot in snapshots},
+            key=lambda value: "" if value is None else value,
+        )
+        details.append(f"{rel}: expected one of {expected}, got={actual_hash}")
+    raise RuntimeError(
+        f"{target}: refusing mixed/unknown source state at {root}:\n  "
+        + "\n  ".join(details)
+    )
+
+
+def copy_snapshot_files(
+    source: Path, destination: Path, files: dict[str, str | None]
+) -> None:
+    for rel in files:
+        source_path = source / safe_relative_path(rel)
+        if not source_path.exists():
+            continue
+        destination_path = destination / safe_relative_path(rel)
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination_path)
 
 
 def preflight_components(
@@ -256,7 +360,7 @@ def preflight_components(
     site_packages: Path,
     vllm_source: Path,
     launcher_bin: Path,
-) -> None:
+) -> list[tuple[str, Path, list[dict[str, Any]], int]]:
     """Validate every target before allowing the first source mutation.
 
     The image build applies several independently qualified components.  A
@@ -267,31 +371,28 @@ def preflight_components(
     """
 
     failures: list[str] = []
-    dry_runs: list[tuple[str, Path, Path]] = []
-    for component in components:
-        name = component["name"]
-        patch_path = manifest_dir / safe_relative_path(component["patch"])
-        for target in component["targets"]:
-            root = resolve_target(
-                target,
-                site_packages=site_packages,
-                vllm_source=vllm_source,
-                launcher_bin=launcher_bin,
-            )
-            if not root.is_dir():
-                failures.append(f"{name}: patch root does not exist: {root}")
+    plans: list[tuple[str, Path, list[dict[str, Any]], int]] = []
+    for target in ("site-packages", "vllm-source", "launcher-bin"):
+        chains = target_component_chains(components, target)
+        if not chains:
+            continue
+        root = resolve_target(
+            target,
+            site_packages=site_packages,
+            vllm_source=vllm_source,
+            launcher_bin=launcher_bin,
+        )
+        if not root.is_dir():
+            failures.append(f"{target}: patch root does not exist: {root}")
+            continue
+        for ordered in chains:
+            try:
+                snapshots = component_snapshots(ordered, target)
+                start = snapshot_index(root, snapshots, target=target)
+            except (OSError, RuntimeError, ValueError) as exc:
+                failures.append(str(exc))
                 continue
-            all_before, all_after, details = state_for(root, component["files"])
-            if all_after:
-                continue
-            if not all_before:
-                rendered = "\n    ".join(details)
-                failures.append(
-                    f"{name}: refusing mixed/unknown source state at {root}:\n"
-                    f"    {rendered}"
-                )
-                continue
-            dry_runs.append((name, root, patch_path))
+            plans.append((target, root, ordered, start))
 
     if failures:
         raise RuntimeError(
@@ -299,31 +400,26 @@ def preflight_components(
             + "\n  ".join(failures)
         )
 
-    for name, root, patch_path in dry_runs:
-        result = subprocess.run(
-            [
-                "patch",
-                "--dry-run",
-                "--batch",
-                "--forward",
-                "--fuzz=0",
-                "--no-backup-if-mismatch",
-                "-p1",
-                "-d",
-                str(root),
-                "-i",
-                str(patch_path),
-            ],
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-        if result.returncode:
-            raise RuntimeError(
-                f"{name}: patch dry run failed at {root} "
-                f"(rc={result.returncode}) before mutation:\n{result.stdout}"
-            )
+    for target, root, ordered, start in plans:
+        with tempfile.TemporaryDirectory(prefix="field-review-preflight-") as tmp:
+            scratch = Path(tmp)
+            snapshots = component_snapshots(ordered, target)
+            copy_snapshot_files(root, scratch, snapshots[0])
+            try:
+                for component in ordered[start:]:
+                    apply_component_at_root(
+                        component,
+                        manifest_dir=manifest_dir,
+                        root=scratch,
+                        announce=False,
+                    )
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"{target}: patch-chain dry run failed at {root} "
+                    f"before mutation: {exc}"
+                ) from exc
+
+    return plans
 
 
 def parse_args() -> argparse.Namespace:
@@ -370,6 +466,9 @@ def main() -> int:
         if not isinstance(component, dict):
             raise ValueError("each field-review component must be an object")
         validate_component(component, manifest_path.parent)
+    for target in ("site-packages", "vllm-source", "launcher-bin"):
+        for chain in target_component_chains(components, target):
+            component_snapshots(chain, target)
 
     if args.validate_only:
         print(f">>> validated {len(components)} field-review patch components")
@@ -378,21 +477,25 @@ def main() -> int:
     site_packages = args.site_packages.resolve()
     vllm_source = args.vllm_source.resolve()
     launcher_bin = args.launcher_bin.resolve()
-    preflight_components(
+    plans = preflight_components(
         components,
         manifest_dir=manifest_path.parent,
         site_packages=site_packages,
         vllm_source=vllm_source,
         launcher_bin=launcher_bin,
     )
-    for component in components:
-        apply_component(
-            component,
-            manifest_dir=manifest_path.parent,
-            site_packages=site_packages,
-            vllm_source=vllm_source,
-            launcher_bin=launcher_bin,
-        )
+    for _target, root, ordered, start in plans:
+        for component in ordered[:start]:
+            print(
+                f">>> field review {component['name']}: "
+                f"already applied at {root}"
+            )
+        for component in ordered[start:]:
+            apply_component_at_root(
+                component,
+                manifest_dir=manifest_path.parent,
+                root=root,
+            )
     return 0
 
 

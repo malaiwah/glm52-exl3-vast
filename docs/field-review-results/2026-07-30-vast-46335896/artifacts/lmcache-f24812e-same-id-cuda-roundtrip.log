@@ -1,0 +1,72 @@
+[32;20m[2026-07-31 13:45:48,101] LMCache INFO:[0m torch_dev=<module 'torch.cuda' from '/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py'>, torch_device_type=cuda [3m(__init__.py:249:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 13:45:48,201] LMCache INFO:[0m Using backend: lmcache.c_ops [3m(__init__.py:239:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 13:45:50,283] LMCache INFO:[0m multi_layer_block_kv_transfer mode: ptr [3m(base.py:94:lmcache.v1.multiprocess.transfer_context.base)[0m
+
+tests/v1/multiprocess/test_cache_server.py::test_same_instance_reregister_after_reset_store_retrieve_unregister /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+[32;20m[2026-07-31 13:45:52,188] LMCache INFO:[0m torch_dev=<module 'torch.cuda' from '/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py'>, torch_device_type=cuda [3m(__init__.py:249:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 13:45:52,309] LMCache INFO:[0m Using backend: lmcache.c_ops [3m(__init__.py:239:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 13:45:52,456] LMCache INFO:[0m multi_layer_block_kv_transfer mode: ptr [3m(base.py:94:lmcache.v1.multiprocess.transfer_context.base)[0m
+[32;20m[2026-07-31 13:45:52,638] LMCache INFO:[0m CudaPinMemoryBackend: using torch cudart [3m(pin_memory.py:89:lmcache.v1.platform.cuda.pin_memory)[0m
+[32;20m[2026-07-31 13:45:52,638] LMCache INFO:[0m Checking if shm capacity is larger than L1 request [3m(server.py:332:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 13:45:53,205] LMCache INFO:[0m Starting L1EvictionController... [3m(eviction_controller.py:63:lmcache.v1.distributed.storage_controllers.eviction_controller)[0m
+[32;20m[2026-07-31 13:45:53,206] LMCache INFO:[0m Starting L2EvictionController... [3m(eviction_controller.py:711:lmcache.v1.distributed.storage_controllers.eviction_controller)[0m
+[32;20m[2026-07-31 13:45:53,206] LMCache INFO:[0m Starting StoreController... [3m(store_controller.py:305:lmcache.v1.distributed.storage_controllers.store_controller)[0m
+[32;20m[2026-07-31 13:45:53,206] LMCache INFO:[0m Starting PrefetchController... [3m(prefetch_controller.py:577:lmcache.v1.distributed.storage_controllers.prefetch_controller)[0m
+[32;20m[2026-07-31 13:45:53,206] LMCache INFO:[0m Using blake3 hash function [3m(token_hasher.py:79:lmcache.v1.multiprocess.token_hasher)[0m
+[32;20m[2026-07-31 13:45:53,207] LMCache INFO:[0m Computed NONE_HASH=b"~>\xff\x9e\xf7a:P4\x0e\xb1&w\xee\x03\xb8:\xc7Y\xfc\xba\x9b\xb3'\x05\xf0rH\xd5mG;" using hash function [3m(token_hasher.py:180:lmcache.v1.multiprocess.token_hasher)[0m
+[32;20m[2026-07-31 13:45:53,207] LMCache INFO:[0m TokenHasher initialized: chunk_size=256, hash_algorithm=blake3 [3m(token_hasher.py:67:lmcache.v1.multiprocess.token_hasher)[0m
+[32;20m[2026-07-31 13:45:53,208] LMCache INFO:[0m PeriodicThread SessionManager-cleanup-thread-7bd97d8a2330 entering main loop (interval=60.0s) [3m(periodic_thread.py:284:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:45:53,208] LMCache INFO:[0m Started PeriodicThread: SessionManager-cleanup-thread-7bd97d8a2330 (level=medium, interval=60.0s, init_wait=0.0s) [3m(periodic_thread.py:244:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:45:53,208] LMCache INFO:[0m Supported transfer mode: auto [3m(server.py:209:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 13:45:53,208] LMCache INFO:[0m PeriodicThread lmcache-mp-worker-reaper entering main loop (interval=30.0s) [3m(periodic_thread.py:284:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:45:53,209] LMCache INFO:[0m Started PeriodicThread: lmcache-mp-worker-reaper (level=medium, interval=30.0s, init_wait=0.0s) [3m(periodic_thread.py:244:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:45:53,210] LMCache INFO:[0m Created AffinityThreadPool 'affinity-pool-0' with 1 worker slots: up to 1 distinct affinity keys each bind to their own thread before slots are shared. Compare this against the number of clients expected to connect to confirm routing. [3m(affinity_pool.py:62:lmcache.v1.multiprocess.affinity_pool)[0m
+[32;20m[2026-07-31 13:45:53,210] LMCache INFO:[0m LMCache ZMQ cache server is running on tcp://localhost:5599 [3m(server.py:395:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 13:45:53,210] LMCache INFO:[0m LMCache cache server is running... [3m(server.py:410:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 13:45:53,332] LMCache INFO:[0m Engine KV Format: EngineKVFormat.NL_X_TWO_NB_BS_NH_HS NL x [2, NB, BS, NH, HS] [3m(detection.py:44:lmcache.v1.gpu_connector.kv_format.detection)[0m
+[32;20m[2026-07-31 13:45:53,332] LMCache INFO:[0m Engine KV Format: EngineKVFormat.NL_X_TWO_NB_BS_NH_HS NL x [2, NB, BS, NH, HS] [3m(detection.py:44:lmcache.v1.gpu_connector.kv_format.detection)[0m
+[32;20m[2026-07-31 13:45:53,332] LMCache INFO:[0m Group 0 first-layer tensor: layer_idx=0 shape=(2, 1024, 16, 8, 128) stride=(16777216, 16384, 1024, 128, 1) is_contiguous=True dtype=torch.bfloat16 device=cuda:0 storage_offset=0 numel=33554432 storage_nbytes=67108864 padding_per_block=0 [3m(utils.py:589:lmcache.v1.gpu_connector.utils)[0m
+[32;20m[2026-07-31 13:45:53,332] LMCache INFO:[0m KV layer groups: ---
+KernelGroupInfo(layers=32, indices=0-31, shape_desc=(kv=2, nl=32, nb=1024, bs=16, nh=8, hs=128, element_size=2, block_stride_elems=0), dtype=torch.bfloat16, tokens_per_block=16, slots_per_block=16, physical_blocks_per_engine_block=1, engine_group_idx=0, sw_size_tokens=-1)
+--- [3m(kv_layer_groups.py:458:lmcache.v1.kv_layer_groups)[0m
+[33;20m[2026-07-31 13:45:53,333] LMCache WARNING:[0m KVLayerGroupsManager.kv_layer_groups is deprecated: `kv_layer_groups` is an outdated alias for `kernel_groups` [3m(utils.py:734:lmcache.utils)[0m
+[32;20m[2026-07-31 13:45:53,402] LMCache INFO:[0m Registered KV cache for GPU ID 279406 with 32 layers [3m(lmcache_driven_transfer.py:912:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+[32;20m[2026-07-31 13:45:53,402] LMCache INFO:[0m Initialized cuda stream on device cuda:0 [3m(cache_context.py:430:lmcache.v1.platform.cuda.cache_context)[0m
+[32;20m[2026-07-31 13:45:53,404] LMCache INFO:[0m Instance 279406 already registered; refreshing liveness [3m(lmcache_driven_transfer.py:870:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+[32;20m[2026-07-31 13:45:53,404] LMCache INFO:[0m AffinityThreadPool: affinity_key=164221607982336108 assigned to worker slot 0 of 1 (thread affinity-pool-0-0); 1 distinct key(s) now bound [3m(affinity_pool.py:110:lmcache.v1.multiprocess.affinity_pool)[0m
+[32;20m[2026-07-31 13:45:53,407] LMCache INFO:[0m Stored 256 tokens in 0.003 seconds [3m(lmcache_driven_transfer.py:1157:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+[32;20m[2026-07-31 13:45:53,419] LMCache INFO:[0m Prefetch request completed (L1+L2): 1/1 retained keys (1 L1, 0 L2) in 0.2 ms (external_request_id=test_request_98001, prefetch_request_id=-1) [3m(storage_manager.py:735:lmcache.v1.distributed.storage_manager)[0m
+[32;20m[2026-07-31 13:45:53,425] LMCache INFO:[0m Retrieved 256 tokens in 0.000 seconds [3m(lmcache_driven_transfer.py:1345:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m Checking memory allocator consistency [3m(tensor_memory_allocator.py:298:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m  - Total active allocations: 1 [3m(tensor_memory_allocator.py:299:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m  - Total allocated size: 32.000000 MB [3m(tensor_memory_allocator.py:300:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m  - Total free size: 5088.000000 MB [3m(tensor_memory_allocator.py:307:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m L1Manager memcheck: total objects = 1, write-locked = 0, read-locked = 0 [3m(l1_manager.py:1024:lmcache.v1.distributed.l1_manager)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m L1Manager: force-clearing all 1 unlocked object(s). [3m(l1_manager.py:818:lmcache.v1.distributed.l1_manager)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m L1Manager: cleared 1 objects, 0 remaining. [3m(l1_manager.py:834:lmcache.v1.distributed.l1_manager)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m Checking memory allocator consistency [3m(tensor_memory_allocator.py:298:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m  - Total active allocations: 0 [3m(tensor_memory_allocator.py:299:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m  - Total allocated size: 0.000000 MB [3m(tensor_memory_allocator.py:300:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m  - Total free size: 5120.000000 MB [3m(tensor_memory_allocator.py:307:lmcache.v1.memory_management)[0m
+[32;20m[2026-07-31 13:45:53,474] LMCache INFO:[0m L1Manager memcheck: total objects = 0, write-locked = 0, read-locked = 0 [3m(l1_manager.py:1024:lmcache.v1.distributed.l1_manager)[0m
+[32;20m[2026-07-31 13:45:53,477] LMCache INFO:[0m Unregistered KV cache for GPU ID 279406 [3m(lmcache_driven_transfer.py:952:lmcache.v1.multiprocess.modules.lmcache_driven_transfer)[0m
+PASSED[32;20m[2026-07-31 13:45:53,479] LMCache INFO:[0m Shutting down server... [3m(server.py:419:lmcache.v1.multiprocess.server)[0m
+[32;20m[2026-07-31 13:45:53,479] LMCache INFO:[0m Stopping PeriodicThread: lmcache-mp-worker-reaper [3m(periodic_thread.py:263:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:45:53,479] LMCache INFO:[0m PeriodicThread lmcache-mp-worker-reaper loop stopped [3m(periodic_thread.py:349:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:45:53,479] LMCache INFO:[0m Stopping PeriodicThread: SessionManager-cleanup-thread-7bd97d8a2330 [3m(periodic_thread.py:263:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:45:53,479] LMCache INFO:[0m PeriodicThread SessionManager-cleanup-thread-7bd97d8a2330 loop stopped [3m(periodic_thread.py:349:lmcache.v1.periodic_thread)[0m
+[32;20m[2026-07-31 13:45:54,257] LMCache INFO:[0m MPCacheServer closed [3m(server.py:116:lmcache.v1.multiprocess.server)[0m
+
+
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+../../../../opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: 122 warnings
+  /opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: DeprecationWarning: `LoggingHandler` in `opentelemetry-sdk` is deprecated. Use the handler from `opentelemetry-instrumentation-logging` instead.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 1 passed, 123 warnings in 5.14s ========================

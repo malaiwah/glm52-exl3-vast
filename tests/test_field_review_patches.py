@@ -11,7 +11,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 APPLIER = ROOT / "scripts" / "apply_field_review_patches.py"
 
@@ -95,6 +94,40 @@ class FieldReviewPatchTests(unittest.TestCase):
             stderr=subprocess.STDOUT,
         )
 
+    def add_successor(self, manifest_path: Path) -> bytes:
+        before = b"VALUE = 'after'\n"
+        after = b"VALUE = 'final'\n"
+        patch = (
+            "diff --git a/demo/value.py b/demo/value.py\n"
+            "index e0b8fc9..0a7ad57 100644\n"
+            "--- a/demo/value.py\n"
+            "+++ b/demo/value.py\n"
+            "@@ -1 +1 @@\n"
+            "-VALUE = 'after'\n"
+            "+VALUE = 'final'\n"
+        ).encode()
+        patch_path = manifest_path.parent / "successor.patch"
+        patch_path.write_bytes(patch)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["components"].append(
+            {
+                "name": "demo-successor",
+                "base_tree": "demo-tested-head",
+                "tested_head": "successor-head",
+                "patch": patch_path.name,
+                "patch_sha256": digest(patch),
+                "targets": ["site-packages", "vllm-source"],
+                "files": {
+                    "demo/value.py": {
+                        "before": digest(before),
+                        "after": digest(after),
+                    }
+                },
+            }
+        )
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return after
+
     def test_apply_and_idempotent_replay(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             manifest, site, source = self.make_fixture(Path(tmp))
@@ -110,6 +143,108 @@ class FieldReviewPatchTests(unittest.TestCase):
             second = self.run_applier(manifest, site, source)
             self.assertEqual(second.returncode, 0, second.stdout)
             self.assertEqual(second.stdout.count("already applied"), 2)
+
+    def test_overlapping_successor_chain_applies_and_replays(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, site, source = self.make_fixture(Path(tmp))
+            final = self.add_successor(manifest)
+
+            first = self.run_applier(manifest, site, source)
+            self.assertEqual(first.returncode, 0, first.stdout)
+            self.assertEqual((site / "demo/value.py").read_bytes(), final)
+            self.assertEqual((source / "demo/value.py").read_bytes(), final)
+
+            second = self.run_applier(manifest, site, source)
+            self.assertEqual(second.returncode, 0, second.stdout)
+            self.assertEqual(second.stdout.count("already applied"), 4)
+
+    def test_overlapping_successor_resumes_from_prerequisite_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, site, source = self.make_fixture(Path(tmp))
+            final = self.add_successor(manifest)
+            prerequisite = b"VALUE = 'after'\n"
+            (site / "demo/value.py").write_bytes(prerequisite)
+            (source / "demo/value.py").write_bytes(prerequisite)
+
+            result = self.run_applier(manifest, site, source)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(result.stdout.count("already applied"), 2)
+            self.assertEqual((site / "demo/value.py").read_bytes(), final)
+            self.assertEqual((source / "demo/value.py").read_bytes(), final)
+
+    def test_disjoint_components_resume_independently(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, site, source = self.make_fixture(Path(tmp))
+            before = b"OTHER = 'before'\n"
+            after = b"OTHER = 'after'\n"
+            for root in (site, source):
+                (root / "other").mkdir()
+                (root / "other" / "value.py").write_bytes(before)
+                # Simulate the prior bundle having already completed only the
+                # independent demo component.
+                (root / "demo" / "value.py").write_text(
+                    "VALUE = 'after'\n", encoding="utf-8"
+                )
+            patch = (
+                "diff --git a/other/value.py b/other/value.py\n"
+                "index 74b944a..94dc80a 100644\n"
+                "--- a/other/value.py\n"
+                "+++ b/other/value.py\n"
+                "@@ -1 +1 @@\n"
+                "-OTHER = 'before'\n"
+                "+OTHER = 'after'\n"
+            ).encode()
+            patch_path = manifest.parent / "independent.patch"
+            patch_path.write_bytes(patch)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["components"].append(
+                {
+                    "name": "independent",
+                    "base_tree": "independent-base",
+                    "tested_head": "independent-head",
+                    "patch": patch_path.name,
+                    "patch_sha256": digest(patch),
+                    "targets": ["site-packages", "vllm-source"],
+                    "files": {
+                        "other/value.py": {
+                            "before": digest(before),
+                            "after": digest(after),
+                        }
+                    },
+                }
+            )
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+            result = self.run_applier(manifest, site, source)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertEqual((site / "other/value.py").read_bytes(), after)
+            self.assertEqual((source / "other/value.py").read_bytes(), after)
+
+    def test_discontinuous_successor_chain_is_rejected_by_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest, _site, _source = self.make_fixture(Path(tmp))
+            self.add_successor(manifest)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["components"][1]["files"]["demo/value.py"]["before"] = (
+                digest(b"VALUE = 'not-the-prerequisite'\n")
+            )
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(APPLIER),
+                    "--manifest",
+                    str(manifest),
+                    "--validate-only",
+                ],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            self.assertEqual(result.returncode, 2, result.stdout)
+            self.assertIn("patch chain is discontinuous", result.stdout)
 
     def test_unknown_state_is_rejected_without_touching_other_target(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

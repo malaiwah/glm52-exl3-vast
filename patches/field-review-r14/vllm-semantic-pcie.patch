@@ -1,0 +1,955 @@
+diff --git a/vllm/distributed/device_communicators/custom_all_reduce.py b/vllm/distributed/device_communicators/custom_all_reduce.py
+index 1b4b4f0cfcc229ca7bd522298059ed32b1afab0e..652ee4d607242d443cd5216247a8a5eccd7438cf 100644
+--- a/vllm/distributed/device_communicators/custom_all_reduce.py
++++ b/vllm/distributed/device_communicators/custom_all_reduce.py
+@@ -31,6 +31,12 @@ except Exception:
+ 
+ logger = init_logger(__name__)
+ 
++# The eager scheduler has one stable all-reduce stream owner.  Never derive
++# this identity from a process-local CUDA stream handle; SparkInfer deliberately
++# fails closed if the same logical owner is rebound to a second eager stream.
++_B12X_PCIE_EAGER_CHANNEL_ID = "vllm:eager:allreduce"
++_B12X_PCIE_MAX_CONCURRENT_CHANNELS = 2
++
+ 
+ def _get_pcie_allreduce_backend() -> str:
+     backend = envs.VLLM_PCIE_ALLREDUCE_BACKEND.lower()
+@@ -488,8 +494,15 @@ class CustomAllreduce:
+                     eager_buffer_bytes=pcie_oneshot_buffer_size,
+                     max_size=pcie_oneshot_buffer_size,
+                     single_channel=pcie_single_channel,
++                    max_concurrent_channels=_B12X_PCIE_MAX_CONCURRENT_CHANNELS,
++                )
++                if not pcie_single_channel:
++                    pcie_runtime.prepare_channels((_B12X_PCIE_EAGER_CHANNEL_ID,))
++                pcie_runtime.for_stream(
++                    channel_id=(
++                        None if pcie_single_channel else _B12X_PCIE_EAGER_CHANNEL_ID
++                    )
+                 )
+-                pcie_runtime.for_stream()
+             except Exception as exc:
+                 pcie_init_error = exc
+ 
+@@ -655,7 +668,12 @@ class CustomAllreduce:
+         ops.register_buffer(self._ptr, self.buffer_ptrs)
+ 
+     @contextmanager
+-    def capture(self, stream: torch.cuda.Stream | None = None):
++    def capture(
++        self,
++        stream: torch.cuda.Stream | None = None,
++        *,
++        channel_id: str | None = None,
++    ):
+         """Bind communicator resources to the enclosing CUDA graph capture.
+ 
+         Legacy custom all-reduce registers graph buffers on exit. SparkInfer
+@@ -668,8 +686,16 @@ class CustomAllreduce:
+             if self._pcie_runtime is None:
+                 yield
+             else:
++                if channel_id is None:
++                    raise RuntimeError(
++                        "distributed PCIe graph capture requires an explicit "
++                        "semantic channel_id"
++                    )
+                 self._pcie_capture_stream = stream
+-                with self._pcie_runtime.capture(stream=stream):
++                with self._pcie_runtime.capture(
++                    stream=stream,
++                    channel_id=channel_id,
++                ):
+                     yield
+         finally:
+             self._pcie_capture_stream = old_pcie_capture_stream
+@@ -727,7 +753,8 @@ class CustomAllreduce:
+     def register_graph_buffers(self):
+         if self._pcie_runtime is not None:
+             self._pcie_runtime.for_stream(
+-                self._pcie_runtime_stream()
++                self._pcie_runtime_stream(),
++                channel_id=_B12X_PCIE_EAGER_CHANNEL_ID,
+             ).register_graph_buffers()
+             return
+         handle, offset = ops.get_graph_buffer_ipc_meta(self._ptr)
+@@ -757,7 +784,8 @@ class CustomAllreduce:
+                 self._pcie_allreduce_max_size is not None
+                 and inp_size <= self._pcie_allreduce_max_size
+                 and self._pcie_runtime.for_stream(
+-                    self._pcie_runtime_stream()
++                    self._pcie_runtime_stream(),
++                    channel_id=_B12X_PCIE_EAGER_CHANNEL_ID,
+                 ).should_allreduce(inp)
+             )
+             if (
+@@ -836,7 +864,10 @@ class CustomAllreduce:
+                     self._pcie_runtime_stream() is not None,
+                 )
+             return self._pcie_runtime.all_reduce(
+-                inp, out=out, stream=self._pcie_runtime_stream()
++                inp,
++                out=out,
++                stream=self._pcie_runtime_stream(),
++                channel_id=_B12X_PCIE_EAGER_CHANNEL_ID,
+             )
+         if out is None:
+             out = torch.empty_like(inp)
+@@ -878,7 +909,8 @@ class CustomAllreduce:
+             return False
+         assert self._pcie_runtime is not None
+         if not self._pcie_runtime.for_stream(
+-            self._pcie_runtime_stream()
++            self._pcie_runtime_stream(),
++            channel_id=_B12X_PCIE_EAGER_CHANNEL_ID,
+         ).should_allreduce(inp):
+             return False
+         if (
+@@ -905,6 +937,7 @@ class CustomAllreduce:
+             out=inp,
+             residual_out=residual,
+             stream=self._pcie_runtime_stream(),
++            channel_id=_B12X_PCIE_EAGER_CHANNEL_ID,
+         )
+         return True
+ 
+diff --git a/vllm/distributed/parallel_state.py b/vllm/distributed/parallel_state.py
+index 54da6ac47a4653681b9849115e6d2e84aa852af6..8e3b1ca60a66bce5b57ec002dba810d1bd4917e7 100644
+--- a/vllm/distributed/parallel_state.py
++++ b/vllm/distributed/parallel_state.py
+@@ -65,6 +65,7 @@ if TYPE_CHECKING:
+ @dataclass
+ class GraphCaptureContext:
+     stream: torch.cuda.Stream
++    channel_id: str | None = None
+ 
+ 
+ TensorMetadata = namedtuple("TensorMetadata", ["device", "dtype", "size"])
+@@ -620,7 +621,10 @@ class GroupCoordinator:
+             )
+             ca_comm = self.device_communicator.ca_comm
+             if ca_comm is not None:
+-                maybe_ca_context = ca_comm.capture(stream=stream)  # type: ignore
++                maybe_ca_context = ca_comm.capture(  # type: ignore
++                    stream=stream,
++                    channel_id=graph_capture_context.channel_id,
++                )
+ 
+             from vllm._aiter_ops import rocm_aiter_ops
+ 
+@@ -1643,14 +1647,15 @@ def get_pcp_group() -> GroupCoordinator:
+ def graph_capture(
+     device: torch.device,
+     graph_capture_context: GraphCaptureContext | None = None,
++    channel_id: str | None = None,
+ ):
+     """
+     `graph_capture` is a context manager which should surround the code that
+     is capturing the CUDA graph. Its main purpose is to ensure that some
+     operations will be run after the graph is captured, before the graph
+     is replayed. It returns a `GraphCaptureContext` object which contains the
+-    necessary data for the graph capture. Currently, it only contains the
+-    stream that the graph capture is running on. This stream is set to the
++    necessary data for the graph capture: its stream and an optional semantic
++    channel identity for distributed capture resources. The stream is set to the
+     current CUDA stream when the context manager is entered and reset to the
+     default stream when the context manager is exited. This is to ensure that
+     the graph capture is running on a separate stream from the default stream,
+@@ -1660,21 +1665,37 @@ def graph_capture(
+     A caller may pass an explicit ``graph_capture_context`` to control the
+     stream used (e.g. to capture on the default stream).
+     """
+-    context = graph_capture_context or GraphCaptureContext(
+-        torch.cuda.Stream(device=device)
+-    )
++    if graph_capture_context is None:
++        context = GraphCaptureContext(
++            torch.cuda.Stream(device=device),
++            channel_id=channel_id,
++        )
++    else:
++        context = graph_capture_context
++        if channel_id is not None:
++            if context.channel_id is not None and context.channel_id != channel_id:
++                raise ValueError(
++                    "graph capture channel_id conflicts with GraphCaptureContext"
++                )
++            if context.channel_id is None:
++                context = GraphCaptureContext(context.stream, channel_id=channel_id)
+     maybe_dcp_capture = (
+         get_dcp_group().graph_capture(context)
+         if _DCP is not None and get_dcp_group().world_size > 1
+         else nullcontext()
+     )
++    maybe_b12x_dcp_capture: contextlib.AbstractContextManager[Any]
+     if _DCP is not None and get_dcp_group().world_size > 1:
+         # Import locally to avoid making distributed initialization depend on
+         # attention modules. The helper is a no-op until DCP warmup creates a
+         # SparkInfer pool for this process group.
+         from vllm.v1.attention.ops.dcp_alltoall import capture_b12x_dcp_a2a
+ 
+-        maybe_b12x_dcp_capture = capture_b12x_dcp_a2a(get_dcp_group(), context.stream)
++        maybe_b12x_dcp_capture = capture_b12x_dcp_a2a(
++            get_dcp_group(),
++            context.stream,
++            channel_id=context.channel_id,
++        )
+     else:
+         maybe_b12x_dcp_capture = nullcontext()
+     with (
+diff --git a/vllm/v1/attention/ops/dcp_alltoall.py b/vllm/v1/attention/ops/dcp_alltoall.py
+index e908a7262d1a85aedec4d4e73f1879b59f13ebb6..da0dce93e14e08d49d6caadcc93f8babcd923316 100644
+--- a/vllm/v1/attention/ops/dcp_alltoall.py
++++ b/vllm/v1/attention/ops/dcp_alltoall.py
+@@ -41,6 +41,10 @@ logger = init_logger(__name__)
+ 
+ _B12X_DCP_A2A_POOLS: dict[tuple[int, int, int, int, int, int], Any] = {}
+ _B12X_DCP_A2A_DISABLED: set[tuple[int, int, int, int, int, int]] = set()
++# DCP likewise has one stable eager scheduler owner.  Graph target/draft/encoder
++# identities are supplied separately by their GraphCaptureContext.
++_B12X_DCP_EAGER_CHANNEL_ID = "vllm:eager:dcp"
++_B12X_DCP_MAX_CONCURRENT_CHANNELS = 2
+ _DCP_A2A_GRAPH_BUFFERS: dict[
+     tuple[tuple[int, ...], torch.device, torch.dtype],
+     tuple[torch.Tensor, torch.Tensor],
+@@ -53,9 +57,7 @@ def _is_supported_bhd_layout(tensor: torch.Tensor) -> bool:
+         return False
+     batch, heads, head_dim = (int(value) for value in tensor.shape)
+     stride_batch, stride_head, _ = (int(value) for value in tensor.stride())
+-    packed_token_major = (
+-        stride_batch == heads * head_dim and stride_head == head_dim
+-    )
++    packed_token_major = stride_batch == heads * head_dim and stride_head == head_dim
+     capacity_strided_head_major = (
+         stride_batch == head_dim and stride_head >= batch * head_dim
+     )
+@@ -130,8 +132,10 @@ def _get_b12x_dcp_a2a_pool(
+             head_dim=head_dim,
+             query_head_dim=query_head_dim,
+             single_channel=False,
++            max_concurrent_channels=_B12X_DCP_MAX_CONCURRENT_CHANNELS,
+         )
+-        pool.for_stream()
++        pool.prepare_channels((_B12X_DCP_EAGER_CHANNEL_ID,))
++        pool.for_stream(channel_id=_B12X_DCP_EAGER_CHANNEL_ID)
+     except Exception as exc:
+         init_error = exc
+ 
+@@ -171,6 +175,8 @@ def _get_b12x_dcp_a2a_pool(
+ def capture_b12x_dcp_a2a(
+     cp_group: GroupCoordinator,
+     stream: torch.cuda.Stream | None = None,
++    *,
++    channel_id: str | None = None,
+ ):
+     """Bind registered SparkInfer DCP pools to the graph's owning stream.
+ 
+@@ -180,6 +186,7 @@ def capture_b12x_dcp_a2a(
+     Args:
+         cp_group: DCP group whose registered pools should enter capture.
+         stream: CUDA stream owned by the enclosing graph capture.
++        channel_id: Stable identity shared by every rank for this graph owner.
+     """
+     group_id = id(cp_group.device_group)
+     matching_pools = sorted(
+@@ -190,9 +197,14 @@ def capture_b12x_dcp_a2a(
+         ),
+         key=lambda item: item[0][1:],
+     )
++    if matching_pools and channel_id is None:
++        raise RuntimeError(
++            "distributed PCIe DCP graph capture requires an explicit semantic "
++            "channel_id"
++        )
+     with ExitStack() as stack:
+         for _, pool in matching_pools:
+-            stack.enter_context(pool.capture(stream=stream))
++            stack.enter_context(pool.capture(stream=stream, channel_id=channel_id))
+         yield
+ 
+ 
+@@ -313,6 +325,7 @@ def _try_b12x_dcp_lse_reduce(
+         cp_attn_lse,
+         out=reduced,
+         is_lse_base_on_e=is_lse_base_on_e,
++        channel_id=_B12X_DCP_EAGER_CHANNEL_ID,
+     )
+ 
+ 
+@@ -363,7 +376,10 @@ def _try_b12x_dcp_all_gather_heads(
+     )
+     if pool is None:
+         return None
+-    return pool.all_gather_heads(local_input)
++    return pool.all_gather_heads(
++        local_input,
++        channel_id=_B12X_DCP_EAGER_CHANNEL_ID,
++    )
+ 
+ 
+ def dcp_b12x_all_gather_heads(
+diff --git a/vllm/v1/worker/gpu/cudagraph_utils.py b/vllm/v1/worker/gpu/cudagraph_utils.py
+index 7b2991bf6c4d13a0ddb21dfdec9c77ea4e018467..1f4cc19e3b4fbf70c26a88f6a9ff5aed7f1d6bfa 100644
+--- a/vllm/v1/worker/gpu/cudagraph_utils.py
++++ b/vllm/v1/worker/gpu/cudagraph_utils.py
+@@ -446,6 +446,8 @@ class CudaGraphManager:
+     def capture(
+         self,
+         create_forward_fn: CreateForwardFn,
++        *,
++        channel_id: str,
+         progress_bar_desc: str = "Capturing CUDA graphs",
+     ) -> None:
+         """Capture CUDA graphs.
+@@ -456,12 +458,16 @@ class CudaGraphManager:
+                 it is invoked once with warmup=True and again with warmup=False
+                 because attention backends may mutate or lazily initialize
+                 metadata during warmup.
++            channel_id: Stable distributed identity for this graph owner.
+         """
+         # Keep event handles created by descriptor warmups alive together with
+         # the graph artifacts captured below. Some multi-stream custom ops run
+         # on joined auxiliary streams where CUDA's per-current-stream capture
+         # query is false even though later graph nodes retain those handles.
+-        with graph_capture(device=self.device), vllm_cudagraph_capture_scope():
++        with (
++            graph_capture(device=self.device, channel_id=channel_id),
++            vllm_cudagraph_capture_scope(),
++        ):
+             # Capture in order: PIECEWISE first, then FULL. PIECEWISE has larger
+             # activations so FULL activations should fit in already allocated
+             # buffers in the graph pool.
+@@ -638,6 +644,8 @@ class ModelCudaGraphManager(CudaGraphManager):
+         has_lora: bool = False,
+         use_aux_hidden_state_outputs: bool = False,
+         lora_capture_hook: Callable[[int, int, int], None] | None = None,
++        *,
++        channel_id: str,
+         progress_bar_desc: str = "Capturing CUDA graphs",
+     ) -> None:
+         """Capture CUDA graphs for model forward pass."""
+@@ -752,7 +760,11 @@ class ModelCudaGraphManager(CudaGraphManager):
+ 
+             return forward_fn
+ 
+-        super().capture(create_forward_fn, progress_bar_desc)
++        super().capture(
++            create_forward_fn,
++            channel_id=channel_id,
++            progress_bar_desc=progress_bar_desc,
++        )
+ 
+     def clear(self) -> None:
+         super().clear()
+diff --git a/vllm/v1/worker/gpu/model_runner.py b/vllm/v1/worker/gpu/model_runner.py
+index 596b1c2b5be77a318371ca2ccf0bf30c514a5a87..1ba33888a05b3b1d2bede735ea3ea326cb21b60a 100644
+--- a/vllm/v1/worker/gpu/model_runner.py
++++ b/vllm/v1/worker/gpu/model_runner.py
+@@ -967,11 +967,12 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+                     has_lora=self.lora_config is not None,
+                     use_aux_hidden_state_outputs=self.use_aux_hidden_state_outputs,
+                     lora_capture_hook=create_lora_capture_hook(self.lora_config, self),
++                    channel_id="vllm:target:profile",
+                     progress_bar_desc="Profiling CUDA graph memory",
+                 )
+                 if self.speculator is not None:
+                     with use_workspace_lane(1):
+-                        self.speculator.capture()
++                        self.speculator.capture(capture_phase="profile")
+                 self._zero_cudagraph_capture_kv_blocks()
+             end_free_gpu_memory = torch.accelerator.get_memory_info()[0]
+             gross_cuda_graph_size = max(start_free_gpu_memory - end_free_gpu_memory, 0)
+@@ -1050,10 +1051,11 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+                     has_lora=self.lora_config is not None,
+                     use_aux_hidden_state_outputs=self.use_aux_hidden_state_outputs,
+                     lora_capture_hook=create_lora_capture_hook(self.lora_config, self),
++                    channel_id="vllm:target:production",
+                 )
+                 if self.speculator is not None:
+                     with use_workspace_lane(1):
+-                        self.speculator.capture()
++                        self.speculator.capture(capture_phase="production")
+                 self._zero_cudagraph_capture_kv_blocks()
+         finally:
+             self._release_cudagraph_pool_anchor()
+diff --git a/vllm/v1/worker/gpu/spec_decode/autoregressive/cudagraph_utils.py b/vllm/v1/worker/gpu/spec_decode/autoregressive/cudagraph_utils.py
+index 19919043c831574b73c8617615a352e885c648f8..c625d91aee8496d3f518361fff2d234ecdf8329a 100644
+--- a/vllm/v1/worker/gpu/spec_decode/autoregressive/cudagraph_utils.py
++++ b/vllm/v1/worker/gpu/spec_decode/autoregressive/cudagraph_utils.py
+@@ -35,6 +35,8 @@ class SpeculatorCudaGraphManager(CudaGraphManager):
+         block_tables: BlockTables,
+         attn_groups: list[list[AttentionGroup]],
+         kv_cache_config: KVCacheConfig,
++        *,
++        channel_id: str,
+         progress_bar_desc: str = "Capturing CUDA graphs",
+     ) -> None:
+         def create_forward_fn(
+@@ -71,4 +73,8 @@ class SpeculatorCudaGraphManager(CudaGraphManager):
+                 cg_mode,
+             )
+ 
+-        super().capture(create_forward_fn, progress_bar_desc)
++        super().capture(
++            create_forward_fn,
++            channel_id=channel_id,
++            progress_bar_desc=progress_bar_desc,
++        )
+diff --git a/vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py b/vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py
+index 9633feaa0103d51d638621b9a90a089e9f9d1d12..d9ab74a28fb9bd1d0f288829f35a5446c5185255 100644
+--- a/vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py
++++ b/vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py
+@@ -21,7 +21,10 @@ from vllm.v1.worker.gpu.input_batch import InputBatch, InputBuffers
+ from vllm.v1.worker.gpu.spec_decode.autoregressive.cudagraph_utils import (
+     SpeculatorCudaGraphManager,
+ )
+-from vllm.v1.worker.gpu.spec_decode.speculator import DraftModelSpeculator
++from vllm.v1.worker.gpu.spec_decode.speculator import (
++    CUDAGraphCapturePhase,
++    DraftModelSpeculator,
++)
+ 
+ logger = init_logger(__name__)
+ 
+@@ -87,7 +90,7 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
+             decode_query_len=1,
+         )
+ 
+-    def capture(self) -> None:
++    def capture(self, *, capture_phase: CUDAGraphCapturePhase) -> None:
+         logger.info("Capturing model for speculator...")
+         # Reset indices to zeros to prevent stale values from prior
+         # dummy runs to cause out-of-bounds indexing during capture.
+@@ -111,6 +114,7 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
+             self.block_tables,
+             self.target_attn_groups,
+             self.kv_cache_config,
++            channel_id=f"vllm:draft:prefill:{capture_phase}",
+             progress_bar_desc="Capturing prefill CUDA graphs",
+         )
+ 
+@@ -128,6 +132,7 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
+             self.block_tables,
+             self.attn_groups,
+             self.kv_cache_config,
++            channel_id=f"vllm:draft:decode:{capture_phase}",
+             progress_bar_desc="Capturing decode CUDA graphs",
+         )
+ 
+diff --git a/vllm/v1/worker/gpu/spec_decode/dflash/cudagraph.py b/vllm/v1/worker/gpu/spec_decode/dflash/cudagraph.py
+index 5b36fee76eb227cd735648b9e31ac97ff1aabbec..fb0f0f2b6014f5ac3810ea4394bbf27255485d6b 100644
+--- a/vllm/v1/worker/gpu/spec_decode/dflash/cudagraph.py
++++ b/vllm/v1/worker/gpu/spec_decode/dflash/cudagraph.py
+@@ -72,6 +72,8 @@ class DFlashCudaGraphManager(CudaGraphManager):
+         kv_cache_config: KVCacheConfig,
+         max_model_len: int,
+         causal: bool | Mapping[int, bool],
++        *,
++        channel_id: str,
+         progress_bar_desc: str = "Capturing CUDA graphs",
+     ) -> None:
+         def create_forward_fn(
+@@ -108,4 +110,8 @@ class DFlashCudaGraphManager(CudaGraphManager):
+                 num_query_per_req=desc.uniform_token_count,
+             )
+ 
+-        super().capture(create_forward_fn, progress_bar_desc)
++        super().capture(
++            create_forward_fn,
++            channel_id=channel_id,
++            progress_bar_desc=progress_bar_desc,
++        )
+diff --git a/vllm/v1/worker/gpu/spec_decode/dflash/speculator.py b/vllm/v1/worker/gpu/spec_decode/dflash/speculator.py
+index 4859d74bcb150019a010b3173e885d3e135ef8b4..8af47efab18f3e263373e91740dcf536bc2b1815 100644
+--- a/vllm/v1/worker/gpu/spec_decode/dflash/speculator.py
++++ b/vllm/v1/worker/gpu/spec_decode/dflash/speculator.py
+@@ -35,7 +35,10 @@ from vllm.v1.worker.gpu.spec_decode.dflash.utils import (
+     load_dflash_model,
+     maybe_load_mask_embedding,
+ )
+-from vllm.v1.worker.gpu.spec_decode.speculator import DraftModelSpeculator
++from vllm.v1.worker.gpu.spec_decode.speculator import (
++    CUDAGraphCapturePhase,
++    DraftModelSpeculator,
++)
+ from vllm.v1.worker.gpu.spec_decode.utils import get_parallel_drafting_token_id
+ from vllm.v1.worker.utils import AttentionGroup
+ 
+@@ -184,7 +187,7 @@ class DFlashSpeculator(DraftModelSpeculator):
+             decode_query_len=self.num_query_per_req,
+         )
+ 
+-    def capture(self) -> None:
++    def capture(self, *, capture_phase: CUDAGraphCapturePhase) -> None:
+         logger.info("Capturing model for %s speculator...", self._speculator_name)
+         # Reset sampling indices to prevent stale values from prior dummy runs
+         # from being baked into the captured graph. Mapping rows stay inert.
+@@ -200,6 +203,7 @@ class DFlashSpeculator(DraftModelSpeculator):
+             self.kv_cache_config,
+             self.max_model_len,
+             causal=self._group_causal,
++            channel_id=f"vllm:draft:dflash:{capture_phase}",
+             progress_bar_desc=f"Capturing {self._speculator_name.lower()} CUDA graphs",
+         )
+ 
+diff --git a/vllm/v1/worker/gpu/spec_decode/speculator.py b/vllm/v1/worker/gpu/spec_decode/speculator.py
+index 0784f580ac0106849ec5f56aa6750d3784979695..a59cd1270bdd030f2beed072d5f1f4b726d6d916 100644
+--- a/vllm/v1/worker/gpu/spec_decode/speculator.py
++++ b/vllm/v1/worker/gpu/spec_decode/speculator.py
+@@ -2,7 +2,7 @@
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ from abc import ABC, abstractmethod
+ from collections.abc import Mapping
+-from typing import TYPE_CHECKING, Any
++from typing import TYPE_CHECKING, Any, Literal
+ 
+ import torch
+ import torch.nn as nn
+@@ -32,6 +32,8 @@ if TYPE_CHECKING:
+ 
+ logger = init_logger(__name__)
+ 
++CUDAGraphCapturePhase = Literal["profile", "production"]
++
+ 
+ class BaseSpeculator(ABC):
+     # Draft-token capacity surface, implemented by speculators with a
+@@ -51,7 +53,7 @@ class BaseSpeculator(ABC):
+         pass
+ 
+     @abstractmethod
+-    def capture(self) -> None:
++    def capture(self, *, capture_phase: CUDAGraphCapturePhase) -> None:
+         pass
+ 
+     def get_cudagraph_managers(self) -> tuple["CudaGraphManager", ...]:
+diff --git a/vllm/v1/worker/gpu_model_runner.py b/vllm/v1/worker/gpu_model_runner.py
+index 5a066f77c195d6daf9c35820b29dc9f3646833ef..4a7a40855552e20364574d7c4423cb7bff20a212 100644
+--- a/vllm/v1/worker/gpu_model_runner.py
++++ b/vllm/v1/worker/gpu_model_runner.py
+@@ -44,12 +44,14 @@ from vllm.distributed.kv_transfer import get_kv_transfer_group, has_kv_transfer_
+ from vllm.distributed.kv_transfer.kv_connector.utils import copy_kv_blocks
+ from vllm.distributed.parallel_state import (
+     GraphCaptureContext,
++    checkpoint_b12x_graph_channels,
+     get_dcp_group,
+     get_pp_group,
+     get_tp_group,
+     graph_capture,
+     is_global_first_rank,
+     prepare_communication_buffer_for_model,
++    rollback_b12x_graph_channels,
+ )
+ from vllm.forward_context import (
+     BatchDescriptor,
+@@ -5845,6 +5847,7 @@ class GPUModelRunner(
+         profile_seq_lens: int | None = None,
+         include_mm_inputs: bool = True,
+         single_request_prefill: bool = False,
++        run_drafter: bool = True,
+     ) -> tuple[torch.Tensor, torch.Tensor]:
+         """
+         Run a dummy forward pass to warm up/profile run or capture the
+@@ -5878,6 +5881,7 @@ class GPUModelRunner(
+             single_request_prefill: If True, create one prefill request with
+                 `num_tokens` tokens. This covers text-only single-request
+                 prefill kernels without keying warmup on a live prompt length.
++            run_drafter: Whether to execute the draft-model portion of the run.
+         """
+         mm_config = self.vllm_config.model_config.multimodal_config
+         if mm_config and mm_config.mm_encoder_only:
+@@ -6177,10 +6181,14 @@ class GPUModelRunner(
+             else:
+                 hidden_states = outputs
+ 
+-            if self.speculative_config and (
+-                self.speculative_config.use_eagle()
+-                or self.speculative_config.uses_draft_model()
+-                or self.speculative_config.uses_extract_hidden_states()
++            if (
++                run_drafter
++                and self.speculative_config
++                and (
++                    self.speculative_config.use_eagle()
++                    or self.speculative_config.uses_draft_model()
++                    or self.speculative_config.uses_extract_hidden_states()
++                )
+             ):
+                 assert isinstance(
+                     self.drafter,
+@@ -6672,7 +6680,7 @@ class GPUModelRunner(
+ 
+         saved_num_cudagraph_captured = compilation_counter.num_cudagraph_captured
+ 
+-        capture_descs = self.cudagraph_dispatcher.get_capture_descs()
++        capture_descs = list(self.cudagraph_dispatcher.get_capture_descs())
+         # Use a temporary manager for memory profiling. The persistent manager
+         # is initialized later so it does not keep profiling-only graph state.
+         encoder_cudagraph_manager = self._create_encoder_cudagraph_manager()
+@@ -6715,81 +6723,114 @@ class GPUModelRunner(
+             original_pools[id(instance)] = instance.graph_pool
+             instance.graph_pool = profiling_pool
+ 
+-        shared_memory_estimate = {}
+-        per_graph_estimate = {}
++        shared_memory_estimate: dict[CUDAGraphMode, int] = {}
++        per_graph_estimate: dict[CUDAGraphMode, int] = {}
+         encoder_memory_estimate = 0
+ 
+-        # On ROCm, capture these throwaway profiling graphs on vLLM's dedicated
+-        # compute stream instead of the fresh side stream graph_capture()
+-        # allocates by default. torch's allocator pools free blocks per stream,
+-        # so a side-stream forward strands a persistent aiter scratch buffer in
+-        # a separate pool, shifting the physical placement of the real KV cache
+-        # allocated afterward and slowing bandwidth-bound decode ~20%. The
+-        # graphs are discarded, so a side stream is unnecessary here.
+-        # Use current_stream(), not torch.cuda.current_stream(): before vLLM
+-        # initializes its dedicated stream, torch returns the per-thread default
+-        # stream (cuda_stream=0), which cannot be used for cudagraph capture.
+-        # cap_ctx=None keeps the side-stream path on CUDA.
+-        cap_ctx = (
+-            GraphCaptureContext(current_stream())
+-            if current_platform.is_rocm()
+-            else None
+-        )
+-
+         # Cleanup-only guard: CUDA graph capture errors should still propagate
+         # because encoder graph capture is opt-in.
++        graph_channel_checkpoints: tuple[tuple[Callable[[Any], None], Any], ...] = ()
+         try:
++            graph_channel_checkpoints = checkpoint_b12x_graph_channels()
+             set_cudagraph_capturing_enabled(True)
+-            with (
+-                self._freeze_gc(),
+-                graph_capture(device=self.device, graph_capture_context=cap_ctx),
+-            ):
+-                torch.accelerator.synchronize()
+-                torch.accelerator.empty_cache()
++            with self._freeze_gc():
++                for component, channel_id in (
++                    ("target", "vllm:target:profile"),
++                    ("draft", "vllm:draft:profile"),
++                ):
++                    component_descs = [
++                        (mode, descs)
++                        for mode, descs in capture_descs
++                        if component == "target"
++                        or self._captures_independent_drafter_graphs(mode)
++                    ]
++                    if not component_descs:
++                        continue
+ 
+-                for mode, descs in capture_descs:
+-                    profile_descs = descs[:2]
+-                    mem_samples: list[int] = []
+-
+-                    for i, desc in enumerate(profile_descs):
+-                        mem_before = torch.accelerator.get_memory_info()[0]
+-                        self._warmup_and_capture(
+-                            desc,
+-                            cudagraph_runtime_mode=mode,
+-                            profile_seq_lens=(
+-                                min(
+-                                    self.max_model_len,
+-                                    self.max_num_tokens // desc.num_tokens,
+-                                )
+-                                if mode == CUDAGraphMode.FULL and i == 0
+-                                else None
+-                            ),
+-                        )
++                    # ROCm profiles on vLLM's dedicated compute stream to avoid
++                    # stranding allocator pages in a disposable side stream.
++                    cap_ctx = (
++                        GraphCaptureContext(current_stream(), channel_id=channel_id)
++                        if current_platform.is_rocm()
++                        else None
++                    )
++                    with graph_capture(
++                        device=self.device,
++                        graph_capture_context=cap_ctx,
++                        channel_id=channel_id,
++                    ):
+                         torch.accelerator.synchronize()
+-                        free_after = torch.accelerator.get_memory_info()[0]
+-                        mem_samples.append(mem_before - free_after)
++                        torch.accelerator.empty_cache()
+ 
+-                    first_capture = mem_samples[0]
+-                    # Use at least 1 MiB per graph for driver overhead
+-                    per_graph = max(
+-                        mem_samples[1] if len(mem_samples) > 1 else 0, 1 << 20
+-                    )
++                        for mode, descs in component_descs:
++                            profile_descs = descs[:2]
++                            mem_samples: list[int] = []
++                            captures_drafter = (
++                                self._captures_independent_drafter_graphs(mode)
++                            )
+ 
+-                    shared_memory_estimate[mode] = first_capture
+-                    per_graph_estimate[mode] = per_graph * (len(descs) - 1)
++                            for i, desc in enumerate(profile_descs):
++                                mem_before = torch.accelerator.get_memory_info()[0]
++                                self._warmup_and_capture(
++                                    desc,
++                                    cudagraph_runtime_mode=mode,
++                                    profile_seq_lens=(
++                                        min(
++                                            self.max_model_len,
++                                            self.max_num_tokens // desc.num_tokens,
++                                        )
++                                        if mode == CUDAGraphMode.FULL and i == 0
++                                        else None
++                                    ),
++                                    run_drafter=(
++                                        component == "draft" or not captures_drafter
++                                    ),
++                                )
++                                torch.accelerator.synchronize()
++                                free_after = torch.accelerator.get_memory_info()[0]
++                                mem_samples.append(max(mem_before - free_after, 0))
++
++                            first_capture = mem_samples[0]
++                            # Use at least 1 MiB per graph for driver overhead.
++                            per_graph = max(
++                                mem_samples[1] if len(mem_samples) > 1 else 0,
++                                1 << 20,
++                            )
+ 
+-                    logger.debug(
+-                        "Estimated %s CUDA graph memory: "
+-                        "%.2f MiB first-capture + (%d-1) × %.2f MiB per-graph",
+-                        mode.name,
+-                        first_capture / (1 << 20),
+-                        len(descs),
+-                        per_graph / (1 << 20),
+-                    )
++                            shared_memory_estimate[mode] = (
++                                shared_memory_estimate.get(mode, 0) + first_capture
++                            )
++                            per_graph_estimate[mode] = per_graph_estimate.get(
++                                mode, 0
++                            ) + per_graph * (len(descs) - 1)
++
++                            logger.debug(
++                                "Estimated %s %s CUDA graph memory: "
++                                "%.2f MiB first-capture + (%d-1) × %.2f MiB "
++                                "per-graph",
++                                component,
++                                mode.name,
++                                first_capture / (1 << 20),
++                                len(descs),
++                                per_graph / (1 << 20),
++                            )
+ 
+                 if encoder_cudagraph_manager is not None:
++                    channel_id = "vllm:encoder:profile"
++                    cap_ctx = (
++                        GraphCaptureContext(current_stream(), channel_id=channel_id)
++                        if current_platform.is_rocm()
++                        else None
++                    )
+                     mem_before = torch.accelerator.get_memory_info()[0]
+-                    encoder_cudagraph_manager.capture(graph_pool=encoder_profiling_pool)
++                    with graph_capture(
++                        device=self.device,
++                        graph_capture_context=cap_ctx,
++                        channel_id=channel_id,
++                    ):
++                        encoder_cudagraph_manager.capture(
++                            graph_pool=encoder_profiling_pool
++                        )
+                     torch.accelerator.synchronize()
+                     free_after = torch.accelerator.get_memory_info()[0]
+                     encoder_memory_estimate = max(mem_before - free_after, 0)
+@@ -6800,23 +6841,28 @@ class GPUModelRunner(
+                         encoder_graphs,
+                     )
+         finally:
+-            set_cudagraph_capturing_enabled(False)
+-            CUDAGraphWrapper.clear_all_graphs()
+-            BreakableCUDAGraphWrapper.clear_all_graphs()
+-            if encoder_cudagraph_manager is not None:
+-                encoder_cudagraph_manager.clear()
+-            all_wrappers = list(CUDAGraphWrapper._all_instances) + list(
+-                BreakableCUDAGraphWrapper._all_instances
+-            )
+-            for instance in all_wrappers:
+-                if id(instance) in original_pools:
+-                    instance.graph_pool = original_pools[id(instance)]
+-            for key_set in self.cudagraph_dispatcher.cudagraph_keys.values():
+-                key_set.clear()
+-            self.cudagraph_dispatcher.keys_initialized = False
+-            self.maybe_remove_all_loras(self.lora_config)
+-            self._cleanup_profiling_kv_cache()
+-            compilation_counter.num_cudagraph_captured = saved_num_cudagraph_captured
++            try:
++                set_cudagraph_capturing_enabled(False)
++                CUDAGraphWrapper.clear_all_graphs()
++                BreakableCUDAGraphWrapper.clear_all_graphs()
++                if encoder_cudagraph_manager is not None:
++                    encoder_cudagraph_manager.clear()
++                all_wrappers = list(CUDAGraphWrapper._all_instances) + list(
++                    BreakableCUDAGraphWrapper._all_instances
++                )
++                for instance in all_wrappers:
++                    if id(instance) in original_pools:
++                        instance.graph_pool = original_pools[id(instance)]
++                for key_set in self.cudagraph_dispatcher.cudagraph_keys.values():
++                    key_set.clear()
++                self.cudagraph_dispatcher.keys_initialized = False
++                self.maybe_remove_all_loras(self.lora_config)
++                self._cleanup_profiling_kv_cache()
++                compilation_counter.num_cudagraph_captured = (
++                    saved_num_cudagraph_captured
++                )
++            finally:
++                rollback_b12x_graph_channels(graph_channel_checkpoints)
+ 
+         # FULL and PIECEWISE graphs share the global pool at runtime and are
+         # never replayed concurrently, so the pool overlays their memory.
+@@ -6853,36 +6899,55 @@ class GPUModelRunner(
+         # Trigger CUDA graph capture for specific shapes.
+         # Capture the large shapes first so that the smaller shapes
+         # can reuse the memory pool allocated for the large shapes.
++        capture_descs = list(self.cudagraph_dispatcher.get_capture_descs())
+         set_cudagraph_capturing_enabled(True)
+-        with self._freeze_gc(), graph_capture(device=self.device):
+-            torch.accelerator.synchronize()
+-            torch.accelerator.empty_cache()
+-            start_free_gpu_memory = torch.accelerator.get_memory_info()[0]
+-
+-            for (
+-                runtime_mode,
+-                batch_descs,
+-            ) in self.cudagraph_dispatcher.get_capture_descs():
+-                self._capture_cudagraphs(
+-                    batch_descriptors=batch_descs,
+-                    cudagraph_runtime_mode=runtime_mode,
+-                )
++        try:
++            with self._freeze_gc():
+                 torch.accelerator.synchronize()
++                torch.accelerator.empty_cache()
++                start_free_gpu_memory = torch.accelerator.get_memory_info()[0]
+ 
+-            # Capture encoder CUDA graphs if enabled
+-            if self.encoder_cudagraph_manager is not None:
+-                encoder_graph_pool = current_platform.graph_pool_handle()
+-                self.encoder_cudagraph_manager.capture(graph_pool=encoder_graph_pool)
++                for component, channel_id in (
++                    ("target", "vllm:target:production"),
++                    ("draft", "vllm:draft:production"),
++                ):
++                    component_descs = [
++                        (mode, descs)
++                        for mode, descs in capture_descs
++                        if component == "target"
++                        or self._captures_independent_drafter_graphs(mode)
++                    ]
++                    if not component_descs:
++                        continue
++                    with graph_capture(device=self.device, channel_id=channel_id):
++                        for runtime_mode, batch_descs in component_descs:
++                            captures_drafter = (
++                                self._captures_independent_drafter_graphs(runtime_mode)
++                            )
++                            self._capture_cudagraphs(
++                                batch_descriptors=batch_descs,
++                                cudagraph_runtime_mode=runtime_mode,
++                                run_drafter=(
++                                    component == "draft" or not captures_drafter
++                                ),
++                            )
++                            torch.accelerator.synchronize()
+ 
+-            torch.accelerator.synchronize()
+-            end_free_gpu_memory = torch.accelerator.get_memory_info()[0]
++                if self.encoder_cudagraph_manager is not None:
++                    encoder_graph_pool = current_platform.graph_pool_handle()
++                    with graph_capture(
++                        device=self.device,
++                        channel_id="vllm:encoder:production",
++                    ):
++                        self.encoder_cudagraph_manager.capture(
++                            graph_pool=encoder_graph_pool
++                        )
+ 
+-        # Disable cudagraph capturing globally, so any unexpected cudagraph
+-        # capturing will be detected and raise an error after here.
+-        # Note: We don't put it into graph_capture context manager because
+-        # we may do lazy capturing in future that still allows capturing
+-        # after here.
+-        set_cudagraph_capturing_enabled(False)
++                torch.accelerator.synchronize()
++                end_free_gpu_memory = torch.accelerator.get_memory_info()[0]
++        finally:
++            # Leave capture mode disabled even when one graph owner fails.
++            set_cudagraph_capturing_enabled(False)
+ 
+         torch.accelerator.synchronize()
+         torch.accelerator.empty_cache()
+@@ -6902,6 +6967,22 @@ class GPUModelRunner(
+         )
+         return cuda_graph_size
+ 
++    def _captures_independent_drafter_graphs(
++        self,
++        cudagraph_runtime_mode: CUDAGraphMode,
++    ) -> bool:
++        spec_config = self.speculative_config
++        return (
++            cudagraph_runtime_mode == CUDAGraphMode.PIECEWISE
++            and spec_config is not None
++            and not spec_config.enforce_eager
++            and (
++                spec_config.use_eagle()
++                or spec_config.uses_draft_model()
++                or spec_config.uses_extract_hidden_states()
++            )
++        )
++
+     def _warmup_and_capture(
+         self,
+         desc: BatchDescriptor,
+@@ -6909,6 +6990,7 @@ class GPUModelRunner(
+         profile_seq_lens: int | None = None,
+         allow_microbatching: bool = False,
+         num_warmups: int | None = None,
++        run_drafter: bool = True,
+     ):
+         if num_warmups is None:
+             num_warmups = self.compilation_config.cudagraph_num_of_warmups
+@@ -6924,6 +7006,7 @@ class GPUModelRunner(
+                 remove_lora=False,
+                 num_active_loras=desc.num_active_loras,
+                 profile_seq_lens=profile_seq_lens,
++                run_drafter=run_drafter,
+             )
+         self._dummy_run(
+             desc.num_tokens,
+@@ -6935,12 +7018,15 @@ class GPUModelRunner(
+             num_active_loras=desc.num_active_loras,
+             is_graph_capturing=True,
+             profile_seq_lens=profile_seq_lens,
++            run_drafter=run_drafter,
+         )
+ 
+     def _capture_cudagraphs(
+         self,
+         batch_descriptors: list[BatchDescriptor],
+         cudagraph_runtime_mode: CUDAGraphMode,
++        *,
++        run_drafter: bool = True,
+     ):
+         assert (
+             cudagraph_runtime_mode != CUDAGraphMode.NONE
+@@ -6983,6 +7069,7 @@ class GPUModelRunner(
+                 batch_desc,
+                 cudagraph_runtime_mode=cudagraph_runtime_mode,
+                 allow_microbatching=allow_microbatching,
++                run_drafter=run_drafter,
+             )
+             torch.accelerator.synchronize()
+         self.maybe_remove_all_loras(self.lora_config)

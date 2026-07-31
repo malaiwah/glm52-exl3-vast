@@ -1263,8 +1263,91 @@ candidate at least 16K, preferably 32K, completion tokens and report the
 remaining truncation rate separately. No additional scorecard run will
 displace GPU qualification work.
 
+The harness now makes that contract durable: its task-aware default is 4,096
+tokens for GSM8K and 32,768 for GPQA Diamond.  An explicit `--max-tokens`
+continues to override either value, and any capped response is still retained
+and reported rather than scored from hidden reasoning.
+
 [8K-cap matched GPQA JSON](artifacts/vllm210211-control-gpqa50-v2.json) and
 [progress log](artifacts/vllm210211-control-gpqa50-v2.log). The
 [complete compressed control serving log](artifacts/scorecard-control-v1-server.log.gz)
 contains zero ERROR, traceback, OOM, Xid, preemption, or failed-FSM record
 through graceful shutdown; all four GPU workers exited.
+
+### K. Frozen PCIe and LMCache successors
+
+The public SparkInfer #101/#103 heads remain rejected evidence; their safe
+replacement is the independently reviewed frozen commit
+`31fa6a48116471ce423f0338047453ec1032c202`.  It keeps semantic channel
+allocation collective and fail-closed while allowing ranks to capture already
+prepared channels in different local orders.  A fresh extension-cache run on
+all four rental GPUs passed the exact adversarial case that rejected the prior
+successor: two channels prepared in opposite rank-local order, 128 eager
+iterations and 1,025 CUDA-graph replays (**1 passed in 6.36 seconds**).
+
+The same frozen source also passed:
+
+- the four-rank one-shot torture gate with 64 eager iterations, 1,025 graph
+  replays and 64 overlapping-stream iterations (**7.11 seconds**);
+- four-rank fused RMSNorm correctness (**5.71 seconds**);
+- collective argument rejection, one-rank pre-allocation failure, and the
+  corrected synthetic 32-visible-SM rejection before CUDA IPC allocation;
+- four-rank DCP eager/capture correctness across 64 graph replays plus an
+  injected unmap failure and coherent teardown retry (**115.01 seconds**);
+- four-rank two-shot eager/capture, alternating staging slots and clean
+  teardown; and
+- the complete communication CPU/static suite (**239 passed / 21 expected
+  skips**).
+
+The first reduced-SM command omitted its required synthetic
+`SPARKINFER_PCIE_TEST_VISIBLE_SM_COUNT=32`.  The guard correctly detected that
+allocation had started and failed that invalid harness invocation.  The
+corrected exact command passed; both logs are retained.  The two-shot
+microbenchmark was also deliberately not promoted as a speed claim on this
+shape/topology: SparkInfer reduce-scatter/all-gather measured 3,714.8/3,767.3
+microseconds versus NCCL's 1,024.3/990.5 microseconds.  Its value here is the
+correctness, capture and ownership gate.
+
+The atomic caller boundary uses vLLM
+`be1e289a8ca6cc043b582b26c788efc4b1f5d0a8`.  With the frozen SparkInfer head
+on `PYTHONPATH`, all **64/64** fused-allreduce and DCP tests passed on Linux/GPU
+in 102.17 seconds.  This proves the semantic eager/target/draft/encoder channel
+contract as one unit rather than qualifying either half against an old
+installed dependency.
+
+LMCache converged through three retained GPU observations.  Commit `0c71e15f`
+removed the invalid same-process reopening of an exporter-owned CUDA event,
+then exposed a legitimate asynchronous visibility window: STORE had completed
+its GPU copy but the 5 ms completion dispatcher had not yet released the L1
+write lock.  Commit `79fedc4a` made the test retry a complete LOOKUP under the
+existing 20-second deadline; it cannot hide a dropped completion because the
+600-second write TTL cannot expire during that window, and RETRIEVE still
+compares every output byte.  Finally,
+`f24812ee33dc9196e788d1004b1d68f473741e2b` releases the capability probe's one
+`_share_cuda_()` reservation and lets the spawned daemon follow production's
+SIGTERM cleanup path.  It also logs forced cleanup of wholly unlocked cache
+objects at INFO while retaining WARN, with an exact count, whenever any read
+or write lock exists.
+
+On physical GPU 3, the final same-ID reset/register/STORE/LOOKUP/RETRIEVE/
+UNREGISTER test passed in 5.14 seconds.  Its contract compared all 32 source
+and destination BF16 layer tensors with `torch.allclose(..., atol=1e-4)`; all
+comparisons passed.  Teardown reported zero locked objects, normal
+`MPCacheServer closed`, and no PyTorch shared-CUDA producer warning.  The exact
+final composed CUDA union passed **184/184** in 70.14 seconds.  Independent
+review approved the runtime ownership and test contracts; the final image
+still needs the full-model startup/traffic/shutdown gate before this bundle is
+called deployable.
+
+Evidence:
+[opposite-order gate](artifacts/spark-31fa6a4-opposite-order-dcp4-1025.log),
+[one-shot torture](artifacts/spark-31fa6a4-oneshot-torture-dcp4-1025.log),
+[fused RMSNorm](artifacts/spark-31fa6a4-fused-rms-dcp4.log),
+[retained invalid reduced-SM invocation](artifacts/spark-31fa6a4-preallocation-rejection-dcp4.log),
+[corrected reduced-SM gate](artifacts/spark-31fa6a4-reduced-sm-rejection-dcp4-corrected.log),
+[DCP teardown retry](artifacts/spark-31fa6a4-dcp4-64-teardown-retry.log),
+[two-shot gate](artifacts/spark-31fa6a4-twoshot-dcp4.log),
+[atomic vLLM/SparkInfer union](artifacts/atomic-vllm-be1e289-spark-31fa6a4-linux-gpu-full.log),
+[LMCache final CUDA union](artifacts/lmcache-f24812e-composed-gpu3-union.log),
+and
+[LMCache clean recovery round trip](artifacts/lmcache-f24812e-same-id-cuda-roundtrip.log).

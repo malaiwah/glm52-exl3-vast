@@ -206,6 +206,10 @@ class ScorecardTests(unittest.TestCase):
             scorecard.extract_answer("gpqa_diamond", "Answer: $c"), "C"
         )
 
+    def test_scorecard_defaults_leave_room_for_reasoning(self):
+        self.assertEqual(scorecard.default_max_tokens("gsm8k_cot"), 4096)
+        self.assertEqual(scorecard.default_max_tokens("gpqa_diamond"), 32768)
+
     def test_hidden_reasoning_is_not_a_visible_answer(self):
         content = ""
         reasoning = "After checking the work, The answer is 42."

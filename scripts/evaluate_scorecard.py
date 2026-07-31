@@ -114,6 +114,11 @@ B) {b}
 C) {c}
 D) {d}"""
 
+DEFAULT_MAX_TOKENS = {
+    "gsm8k_cot": 4096,
+    "gpqa_diamond": 32768,
+}
+
 
 def fetch_text(url: str, timeout: int = 120) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": "turnkey-scorecard/1"})
@@ -172,6 +177,12 @@ def extract_answer(task: str, text: str) -> str | None:
         return gsm8k_extract(text)
     matches = re.findall(r"(?i)Answer[ \t]*:[ \t]*\$?([A-D])\$?", text)
     return matches[-1].upper() if matches else None
+
+
+def default_max_tokens(task: str) -> int:
+    """Leave enough room for GLM reasoning unless the caller opts out."""
+
+    return DEFAULT_MAX_TOKENS[task]
 
 
 def make_examples(
@@ -318,7 +329,12 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--concurrency", type=int, default=8)
-    parser.add_argument("--max-tokens", type=int, default=2048)
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help="completion ceiling (default: 4K GSM8K, 32K GPQA Diamond)",
+    )
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--label", required=True)
     parser.add_argument(
@@ -329,6 +345,11 @@ def main() -> int:
     )
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
+    max_tokens = (
+        args.max_tokens
+        if args.max_tokens is not None
+        else default_max_tokens(args.task)
+    )
 
     metadata: dict[str, str] = {}
     for item in args.metadata:
@@ -351,7 +372,7 @@ def main() -> int:
                 args.model,
                 example,
                 args.task,
-                args.max_tokens,
+                max_tokens,
                 args.timeout,
                 args.api_key,
                 args.seed,
@@ -396,7 +417,7 @@ def main() -> int:
         "concurrency": args.concurrency,
         "model": args.model,
         "base_url": args.base_url,
-        "max_tokens": args.max_tokens,
+        "max_tokens": max_tokens,
         "summary": {
             "requests": len(results),
             "completed": len(completed),
