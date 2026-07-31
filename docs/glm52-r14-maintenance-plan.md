@@ -104,6 +104,93 @@ Rental topology is a qualification result, not an AIBeast performance proxy.
 Record driver, CUDA report, P2P matrix, NUMA, PCIe width, power ceiling, host
 RAM and disk bandwidth before interpreting its PP/TG numbers.
 
+### Vast rental qualification evidence
+
+Instance `46335896` completed the cost-bounded compatibility and quality row
+on 2026-07-31. It used the r14 candidate at appliance commit `6ad56a8`; that
+candidate pins the immutable upstream r14 payload above. The later wrapper
+commit `cb62061` changes only NVIDIA banner parsing, passed CI, and published
+as `ghcr.io/malaiwah/glm52-exl3-vast:cb62061558913d4c46db6fcbae25c2a6426a7562`
+(`sha256:af2edc5004b0b453845c4614ed03e6d79048f2c097dfe43ff4a1a881dbd426a2`).
+The active rental was deliberately not recycled onto it because `/workspace`
+is part of the container's 600 GB overlay on this host; recycling could discard
+the 315.78 GiB checkpoint. The old candidate was allowed only after direct
+inspection established driver `610.43.02`, CUDA UMD `13.3`, PyTorch
+`2.12.0+cu132`, and NCCL `2.29.7`.
+
+The host disappeared from Vast briefly at 40% of the checkpoint download.
+Instance intent remained `running`; it recovered without intervention and the
+authenticated Hugging Face download resumed at the preserved byte count. The
+checkpoint then loaded all 81 target shards and the native MTP shard. Every
+routed layer reported `tiers=((3, 192), (4, 64))`; no compatibility graft,
+eager-parity path, or mixed-K reconstruction ran.
+
+The release-request shape at GMU `0.95` failed safely at KV admission:
+3.17 GiB/GPU was available, 3.90 GiB was required for 524,288, and vLLM
+estimated a 425,472-token ceiling. Applying only GMU `0.96` through the
+self-service editor restarted vLLM without touching the weights. Two
+successive cached boots produced:
+
+| rental startup measurement | first boot | repeat boot |
+|---|---:|---:|
+| available KV memory/GPU | 4.12 GiB | 4.12 GiB |
+| logical KV tokens | 553,216 | 552,960 |
+| full-524,288 concurrency | 1.06x | 1.05x |
+| engine initialization | 67.86 s | 53.55 s |
+| compilation inside initialization | 4.48 s | 0.63 s |
+| idle free VRAM after serving | 294–514 MiB | 514–554 MiB |
+
+The second boot also completed a first 194-token generation without the
+historical post-start 36 MiB allocation OOM. GMU `0.96` is therefore a
+repeatable rental setting for this exact MTP3/3,072/auto-KV shape, but its
+small physical headroom is not evidence to replace AIBeast's pinned-block
+production geometry.
+
+Measured serving results at temperature `1.0`, with no request errors,
+preemptions, or OOM:
+
+| Vast Community, no CUDA peer access | result |
+|---|---:|
+| 8K prefill | 973.5 tok/s |
+| 65K prefill | 1,670.9 tok/s |
+| 1K-context C1 | 36.2 aggregate tok/s; 18.67 ms mean TPOT; MAL 3.11 |
+| 1K-context C4 | 59.2 aggregate tok/s; MAL 3.48 |
+| 1K-context C8 | 171.7 aggregate tok/s; MAL 3.11 |
+| near-zero-context C1 | 38.8 aggregate tok/s; 24.57 ms mean TPOT; MAL 2.28 |
+| near-zero-context C4 | 75.4 aggregate tok/s; MAL 2.40 |
+| near-zero-context C8 | 247.8 aggregate tok/s; MAL 2.82 |
+| exact near-maximum retrieval | 5/5 with a 523,458-token haystack, 364.55 s |
+
+The five needles were at 1%, 25%, 50%, 75%, and 99%; the answer matched every
+code and the degeneration detector remained empty. A subsequent arithmetic
+request returned exactly `391`. The complete API suite also passed auth,
+tokenization, ordinary/thinking chat, streamed usage, preserved-thinking
+multi-turn, structured JSON with thinking both off and on, one tool call, and
+the tool-result round trip. Vision was not requested because this checkpoint
+is the text-only 3.25-bpw profile.
+
+During the 523K prefill, cards averaged `367.7 / 334.7 / 339.8 / 350.0 W`
+while at least 90% busy and peaked at `442.7 / 437.7 / 406.6 / 433.7 W`.
+Their power ceiling was 600 W, versus AIBeast's deliberate 280 W/card cap.
+The rental is not power-limited; its missing CUDA peer access and fallback to
+NCCL/shared memory are the material topology differences. The alternating
+1,228.8/1,536.0 tok/s long-prefill log rows correspond to four versus five
+3,072-token chunks landing in a fixed ten-second metrics bucket. They are a
+reporting-quantization artifact, not alternating slow hardware cycles.
+
+Artifacts retained on the rental:
+
+- `/workspace/benchmarks/r14-vast-feature.json`
+- `/workspace/benchmarks/r14-vast-serving.json`
+- `/workspace/benchmarks/r14-vast-zero-context.json`
+- `/workspace/benchmarks/r14-vast-needles-522360.json`
+- `/workspace/benchmarks/r14-vast-feature-power.csv`
+- `/workspace/benchmarks/r14-vast-522k-power.csv`
+
+The instance remains running for follow-up patches at `$6.57/hour`, as
+requested. The first SSH-mode Vast instance and the r580 RunPod Community pod
+remain stopped rather than destroyed.
+
 ## Turnkey compatibility preparation
 
 The r14 candidate must:
@@ -229,6 +316,35 @@ For the selected configuration:
   tool-call/result loop;
 - review the complete vLLM, SparkInfer, LMCache, CUDA/NCCL and appliance logs,
   not just request status.
+
+### 5. Log-derived follow-ups
+
+The Vast full-log review added four items to tonight's interpretation:
+
+1. vLLM warns that MTP3, eight sequences and a 3,072-token scheduler budget
+   may under-provision draft slots. This is another reason to retain the
+   planned matched 2,048/3,072 prefill A/B; do not assume that the larger
+   number is automatically faster.
+2. First use compiled several CuTeDSL/Triton shapes that startup warmup did not
+   cover, including unified prefill, fused W4A16 MoE, DCP correction and
+   route-packing kernels. Compare first-cold and warmed 32K/128K latency. Only
+   extend appliance warmup for shapes whose latency benefit justifies added
+   startup time and memory pressure.
+3. Keep CUDA-graph memory profiling enabled. r14 reports that GMU `0.96`
+   behaves like `0.9549` under the older unprofiled accounting; disabling the
+   profiler would hide graph memory from admission rather than create safe
+   headroom.
+4. The `top_p=0.95` startup notice comes from the checkpoint's
+   `generation_config.json`, not an appliance-injected request. Do not add
+   `--generation-config vllm` merely to silence it; clients and the benchmark
+   explicitly supply their desired sampling parameters.
+
+The repeated “unknown vLLM environment variable” messages remain cosmetic:
+the variables are consumed by the composed GLM/SparkInfer integration outside
+upstream `envs.py`. The no-peer `SymmMemCommunicator` warnings are expected on
+this rental and correctly coincide with the appliance disabling B12X PCIe DMA
+and DCP A2A. The one ACME transient check recovered through the bounded
+background retry and produced the working public certificate before serving.
 
 ## Promotion decision
 
