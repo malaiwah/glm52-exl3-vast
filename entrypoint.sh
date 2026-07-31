@@ -451,10 +451,42 @@ if [ "$PLATFORM" = "runpod" ] && [ "${RUNPOD_DIRECT_TLS:-0}" != "1" ]; then
   TLS_STATE="https:// managed by Runpod proxy"
 fi
 status_update() {
-  printf '{"phase":"%s","endpoint":"%s","tls":"%s","https_hostport":"%s","cert":"%s","keyfile":"%s","offload":"%s","api_key":"%s","model_dir":"%s","served_model":"%s","model_family":"%s","auth":"%s","port":"%s","gpus":"%s","gpu_name":"%s","sshd":"%s","provider":"%s"}\n' \
-    "$1" "$EP_URL" "$TLS_STATE" "$HTTPS_HOSTPORT" "$CERT_PATH" "$KEY_PATH" "$OFFLOAD_STATE" "${VLLM_API_KEY:-}" "$MODEL_DIR" \
-    "${SERVED_MODEL_NAME:-model}" "${MODEL_FAMILY:-unknown}" "${AUTH:-key}" "${PORT:-8000}" \
-    "${GLM_GPU_COUNT:-?}" "${GPU_NAME:-}" "${SSHD_STATE:-not started}" "${GLM_PROVIDER:-unknown}" > "$STATUS_FILE"
+  # Compose the JSON with json.dumps, not printf: a double quote or backslash
+  # in any interpolated value (API key, served name, GPU name) would corrupt
+  # the file the landing page depends on for the whole session. Values travel
+  # via the child's environment, never argv.
+  STATUS_PHASE="$1" STATUS_EP_URL="$EP_URL" STATUS_TLS="$TLS_STATE" \
+  STATUS_HTTPS_HOSTPORT="$HTTPS_HOSTPORT" STATUS_CERT="$CERT_PATH" \
+  STATUS_KEYFILE="$KEY_PATH" STATUS_OFFLOAD="$OFFLOAD_STATE" \
+  STATUS_API_KEY="${VLLM_API_KEY:-}" STATUS_MODEL_DIR="$MODEL_DIR" \
+  STATUS_SERVED="${SERVED_MODEL_NAME:-model}" \
+  STATUS_FAMILY="${MODEL_FAMILY:-unknown}" STATUS_AUTH="${AUTH:-key}" \
+  STATUS_PORT="${PORT:-8000}" STATUS_GPUS="${GLM_GPU_COUNT:-?}" \
+  STATUS_GPU_NAME="${GPU_NAME:-}" STATUS_SSHD="${SSHD_STATE:-not started}" \
+  STATUS_PROVIDER="${GLM_PROVIDER:-unknown}" \
+  python3 - > "$STATUS_FILE" <<'PY' || echo "!!! status_update failed for phase $1" >&2
+import json, os
+e = os.environ.get
+print(json.dumps({
+    "phase": e("STATUS_PHASE", ""),
+    "endpoint": e("STATUS_EP_URL", ""),
+    "tls": e("STATUS_TLS", ""),
+    "https_hostport": e("STATUS_HTTPS_HOSTPORT", ""),
+    "cert": e("STATUS_CERT", ""),
+    "keyfile": e("STATUS_KEYFILE", ""),
+    "offload": e("STATUS_OFFLOAD", ""),
+    "api_key": e("STATUS_API_KEY", ""),
+    "model_dir": e("STATUS_MODEL_DIR", ""),
+    "served_model": e("STATUS_SERVED", "model"),
+    "model_family": e("STATUS_FAMILY", "unknown"),
+    "auth": e("STATUS_AUTH", "key"),
+    "port": e("STATUS_PORT", "8000"),
+    "gpus": e("STATUS_GPUS", "?"),
+    "gpu_name": e("STATUS_GPU_NAME", ""),
+    "sshd": e("STATUS_SSHD", "not started"),
+    "provider": e("STATUS_PROVIDER", "unknown"),
+}))
+PY
   if id soul >/dev/null 2>&1; then
     chgrp soul "$STATUS_FILE" 2>/dev/null || true
     chmod 640 "$STATUS_FILE" 2>/dev/null || true
@@ -672,6 +704,33 @@ stop_soul_supervisor() {
 trap ':' USR1
 trap 'stop_soul_supervisor; if [ -n "${SRV_PID:-}" ]; then kill -9 -- "-$SRV_PID" 2>/dev/null || true; fi' EXIT
 
+# This script is container PID 1, and PID 1 ignores default-disposition
+# signals: an untrapped `docker stop` / provider stop would hang for the full
+# grace period and end in SIGKILL with no orderly release. Forward TERM to
+# the serve process group and the background children, give vLLM a bounded
+# grace to drop its GPU allocations, then exit; the EXIT trap's kill -9 of
+# the serve group is the backstop for anything that ignored TERM.
+# shellcheck disable=SC2329  # invoked indirectly via the TERM/INT trap below
+on_term() {
+  trap ':' TERM INT
+  echo ">>> stop requested: releasing serve process group and children" >&2
+  stop_soul_supervisor 2>/dev/null || true
+  if [ -n "${SRV_PID:-}" ]; then
+    kill -TERM -- "-$SRV_PID" 2>/dev/null || true
+  fi
+  for _child in $(jobs -p); do
+    kill -TERM "$_child" 2>/dev/null || true
+  done
+  if [ -n "${SRV_PID:-}" ]; then
+    for _ in $(seq 1 30); do
+      kill -0 "$SRV_PID" 2>/dev/null || break
+      sleep 0.5
+    done
+  fi
+  exit 143
+}
+trap on_term TERM INT
+
 fetch_weights() {
   _wanted_checkpoint="${MODEL_REPO:-}"
   if [ -n "${MODEL_REVISION:-}" ]; then
@@ -722,6 +781,11 @@ fetch_weights() {
     return 0
   fi
   status_update downloading-weights
+  # Stamp the directory's identity BEFORE any bytes land: a partial download
+  # followed by a family/variant switch must hit the mismatch gate above, not
+  # interleave two checkpoints' identically-named shards in one directory.
+  mkdir -p "$MODEL_DIR"
+  printf '%s' "${MODEL_REPO:-}" > "$_repo_marker" 2>/dev/null || true
   boot_note ">>> Downloading ${MODEL_REPO:-?} (${MODEL_FAMILY:-glm52} family) to $MODEL_DIR"
   if [ -n "${HF_TOKEN:-}" ]; then
     echo ">>> (HF_TOKEN detected: authenticated download)"
@@ -765,7 +829,18 @@ snapshot_download(os.environ["MODEL_REPO"], revision=os.environ.get("MODEL_REVIS
     --expected-gib "$_download_gib" --boot-notes "$BOOT_NOTES" &
   _progress_pid=$!
   _download_rc=0
-  wait "$_download_pid" || _download_rc=$?
+  # `wait` returns 128+signal when a trapped signal arrives — the dashboard's
+  # USR1 wake-up hint lands here during long downloads. Treating that as a
+  # download failure killed healthy multi-hundred-GiB transfers and respawned
+  # a second concurrent download; re-wait until the child has actually exited.
+  while :; do
+    if wait "$_download_pid"; then
+      _download_rc=0
+      break
+    fi
+    _download_rc=$?
+    kill -0 "$_download_pid" 2>/dev/null || break
+  done
   # The monitor normally notices the reaped child within five seconds. Stop it
   # immediately so successful startup is not delayed by a reporting helper.
   kill "$_progress_pid" 2>/dev/null || true
@@ -1419,7 +1494,10 @@ unset _GLM_NVFP4_SCALE_FILE _GLM_NVFP4_SCALE_SHA256
           VLLM_DCP_INDEXER_SHARDS=*|VLLM_B12X_MLA_CKV_PREFETCH_DEPTH=*|\
           VLLM_PCIE_DMA_MIN_BYTES=*|PCIE_CALIBRATION_STATUS=*|\
           PCIE_CALIBRATION_CACHE=*)
-            eval "export $_cal_line"
+            # A plain export assigns the KEY=VALUE held in the variable without
+            # re-evaluating its contents ($(...), ;) the way eval would.
+            # shellcheck disable=SC2163
+            export "$_cal_line"
             ;;
         esac
       done <<< "$_cal_env"
@@ -1576,7 +1654,21 @@ fi
 if [ "$ACME_DIRECT" = "1" ] && [ -n "${DESEC_TOKEN:-}" ] &&
    [ -n "${DESEC_DOMAIN:-}" ] && [ -z "${ACME_DOMAIN:-}" ] &&
    [ "${CONFIG_SMOKE:-0}" != "1" ]; then
-  SUB="model-${INSTANCE_ID:-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
+  _dns_id="${INSTANCE_ID:-}"
+  if [ -z "$_dns_id" ]; then
+    # No provider instance id (generic host): persist a random suffix on the
+    # volume so reboots reuse ONE DNS name and ONE LE certificate instead of
+    # minting a fresh pair per boot — records pile up in the zone and the LE
+    # duplicate-certificate limit (5/week) burns down in a reboot loop.
+    _sub_file="$GLM_STATE_DIR/.dns-suffix"
+    _dns_id="$(cat "$_sub_file" 2>/dev/null || true)"
+    if [ -z "$_dns_id" ]; then
+      _dns_id="$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+      mkdir -p "$GLM_STATE_DIR" 2>/dev/null || true
+      printf '%s' "$_dns_id" > "$_sub_file" 2>/dev/null || true
+    fi
+  fi
+  SUB="model-${_dns_id}"
   MYIP="$PUBLIC_IP_CURRENT"
   export ACME_DOMAIN="${SUB}.${DESEC_DOMAIN}" ACME_DNS_PROVIDER=desec DESEC_TOKEN
   if [ -z "$MYIP" ]; then
@@ -1584,11 +1676,16 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${DESEC_TOKEN:-}" ] &&
   else
     # ttl 3600 = deSEC's account minimum; lower values are rejected with HTTP 400
     echo ">>> Registering ${SUB}.${DESEC_DOMAIN} -> ${MYIP} via deSEC"
+    # The token travels in a 0600 header file, not argv: /proc/*/cmdline is
+    # world-readable inside the container (including by the soul account).
+    _desec_hdr="$(umask 077 && mktemp "${GLM_RUNTIME_DIR:-/tmp}/desec-hdr.XXXXXX")"
+    printf 'Authorization: Token %s\n' "$DESEC_TOKEN" > "$_desec_hdr"
     curl -sf -X PUT "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/" \
-      -H "Authorization: Token ${DESEC_TOKEN}" -H "Content-Type: application/json" \
+      -H @"$_desec_hdr" -H "Content-Type: application/json" \
       -d "[{\"subname\":\"${SUB}\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"${MYIP}\"]}]" >/dev/null \
       && echo ">>> Registered. Endpoint will be: https://${ACME_DOMAIN}:${PUBLIC_API_PORT}/v1" \
       || echo "!!! deSEC registration failed; continuing startup and retrying in the background"
+    rm -f "$_desec_hdr"
   fi
 fi
 
@@ -1846,9 +1943,14 @@ if [ -n "${CONTAINER_API_KEY:-}" ] && [ -n "${CONTAINER_ID:-}" ]; then
     MODEL_LABEL="${SERVED_MODEL_NAME%% *} READY ${EP_URL}/v1"
     LABEL_JSON="$(MODEL_LABEL="$MODEL_LABEL" python3 -c \
       'import json,os; print(json.dumps({"label": os.environ["MODEL_LABEL"]}))')"
+    # The account-scoped Vast key travels in a 0600 header file, not argv:
+    # /proc/*/cmdline is world-readable inside the container.
+    _lbl_hdr="$(umask 077 && mktemp "${GLM_RUNTIME_DIR:-/tmp}/vast-label-hdr.XXXXXX")"
+    printf 'Authorization: Bearer %s\n' "$CONTAINER_API_KEY" > "$_lbl_hdr"
     curl -s -X PUT "https://console.vast.ai/api/v0/instances/${CONTAINER_ID}/" \
-      -H "Authorization: Bearer ${CONTAINER_API_KEY}" \
+      -H @"$_lbl_hdr" \
       -H "Content-Type: application/json" -d "$LABEL_JSON" >/dev/null 2>&1 || true
+    rm -f "$_lbl_hdr"
   ) &
 fi
 
@@ -1865,10 +1967,13 @@ read -r -a SERVED_NAMES <<< "${SERVED_MODEL_NAME:-model}"
 # NB: `[ test ] && ARR=(...)` returns non-zero when the test is false, which
 # under `set -e` kills serve_once outright — precisely in the AUTH=none and
 # GPU_BLOCKS_OVERRIDE=0 cases these branches exist to support. Use if/then.
+# vLLM reads VLLM_API_KEY from its environment (exported above; emptied for
+# AUTH=none), so no --api-key argv is needed. Passing it on the argv exposed
+# the secret in /proc/*/cmdline to every local user — including the sandboxed
+# soul account — for the server's whole lifetime. The boot-time bad-key probe
+# below verifies auth is actually enforced, so an environment-plumbing
+# regression cannot go unnoticed.
 AUTH_ARGS=()
-if [ "${AUTH:-key}" != "none" ]; then
-  AUTH_ARGS=(--api-key "$VLLM_API_KEY")
-fi
 # Pool sizing: auto-profile by default. On the v29 EXL3/MTP3 release this is
 # about 1.1M tokens on four 96 GB cards, enough for two full 524K requests.
 # A positive override remains available for reproducible smaller pools.
@@ -1923,6 +2028,12 @@ if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   compute_offload
   compute_vision_args
   warn_capture_window
+  # prepare_mtp78 is skipped in smoke mode, but the override draft's location
+  # is deterministic: fill it in so the printed argv matches what the real
+  # boot executes instead of omitting the speculative "model" key.
+  if [ "${MTP78_MODE:-off}" = "override" ] && [ -z "${DRAFT_MODEL:-}" ]; then
+    DRAFT_MODEL="$MODEL_DIR/.mtp78-draft"
+  fi
   build_spec_args
   echo ">>> vllm argv that would be executed:"
   SERVE_PRINT_ONLY=1 serve_once
@@ -2010,6 +2121,23 @@ start_verifier() {
   if [ "${AUTH:-key}" != "none" ]; then
     echo ">>> Verification: one intentional bad-key GET /v1/models will log 401 from 127.0.0.1."
     echo ">>> That 401 proves authentication rejects an invalid credential; it is expected."
+    # Actually send that probe (bounded: give up when the engine never gets
+    # healthy — the verifier reports that failure itself). A non-401 answer is
+    # surfaced as a loud boot note: it means requests are NOT authenticated.
+    ( _i=0
+      until curl -skf -o /dev/null "$LOCAL_BASE/health" 2>/dev/null; do
+        _i=$((_i + 1))
+        [ "$_i" -ge 720 ] && exit 0
+        sleep 5
+      done
+      _code="$(curl -sk -o /dev/null -w '%{http_code}' \
+        -H 'Authorization: Bearer definitely-wrong' \
+        "$LOCAL_BASE/v1/models" 2>/dev/null || true)"
+      if [ "$_code" = "401" ]; then
+        echo ">>> auth probe: bad key rejected with 401, as required"
+      else
+        boot_note "!!! auth probe: expected 401 for a bad key, got HTTP ${_code:-none} — the API may be serving UNAUTHENTICATED"
+      fi ) &
   fi
   python3 "$SCRIPTS_DIR/verify_serving.py" \
     --base-url "$LOCAL_BASE" --api-key "${VLLM_API_KEY:-}" --model "${_names[0]}" \
@@ -2170,16 +2298,29 @@ while :; do
     fi
     if [ "$verified" = "0" ] && [ -f "$VERIFY_FILE" ]; then
       verified=1
-      mv "$VERIFY_FILE" "$VERIFY_LAST" || true
-      if verdict_ok "$VERIFY_LAST"; then
-        echo ">>> Verified: $(verdict_reason "$VERIFY_LAST")"
+      # VERIFY_FILE lives in the runtime tmpfs and VERIFY_LAST on the volume:
+      # a plain cross-device mv is copy+unlink (readers can observe a torn
+      # file), and a failed move must not hand verdict_ok the PREVIOUS boot's
+      # verdict. Stage next to the destination, replace atomically, and fall
+      # back to judging the fresh file in place if persisting it failed.
+      _verdict_src="$VERIFY_LAST"
+      if cp -f "$VERIFY_FILE" "$VERIFY_LAST.tmp" 2>/dev/null &&
+         mv -f "$VERIFY_LAST.tmp" "$VERIFY_LAST" 2>/dev/null; then
+        rm -f "$VERIFY_FILE"
+      else
+        echo "!!! could not persist the verification verdict to $VERIFY_LAST" >&2
+        rm -f "$VERIFY_LAST.tmp" 2>/dev/null || true
+        _verdict_src="$VERIFY_FILE"
+      fi
+      if verdict_ok "$_verdict_src"; then
+        echo ">>> Verified: $(verdict_reason "$_verdict_src")"
         python3 "$SCRIPTS_DIR/config_cli.py" mark-good --log "$SERVE_LOG" || true
         status_update serving
         attempt=0
         good=1
         maybe_self_analyze
       else
-        echo "!!! VERIFICATION FAILED: $(verdict_reason "$VERIFY_LAST")" >&2
+        echo "!!! VERIFICATION FAILED: $(verdict_reason "$_verdict_src")" >&2
         if python3 "$SCRIPTS_DIR/config_cli.py" should-rollback; then
           reason="verify-failed"
           break
