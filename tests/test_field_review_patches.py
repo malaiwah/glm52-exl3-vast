@@ -68,8 +68,14 @@ class FieldReviewPatchTests(unittest.TestCase):
         return manifest_path, site, source
 
     def run_applier(
-        self, manifest: Path, site: Path, source: Path
+        self,
+        manifest: Path,
+        site: Path,
+        source: Path,
+        launcher: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        launcher = launcher or manifest.parent / "launcher"
+        launcher.mkdir(exist_ok=True)
         return subprocess.run(
             [
                 sys.executable,
@@ -80,6 +86,8 @@ class FieldReviewPatchTests(unittest.TestCase):
                 str(site),
                 "--vllm-source",
                 str(source),
+                "--launcher-bin",
+                str(launcher),
             ],
             check=False,
             text=True,
@@ -114,6 +122,55 @@ class FieldReviewPatchTests(unittest.TestCase):
             self.assertIn("refusing mixed/unknown source state", result.stdout)
             self.assertEqual(
                 (source / "demo/value.py").read_text(), "VALUE = 'before'\n"
+            )
+
+    def test_launcher_target_is_hash_checked_and_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest_path, site, source = self.make_fixture(root)
+            launcher = root / "launcher"
+            launcher.mkdir()
+            before = b"PRELOAD='unsafe'\n"
+            after = b"PRELOAD='safe'\n"
+            (launcher / "runtime-env.sh").write_bytes(before)
+            patch = (
+                "diff --git a/runtime-env.sh b/runtime-env.sh\n"
+                "index 9afc2d4..28b89a8 100644\n"
+                "--- a/runtime-env.sh\n"
+                "+++ b/runtime-env.sh\n"
+                "@@ -1 +1 @@\n"
+                "-PRELOAD='unsafe'\n"
+                "+PRELOAD='safe'\n"
+            ).encode()
+            patch_path = manifest_path.parent / "launcher.patch"
+            patch_path.write_bytes(patch)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["components"].append(
+                {
+                    "name": "launcher",
+                    "base_tree": "launcher-base",
+                    "tested_head": "launcher-head",
+                    "patch": patch_path.name,
+                    "patch_sha256": digest(patch),
+                    "targets": ["launcher-bin"],
+                    "files": {
+                        "runtime-env.sh": {
+                            "before": digest(before),
+                            "after": digest(after),
+                        }
+                    },
+                }
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            first = self.run_applier(manifest_path, site, source, launcher)
+            self.assertEqual(first.returncode, 0, first.stdout)
+            self.assertEqual((launcher / "runtime-env.sh").read_bytes(), after)
+
+            second = self.run_applier(manifest_path, site, source, launcher)
+            self.assertEqual(second.returncode, 0, second.stdout)
+            self.assertIn(
+                f"already applied at {launcher.resolve()}", second.stdout
             )
 
     def test_later_unknown_target_is_rejected_before_first_target_changes(self) -> None:

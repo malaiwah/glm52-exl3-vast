@@ -1066,6 +1066,18 @@ trees. This image is packaging evidence, **not** the final candidate:
 SparkInfer #101/#103 and LMCache #18/#19/#20 remain excluded until their
 second-stage lifecycle reviews and fresh-GPU gates pass.
 
+The next bundle revision also packages independently approved
+blackwell-llm-docker PR #13 as an exact `launcher-bin` component instead of
+depending on a future parent-image refresh. Its fail-closed boundary is the
+r14 `/usr/local/bin/glm52-pcie-runtime-env.sh` hash
+`4838499b...b36d9`; the accepted output is `e3a35eef...2758`. A pure-r14
+fixture on the retained Vast host applied all three currently accepted
+components atomically, reported every component already applied on replay,
+and propagated `/opt/libnccl-local-inference.so.2.30.4` to a child shell from
+an initially empty `LD_PRELOAD`. The applicator contract is now 5/5, including
+an isolated launcher-target hash/idempotence test. Evidence:
+[three-component apply/replay](artifacts/field-review-bundle-v3-launcher-apply.log).
+
 ### I. Full-model pre-composition control
 
 Before either pending IPC repair was admitted, the retained Vast host ran a

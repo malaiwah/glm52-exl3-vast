@@ -1,0 +1,10 @@
+>>> field review vllm-210-211: applied at /workspace/field-review-tests/tmp/launcher-bundle.ywllyY/source (base tree 749050edab1b6664937c52fa1b0be360be632c1e, tested head 5a7ac1481e1fc24b0bbc35efe160b2ff34797bee)
+>>> field review vllm-210-211: applied at /workspace/field-review-tests/tmp/launcher-bundle.ywllyY/site (base tree 749050edab1b6664937c52fa1b0be360be632c1e, tested head 5a7ac1481e1fc24b0bbc35efe160b2ff34797bee)
+>>> field review sparkinfer-w4a16-100-102: applied at /workspace/field-review-tests/tmp/launcher-bundle.ywllyY/site (base tree 8110e3ea417794bfb08aff1fba20135102e5536b, tested head e2205cba8d78db03427a3945a75a1f647b51ef5a)
+>>> field review blackwell-launcher-13: applied at /workspace/field-review-tests/tmp/launcher-bundle.ywllyY/launcher (base tree b0e1cdaa976c736c95f73a446f1dcd32f38a0175, tested head 5eee240d6c32e08516287380131c96ca7493f0f6)
+>>> field review vllm-210-211: already applied at /workspace/field-review-tests/tmp/launcher-bundle.ywllyY/source
+>>> field review vllm-210-211: already applied at /workspace/field-review-tests/tmp/launcher-bundle.ywllyY/site
+>>> field review sparkinfer-w4a16-100-102: already applied at /workspace/field-review-tests/tmp/launcher-bundle.ywllyY/site
+>>> field review blackwell-launcher-13: already applied at /workspace/field-review-tests/tmp/launcher-bundle.ywllyY/launcher
+e3a35eefabd13f94beb8122d983c4b98bc6373575d7d9ea3e81fe83632ab2758  /workspace/field-review-tests/tmp/launcher-bundle.ywllyY/launcher/glm52-pcie-runtime-env.sh
+child_preload=/opt/libnccl-local-inference.so.2.30.4

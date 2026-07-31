@@ -107,6 +107,28 @@
                     "after": "efdbfa1bae6662e24bf17a4b041f478b46bc5e6c4362353ab0511d5aa20da16c"
                 }
             }
+        },
+        {
+            "name": "blackwell-launcher-13",
+            "base_commit": "2464cc03",
+            "base_tree": "b0e1cdaa976c736c95f73a446f1dcd32f38a0175",
+            "tested_head": "5eee240d6c32e08516287380131c96ca7493f0f6",
+            "tested_tree": "8c5ee24d2372590822f97fb47c9273b86972ea43",
+            "upstream": {
+                "issue_12": "https://github.com/local-inference-lab/blackwell-llm-docker/issues/12",
+                "pr_13": "https://github.com/local-inference-lab/blackwell-llm-docker/pull/13"
+            },
+            "patch": "blackwell-launcher.patch",
+            "patch_sha256": "9cfde60e9b37a01ed3b82609e53674d9d89c6e3716ce824a646beada4ae1b5ae",
+            "targets": [
+                "launcher-bin"
+            ],
+            "files": {
+                "glm52-pcie-runtime-env.sh": {
+                    "before": "4838499bb331625d9b5ea921ff2d258044e446cc5082ccde64941f10a51b36d9",
+                    "after": "e3a35eefabd13f94beb8122d983c4b98bc6373575d7d9ea3e81fe83632ab2758"
+                }
+            }
         }
     ]
 }

@@ -63,11 +63,14 @@ def resolve_target(
     *,
     site_packages: Path,
     vllm_source: Path,
+    launcher_bin: Path,
 ) -> Path:
     if target == "site-packages":
         return site_packages
     if target == "vllm-source":
         return vllm_source
+    if target == "launcher-bin":
+        return launcher_bin
     raise ValueError(f"unknown patch target: {target!r}")
 
 
@@ -116,7 +119,10 @@ def validate_component(component: dict[str, Any], manifest_dir: Path) -> None:
     if (
         not isinstance(targets, list)
         or not targets
-        or any(target not in {"site-packages", "vllm-source"} for target in targets)
+        or any(
+            target not in {"site-packages", "vllm-source", "launcher-bin"}
+            for target in targets
+        )
         or len(set(targets)) != len(targets)
     ):
         raise ValueError(f"{name}: targets must be a unique non-empty target list")
@@ -179,6 +185,7 @@ def apply_component(
     manifest_dir: Path,
     site_packages: Path,
     vllm_source: Path,
+    launcher_bin: Path,
 ) -> None:
     name = component["name"]
     patch_path = manifest_dir / safe_relative_path(component["patch"])
@@ -188,6 +195,7 @@ def apply_component(
             target,
             site_packages=site_packages,
             vllm_source=vllm_source,
+            launcher_bin=launcher_bin,
         )
         if not root.is_dir():
             raise RuntimeError(f"{name}: patch root does not exist: {root}")
@@ -247,6 +255,7 @@ def preflight_components(
     manifest_dir: Path,
     site_packages: Path,
     vllm_source: Path,
+    launcher_bin: Path,
 ) -> None:
     """Validate every target before allowing the first source mutation.
 
@@ -267,6 +276,7 @@ def preflight_components(
                 target,
                 site_packages=site_packages,
                 vllm_source=vllm_source,
+                launcher_bin=launcher_bin,
             )
             if not root.is_dir():
                 failures.append(f"{name}: patch root does not exist: {root}")
@@ -334,6 +344,11 @@ def parse_args() -> argparse.Namespace:
         default=Path("/opt/vllm"),
     )
     parser.add_argument(
+        "--launcher-bin",
+        type=Path,
+        default=Path("/usr/local/bin"),
+    )
+    parser.add_argument(
         "--validate-only",
         action="store_true",
         help="validate manifest and patch digests without touching targets",
@@ -362,11 +377,13 @@ def main() -> int:
 
     site_packages = args.site_packages.resolve()
     vllm_source = args.vllm_source.resolve()
+    launcher_bin = args.launcher_bin.resolve()
     preflight_components(
         components,
         manifest_dir=manifest_path.parent,
         site_packages=site_packages,
         vllm_source=vllm_source,
+        launcher_bin=launcher_bin,
     )
     for component in components:
         apply_component(
@@ -374,6 +391,7 @@ def main() -> int:
             manifest_dir=manifest_path.parent,
             site_packages=site_packages,
             vllm_source=vllm_source,
+            launcher_bin=launcher_bin,
         )
     return 0
 
