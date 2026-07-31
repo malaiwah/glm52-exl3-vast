@@ -269,7 +269,8 @@ def test_glm_release_integration():
                 "KV_CACHE_MEMORY_BYTES",
                 "LMCACHE_L1_INIT_GB",
                 "CUDAGRAPH_CAPTURE_SIZES", "MAX_CUDAGRAPH_CAPTURE_SIZE",
-                "VLLM_EXL3_TRELLIS_MAX_M", "DCP_CKV_GATHER_MAX_TOKENS",
+                "VLLM_EXL3_TRELLIS_MAX_M", "VLLM_EXL3_PREFILL_CAPACITY",
+                "DCP_CKV_GATHER_MAX_TOKENS",
                 "DCP_KV_CACHE_INTERLEAVE_SIZE",
                 "MTP_REJECTION_SAMPLE_METHOD", "KV_SCALE_MODE"):
         check(f"the local runner forwards an explicit {key}",
@@ -490,13 +491,14 @@ def test_higher_fidelity_exl3_candidate():
     check("the profile pins exactly one binary-512K request",
           eff["MAX_MODEL_LEN"] == 524288
           and eff["GPU_BLOCKS_OVERRIDE"] == 2048)
-    check("MTP5 and C8 remain inside the measured capture window",
-          eff["MTP_TOKENS"] == 5
+    check("MTP3 and C8 remain inside the measured capture window",
+          eff["MTP_TOKENS"] == 3
           and eff["MAX_NUM_SEQS"] == 8
-          and eff["MAX_CUDAGRAPH_CAPTURE_SIZE"] == 48
-          and eff["VLLM_EXL3_TRELLIS_MAX_M"] == 48)
+          and eff["MAX_CUDAGRAPH_CAPTURE_SIZE"] == 32
+          and eff["VLLM_EXL3_TRELLIS_MAX_M"] == 32)
     check("the full-context profile selects the qualified 125 GiB LMCache tier",
           eff["MAX_NUM_BATCHED_TOKENS"] == 2048
+          and eff["VLLM_EXL3_PREFILL_CAPACITY"] == 1024
           and eff["OFFLOAD_FRACTION"] == 0.5
           and eff["PREFIX_CACHE_BACKEND"] == "lmcache"
           and eff["PREFIX_CACHE_DISK_GB"] == 0)
@@ -507,6 +509,12 @@ def test_higher_fidelity_exl3_candidate():
         MAX_NUM_BATCHED_TOKENS=3072)
     check("the configurator refuses the measured 3,072-token offload OOM shape",
           "mixed-325-offload-headroom" in ids(gc.validate(unsafe_chunk)))
+    impossible_arena, _, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-3.25bpw",
+        VLLM_EXL3_PREFILL_CAPACITY=3072)
+    check("the configurator rejects an EXL3 arena above the scheduler chunk",
+          "exl3-prefill-capacity-above-scheduler"
+          in ids(gc.validate(impossible_arena)))
 
 
 def test_qwen_preset():

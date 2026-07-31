@@ -1334,6 +1334,11 @@ fi
 # warning, EXL3 planner and CUDA-graph ceiling all describe the same window.
 export VLLM_EXL3_TRELLIS_MAX_M="${VLLM_EXL3_TRELLIS_MAX_M:-32}"
 export VLLM_EXL3_TRELLIS_BLOCK_M=8 VLLM_EXL3_PREFILL_CHUNK=128
+# PR #210 separates the reusable EXL3 prefill arena from the scheduler chunk.
+# config.env supplies the family/variant value; this explicit export both keeps
+# it visible in EngineCore workers and makes the otherwise indirect env
+# consumer auditable by the knob-wiring gate.
+export VLLM_EXL3_PREFILL_CAPACITY="${VLLM_EXL3_PREFILL_CAPACITY:-${MAX_NUM_BATCHED_TOKENS:-3072}}"
 # Keep the graph-aware, attention-aware profiler as the safe default, while
 # honoring an explicit expert override.  A previous unconditional export made
 # `VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0` appear accepted in the container
@@ -1441,7 +1446,8 @@ else
   # The base image carries GLM-specific OCI environment values. Remove them for
   # Qwen/custom so a profile switch cannot inherit MLA, EXL3, or custom NCCL
   # behavior merely because the container image was built for GLM.
-  unset VLLM_EXL3_EXT_PATH VLLM_EXL3_ABI_SHIM VLLM_NVFP4_MLA_SCALES_FILE
+  unset VLLM_EXL3_EXT_PATH VLLM_EXL3_ABI_SHIM VLLM_EXL3_PREFILL_CAPACITY
+  unset VLLM_NVFP4_MLA_SCALES_FILE
   unset VLLM_NVFP4_MLA_DYNAMIC_SCALE KV_FP8_ROPE
   unset SPARKINFER_INDEXER_TWO_LEVEL_FOLD SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB
   unset VLLM_ENABLE_PCIE_ALLREDUCE VLLM_PCIE_ALLREDUCE_BACKEND
