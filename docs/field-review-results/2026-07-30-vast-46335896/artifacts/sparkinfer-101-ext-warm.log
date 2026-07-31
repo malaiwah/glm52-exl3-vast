@@ -1,0 +1,6 @@
+head=1b9a37b935a4868e4dec693c3b718b093aca5bb4 phase=warm start=2026-07-31T01:44:32Z
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+modules= ['sparkinfer_pcie_dcp_a2a_ext', 'sparkinfer_pcie_oneshot_ext', 'sparkinfer_pcie_twoshot_ext']
+paths= ['/workspace/field-review-tests/cache/sparkinfer-101-ext-cold/torch/sparkinfer_pcie_dcp_a2a_ext/sparkinfer_pcie_dcp_a2a_ext.so', '/workspace/field-review-tests/cache/sparkinfer-101-ext-cold/torch/sparkinfer_pcie_oneshot_ext/sparkinfer_pcie_oneshot_ext.so', '/workspace/field-review-tests/cache/sparkinfer-101-ext-cold/torch/sparkinfer_pcie_twoshot_ext/sparkinfer_pcie_twoshot_ext.so']
+exit=0 elapsed_seconds=1 end=2026-07-31T01:44:33Z

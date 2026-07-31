@@ -1,0 +1,29 @@
+target=sparkinfer-102
+started_utc=2026-07-31T01:16:16Z
++ eval 'cd "$root/worktrees/sparkinfer-pr102" && env CUDA_VISIBLE_DEVICES= PYTHONPATH="$PWD" /opt/venv/bin/python -m pytest -q tests/_lib/test_compile_cache.py tests/moe/test_w4a16_e2e.py && files=$(git diff --name-only 06032ce74afba49a683d01339ed2c971568cec3f..HEAD -- "*.py") && /opt/venv/bin/ruff check $files'
+++ cd /workspace/field-review-tests/worktrees/sparkinfer-pr102
+++ env CUDA_VISIBLE_DEVICES= PYTHONPATH=/workspace/field-review-tests/worktrees/sparkinfer-pr102 /opt/venv/bin/python -m pytest -q tests/_lib/test_compile_cache.py tests/moe/test_w4a16_e2e.py
+.............................sssssssssssssssssssssssssssssssssssssssssss [ 62%]
+ssssssssssssssssssssssssssssssssssssssssssss                             [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+29 passed, 87 skipped, 1 warning in 3.87s
++++ git diff --name-only 06032ce74afba49a683d01339ed2c971568cec3f..HEAD -- '*.py'
+++ files='sparkinfer/_lib/compiler.py
+sparkinfer/moe/_shared/kernels/w4a16/host.py
+sparkinfer/moe/_shared/kernels/w4a16/kernel.py
+sparkinfer/moe/_shared/kernels/w4a16/route_pack.py
+sparkinfer/moe/fused_moe/_impl.py
+tests/_lib/test_compile_cache.py
+tests/moe/test_w4a16_e2e.py'
+++ /opt/venv/bin/ruff check sparkinfer/_lib/compiler.py sparkinfer/moe/_shared/kernels/w4a16/host.py sparkinfer/moe/_shared/kernels/w4a16/kernel.py sparkinfer/moe/_shared/kernels/w4a16/route_pack.py sparkinfer/moe/fused_moe/_impl.py tests/_lib/test_compile_cache.py tests/moe/test_w4a16_e2e.py
+All checks passed!
++ rc=0
++ set +x
+exit_code=0
+elapsed_s=5
+finished_utc=2026-07-31T01:16:21Z

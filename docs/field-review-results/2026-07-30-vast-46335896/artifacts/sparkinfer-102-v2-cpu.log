@@ -1,0 +1,40 @@
+head=2c2e22010073955caf574f474fc5abb67c7a8ec8 start=2026-07-31T01:34:14Z
+.............................sssssssssssssssssssssssssssssssssssssssssss [ 62%]
+ssssssssssssssssssssssssssssssssssssssssssss                             [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+29 passed, 87 skipped, 1 warning in 2.68s
+SIM114 [*] Combine `if` branches using logical `or` operator
+    --> sparkinfer/moe/_shared/kernels/dynamic.py:4203:13
+     |
+4201 |               # residual bufs in sC (dead until the epilogue rendezvous); FC2
+4202 |               # residual bufs alias the (FC1-only) A-buf region.
+4203 | /             if cutlass.const_expr(self.w4a8_repacked):
+4204 | |                 w4a8_sa0 = (
+4205 | |                     ctrl_base_addr
+4206 | |                     + Int32(Storage._offsets["sA"])
+4207 | |                     + Int32(self.tile_shape_mnk[0] * self.tile_shape_mnk[2])
+4208 | |                 )
+4209 | |                 w4a8_res0 = ctrl_base_addr + Int32(Storage._offsets["sC"])
+4210 | |                 w4a8_res2 = w4a8_sa0
+4211 | |             elif cutlass.const_expr(self.w4a8_small):
+4212 | |                 w4a8_sa0 = (
+4213 | |                     ctrl_base_addr
+4214 | |                     + Int32(Storage._offsets["sA"])
+4215 | |                     + Int32(self.tile_shape_mnk[0] * self.tile_shape_mnk[2])
+4216 | |                 )
+4217 | |                 w4a8_res0 = ctrl_base_addr + Int32(Storage._offsets["sC"])
+4218 | |                 w4a8_res2 = w4a8_sa0
+     | |____________________________________^
+4219 |               else:
+4220 |                   w4a8_sa0 = ctrl_base_addr + Int32(Storage._offsets["sC"])
+     |
+help: Combine `if` branches
+
+Found 1 error.
+[*] 1 fixable with the `--fix` option.
+pytest_exit=0 ruff_exit=1 elapsed_seconds=4 end=2026-07-31T01:34:18Z

@@ -1,0 +1,177 @@
+case=sparkinfer-102 phase=cold gpu=physical-2 visible-cuda0
+head=5bea8f3c1c0401fb8d79bcde674f106cddbc2609
+torch_extensions=/workspace/field-review-tests/cache/sparkinfer-102-cold/torch
+cuda_cache=/workspace/field-review-tests/cache/sparkinfer-102-cold/cuda
+start=2026-07-31T01:27:26Z
+command=python -m pytest -q tests/_lib/test_compile_cache.py tests/moe/test_w4a16_e2e.py
+.................................ss..ss..ss..ss........................F [ 62%]
+............................................                             [100%]
+=================================== FAILURES ===================================
+____ test_w4a16_beats_nvfp4_against_true_fp32_oracle_for_odd_shapes[relu2] _____
+
+activation = 'relu2'
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+    @pytest.mark.parametrize("activation", ["relu2", "silu"])
+    def test_w4a16_beats_nvfp4_against_true_fp32_oracle_for_odd_shapes(
+        activation: str,
+    ) -> None:
+        experts, hidden_size, intermediate_size = 8, 128, 128
+        cases = [
+            (1, 3, 2, torch.int32, 0.50),
+            (5, 7, 3, torch.int64, 0.75),
+        ]
+        for batch_size, seq_len, topk, ids_dtype, input_scale in cases:
+            m = batch_size * seq_len
+            torch.manual_seed(
+                20260525
+                + m * 31
+                + topk
+                + (1000 if activation == "silu" else 0)
+            )
+            rows = intermediate_size * (2 if activation == "silu" else 1)
+            w13_dense = (
+                torch.randn(experts, rows, hidden_size, device="cuda")
+                * (0.18 if activation == "silu" else 0.08)
+            )
+            w2_dense = (
+                torch.randn(experts, hidden_size, intermediate_size, device="cuda")
+                * (0.18 if activation == "silu" else 0.08)
+            )
+            w13_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+            w2_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+            w13, w13_blockscale = _quantize_dense_moe_weight_storage(
+                w13_dense,
+                w13_global_scale,
+            )
+            w2, w2_blockscale = _quantize_dense_moe_weight_storage(
+                w2_dense,
+                w2_global_scale,
+            )
+
+            x = (torch.randn(m, hidden_size, device="cuda") * input_scale).to(
+                torch.bfloat16
+            )
+            topk_ids = torch.randint(
+                0,
+                experts,
+                (m, topk),
+                device="cuda",
+                dtype=ids_dtype,
+            )
+            topk_weights = torch.softmax(torch.randn(m, topk, device="cuda"), dim=-1)
+            a_gscale = torch.ones(experts, dtype=torch.float32, device="cuda")
+            nvfp4_experts = prepare_tp_moe_fp4_experts(
+                a=x,
+                a1_gscale=a_gscale,
+                w1_fp4=w13,
+                w1_blockscale=w13_blockscale,
+                w1_alphas=w13_global_scale,
+                a2_gscale=a_gscale,
+                w2_fp4=w2,
+                w2_blockscale=w2_blockscale,
+                w2_alphas=w2_global_scale,
+                activation=activation,
+                quant_mode="nvfp4",
+            )
+
+>           nvfp4 = run_tp_moe_fp4(
+                a=x,
+                experts=nvfp4_experts,
+                topk_weights=topk_weights,
+                topk_ids=topk_ids,
+                quant_mode="nvfp4",
+            )
+
+tests/moe/test_w4a16_e2e.py:1016:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/_reference/helpers.py:186: in run_tp_moe_fp4
+    return fused_moe.run(binding=make_tp_moe_fp4_binding(**kwargs))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sparkinfer/moe/fused_moe/_impl.py:10224: in sparkinfer_moe_fp4
+    _launch_dynamic(
+sparkinfer/moe/fused_moe/_impl.py:9073: in _launch_dynamic
+    torch.ops.sparkinfer.tp_moe_dynamic_launch(
+/opt/venv/lib/python3.12/site-packages/torch/_ops.py:1275: in __call__
+    return self._op(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/_library/autograd.py:112: in autograd_impl
+    result = forward_no_grad(*args, Metadata(keyset, keyword_only_args))
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/_library/autograd.py:41: in forward_no_grad
+    result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/_ops.py:878: in redispatch
+    return self._handle.redispatch_boxed(keyset, *args, **kwargs)  # type: ignore[return-value]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/_library/custom_ops.py:690: in adinplaceorview_impl
+    return original_kernel.call_boxed(keyset, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/_library/custom_ops.py:375: in backend_impl
+    result = self._backend_fns[device_type](*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/_compile.py:54: in inner
+    return disable_fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:1298: in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+/opt/venv/lib/python3.12/site-packages/torch/_library/custom_ops.py:410: in wrapped_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+sparkinfer/moe/fused_moe/_impl.py:8894: in _tp_moe_dynamic_launch_op
+    _launch_dynamic_flat(
+sparkinfer/moe/fused_moe/_impl.py:8718: in _launch_dynamic_flat
+    compiled, mac = _get_dynamic_kernel(
+sparkinfer/moe/fused_moe/_impl.py:8302: in _get_dynamic_kernel
+    kernel = activation_spec.make_dynamic_kernel(**kernel_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sparkinfer/moe/fused_moe/_impl.py:1175: in make_dynamic_kernel
+    return self.dynamic_kernel_cls(**kernel_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sparkinfer/moe/_shared/kernels/relu2.py:78: in __init__
+    super().__init__(
+sparkinfer/moe/_shared/kernels/dynamic.py:820: in __init__
+    self.materialized_phase1_kernel = W4A8MaterializedPhase1Kernel(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <sparkinfer.moe._shared.kernels.w4a8_phase1.W4A8MaterializedPhase1Kernel object at 0x7510c05a9be0>
+
+    def __init__(
+        self,
+        *,
+        fast_math: bool = False,
+        source_tile_m: int = 128,
+        deterministic_output: bool = False,
+        num_topk: int = 1,
+        activation: str = "silu",
+    ):
+        if source_tile_m not in (64, 128):
+            raise ValueError(
+                f"materialized phase 1 source_tile_m must be 64 or 128, got {source_tile_m}"
+            )
+        self.fast_math = bool(fast_math)
+        self.source_tile_m = int(source_tile_m)
+        self.source_halves = self.source_tile_m // self.tile_m
+        self.deterministic_output = bool(deterministic_output)
+        if int(num_topk) <= 0:
+            raise ValueError(f"num_topk must be positive, got {num_topk}")
+        self.num_topk = int(num_topk)
+        if activation not in {"silu", SITU}:
+>           raise ValueError(
+                "materialized W4A8 phase 1 requires silu or situ, "
+                f"got {activation!r}"
+            )
+E           ValueError: materialized W4A8 phase 1 requires silu or situ, got 'relu2'
+
+sparkinfer/moe/_shared/kernels/w4a8_phase1.py:102: ValueError
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/moe/test_w4a16_e2e.py::test_w4a16_beats_nvfp4_against_true_fp32_oracle_for_odd_shapes[relu2]
+1 failed, 107 passed, 8 skipped, 1 warning in 103.09s (0:01:43)
+exit=1 elapsed_seconds=105 end=2026-07-31T01:29:11Z

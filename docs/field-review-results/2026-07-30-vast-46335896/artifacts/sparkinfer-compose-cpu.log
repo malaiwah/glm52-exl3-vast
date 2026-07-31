@@ -1,0 +1,172 @@
+head=113a519a29908786a4793474702220c4dc498916 base=06032ce74afba49a683d01339ed2c971568cec3f start=2026-07-31T01:55:09Z
+.................sssssssssssssss.........ss......sssssssssssssssssssssss [ 29%]
+ssssssssssssssssssssssssssssssssssssssss.............................sss [ 59%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 89%]
+ssssssssssss.............                                                [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+74 passed, 167 skipped, 1 warning in 3.07s
+B905 [*] `zip()` without an explicit `strict=` parameter
+    --> benchmarks/benchmark_paged_attention.py:3473:53
+     |
+3471 |   …                                 float(err.item()),
+3472 |   …                             )
+3473 |   …                             for err, idx in zip(
+     |  _______________________________________________^
+3474 | | …                                 nearest_flat.values, nearest_flat.indices
+3475 | | …                             )
+     | |_______________________________^
+3476 |   …                         ]
+3477 |   …                     )
+     |
+help: Add explicit value for parameter `strict=`
+
+B905 [*] `zip()` without an explicit `strict=` parameter
+   --> benchmarks/search_bf16_decode2048_optuna.py:166:43
+    |
+164 | def _q_lengths_from_cu_seqlens(cu_seqlens_q: torch.Tensor) -> list[int]:
+165 |     cu = [int(v) for v in cu_seqlens_q.detach().cpu().tolist()]
+166 |     return [end - start for start, end in zip(cu[:-1], cu[1:])]
+    |                                           ^^^^^^^^^^^^^^^^^^^^
+    |
+help: Add explicit value for parameter `strict=`
+
+B905 [*] `zip()` without an explicit `strict=` parameter
+   --> sparkinfer/attention/paged/planner.py:515:34
+    |
+513 | ) -> int:
+514 |     new_batch_size = 0
+515 |     for packed_qo_len, kv_len in zip(packed_qo_len_arr, kv_len_arr):
+    |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+516 |         num_tiles_q = _ceil_div(packed_qo_len, qo_chunk_size)
+517 |         num_chunks_kv = _ceil_div(max(kv_len, 1), kv_chunk_size_pages)
+    |
+help: Add explicit value for parameter `strict=`
+
+B905 [*] `zip()` without an explicit `strict=` parameter
+   --> sparkinfer/attention/paged/planner.py:535:23
+    |
+533 |     cu_seqlens_q_list = _metadata_to_cpu_int_list(cu_seqlens_q, name="cu_seqlens_q")
+534 |     q_lengths: list[int] = []
+535 |     for start, end in zip(cu_seqlens_q_list[:-1], cu_seqlens_q_list[1:]):
+    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+536 |         if end < start:
+537 |             raise ValueError("cu_seqlens_q must be non-decreasing")
+    |
+help: Add explicit value for parameter `strict=`
+
+SIM114 [*] Combine `if` branches using logical `or` operator
+   --> sparkinfer/attention/paged/planner.py:622:5
+    |
+620 |           min_chunks = 4
+621 |           max_chunks = 48
+622 | /     elif head_dim_qk <= 192 and head_dim_vo <= 128:
+623 | |         total_chunk_budget = 64
+624 | |         divisor = max(batch, 2)
+625 | |         min_chunks = 4
+626 | |         max_chunks = 32
+627 | |     elif gqa_group_size > 8:
+628 | |         total_chunk_budget = 64
+629 | |         divisor = max(batch, 2)
+630 | |         min_chunks = 4
+631 | |         max_chunks = 32
+    | |_______________________^
+632 |       else:
+633 |           total_chunk_budget = 128
+    |
+help: Combine `if` branches
+
+B905 [*] `zip()` without an explicit `strict=` parameter
+   --> sparkinfer/attention/paged/planner.py:900:42
+    |
+898 |     total_num_partial_rows = 0
+899 |     split_kv = False
+900 |     for packed_qo_len, qo_len, kv_len in zip(packed_qo_len_arr, q_lengths, kv_len_arr):
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+901 |         num_tiles_q = _ceil_div(packed_qo_len, qo_chunk_size)
+902 |         num_chunks_kv = _ceil_div(max(kv_len, 1), kv_chunk_size_pages)
+    |
+help: Add explicit value for parameter `strict=`
+
+SIM103 Return the negated condition directly
+   --> sparkinfer/attention/paged/planner.py:923:5
+    |
+921 |       ):
+922 |           return False
+923 | /     if budget.max_partial_rows is not None and total_num_partial_rows > int(
+924 | |         budget.max_partial_rows
+925 | |     ):
+926 | |         return False
+927 | |     return True
+    | |_______________^
+    |
+help: Inline condition
+
+B905 [*] `zip()` without an explicit `strict=` parameter
+    --> sparkinfer/attention/paged/planner.py:1892:47
+     |
+1890 |                 max(kv_pages - 1, 0),
+1891 |             )
+1892 |             for cache_len, q_len, kv_pages in zip(cache_lengths, q_lengths, kv_len_arr)
+     |                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1893 |         ]
+1894 |         effective_kv_len_arr = [
+     |
+help: Add explicit value for parameter `strict=`
+
+B905 [*] `zip()` without an explicit `strict=` parameter
+    --> sparkinfer/attention/paged/planner.py:1896:41
+     |
+1894 |         effective_kv_len_arr = [
+1895 |             max(kv_pages - start_page, 1)
+1896 |             for kv_pages, start_page in zip(kv_len_arr, kv_window_start_pages)
+     |                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1897 |         ]
+1898 |     else:
+     |
+help: Add explicit value for parameter `strict=`
+
+B905 [*] `zip()` without an explicit `strict=` parameter
+    --> sparkinfer/attention/paged/planner.py:1917:46
+     |
+1915 |         effective_kv_len_arr = [
+1916 |             max(effective_pages, min(kv_pages, max_graph_window_pages))
+1917 |             for effective_pages, kv_pages in zip(effective_kv_len_arr, kv_len_arr)
+     |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1918 |         ]
+1919 |         kv_window_start_pages = [
+     |
+help: Add explicit value for parameter `strict=`
+
+B905 [*] `zip()` without an explicit `strict=` parameter
+    --> sparkinfer/attention/paged/planner.py:1921:58
+     |
+1919 |           kv_window_start_pages = [
+1920 |               min(start_page, max(kv_pages - effective_pages, 0))
+1921 |               for start_page, kv_pages, effective_pages in zip(
+     |  __________________________________________________________^
+1922 | |                 kv_window_start_pages, kv_len_arr, effective_kv_len_arr
+1923 | |             )
+     | |_____________^
+1924 |           ]
+     |
+help: Add explicit value for parameter `strict=`
+
+B905 [*] `zip()` without an explicit `strict=` parameter
+    --> sparkinfer/attention/paged/planner.py:2236:9
+     |
+2235 |     for request_idx, (packed_qo_len, qo_len, kv_len) in enumerate(
+2236 |         zip(packed_qo_len_arr, q_lengths, effective_kv_len_arr)
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2237 |     ):
+2238 |         num_tiles_q = _ceil_div(packed_qo_len, cta_tile_q)
+     |
+help: Add explicit value for parameter `strict=`
+
+Found 12 errors.
+[*] 11 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).
+pytest_exit=0 ruff_exit=1 elapsed_seconds=4 end=2026-07-31T01:55:13Z

@@ -1,0 +1,3 @@
+PASS: DSpark passes sample_pos[:, i] - 2 to shared probabilistic sampler
+captured= [[99, 199], [100, 200]]
+expected= [[99, 199], [100, 200]]

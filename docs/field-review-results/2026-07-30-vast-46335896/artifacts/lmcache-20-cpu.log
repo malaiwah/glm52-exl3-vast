@@ -1,0 +1,100 @@
+case=lmcache-20
+head=9374b2970987a8e6f7027658c802b7835e007b7a
+harness=native_storage_ops installed-runtime ABI symlink /opt/venv/lib/python3.12/site-packages/lmcache/native_storage_ops.cpython-312-x86_64-linux-gnu.so
+start=2026-07-31T01:20:17Z
+command=CUDA_VISIBLE_DEVICES= pytest -q tests/v1/multiprocess/test_mq.py tests/v1/multiprocess/test_futures.py tests/v1/test_vllm_mp_adapter.py
+
+tests/v1/multiprocess/test_mq.py::test_mq_noop_request PASSED            [  1%]
+tests/v1/multiprocess/test_mq.py::test_mq_noop_multiple_requests PASSED  [  2%]
+tests/v1/multiprocess/test_mq.py::test_mq_noop_multiple_clients PASSED   [  3%]
+tests/v1/multiprocess/test_mq.py::test_mq_register_kv_cache SKIPPED      [  5%]
+tests/v1/multiprocess/test_mq.py::test_mq_unregister_kv_cache PASSED     [  6%]
+tests/v1/multiprocess/test_mq.py::test_mq_unregister_kv_cache_multiple_clients PASSED [  7%]
+tests/v1/multiprocess/test_mq.py::test_mq_store PASSED                   [  8%]
+tests/v1/multiprocess/test_mq.py::test_mq_retrieve PASSED                [ 10%]
+tests/v1/multiprocess/test_mq.py::test_mq_lookup PASSED                  [ 11%]
+tests/v1/multiprocess/test_mq.py::test_mq_lookup_with_different_key PASSED [ 12%]
+tests/v1/multiprocess/test_mq.py::test_mq_report_block_allocation PASSED [ 13%]
+tests/v1/multiprocess/test_mq.py::test_mq_report_block_allocation_empty PASSED [ 15%]
+tests/v1/multiprocess/test_mq.py::test_shared_loop_lifecycle PASSED      [ 16%]
+tests/v1/multiprocess/test_mq.py::test_shared_loop_dispatch PASSED       [ 17%]
+tests/v1/multiprocess/test_mq.py::test_full_dead_client_queue_does_not_block_healthy_client PASSED [ 18%]
+tests/v1/multiprocess/test_mq.py::test_timed_out_future_is_reclaimed_and_late_response_is_ignored PASSED [ 20%]
+tests/v1/multiprocess/test_mq.py::test_connection_reset_discards_stale_pending_and_unsent_work PASSED [ 21%]
+tests/v1/multiprocess/test_mq.py::test_timed_out_unregister_is_retired_when_loop_recovers PASSED [ 22%]
+tests/v1/multiprocess/test_mq.py::test_claimed_register_timeout_rolls_back_on_polling_thread PASSED [ 24%]
+tests/v1/multiprocess/test_mq.py::test_release_instance_uses_bounded_join_and_preserves_live_notifier PASSED [ 25%]
+tests/v1/multiprocess/test_mq.py::test_client_close_defers_socket_close_after_unregister_timeout PASSED [ 26%]
+tests/v1/multiprocess/test_mq.py::test_sync_handler_failure_completes_future_and_loop_recovers PASSED [ 27%]
+tests/v1/multiprocess/test_mq.py::test_blocking_handler_failure_completes_future PASSED [ 29%]
+tests/v1/multiprocess/test_mq.py::test_shared_loop_recreate PASSED       [ 30%]
+tests/v1/multiprocess/test_mq.py::test_add_normal_thread_pool PASSED     [ 31%]
+tests/v1/multiprocess/test_mq.py::test_add_affinity_thread_pool PASSED   [ 32%]
+tests/v1/multiprocess/test_mq.py::test_normal_pool_error_on_sync_handler PASSED [ 34%]
+tests/v1/multiprocess/test_mq.py::test_affinity_pool_error_on_sync_handler PASSED [ 35%]
+tests/v1/multiprocess/test_mq.py::test_pool_error_on_unregistered PASSED [ 36%]
+tests/v1/multiprocess/test_mq.py::test_multiple_pools PASSED             [ 37%]
+tests/v1/multiprocess/test_mq.py::test_start_fails_without_pool_assignment PASSED [ 39%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_basic_usage PASSED [ 40%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_with_thread PASSED [ 41%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_wait_success PASSED [ 43%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_wait_timeout PASSED [ 44%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_result_timeout PASSED [ 45%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_wait_no_timeout PASSED [ 46%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_multiple_result_calls PASSED [ 48%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_complex_type PASSED [ 49%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_exception_is_re_raised PASSED [ 50%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_rejects_non_exception PASSED [ 51%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_basic_usage SKIPPED [ 53%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_with_thread SKIPPED [ 54%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_wait_no_timeout SKIPPED [ 55%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_wait_with_timeout_success SKIPPED [ 56%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_wait_timeout_reached SKIPPED [ 58%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_result_with_timeout_success SKIPPED [ 59%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_result_timeout_reached SKIPPED [ 60%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_multiple_result_calls SKIPPED [ 62%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_query_before_and_after SKIPPED [ 63%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_complex_type SKIPPED [ 64%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_to_cuda_future SKIPPED [ 65%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_with_explicit_device SKIPPED [ 67%]
+tests/v1/test_vllm_mp_adapter.py::test_register_kv_caches_updates_kv_caches_and_submits PASSED [ 68%]
+tests/v1/test_vllm_mp_adapter.py::test_register_kv_caches_raises_connection_error_on_timeout PASSED [ 69%]
+tests/v1/test_vllm_mp_adapter.py::test_register_kv_caches_cpu_submits_engine_driven_context_registration PASSED [ 70%]
+tests/v1/test_vllm_mp_adapter.py::test_submit_store_request_tracks_returned_future PASSED [ 72%]
+tests/v1/test_vllm_mp_adapter.py::test_chunked_store_keeps_all_futures_and_events PASSED [ 73%]
+tests/v1/test_vllm_mp_adapter.py::test_submit_store_request_expands_block_ids_to_views PASSED [ 74%]
+tests/v1/test_vllm_mp_adapter.py::test_submit_retrieve_request_tracks_returned_future PASSED [ 75%]
+tests/v1/test_vllm_mp_adapter.py::test_load_store_op_accepts_per_group_block_ids PASSED [ 77%]
+tests/v1/test_vllm_mp_adapter.py::test_store_keeps_event_until_future_finishes PASSED [ 78%]
+tests/v1/test_vllm_mp_adapter.py::test_retrieve_keeps_event_until_future_finishes PASSED [ 79%]
+tests/v1/test_vllm_mp_adapter.py::test_instance_id_is_uuid_derived_63_bit_int PASSED [ 81%]
+tests/v1/test_vllm_mp_adapter.py::test_instance_id_logged_at_info_on_construction PASSED [ 82%]
+tests/v1/test_vllm_mp_adapter.py::test_heartbeat_lazy_start_wires_callback_before_start PASSED [ 83%]
+tests/v1/test_vllm_mp_adapter.py::test_scheduler_heartbeat_starts_from_empty_map_once_per_server PASSED [ 84%]
+tests/v1/test_vllm_mp_adapter.py::test_heartbeat_retires_outage_session_then_recovers PASSED [ 86%]
+tests/v1/test_vllm_mp_adapter.py::test_heartbeat_first_ping_runs_callback_before_setting_event PASSED [ 87%]
+tests/v1/test_vllm_mp_adapter.py::test_dropped_retrieve_reported_once_via_unhealthy_get_finished PASSED [ 88%]
+tests/v1/test_vllm_mp_adapter.py::test_dropped_retrieve_reported_once_via_healthy_get_finished PASSED [ 89%]
+tests/v1/test_vllm_mp_adapter.py::test_shutdown_stops_heartbeat_before_unregister PASSED [ 91%]
+tests/v1/test_vllm_mp_adapter.py::test_shutdown_without_heartbeat_sends_unregister PASSED [ 92%]
+tests/v1/test_vllm_mp_adapter.py::test_straggler_cycle_after_stop_skips_callback_and_event PASSED [ 93%]
+tests/v1/test_vllm_mp_adapter.py::test_recover_callback_skips_register_after_stop_requested PASSED [ 94%]
+tests/v1/test_vllm_mp_adapter.py::test_register_uses_local_context_when_self_transfer_ctx_nulled PASSED [ 96%]
+tests/v1/test_vllm_mp_adapter.py::test_startup_warns_when_heartbeat_interval_exceeds_reap_floor PASSED [ 97%]
+tests/v1/test_vllm_mp_adapter.py::test_startup_does_not_warn_for_default_heartbeat_interval PASSED [ 98%]
+tests/v1/test_vllm_mp_adapter.py::test_recover_callback_rebuilds_transfer_ctx_without_closing_previous PASSED [100%]
+
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+../../../../opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: 121 warnings
+  /opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: DeprecationWarning: `LoggingHandler` in `opentelemetry-sdk` is deprecated. Use the handler from `opentelemetry-instrumentation-logging` instead.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 66 passed, 13 skipped, 122 warnings in 40.38s =================
+exit=0
+elapsed_seconds=45
+end=2026-07-31T01:21:02Z

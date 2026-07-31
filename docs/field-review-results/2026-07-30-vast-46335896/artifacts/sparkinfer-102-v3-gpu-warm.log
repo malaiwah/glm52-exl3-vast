@@ -1,0 +1,11 @@
+case=sparkinfer-102-v3 phase=warm head=2bed880a7e9edbd9f2d976ba1a8ee88c9ba6e338 gpu=physical-2 start=2026-07-31T01:40:17Z
+.................................ss..ss..ss..ss......................... [ 62%]
+............................................                             [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+108 passed, 8 skipped, 1 warning in 105.40s (0:01:45)
+exit=0 elapsed_seconds=107 end=2026-07-31T01:42:04Z

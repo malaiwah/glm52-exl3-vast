@@ -1,0 +1,92 @@
+case=lmcache-18 phase=cold gpu=physical-3 visible-cuda0
+head=85abae7d2dab3585be9ad920dc634ea37c905333
+torch_extensions=/workspace/field-review-tests/cache/lmcache-18-cold/torch
+cuda_cache=/workspace/field-review-tests/cache/lmcache-18-cold/cuda
+start=2026-07-31T01:27:26Z
+command=python -m pytest -q tests/v1/multiprocess/test_futures.py tests/v1/multiprocess/test_engine_driven_transfer.py tests/v1/multiprocess/test_lmcache_driven_event_ordering.py tests/cli/commands/bench/test_server_bench.py::TestHandleTransferEvents
+
+tests/v1/multiprocess/test_futures.py::test_messaging_future_basic_usage PASSED [  1%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_with_thread PASSED [  2%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_wait_success PASSED [  4%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_wait_timeout PASSED [  5%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_result_timeout PASSED [  7%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_wait_no_timeout PASSED [  8%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_multiple_result_calls PASSED [  9%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_complex_type PASSED [ 11%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_exception_is_re_raised PASSED [ 12%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_rejects_non_exception PASSED [ 14%]
+tests/v1/multiprocess/test_futures.py::test_cuda_future_retains_exporter_event_until_raw_response PASSED [ 15%]
+tests/v1/multiprocess/test_futures.py::test_raw_future_retains_exporter_when_cuda_future_is_abandoned PASSED [ 16%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_basic_usage PASSED [ 18%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_with_thread PASSED [ 19%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_wait_no_timeout PASSED [ 21%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_wait_with_timeout_success PASSED [ 22%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_wait_timeout_reached PASSED [ 23%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_result_with_timeout_success PASSED [ 25%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_result_timeout_reached PASSED [ 26%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_multiple_result_calls PASSED [ 28%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_query_before_and_after PASSED [ 29%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_complex_type PASSED [ 30%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_to_cuda_future PASSED [ 32%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_with_explicit_device PASSED [ 33%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_wrap_kv_caches_wraps_all_tensors PASSED [ 35%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_create_transfer_context_uses_non_cuda_context_on_cpu PASSED [ 36%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_resolve_extra_config_default_mp_transfer_mode_is_auto PASSED [ 38%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_resolve_extra_config_overrides_mp_transfer_mode PASSED [ 39%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_extra_config_default_lets_env_var_select_mp_transfer_mode PASSED [ 40%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_create_transfer_context_force_lmcache_driven_mode PASSED [ 42%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_create_transfer_context_force_engine_driven_mode_on_cpu PASSED [ 43%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_create_transfer_context_invalid_mode_raises PASSED [ 45%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_create_transfer_context_handle_mode_unsupported_device_raises PASSED [ 46%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_musa_data_context_keeps_layout_validation_device_agnostic PASSED [ 47%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_musa_data_context_store_uses_device_agnostic_gather PASSED [ 49%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_musa_data_context_retrieve_uses_device_agnostic_scatter PASSED [ 50%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_lmcache_driven_requests_use_distinct_exporter_owned_events PASSED [ 52%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_create_transfer_context_env_var_overrides_default PASSED [ 53%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_compute_kv_layout_and_gather_scatter_roundtrip[nhd] PASSED [ 54%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_compute_kv_layout_and_gather_scatter_roundtrip[mla] PASSED [ 56%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_compute_kv_layout_and_gather_scatter_roundtrip[fused_hnd] PASSED [ 57%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_compute_kv_layout_and_gather_scatter_roundtrip[fused_nhd] PASSED [ 59%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_gather_scatter_roundtrip_hnd_layout[_make_hnd_kv_caches-NL_X_TWO_NB_NH_BS_HS] PASSED [ 60%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_gather_scatter_roundtrip_hnd_layout[_make_hnd_flashinfer_kv_caches-NL_X_NB_TWO_NH_BS_HS] PASSED [ 61%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_compute_kv_layout_empty_raises_value_error PASSED [ 63%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_scatter_respects_skip_first_n_tokens[nhd-skip-two-blocks] PASSED [ 64%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_scatter_respects_skip_first_n_tokens[mla-skip-two-blocks] PASSED [ 66%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_scatter_respects_skip_first_n_tokens[mla-skip-past-chunk] PASSED [ 67%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_scatter_rounds_down_partial_block_skip_first_n_tokens[hnd] PASSED [ 69%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_scatter_rounds_down_partial_block_skip_first_n_tokens[mla] PASSED [ 70%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_engine_context_shm_pool_info[non-lazy] PASSED [ 71%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_engine_context_shm_pool_info[lazy] PASSED [ 73%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_server_register_and_find_non_cuda_context_layout PASSED [ 74%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_server_store_and_retrieve_cpu_chunks PASSED [ 76%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_server_shm_commit_store_allows_noop_when_all_keys_exist PASSED [ 77%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_server_prepare_store_releases_unused_reserved_write_locks PASSED [ 78%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_server_shm_transport_uses_engine_level_config PASSED [ 80%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_server_engine_driven_reregister_returns_existing_shm_response PASSED [ 81%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_server_unregister_engine_driven_context_releases_pending_shm_locks PASSED [ 83%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_gather_paged_kv_with_chunk_indices_subset PASSED [ 84%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_server_prepare_store_includes_chunk_indices PASSED [ 85%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_engine_driven_context_shm_tensor_view_from_buffer PASSED [ 87%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_engine_driven_context_shm_store_retrieve_flow_with_mocked_mq PASSED [ 88%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_engine_driven_context_shm_init_raises_when_segment_missing PASSED [ 90%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_create_engine_driven_context_falls_back_to_pickle_without_shm_info PASSED [ 91%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_create_engine_driven_context_use_pickle_ignores_valid_shm_info PASSED [ 92%]
+tests/v1/multiprocess/test_engine_driven_transfer.py::test_engine_driven_context_shm_close_is_idempotent PASSED [ 94%]
+tests/v1/multiprocess/test_lmcache_driven_event_ordering.py::test_store_rerecords_worker_owned_event_after_d2h PASSED [ 95%]
+tests/v1/multiprocess/test_lmcache_driven_event_ordering.py::test_retrieve_waits_for_worker_fence_before_h2d PASSED [ 97%]
+tests/cli/commands/bench/test_server_bench.py::TestHandleTransferEvents::test_worker_event_lives_through_response_and_is_synchronized[_send_store-RequestType.STORE] PASSED [ 98%]
+tests/cli/commands/bench/test_server_bench.py::TestHandleTransferEvents::test_worker_event_lives_through_response_and_is_synchronized[_send_retrieve-RequestType.RETRIEVE] PASSED [100%]
+
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+../../../../opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: 117 warnings
+tests/v1/multiprocess/test_engine_driven_transfer.py: 17 warnings
+  /opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: DeprecationWarning: `LoggingHandler` in `opentelemetry-sdk` is deprecated. Use the handler from `opentelemetry-instrumentation-logging` instead.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 71 passed, 135 warnings in 20.09s =======================
+exit=0 elapsed_seconds=25 end=2026-07-31T01:27:51Z

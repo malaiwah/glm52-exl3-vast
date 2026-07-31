@@ -1,0 +1,16 @@
+case=sparkinfer-101
+head=1b9a37b935a4868e4dec693c3b718b093aca5bb4
+start=2026-07-31T01:19:32Z
+command=pytest -q tests/comm/test_pcie_two_slot_selector.py && ruff check tests/comm/test_pcie_two_slot_selector.py
+.                                                                        [100%]
+=============================== warnings summary ===============================
+tests/comm/test_pcie_two_slot_selector.py::test_two_slot_selector_preserves_phase_for_long_run
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 passed, 1 warning in 0.89s
+All checks passed!
+exit=0
+elapsed_seconds=1
+end=2026-07-31T01:19:33Z

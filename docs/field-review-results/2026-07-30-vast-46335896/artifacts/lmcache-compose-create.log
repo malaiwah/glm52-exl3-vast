@@ -1,0 +1,55 @@
+Preparing worktree (new branch 'test-compose-lmcache-18-19-20')
+HEAD is now at 9cebd405 Merge pull request #1 from local-inference-lab/fix/glm52-dcp-v052-20260728
+apply prerequisite PR #7
+[test-compose-lmcache-18-19-20 79889e0c] fix(mp): propagate remote handler failures to clients
+ Author: Martin Vit <martin@voipmonitor.org>
+ Date: Wed Jul 29 16:53:52 2026 +0000
+ 5 files changed, 168 insertions(+), 3 deletions(-)
+apply prerequisite PR #8
+[test-compose-lmcache-18-19-20 3db5a6ac] fix(vllm): surface MP retrieve failures to the scheduler
+ Author: Florian Bernd <git@flobernd.de>
+ Date: Wed Jul 29 01:27:01 2026 +0200
+ 2 files changed, 140 insertions(+), 8 deletions(-)
+[test-compose-lmcache-18-19-20 e911cb3e] fix(vllm): suppress retrieve ops that exceed allocated blocks
+ Author: Florian Bernd <git@flobernd.de>
+ Date: Wed Jul 29 01:27:01 2026 +0200
+ 2 files changed, 169 insertions(+)
+ create mode 100644 tests/v1/test_vllm_mp_connector_metadata.py
+[test-compose-lmcache-18-19-20 eb5efcaa] test(vllm): keep retrieve fault injection out of runtime
+ Author: Martin Vit <martin@voipmonitor.org>
+ Date: Wed Jul 29 16:56:21 2026 +0000
+ 2 files changed, 1 insertion(+), 39 deletions(-)
+apply #18
+[test-compose-lmcache-18-19-20 52c7a844] fix(mp): preserve CUDA IPC event ownership
+ Author: Michel Belleau <michel.belleau@malaimawah.com>
+ Date: Thu Jul 30 21:09:58 2026 +0000
+ 10 files changed, 432 insertions(+), 58 deletions(-)
+ create mode 100644 tests/v1/multiprocess/test_lmcache_driven_event_ordering.py
+apply #19
+[test-compose-lmcache-18-19-20 a9861fd3] fix(vllm): contain MP future polling errors
+ Author: Michel Belleau <michel.belleau@malaimawah.com>
+ Date: Thu Jul 30 21:18:06 2026 +0000
+ 2 files changed, 54 insertions(+), 8 deletions(-)
+apply #20
+[test-compose-lmcache-18-19-20 fcf5c3e4] fix(mq): keep shared client loop responsive
+ Author: Michel Belleau <michel.belleau@malai.maiwah.com>
+ Date: Thu Jul 30 21:39:41 2026 +0000
+ 2 files changed, 349 insertions(+), 80 deletions(-)
+Auto-merging lmcache/integration/vllm/vllm_multi_process_adapter.py
+Auto-merging lmcache/v1/multiprocess/futures.py
+CONFLICT (content): Merge conflict in lmcache/v1/multiprocess/futures.py
+Auto-merging tests/v1/test_vllm_mp_adapter.py
+error: could not apply 5aba0ddd... fix(mq): retire stale outage sessions
+hint: After resolving the conflicts, mark them with
+hint: "git add/rm <pathspec>", then run
+hint: "git cherry-pick --continue".
+hint: You can instead skip this commit with "git cherry-pick --skip".
+hint: To abort and get back to the state before "git cherry-pick",
+hint: run "git cherry-pick --abort".
+integration_head=fcf5c3e4a5ac89a9aaad944d2d5b2a1e128aeb12
+status:
+M  lmcache/integration/vllm/vllm_multi_process_adapter.py
+UU lmcache/v1/multiprocess/futures.py
+M  lmcache/v1/multiprocess/mq.py
+M  tests/v1/multiprocess/test_mq.py
+M  tests/v1/test_vllm_mp_adapter.py

@@ -1,0 +1,11 @@
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+trigger complete
+binding relu2 3 2 routed 8 route_block None fused_block None fused_m None scratch [('intermediate_cache13', (1024,)), ('intermediate_cache2', (2048,)), ('fc1_c_tmp', (32768,)), ('fc2_c_tmp', (32768,)), ('packed_route_indices', (256,)), ('block_expert_ids', (8,))]
+output relu2 3 2 finite True nan 0 max 0.7109375
+binding relu2 35 3 routed 192 route_block None fused_block None fused_m None scratch [('intermediate_cache13', (24576,)), ('intermediate_cache2', (24576,)), ('fc1_c_tmp', (63488,)), ('fc2_c_tmp', (63488,)), ('packed_route_indices', (440,)), ('block_expert_ids', (31,))]
+output relu2 35 3 finite True nan 0 max 2.453125
+binding silu 3 2 routed 8 route_block None fused_block None fused_m None scratch [('intermediate_cache13', (2048,)), ('intermediate_cache2', (2048,)), ('fc1_c_tmp', (65536,)), ('fc2_c_tmp', (32768,)), ('packed_route_indices', (256,)), ('block_expert_ids', (8,))]
+output silu 3 2 finite True nan 0 max 3.15625
+binding silu 35 3 routed 192 route_block None fused_block None fused_m None scratch [('intermediate_cache13', (49152,)), ('intermediate_cache2', (24576,)), ('fc1_c_tmp', (126976,)), ('fc2_c_tmp', (63488,)), ('packed_route_indices', (440,)), ('block_expert_ids', (31,))]
+output silu 35 3 finite True nan 0 max 13.625

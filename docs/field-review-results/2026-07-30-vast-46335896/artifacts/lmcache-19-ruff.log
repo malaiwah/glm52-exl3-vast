@@ -1,0 +1,17 @@
+head=1d4396c70352764d1fa5c85ef2f27dbe948d6481
+base=cd2c0d6a6a982ec5e334bae7704e1029c06d3c97
+changed_python_files:
+lmcache/integration/vllm/kv_cache_groups.py
+lmcache/integration/vllm/lmcache_mp_connector.py
+lmcache/integration/vllm/vllm_multi_process_adapter.py
+lmcache/v1/kv_layer_groups.py
+lmcache/v1/multiprocess/custom_types.py
+lmcache/v1/multiprocess/group_view.py
+lmcache/v1/multiprocess/modules/lookup.py
+tests/v1/test_kv_cache_groups.py
+tests/v1/test_kv_layer_groups_manager.py
+tests/v1/test_vllm_dcp_parallel_strategy.py
+tests/v1/test_vllm_kv_cache_groups.py
+tests/v1/test_vllm_mp_adapter.py
+tests/v1/test_vllm_mp_connector_metadata.py
+All checks passed!

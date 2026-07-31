@@ -1,0 +1,70 @@
+head_before_conflict=fcf5c3e4a5ac89a9aaad944d2d5b2a1e128aeb12
+cherry_pick_head=5aba0dddb37b78496e6ef87a4e14b1840962eb95
+status:
+M  lmcache/integration/vllm/vllm_multi_process_adapter.py
+UU lmcache/v1/multiprocess/futures.py
+M  lmcache/v1/multiprocess/mq.py
+M  tests/v1/multiprocess/test_mq.py
+M  tests/v1/test_vllm_mp_adapter.py
+unmerged files:
+lmcache/v1/multiprocess/futures.py
+combined diff:
+diff --cc lmcache/v1/multiprocess/futures.py
+index 1b65a910,69d8b068..00000000
+--- a/lmcache/v1/multiprocess/futures.py
++++ b/lmcache/v1/multiprocess/futures.py
+@@@ -16,7 -16,7 +16,11 @@@ class MessagingFuture(Generic[T])
+          self.result_ = None
+          self.exception_: BaseException | None = None
+          self._completion_lock = threading.Lock()
+++<<<<<<< HEAD
+ +        self._retained_resources: list[Any] = []
+++=======
++         self._on_timeout = on_timeout
+++>>>>>>> 5aba0ddd (fix(mq): retire stale outage sessions)
+
+      def query(self) -> bool:
+          """
+@@@ -77,8 -77,9 +87,14 @@@
+              result (T): The result to set.
+          """
+          with self._completion_lock:
+++<<<<<<< HEAD
+ +            self.result_ = result
+ +            self._retained_resources.clear()
+++=======
++             if self.is_done_.is_set():
++                 return
++             self.result_ = result
+++>>>>>>> 5aba0ddd (fix(mq): retire stale outage sessions)
+              self.is_done_.set()
+
+      def set_exception(self, exception: BaseException) -> None:
+@@@ -86,9 -87,21 +102,27 @@@
+          if not isinstance(exception, BaseException):
+              raise TypeError("exception must derive from BaseException")
+          with self._completion_lock:
+++<<<<<<< HEAD
+ +            self.exception_ = exception
+ +            self._retained_resources.clear()
+ +            self.is_done_.set()
+++=======
++             if self.is_done_.is_set():
++                 return
++             self.exception_ = exception
++             self.is_done_.set()
++
++     def _expire(self, exception: BaseException) -> bool:
++         """Atomically expire an unanswered future and notify its transport."""
++         with self._completion_lock:
++             if self.is_done_.is_set():
++                 return False
++             self.exception_ = exception
++             self.is_done_.set()
++         if self._on_timeout is not None:
++             self._on_timeout()
++         return True
+++>>>>>>> 5aba0ddd (fix(mq): retire stale outage sessions)
+
+      def to_cuda_future(
+          self,

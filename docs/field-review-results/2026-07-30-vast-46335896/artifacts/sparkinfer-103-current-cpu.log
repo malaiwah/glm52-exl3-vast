@@ -1,0 +1,10 @@
+head=5c4f8b01962c42d3aab8ac36b1e663974ad2537b start=2026-07-31T02:42:55Z
+............ss                                                           [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+12 passed, 2 skipped, 1 warning in 1.30s
+exit=0 elapsed_seconds=2 end=2026-07-31T02:42:57Z

@@ -1,0 +1,61 @@
+Preparing worktree (new branch 'test-compose-sparkinfer-field-review')
+HEAD is now at 06032ce test(moe): document Trellis fixed-capacity arena budget
+base=06032ce74afba49a683d01339ed2c971568cec3f
+merge #100
+Merge made by the 'ort' strategy.
+ sparkinfer/moe/_shared/kernels/w4a16/host.py |  14 +++
+ sparkinfer/moe/ep_moe/_impl.py               |   9 +-
+ sparkinfer/moe/fused_moe/__init__.py         |   4 +
+ sparkinfer/moe/fused_moe/_impl.py            |  68 +++++++++--
+ sparkinfer/moe/fused_moe/api.py              |   4 +
+ tests/moe/test_ep_moe_api.py                 |  20 +++-
+ tests/moe/test_fused_moe_planning.py         | 171 +++++++++++++++++++++++++++
+ tests/moe/test_w4a16_route_pack.py           |  38 ++++++
+ 8 files changed, 312 insertions(+), 16 deletions(-)
+ create mode 100644 tests/moe/test_fused_moe_planning.py
+merge #102 moved/fixed head
+Auto-merging sparkinfer/moe/_shared/kernels/w4a16/host.py
+Auto-merging sparkinfer/moe/fused_moe/_impl.py
+Merge made by the 'ort' strategy.
+ sparkinfer/_lib/compiler.py                        |  27 +--
+ sparkinfer/moe/_shared/kernels/dynamic.py          |  16 +-
+ sparkinfer/moe/_shared/kernels/w4a16/host.py       |  22 +++
+ sparkinfer/moe/_shared/kernels/w4a16/kernel.py     |  32 +++-
+ sparkinfer/moe/_shared/kernels/w4a16/route_pack.py |  34 ++--
+ sparkinfer/moe/fused_moe/_impl.py                  |  18 +-
+ tests/_lib/test_compile_cache.py                   |  55 +++++-
+ tests/moe/test_w4a16_e2e.py                        | 213 ++++++++++++++++++++-
+ 8 files changed, 354 insertions(+), 63 deletions(-)
+merge #103
+Merge made by the 'ort' strategy.
+ benchmarks/benchmark_paged_attention.py           |   7 +-
+ benchmarks/search_bf16_decode2048_optuna.py       |   2 +-
+ sparkinfer/attention/paged/planner.py             |  53 ++++++++
+ sparkinfer/comm/pcie/pcie_dcp_a2a.cu              |  55 +++++---
+ sparkinfer/comm/pcie/pcie_dcp_a2a.py              |  15 +++
+ sparkinfer/comm/pcie/pcie_oneshot.cu              |  12 +-
+ sparkinfer/comm/pcie/pcie_twoshot.cu              |  12 +-
+ sparkinfer/comm/pcie/two_slot_selector.h          |  38 ++++++
+ tests/attention/test_attention_paged_planner.py   |  49 +++++++
+ tests/attention/test_benchmark_paged_attention.py |  16 +++
+ tests/comm/test_pcie_dcp_a2a.py                   |  99 +++++++++++++-
+ tests/comm/test_pcie_dcp_a2a_gpu.py               | 154 ++++++++++++++++++++++
+ tests/comm/test_pcie_two_slot_selector.py         |  46 +++++++
+ 13 files changed, 521 insertions(+), 37 deletions(-)
+ create mode 100644 sparkinfer/comm/pcie/two_slot_selector.h
+ create mode 100644 tests/comm/test_pcie_two_slot_selector.py
+integration_head=113a519a29908786a4793474702220c4dc498916
+parents:
+113a519 (HEAD -> test-compose-sparkinfer-field-review) Merge branch 'test-pr-103' into test-compose-sparkinfer-field-review
+d5f24e1 Merge branch 'test-pr-102-v3' into test-compose-sparkinfer-field-review
+f96aff4 Merge branch 'test-pr-100' into test-compose-sparkinfer-field-review
+2bed880 (test-pr-102-v3) style(moe): combine identical W4A8 branches
+2c2e220 (test-pr-102-v2) fix(moe): avoid inactive gated helper for relu2
+22c11df (test-pr-103) refactor(pcie): centralize DCP staging selection
+0171333 Merge remote-tracking branch 'fork/fix/pcie-dcp-a2a-slot-overflow-20260730' into HEAD
+5bea8f3 (test-pr-102) fix(moe): preserve exact Trellis launch capacity
+d3ab9bd test(pcie): keep slot observation test-local
+7620e28 fix(moe): complete capture resolution guards
+d1efa5b fix(moe): reject unresolved capture launches
+6b1d9eb test(pcie): observe replay slot advancement
+status:
