@@ -78,7 +78,12 @@ alternates. Local candidate commits:
 - #103 `8fd90a4f687895e705bdf52fcff84ef653a5abf0`.
 
 The corrected #103 test passed cold in 48.59 s and warm three times at about
-5.1 s. Independent peer review is in progress; nothing has been pushed.
+5.1 s. Independent review approved the correction and repeated 1,025 graph
+replays from a fresh cache in 48.23 s. Both repaired branches were pushed and
+the existing PR/issue comments were updated with exact repaired heads:
+
+- #101 `0959fe807d366628380f41933244e3ccce0a8ae0`;
+- #103 `8fd90a4f687895e705bdf52fcff84ef653a5abf0`.
 
 ### B. SparkInfer W4A16 scratch lifetime
 
@@ -88,13 +93,22 @@ Target: precise initialization/lifetime correction for the #100/#102 ordered
 NaN, preserving the 64.91 MiB/rank planner saving and avoiding broad arena
 zeroing unless measurement proves it harmless.
 
-Checkpoint (2026-07-31 03:37 UTC): a deterministic same-binding replay now
+Checkpoint (2026-07-31 04:05 UTC): a deterministic same-binding replay now
 reproduces stale-tail NaNs on exact #100 for both ReLU2 and SiLU small-M direct
 FC2 paths; a narrow lane-mask candidate makes the same cases finite without
-whole-arena zeroing. Warm regression and performance/code-generation review are
-still pending. Do not treat the earlier poison-before-first-run pass as a
-disproof: FC1 overwrote the tested scratch before FC2 in that ordering; the
-predecessor/replay sequence is the reachable stale-lifetime case.
+whole-arena zeroing. Exact #100 + #102 composition `3c758e6682e1430cf6fa6028fd8fb0e2d7d5528b`
+passed 5/5 on Vast; pre-fix failed 2/2 with NaNs and post-fix cold/warm passed
+2/2. The 64.90904 MiB/rank planner reduction is unchanged, and GLM's
+intermediate size takes the byte-identical wide path.
+
+Independent review requested changes before upstreaming because the committed
+regression only exercised the `m>=2` consumer. Commit
+`3eb363e` parameterizes the same-binding replay over `m=[1,3]`, forces and
+asserts the native direct path, and is awaiting its cold/warm Vast gate.
+Review also found a separate generic-shape bug for ModelOpt intermediates
+divisible by 16 but not 64 (for example `I=144`): padded-grid validity can
+permit raw W/scale loads beyond logical rows. A separate repair/test track is
+active; the filed GLM shape `I=1856` is not exposed.
 
 ### C. LMCache future lifecycle
 
@@ -103,14 +117,26 @@ Owner: `lmcache_lifecycle_fix` subagent.
 Target: compose retained CUDA event resources with timeout, idempotent
 completion, `_expire`, late-response safety, and exact-once resource release.
 
-Checkpoint (2026-07-31 03:37 UTC): reconstructed release + #7/#8 prerequisites
+Checkpoint (2026-07-31 04:05 UTC): reconstructed release + #7/#8 prerequisites
 + #18/#19/#20 at local integration `caf7417be83f225c93e426f0885b935cefcc388c`.
 The unified completion transition found an additional traceback-retention bug:
 storing and raising the same timeout exception retained its future/CUDA event.
 `2014fbb2271eae516b9f2c61dd0098601e99bd19` raises a fresh timeout while
 keeping the terminal sentinel traceback-free. The union passed 124 CPU tests
-(13 skipped) and 137 CUDA-visible tests warm. Real round-trip and
-outage/recovery gates remain before peer review; nothing has been pushed.
+(13 skipped), 137 CUDA-visible tests cold and warm, a 10-test outage/recovery
+gate, and a real native c_ops REGISTER + 3 STORE/RETRIEVE + UNREGISTER round
+trip.
+
+Independent review nevertheless **rejected** this composition on lifecycle
+safety. A caller timeout can release a CUDA IPC exporter while the daemon
+still uses it because the transport has no cancellation acknowledgement;
+recovery can register after shutdown, remote UNREGISTER errors skip later
+cleanup, replaced transfer contexts leak, concurrent CUDA consumers can race
+materialization, and timeout callbacks/observability are inconsistent. These
+are correctness/reliability blockers, not test nitpicks. A new repair branch
+is implementing separate caller/transport lifetime, stop-wins recovery,
+finally-safe cleanup, old-context retirement, consumer serialization, and the
+required deterministic regressions. Nothing has been pushed.
 
 ### D. vLLM/full appliance
 
@@ -120,7 +146,7 @@ Target: refresh current `dev/gilded-gnosis` + #210, re-run focused gates, then
 use the model already present on the rental to measure the full #210 capacity
 sweep while the independent source fixes are prepared.
 
-Checkpoint (2026-07-31 03:30 UTC): current
+Checkpoint (2026-07-31 04:05 UTC): current
 `dev/gilded-gnosis@30038602b71395f481ef4a6edfe4fcf8551d9c15` plus exact #210
 produced throwaway integration `4fa1dd849dccae50ed7fa9104b873ef9a44cfedb`.
 Focused source union: 16 passed and Ruff clean. GPU probabilistic union:
@@ -133,6 +159,27 @@ The reproducible full-model one-process harness is
 `scripts/field_review_full_gate.sh`. It isolates state, credentials and JIT
 caches, keeps the checkpoint read-only, disables all appliance auxiliaries,
 and refuses to run when any GPU process is present.
+
+The matched r14 control at GMU 0.90, MTP0, 3,072 scheduler tokens and 131,072
+model length booted with:
+
+- mixed Trellis arena: 759.8 MiB/rank, `prefill_capacity=3072`;
+- GPU KV capacity: 264,960 tokens;
+- resident GPU process memory: about 89.5 GiB/rank;
+- model weights: 81.93 GiB/rank;
+- initialization: 116.13 s after engine creation, including 40.12 s compile.
+
+Unset current-base + #210 reproduced exactly 759.8 MiB and 264,960 KV tokens.
+That first source-import attempt exposed two harness contaminants and is
+diagnostic only: missing local-package FlashAttention `.so` links produced
+fallback ERROR logs, and the turnkey structured-output compatibility patch
+mutated the reviewed worktree. The binary links now point to the unchanged r14
+image extensions, the candidate tree is clean, and candidate gates explicitly
+skip that default-on runtime mutation to preserve exact-SHA attribution.
+Explicit capacity 3,072 is now running from a fresh JIT cache; 1,536/1,024/512
+follow. The installed PCIe calibration helper also exposed a separate
+reliability bug when `LD_PRELOAD` is unset; its upstream source/fix is being
+tracked independently.
 
 ## Public status
 
