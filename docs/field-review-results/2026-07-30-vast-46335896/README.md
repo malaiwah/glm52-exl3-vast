@@ -39,6 +39,22 @@ and
 The continuing repair ledger is
 [`UPSTREAM-REPAIR-CAMPAIGN.md`](UPSTREAM-REPAIR-CAMPAIGN.md).
 
+The retained host has since completed the full-model vLLM #210 capacity
+sweep. At matched TP4/DCP4, MTP0, 3,072 scheduler tokens and GMU 0.90,
+reducing the EXL3 prefill arena from 3,072 to 1,024 rows returned
+480.1 MiB/GPU and increased KV capacity from 264,960 to 328,960 tokens
+(+24.15%). Median 3,072-token prefill moved from 1,845.90 to
+1,807.58 tok/s (-2.08%), while C1 TPOT stayed effectively flat
+(29.334 versus 29.429 ms). Capacity 512 also passed and reached 344,832 KV
+tokens, but cost about 5.1% prefill, making 1,024 the balanced candidate.
+
+The W4A16 #100/#102 composition blocker is also repaired. The exact pre-fix
+lineage fails all four M=1/M=3 × ReLU2/SiLU poisoned same-binding replay
+cases with NaNs; the narrow inactive-lane mask passes them cold and warm.
+The repaired #100 union passed 116/116, and the exact #100 + #102 integration
+passed 112 with 8 intentional skips cold and warm. Full evidence and exact
+integration SHAs are in the repair ledger.
+
 ## Outcome
 
 The focused vLLM changes pass. The individual W4A16 sizing/capture changes

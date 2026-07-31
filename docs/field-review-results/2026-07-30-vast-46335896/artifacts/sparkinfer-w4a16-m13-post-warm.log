@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.1, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /workspace/field-review-tests/worktrees/sparkinfer-w4a16-pr100-final
+configfile: pyproject.toml
+plugins: anyio-4.14.2
+collecting ... collected 4 items
+
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[1-relu2] PASSED [ 25%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[1-silu] PASSED [ 50%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[3-relu2] PASSED [ 75%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[3-silu] PASSED [100%]
+
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+========================= 4 passed, 1 warning in 2.69s =========================

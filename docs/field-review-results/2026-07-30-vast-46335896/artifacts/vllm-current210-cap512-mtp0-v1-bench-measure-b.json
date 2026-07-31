@@ -1,0 +1,221 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T04:41:07Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 3072,
+  "output_tokens": 64,
+  "concurrency": [
+   1
+  ],
+  "requests_per_level": 3,
+  "prefill_tokens": [
+   3072,
+   3073,
+   3074
+  ],
+  "warmup": 0,
+  "temperature": 0.0,
+  "seed": null,
+  "prompt_seed": "field-review-capacity-measure-b"
+ },
+ "metadata": {},
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.764,
+   "request_throughput_rps": 0.5669,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1747.19,
+   "output_throughput_tok_s": 0.567,
+   "mean_ttft_ms": 1762.986,
+   "p50_ttft_ms": 1762.986,
+   "p95_ttft_ms": 1762.986,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.763046,
+     "ttft_ms": 1762.986,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.758,
+   "request_throughput_rps": 0.5688,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1753.169,
+   "output_throughput_tok_s": 0.569,
+   "mean_ttft_ms": 1757.627,
+   "p50_ttft_ms": 1757.627,
+   "p95_ttft_ms": 1757.627,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.757683,
+     "ttft_ms": 1757.627,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 3073
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.7594,
+   "request_throughput_rps": 0.5684,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1751.77,
+   "output_throughput_tok_s": 0.568,
+   "mean_ttft_ms": 1759.082,
+   "p50_ttft_ms": 1759.082,
+   "p95_ttft_ms": 1759.082,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.759122,
+     "ttft_ms": 1759.082,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "batch"
+    }
+   ],
+   "target_prompt_tokens": 3074
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 3,
+   "completed": 3,
+   "failed": 0,
+   "duration_s": 10.6002,
+   "request_throughput_rps": 0.283,
+   "prompt_tokens": 9231,
+   "output_tokens": 192,
+   "prompt_throughput_tok_s": 870.831,
+   "output_throughput_tok_s": 18.113,
+   "mean_ttft_ms": 1682.67,
+   "p50_ttft_ms": 1682.807,
+   "p95_ttft_ms": 1685.448,
+   "mean_tpot_ms": 29.374,
+   "p50_tpot_ms": 29.339,
+   "p95_tpot_ms": 29.451,
+   "mean_itl_ms": 29.373,
+   "metric_prompt_tokens": 9231,
+   "metric_generation_tokens": 192,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.526576,
+     "ttft_ms": 1679.462,
+     "tpot_ms": 29.319,
+     "mean_itl_ms": 29.318,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.541945,
+     "ttft_ms": 1685.742,
+     "tpot_ms": 29.464,
+     "mean_itl_ms": 29.463,
+     "output_head": "batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the record.\nba"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.531172,
+     "ttft_ms": 1682.807,
+     "tpot_ms": 29.339,
+     "mean_itl_ms": 29.338,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

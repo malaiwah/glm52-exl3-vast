@@ -1,0 +1,514 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.1, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /workspace/field-review-tests/worktrees/sparkinfer-w4a16-prefix-m13
+configfile: pyproject.toml
+plugins: anyio-4.14.2
+collecting ... collected 4 items
+
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[1-relu2] FAILED [ 25%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[1-silu] FAILED [ 50%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[3-relu2] FAILED [ 75%]
+tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[3-silu] FAILED [100%]
+
+=================================== FAILURES ===================================
+____ test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[1-relu2] _____
+
+activation = 'relu2', m = 1
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7c3961b1b5f0>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+    @pytest.mark.parametrize("activation", ["relu2", "silu"])
+    @pytest.mark.parametrize("m", [1, 3])
+    def test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail(
+        activation: str,
+        m: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        experts, hidden_size, intermediate_size = 8, 128, 128
+        topk = 2
+        monkeypatch.setenv("SPARKINFER_W4A16_SMALL_M_DIRECT", "1")
+        torch.manual_seed(20260730 + (1000 if activation == "silu" else 0) + m)
+        rows = intermediate_size * (2 if activation == "silu" else 1)
+        w13_dense = torch.randn(experts, rows, hidden_size, device="cuda") * 0.12
+        w2_dense = (
+            torch.randn(experts, hidden_size, intermediate_size, device="cuda") * 0.12
+        )
+        w13_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w2_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w13, w13_blockscale = _quantize_dense_moe_weight_storage(
+            w13_dense,
+            w13_global_scale,
+        )
+        w2, w2_blockscale = _quantize_dense_moe_weight_storage(
+            w2_dense,
+            w2_global_scale,
+        )
+        x = (torch.randn(m, hidden_size, device="cuda") * 0.5).to(torch.bfloat16)
+        topk_ids = torch.randint(
+            0,
+            experts,
+            (m, topk),
+            device="cuda",
+            dtype=torch.int32,
+        )
+        topk_weights = torch.softmax(torch.randn(m, topk, device="cuda"), dim=-1)
+        a_gscale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w4a16_experts = prepare_tp_moe_fp4_experts(
+            a=x,
+            a1_gscale=a_gscale,
+            w1_fp4=w13,
+            w1_blockscale=w13_blockscale,
+            w1_alphas=w13_global_scale,
+            a2_gscale=a_gscale,
+            w2_fp4=w2,
+            w2_blockscale=w2_blockscale,
+            w2_alphas=w2_global_scale,
+            activation=activation,
+            quant_mode="w4a16",
+        )
+        prepared_w4a16 = w4a16_experts.representation_for("w4a16")
+        assert prepared_w4a16.weight_layout == "modelopt"
+        assert _small_m_direct_supported(
+            m=m,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            num_experts=experts,
+            topk=topk,
+            activation=activation,
+            apply_router_weight_on_input=False,
+            swiglu_limit=None,
+            swiglu_alpha=None,
+            swiglu_beta=None,
+            element_dtype="bf16",
+            weight_layout=prepared_w4a16.weight_layout,
+            w13_layout="w13",
+            scale_format="e4m3_k16",
+        )
+        binding = make_tp_moe_fp4_binding(
+            a=x,
+            experts=w4a16_experts,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            quant_mode="w4a16",
+        )
+        expected = moe_reference_w4a16_f32(
+            x,
+            w13,
+            w13_blockscale,
+            w13_global_scale,
+            w2,
+            w2_blockscale,
+            w2_global_scale,
+            topk_ids,
+            topk_weights,
+            experts,
+            hidden_size,
+            intermediate_size,
+            activation=activation,
+        )
+    
+        first = binding.run()
+        torch.cuda.synchronize()
+        first_metrics = compare_to_reference(first, expected)
+        assert bool(torch.isfinite(first).all().item())
+        assert first_metrics.cos > 0.999, first_metrics
+    
+        # The arena legitimately preserves the padded half of each 128-u32
+        # swizzle block. Poison it all, then prove FC1 rewrites every logical lane
+        # and FC2 ignores every inactive lane on the same-binding replay.
+        binding.intermediate_cache2.fill_(float("nan"))
+        replay = binding.run()
+        torch.cuda.synchronize()
+        replay_metrics = compare_to_reference(replay, expected)
+>       assert bool(torch.isfinite(replay).all().item())
+E       AssertionError: assert False
+E        +  where False = bool(False)
+E        +    where False = <built-in method item of Tensor object at 0x7c3960aa44b0>()
+E        +      where <built-in method item of Tensor object at 0x7c3960aa44b0> = tensor(False, device='cuda:0').item
+E        +        where tensor(False, device='cuda:0') = <built-in method all of Tensor object at 0x7c39584bed50>()
+E        +          where <built-in method all of Tensor object at 0x7c39584bed50> = tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0').all
+E        +            where tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0') = <built-in method isfinite of type object at 0x7c3c63f59d60>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0',\n       dtype=torch.bfloat16))
+E        +              where <built-in method isfinite of type object at 0x7c3c63f59d60> = torch.isfinite
+
+tests/moe/test_w4a16_e2e.py:989: AssertionError
+_____ test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[1-silu] _____
+
+activation = 'silu', m = 1
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7c395818aa50>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+    @pytest.mark.parametrize("activation", ["relu2", "silu"])
+    @pytest.mark.parametrize("m", [1, 3])
+    def test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail(
+        activation: str,
+        m: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        experts, hidden_size, intermediate_size = 8, 128, 128
+        topk = 2
+        monkeypatch.setenv("SPARKINFER_W4A16_SMALL_M_DIRECT", "1")
+        torch.manual_seed(20260730 + (1000 if activation == "silu" else 0) + m)
+        rows = intermediate_size * (2 if activation == "silu" else 1)
+        w13_dense = torch.randn(experts, rows, hidden_size, device="cuda") * 0.12
+        w2_dense = (
+            torch.randn(experts, hidden_size, intermediate_size, device="cuda") * 0.12
+        )
+        w13_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w2_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w13, w13_blockscale = _quantize_dense_moe_weight_storage(
+            w13_dense,
+            w13_global_scale,
+        )
+        w2, w2_blockscale = _quantize_dense_moe_weight_storage(
+            w2_dense,
+            w2_global_scale,
+        )
+        x = (torch.randn(m, hidden_size, device="cuda") * 0.5).to(torch.bfloat16)
+        topk_ids = torch.randint(
+            0,
+            experts,
+            (m, topk),
+            device="cuda",
+            dtype=torch.int32,
+        )
+        topk_weights = torch.softmax(torch.randn(m, topk, device="cuda"), dim=-1)
+        a_gscale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w4a16_experts = prepare_tp_moe_fp4_experts(
+            a=x,
+            a1_gscale=a_gscale,
+            w1_fp4=w13,
+            w1_blockscale=w13_blockscale,
+            w1_alphas=w13_global_scale,
+            a2_gscale=a_gscale,
+            w2_fp4=w2,
+            w2_blockscale=w2_blockscale,
+            w2_alphas=w2_global_scale,
+            activation=activation,
+            quant_mode="w4a16",
+        )
+        prepared_w4a16 = w4a16_experts.representation_for("w4a16")
+        assert prepared_w4a16.weight_layout == "modelopt"
+        assert _small_m_direct_supported(
+            m=m,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            num_experts=experts,
+            topk=topk,
+            activation=activation,
+            apply_router_weight_on_input=False,
+            swiglu_limit=None,
+            swiglu_alpha=None,
+            swiglu_beta=None,
+            element_dtype="bf16",
+            weight_layout=prepared_w4a16.weight_layout,
+            w13_layout="w13",
+            scale_format="e4m3_k16",
+        )
+        binding = make_tp_moe_fp4_binding(
+            a=x,
+            experts=w4a16_experts,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            quant_mode="w4a16",
+        )
+        expected = moe_reference_w4a16_f32(
+            x,
+            w13,
+            w13_blockscale,
+            w13_global_scale,
+            w2,
+            w2_blockscale,
+            w2_global_scale,
+            topk_ids,
+            topk_weights,
+            experts,
+            hidden_size,
+            intermediate_size,
+            activation=activation,
+        )
+    
+        first = binding.run()
+        torch.cuda.synchronize()
+        first_metrics = compare_to_reference(first, expected)
+>       assert bool(torch.isfinite(first).all().item())
+E       AssertionError: assert False
+E        +  where False = bool(False)
+E        +    where False = <built-in method item of Tensor object at 0x7c3958205e50>()
+E        +      where <built-in method item of Tensor object at 0x7c3958205e50> = tensor(False, device='cuda:0').item
+E        +        where tensor(False, device='cuda:0') = <built-in method all of Tensor object at 0x7c39584bcff0>()
+E        +          where <built-in method all of Tensor object at 0x7c39584bcff0> = tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0').all
+E        +            where tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0') = <built-in method isfinite of type object at 0x7c3c63f59d60>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0',\n       dtype=torch.bfloat16))
+E        +              where <built-in method isfinite of type object at 0x7c3c63f59d60> = torch.isfinite
+
+tests/moe/test_w4a16_e2e.py:979: AssertionError
+____ test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[3-relu2] _____
+
+activation = 'relu2', m = 3
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7c39536c12b0>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+    @pytest.mark.parametrize("activation", ["relu2", "silu"])
+    @pytest.mark.parametrize("m", [1, 3])
+    def test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail(
+        activation: str,
+        m: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        experts, hidden_size, intermediate_size = 8, 128, 128
+        topk = 2
+        monkeypatch.setenv("SPARKINFER_W4A16_SMALL_M_DIRECT", "1")
+        torch.manual_seed(20260730 + (1000 if activation == "silu" else 0) + m)
+        rows = intermediate_size * (2 if activation == "silu" else 1)
+        w13_dense = torch.randn(experts, rows, hidden_size, device="cuda") * 0.12
+        w2_dense = (
+            torch.randn(experts, hidden_size, intermediate_size, device="cuda") * 0.12
+        )
+        w13_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w2_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w13, w13_blockscale = _quantize_dense_moe_weight_storage(
+            w13_dense,
+            w13_global_scale,
+        )
+        w2, w2_blockscale = _quantize_dense_moe_weight_storage(
+            w2_dense,
+            w2_global_scale,
+        )
+        x = (torch.randn(m, hidden_size, device="cuda") * 0.5).to(torch.bfloat16)
+        topk_ids = torch.randint(
+            0,
+            experts,
+            (m, topk),
+            device="cuda",
+            dtype=torch.int32,
+        )
+        topk_weights = torch.softmax(torch.randn(m, topk, device="cuda"), dim=-1)
+        a_gscale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w4a16_experts = prepare_tp_moe_fp4_experts(
+            a=x,
+            a1_gscale=a_gscale,
+            w1_fp4=w13,
+            w1_blockscale=w13_blockscale,
+            w1_alphas=w13_global_scale,
+            a2_gscale=a_gscale,
+            w2_fp4=w2,
+            w2_blockscale=w2_blockscale,
+            w2_alphas=w2_global_scale,
+            activation=activation,
+            quant_mode="w4a16",
+        )
+        prepared_w4a16 = w4a16_experts.representation_for("w4a16")
+        assert prepared_w4a16.weight_layout == "modelopt"
+        assert _small_m_direct_supported(
+            m=m,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            num_experts=experts,
+            topk=topk,
+            activation=activation,
+            apply_router_weight_on_input=False,
+            swiglu_limit=None,
+            swiglu_alpha=None,
+            swiglu_beta=None,
+            element_dtype="bf16",
+            weight_layout=prepared_w4a16.weight_layout,
+            w13_layout="w13",
+            scale_format="e4m3_k16",
+        )
+        binding = make_tp_moe_fp4_binding(
+            a=x,
+            experts=w4a16_experts,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            quant_mode="w4a16",
+        )
+        expected = moe_reference_w4a16_f32(
+            x,
+            w13,
+            w13_blockscale,
+            w13_global_scale,
+            w2,
+            w2_blockscale,
+            w2_global_scale,
+            topk_ids,
+            topk_weights,
+            experts,
+            hidden_size,
+            intermediate_size,
+            activation=activation,
+        )
+    
+        first = binding.run()
+        torch.cuda.synchronize()
+        first_metrics = compare_to_reference(first, expected)
+>       assert bool(torch.isfinite(first).all().item())
+E       AssertionError: assert False
+E        +  where False = bool(False)
+E        +    where False = <built-in method item of Tensor object at 0x7c3953708fa0>()
+E        +      where <built-in method item of Tensor object at 0x7c3953708fa0> = tensor(False, device='cuda:0').item
+E        +        where tensor(False, device='cuda:0') = <built-in method all of Tensor object at 0x7c395366bde0>()
+E        +          where <built-in method all of Tensor object at 0x7c395366bde0> = tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0').all
+E        +            where tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0') = <built-in method isfinite of type object at 0x7c3c63f59d60>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan],\n        [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan],\n        [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0',\n       dtype=torch.bfloat16))
+E        +              where <built-in method isfinite of type object at 0x7c3c63f59d60> = torch.isfinite
+
+tests/moe/test_w4a16_e2e.py:979: AssertionError
+_____ test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[3-silu] _____
+
+activation = 'silu', m = 3
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7c3961b4c110>
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+    @pytest.mark.parametrize("activation", ["relu2", "silu"])
+    @pytest.mark.parametrize("m", [1, 3])
+    def test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail(
+        activation: str,
+        m: int,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        experts, hidden_size, intermediate_size = 8, 128, 128
+        topk = 2
+        monkeypatch.setenv("SPARKINFER_W4A16_SMALL_M_DIRECT", "1")
+        torch.manual_seed(20260730 + (1000 if activation == "silu" else 0) + m)
+        rows = intermediate_size * (2 if activation == "silu" else 1)
+        w13_dense = torch.randn(experts, rows, hidden_size, device="cuda") * 0.12
+        w2_dense = (
+            torch.randn(experts, hidden_size, intermediate_size, device="cuda") * 0.12
+        )
+        w13_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w2_global_scale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w13, w13_blockscale = _quantize_dense_moe_weight_storage(
+            w13_dense,
+            w13_global_scale,
+        )
+        w2, w2_blockscale = _quantize_dense_moe_weight_storage(
+            w2_dense,
+            w2_global_scale,
+        )
+        x = (torch.randn(m, hidden_size, device="cuda") * 0.5).to(torch.bfloat16)
+        topk_ids = torch.randint(
+            0,
+            experts,
+            (m, topk),
+            device="cuda",
+            dtype=torch.int32,
+        )
+        topk_weights = torch.softmax(torch.randn(m, topk, device="cuda"), dim=-1)
+        a_gscale = torch.ones(experts, dtype=torch.float32, device="cuda")
+        w4a16_experts = prepare_tp_moe_fp4_experts(
+            a=x,
+            a1_gscale=a_gscale,
+            w1_fp4=w13,
+            w1_blockscale=w13_blockscale,
+            w1_alphas=w13_global_scale,
+            a2_gscale=a_gscale,
+            w2_fp4=w2,
+            w2_blockscale=w2_blockscale,
+            w2_alphas=w2_global_scale,
+            activation=activation,
+            quant_mode="w4a16",
+        )
+        prepared_w4a16 = w4a16_experts.representation_for("w4a16")
+        assert prepared_w4a16.weight_layout == "modelopt"
+        assert _small_m_direct_supported(
+            m=m,
+            hidden_size=hidden_size,
+            intermediate_size=intermediate_size,
+            num_experts=experts,
+            topk=topk,
+            activation=activation,
+            apply_router_weight_on_input=False,
+            swiglu_limit=None,
+            swiglu_alpha=None,
+            swiglu_beta=None,
+            element_dtype="bf16",
+            weight_layout=prepared_w4a16.weight_layout,
+            w13_layout="w13",
+            scale_format="e4m3_k16",
+        )
+        binding = make_tp_moe_fp4_binding(
+            a=x,
+            experts=w4a16_experts,
+            topk_weights=topk_weights,
+            topk_ids=topk_ids,
+            quant_mode="w4a16",
+        )
+        expected = moe_reference_w4a16_f32(
+            x,
+            w13,
+            w13_blockscale,
+            w13_global_scale,
+            w2,
+            w2_blockscale,
+            w2_global_scale,
+            topk_ids,
+            topk_weights,
+            experts,
+            hidden_size,
+            intermediate_size,
+            activation=activation,
+        )
+    
+        first = binding.run()
+        torch.cuda.synchronize()
+        first_metrics = compare_to_reference(first, expected)
+        assert bool(torch.isfinite(first).all().item())
+        assert first_metrics.cos > 0.999, first_metrics
+    
+        # The arena legitimately preserves the padded half of each 128-u32
+        # swizzle block. Poison it all, then prove FC1 rewrites every logical lane
+        # and FC2 ignores every inactive lane on the same-binding replay.
+        binding.intermediate_cache2.fill_(float("nan"))
+        replay = binding.run()
+        torch.cuda.synchronize()
+        replay_metrics = compare_to_reference(replay, expected)
+>       assert bool(torch.isfinite(replay).all().item())
+E       AssertionError: assert False
+E        +  where False = bool(False)
+E        +    where False = <built-in method item of Tensor object at 0x7c395373c5a0>()
+E        +      where <built-in method item of Tensor object at 0x7c395373c5a0> = tensor(False, device='cuda:0').item
+E        +        where tensor(False, device='cuda:0') = <built-in method all of Tensor object at 0x7c3953709770>()
+E        +          where <built-in method all of Tensor object at 0x7c3953709770> = tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0').all
+E        +            where tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0') = <built-in method isfinite of type object at 0x7c3c63f59d60>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan],\n        [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan],\n        [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0',\n       dtype=torch.bfloat16))
+E        +              where <built-in method isfinite of type object at 0x7c3c63f59d60> = torch.isfinite
+
+tests/moe/test_w4a16_e2e.py:989: AssertionError
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[1-relu2] - AssertionError: assert False
+ +  where False = bool(False)
+ +    where False = <built-in method item of Tensor object at 0x7c3960aa44b0>()
+ +      where <built-in method item of Tensor object at 0x7c3960aa44b0> = tensor(False, device='cuda:0').item
+ +        where tensor(False, device='cuda:0') = <built-in method all of Tensor object at 0x7c39584bed50>()
+ +          where <built-in method all of Tensor object at 0x7c39584bed50> = tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0').all
+ +            where tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0') = <built-in method isfinite of type object at 0x7c3c63f59d60>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0',\n       dtype=torch.bfloat16))
+ +              where <built-in method isfinite of type object at 0x7c3c63f59d60> = torch.isfinite
+FAILED tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[1-silu] - AssertionError: assert False
+ +  where False = bool(False)
+ +    where False = <built-in method item of Tensor object at 0x7c3958205e50>()
+ +      where <built-in method item of Tensor object at 0x7c3958205e50> = tensor(False, device='cuda:0').item
+ +        where tensor(False, device='cuda:0') = <built-in method all of Tensor object at 0x7c39584bcff0>()
+ +          where <built-in method all of Tensor object at 0x7c39584bcff0> = tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0').all
+ +            where tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0') = <built-in method isfinite of type object at 0x7c3c63f59d60>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0',\n       dtype=torch.bfloat16))
+ +              where <built-in method isfinite of type object at 0x7c3c63f59d60> = torch.isfinite
+FAILED tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[3-relu2] - AssertionError: assert False
+ +  where False = bool(False)
+ +    where False = <built-in method item of Tensor object at 0x7c3953708fa0>()
+ +      where <built-in method item of Tensor object at 0x7c3953708fa0> = tensor(False, device='cuda:0').item
+ +        where tensor(False, device='cuda:0') = <built-in method all of Tensor object at 0x7c395366bde0>()
+ +          where <built-in method all of Tensor object at 0x7c395366bde0> = tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0').all
+ +            where tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0') = <built-in method isfinite of type object at 0x7c3c63f59d60>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan],\n        [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan],\n        [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0',\n       dtype=torch.bfloat16))
+ +              where <built-in method isfinite of type object at 0x7c3c63f59d60> = torch.isfinite
+FAILED tests/moe/test_w4a16_e2e.py::test_w4a16_modelopt_direct_replay_ignores_stale_swizzle_tail[3-silu] - AssertionError: assert False
+ +  where False = bool(False)
+ +    where False = <built-in method item of Tensor object at 0x7c395373c5a0>()
+ +      where <built-in method item of Tensor object at 0x7c395373c5a0> = tensor(False, device='cuda:0').item
+ +        where tensor(False, device='cuda:0') = <built-in method all of Tensor object at 0x7c3953709770>()
+ +          where <built-in method all of Tensor object at 0x7c3953709770> = tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0').all
+ +            where tensor([[False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False],\n        [False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False, False, False,\n         False, False, False, False, False, False, False, False]],\n       device='cuda:0') = <built-in method isfinite of type object at 0x7c3c63f59d60>(tensor([[nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan],\n        [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan],\n        [nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n         nan, nan, nan, nan, nan, nan, nan, nan]], device='cuda:0',\n       dtype=torch.bfloat16))
+ +              where <built-in method isfinite of type object at 0x7c3c63f59d60> = torch.isfinite
+========================= 4 failed, 1 warning in 4.98s =========================

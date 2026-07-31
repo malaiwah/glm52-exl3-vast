@@ -1,0 +1,221 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T04:40:26Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 3072,
+  "output_tokens": 64,
+  "concurrency": [
+   1
+  ],
+  "requests_per_level": 3,
+  "prefill_tokens": [
+   3072,
+   3073,
+   3074
+  ],
+  "warmup": 0,
+  "temperature": 0.0,
+  "seed": null,
+  "prompt_seed": "field-review-capacity-measure-a"
+ },
+ "metadata": {},
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 2.1595,
+   "request_throughput_rps": 0.4631,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1427.201,
+   "output_throughput_tok_s": 0.463,
+   "mean_ttft_ms": 2157.744,
+   "p50_ttft_ms": 2157.744,
+   "p95_ttft_ms": 2157.744,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 2.157812,
+     "ttft_ms": 2157.744,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "apple"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.7621,
+   "request_throughput_rps": 0.5675,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1749.077,
+   "output_throughput_tok_s": 0.568,
+   "mean_ttft_ms": 1761.598,
+   "p50_ttft_ms": 1761.598,
+   "p95_ttft_ms": 1761.598,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.761666,
+     "ttft_ms": 1761.598,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "blue"
+    }
+   ],
+   "target_prompt_tokens": 3073
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.7591,
+   "request_throughput_rps": 0.5685,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1752.014,
+   "output_throughput_tok_s": 0.568,
+   "mean_ttft_ms": 1758.736,
+   "p50_ttft_ms": 1758.736,
+   "p95_ttft_ms": 1758.736,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.758783,
+     "ttft_ms": 1758.736,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "apple"
+    }
+   ],
+   "target_prompt_tokens": 3074
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 3,
+   "completed": 3,
+   "failed": 0,
+   "duration_s": 10.5804,
+   "request_throughput_rps": 0.2835,
+   "prompt_tokens": 9231,
+   "output_tokens": 192,
+   "prompt_throughput_tok_s": 872.46,
+   "output_throughput_tok_s": 18.147,
+   "mean_ttft_ms": 1678.621,
+   "p50_ttft_ms": 1679.512,
+   "p95_ttft_ms": 1680.321,
+   "mean_tpot_ms": 29.333,
+   "p50_tpot_ms": 29.336,
+   "p95_tpot_ms": 29.366,
+   "mean_itl_ms": 29.49,
+   "metric_prompt_tokens": 9231,
+   "metric_generation_tokens": 192,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.53065,
+     "ttft_ms": 1680.411,
+     "tpot_ms": 29.369,
+     "mean_itl_ms": 29.841,
+     "output_head": "cat dog bat rat cow pig fox owl ant bee eel emu yak ape hen ram ewe ox assContinuing the benchmark document field-review"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.525026,
+     "ttft_ms": 1679.512,
+     "tpot_ms": 29.294,
+     "mean_itl_ms": 29.293,
+     "output_head": "cat dog bat fox owl ant bee rat cow pig hen ram yak emu ape elk ox puma lynx hare bear seal wolf moose deer otter stoat "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.524103,
+     "ttft_ms": 1675.941,
+     "tpot_ms": 29.336,
+     "mean_itl_ms": 29.335,
+     "output_head": "apple banana cherry date elderberry fig grape honey ice jelly kiwi lemon mango nectarine orange papaya quince raspberry "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

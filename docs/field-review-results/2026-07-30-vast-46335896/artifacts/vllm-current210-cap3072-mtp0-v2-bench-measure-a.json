@@ -1,0 +1,221 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T04:11:57Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 3072,
+  "output_tokens": 64,
+  "concurrency": [
+   1
+  ],
+  "requests_per_level": 3,
+  "prefill_tokens": [
+   3072,
+   3073,
+   3074
+  ],
+  "warmup": 0,
+  "temperature": 0.0,
+  "seed": null,
+  "prompt_seed": "field-review-capacity-measure-a"
+ },
+ "metadata": {},
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 2.0801,
+   "request_throughput_rps": 0.4807,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1481.646,
+   "output_throughput_tok_s": 0.481,
+   "mean_ttft_ms": 2078.231,
+   "p50_ttft_ms": 2078.231,
+   "p95_ttft_ms": 2078.231,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 2.078305,
+     "ttft_ms": 2078.231,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.6696,
+   "request_throughput_rps": 0.5989,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1845.902,
+   "output_throughput_tok_s": 0.599,
+   "mean_ttft_ms": 1669.233,
+   "p50_ttft_ms": 1669.233,
+   "p95_ttft_ms": 1669.233,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.669283,
+     "ttft_ms": 1669.233,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "batch"
+    }
+   ],
+   "target_prompt_tokens": 3073
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.6673,
+   "request_throughput_rps": 0.5998,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1848.552,
+   "output_throughput_tok_s": 0.6,
+   "mean_ttft_ms": 1667.002,
+   "p50_ttft_ms": 1667.002,
+   "p95_ttft_ms": 1667.002,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.667046,
+     "ttft_ms": 1667.002,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "blue"
+    }
+   ],
+   "target_prompt_tokens": 3074
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 3,
+   "completed": 3,
+   "failed": 0,
+   "duration_s": 10.3181,
+   "request_throughput_rps": 0.2908,
+   "prompt_tokens": 9231,
+   "output_tokens": 192,
+   "prompt_throughput_tok_s": 894.638,
+   "output_throughput_tok_s": 18.608,
+   "mean_ttft_ms": 1591.159,
+   "p50_ttft_ms": 1590.222,
+   "p95_ttft_ms": 1593.627,
+   "mean_tpot_ms": 29.334,
+   "p50_tpot_ms": 29.316,
+   "p95_tpot_ms": 29.366,
+   "mean_itl_ms": 29.491,
+   "metric_prompt_tokens": 9231,
+   "metric_generation_tokens": 192,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.440839,
+     "ttft_ms": 1594.005,
+     "tpot_ms": 29.315,
+     "mean_itl_ms": 29.314,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.440574,
+     "ttft_ms": 1590.222,
+     "tpot_ms": 29.371,
+     "mean_itl_ms": 29.844,
+     "output_head": "cat dog bat fox owl ant bee cow pig rat hen yak ewe ram oxtelemetry batch 132 stayed nominal; the operator reviewed pres"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3077,
+     "output_tokens": 64,
+     "elapsed_s": 3.43614,
+     "ttft_ms": 1589.25,
+     "tpot_ms": 29.316,
+     "mean_itl_ms": 29.315,
+     "output_head": "Telemetry batch 132 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

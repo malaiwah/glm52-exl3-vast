@@ -103,8 +103,23 @@ intermediate size takes the byte-identical wide path.
 
 Independent review requested changes before upstreaming because the committed
 regression only exercised the `m>=2` consumer. Commit
-`3eb363e` parameterizes the same-binding replay over `m=[1,3]`, forces and
-asserts the native direct path, and is awaiting its cold/warm Vast gate.
+`783707cd` parameterizes the same-binding replay over `m=[1,3]`, forces and
+asserts the native direct path. The exact pre-fix lineage failed all four
+M=1/M=3 × ReLU2/SiLU poisoned-replay cases with non-finite output. The narrow
+lane mask then passed all four cold and warm. The repaired #100 lineage passed
+116/116 focused tests; exact #100 + #102 integration
+`6b2ad9dc` passed 112 with 8 intentional skips cold in 106.12 seconds and warm
+in 5.38 seconds. The 64.90904 MiB/rank planner reduction remains unchanged.
+
+Evidence:
+[pre-fix four-case failure](artifacts/sparkinfer-w4a16-m13-prefix-cold.log),
+[post-fix cold](artifacts/sparkinfer-w4a16-m13-post-cold.log),
+[post-fix warm](artifacts/sparkinfer-w4a16-m13-post-warm.log),
+[#100 repaired union](artifacts/sparkinfer-w4a16-pr100-final-suite-cold.log),
+[#100 + #102 cold](artifacts/sparkinfer-w4a16-pr100-102-final-suite-cold.log),
+and
+[#100 + #102 warm](artifacts/sparkinfer-w4a16-pr100-102-final-suite-warm.log).
+
 Review also found a separate generic-shape bug for ModelOpt intermediates
 divisible by 16 but not 64 (for example `I=144`): padded-grid validity can
 permit raw W/scale loads beyond logical rows. A separate repair/test track is
@@ -176,10 +191,45 @@ fallback ERROR logs, and the turnkey structured-output compatibility patch
 mutated the reviewed worktree. The binary links now point to the unchanged r14
 image extensions, the candidate tree is clean, and candidate gates explicitly
 skip that default-on runtime mutation to preserve exact-SHA attribution.
-Explicit capacity 3,072 is now running from a fresh JIT cache; 1,536/1,024/512
-follow. The installed PCIe calibration helper also exposed a separate
-reliability bug when `LD_PRELOAD` is unset; its upstream source/fix is being
-tracked independently.
+The installed PCIe calibration helper also exposed a separate reliability bug
+when `LD_PRELOAD` is unset; its upstream source/fix is being tracked
+independently.
+
+The full current-base + exact #210 sweep is now complete. Every point booted
+the 3.25 bpw model, served the exact `391` correctness response, completed all
+requests, and exited without an engine/CUDA error. Results are matched at
+TP4/DCP4, MTP0, dynamic NVFP4 KV, GMU 0.90, scheduler capacity 3,072,
+131,072 model length, and one sequence:
+
+| EXL3 prefill capacity | Trellis arena/rank | Arena vs 3,072 | GPU KV tokens | KV vs 3,072 | 3,072-token prefill median | Prefill delta | C1 TPOT |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 3,072 | 759.8 MiB | control | 264,960 | control | 1,845.90 tok/s | control | 29.334 ms |
+| 1,536 | 399.7 MiB | -360.1 MiB | 312,832 | +18.07% | 1,827.01 tok/s | -1.02% | 29.434 ms |
+| 1,024 | 279.7 MiB | -480.1 MiB | 328,960 | +24.15% | 1,807.58 tok/s | -2.08% | 29.429 ms |
+| 512 | 159.7 MiB | -600.1 MiB | 344,832 | +30.15% | 1,751.77 tok/s | -5.10% | 29.374 ms |
+
+The 1,024-token capacity is the current balanced candidate: it returns
+480.1 MiB/rank and 64,000 KV tokens without a meaningful decode change for a
+roughly 2% short-prefill cost. Capacity 512 is valid and maximizes headroom,
+but its repeatable prefill tradeoff is large enough that it should remain an
+explicit capacity-first option.
+
+All cold runs exposed an appliance warmup gap rather than a #210 regression:
+the server advertises ready before first-request Triton/CuTeDSL shapes have
+compiled. A dedicated prime was excluded from measured medians; after it, no
+new prefill JIT appeared in the steady repeats. This deserves separate
+turnkey warmup work.
+
+Evidence:
+[3,072 server](artifacts/vllm-current210-cap3072-mtp0-v2-server.log),
+[3,072 benchmark](artifacts/vllm-current210-cap3072-mtp0-v2-bench-measure-a.json),
+[1,536 server](artifacts/vllm-current210-cap1536-mtp0-v1-server.log),
+[1,536 benchmark](artifacts/vllm-current210-cap1536-mtp0-v1-bench-measure-a.json),
+[1,024 server](artifacts/vllm-current210-cap1024-mtp0-v1-server.log),
+[1,024 benchmark](artifacts/vllm-current210-cap1024-mtp0-v1-bench-measure-a.json),
+[512 server](artifacts/vllm-current210-cap512-mtp0-v1-server.log),
+and
+[512 steady repeat](artifacts/vllm-current210-cap512-mtp0-v1-bench-measure-b.json).
 
 ## Public status
 
