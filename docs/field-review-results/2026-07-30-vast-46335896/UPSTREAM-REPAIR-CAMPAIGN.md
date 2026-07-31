@@ -1036,3 +1036,74 @@ The build log explicitly records successful application at both vLLM target
 trees. This image is packaging evidence, **not** the final candidate:
 SparkInfer #101/#103 and LMCache #18/#19/#20 remain excluded until their
 second-stage lifecycle reviews and fresh-GPU gates pass.
+
+### I. Full-model pre-composition control
+
+Before either pending IPC repair was admitted, the retained Vast host ran a
+full GLM-5.2 control with the accepted exact-r14 vLLM #210/#211 overlay only.
+The installed r14 SparkInfer and LMCache remained unchanged. The exact profile
+was TP4/DCP4, the willfalco 3.25-bpw mixed K3/K4 checkpoint, MTP3
+probabilistic sampling, EXL3 prefill capacity 1,024, scheduler capacity 2,048,
+graph/sequence window 32/8, GMU 0.92, and 131,072 maximum model length.
+
+Startup established the memory and graph baseline:
+
+- target mixed-Trellis arena: **294.6 MiB/rank** at decode 32 and prefill
+  capacity 1,024;
+- rank-sliced MTP draft arena: **414.1 MiB/rank**;
+- weights: **83.28 GiB/rank**;
+- profiled peak activation: **1.32 GiB/rank**;
+- actual CUDA-graph pool: **0.14 GiB/rank**;
+- available KV memory: **1.88 GiB/rank**, exposing **252,416 tokens**;
+- engine initialization: **200.23 seconds**.
+
+The authenticated feature gate passed health/model discovery, tokenize,
+thinking and non-thinking chat, streamed usage, multi-turn thinking
+preservation, strict JSON with and without thinking, automatic and required
+tool calls, and tool-result round trip. Vision was intentionally skipped
+because this checkpoint/profile has no vision tower. The short correctness
+gate and five-depth 32K retrieval passed.
+
+The independent long-context gate then ran two seeds at each tested length.
+All **20/20** planted values were recovered: five depths
+(1/25/50/75/99%) at approximately 65.9K and 126.3K tokens, twice. Every
+response was non-degenerate. Durations were 37.4 seconds at 65.9K and 73.1
+seconds at 126.3K.
+
+After all prior traffic had warmed the engine, fresh non-prefix-cached
+prefills measured **1,898.7 tok/s** at 3,088 prompt tokens and
+**1,849.0 tok/s** at 32,780 prompt tokens. The original matrix's first 3K
+point measured only 558.3 tok/s while a new shape compiled; it is retained as
+cold-shape evidence and is not used as the steady baseline. Its 32K point
+measured 1,862.8 tok/s.
+
+The matched eight-request concurrency sweep used 3,075-token prompts,
+128-token outputs, temperature 1.0, and a fixed seed:
+
+| concurrency | aggregate output tok/s | prompt tok/s | p50 TPOT | p95 TPOT | MAL | draft acceptance |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 27.182 | 653.014 | 19.779 ms | 27.149 ms | 2.772 | 59.06% |
+| 2 | 33.935 | 815.230 | 32.689 ms | 73.957 ms | 2.937 | 64.57% |
+| 4 | 35.579 | 854.719 | 72.481 ms | 136.258 ms | 2.393 | 46.45% |
+| 8 | 63.026 | 1,514.102 | 59.379 ms | 101.233 ms | 2.675 | 55.82% |
+
+All 32 decode requests completed with zero request error or preemption.
+These are rental-host workload measurements, not the r14 release host's CC1
+microbenchmark.
+
+This control is **not a clean final-stack PASS** despite correct responses.
+The complete server log records post-ready SparkInfer cache misses/JIT for
+previously unseen request shapes, and XGrammar logged four
+`Failed to advance FSM` errors during otherwise successful strict-JSON
+responses. Both are retained as baseline defects that the final appliance
+must eliminate or explicitly reproduce and classify; response-level success
+does not erase a plan-level runtime-log failure.
+
+Evidence:
+[server log](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-server.log),
+[feature gate](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-features.json),
+[32K verification](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-verify32k.json),
+[65K/126K needle matrix](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-needles.json),
+[concurrency matrix](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-benchmark.json),
+and
+[steady prefill control](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-steady-prefill.json).

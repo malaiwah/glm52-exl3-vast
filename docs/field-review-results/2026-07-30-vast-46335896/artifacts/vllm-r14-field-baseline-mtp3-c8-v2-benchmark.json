@@ -1,0 +1,568 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T11:09:27Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 3072,
+  "output_tokens": 128,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 8,
+  "prefill_tokens": [
+   3072,
+   32768
+  ],
+  "warmup": 2,
+  "temperature": 1.0,
+  "seed": 20260731,
+  "prompt_seed": "field-baseline-v2"
+ },
+ "metadata": {
+  "stack": "exact-r14-vllm210211-only"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 5.5167,
+   "request_throughput_rps": 0.1813,
+   "prompt_tokens": 3080,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 558.307,
+   "output_throughput_tok_s": 0.181,
+   "mean_ttft_ms": 5516.254,
+   "p50_ttft_ms": 5516.254,
+   "p95_ttft_ms": 5516.254,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3080,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3080,
+     "output_tokens": 1,
+     "elapsed_s": 5.516314,
+     "ttft_ms": 5516.254,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 17.5926,
+   "request_throughput_rps": 0.0568,
+   "prompt_tokens": 32772,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1862.824,
+   "output_throughput_tok_s": 0.057,
+   "mean_ttft_ms": 17592.184,
+   "p50_ttft_ms": 17592.184,
+   "p95_ttft_ms": 17592.184,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 32772,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32772,
+     "output_tokens": 1,
+     "elapsed_s": 17.592253,
+     "ttft_ms": 17592.184,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "pot"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 37.6715,
+   "request_throughput_rps": 0.2124,
+   "prompt_tokens": 24600,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 653.014,
+   "output_throughput_tok_s": 27.182,
+   "mean_ttft_ms": 2027.27,
+   "p50_ttft_ms": 1501.959,
+   "p95_ttft_ms": 4235.493,
+   "mean_tpot_ms": 21.114,
+   "p50_tpot_ms": 19.779,
+   "p95_tpot_ms": 27.149,
+   "mean_itl_ms": 58.53,
+   "metric_prompt_tokens": 24600,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 368,
+    "draft_tokens": 1104,
+    "accepted_tokens": 652,
+    "mean_acceptance_length": 2.7717,
+    "draft_token_acceptance_rate": 0.5906
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 8.447009,
+     "ttft_ms": 5706.669,
+     "tpot_ms": 21.577,
+     "mean_itl_ms": 59.572,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 3.727508,
+     "ttft_ms": 1503.309,
+     "tpot_ms": 17.513,
+     "mean_itl_ms": 58.531,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 3.722937,
+     "ttft_ms": 1500.555,
+     "tpot_ms": 17.499,
+     "mean_itl_ms": 58.483,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 3.726735,
+     "ttft_ms": 1500.544,
+     "tpot_ms": 17.529,
+     "mean_itl_ms": 58.583,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 4.951939,
+     "ttft_ms": 1501.768,
+     "tpot_ms": 27.167,
+     "mean_itl_ms": 57.502,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 3.78584,
+     "ttft_ms": 1502.297,
+     "tpot_ms": 17.981,
+     "mean_itl_ms": 58.552,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 4.945887,
+     "ttft_ms": 1502.15,
+     "tpot_ms": 27.116,
+     "mean_itl_ms": 57.395,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 4.362657,
+     "ttft_ms": 1500.867,
+     "tpot_ms": 22.534,
+     "mean_itl_ms": 59.62,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 30.1755,
+   "request_throughput_rps": 0.2651,
+   "prompt_tokens": 24600,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 815.23,
+   "output_throughput_tok_s": 33.935,
+   "mean_ttft_ms": 2319.716,
+   "p50_ttft_ms": 1578.693,
+   "p95_ttft_ms": 4802.12,
+   "mean_tpot_ms": 40.54,
+   "p50_tpot_ms": 32.689,
+   "p95_tpot_ms": 73.957,
+   "mean_itl_ms": 114.058,
+   "metric_prompt_tokens": 24600,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 350,
+    "draft_tokens": 1050,
+    "accepted_tokens": 678,
+    "mean_acceptance_length": 2.9371,
+    "draft_token_acceptance_rate": 0.6457
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 8.218516,
+     "ttft_ms": 1861.179,
+     "tpot_ms": 50.058,
+     "mean_itl_ms": 111.531,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 14.097869,
+     "ttft_ms": 3071.049,
+     "tpot_ms": 86.825,
+     "mean_itl_ms": 183.779,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 9.804461,
+     "ttft_ms": 5734.235,
+     "tpot_ms": 32.049,
+     "mean_itl_ms": 110.005,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 5.729645,
+     "ttft_ms": 1578.686,
+     "tpot_ms": 32.685,
+     "mean_itl_ms": 109.234,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 5.730739,
+     "ttft_ms": 1578.7,
+     "tpot_ms": 32.693,
+     "mean_itl_ms": 109.263,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 5.728968,
+     "ttft_ms": 1578.185,
+     "tpot_ms": 32.683,
+     "mean_itl_ms": 109.23,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 5.8181,
+     "ttft_ms": 1577.954,
+     "tpot_ms": 33.387,
+     "mean_itl_ms": 108.721,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 4.617928,
+     "ttft_ms": 1577.739,
+     "tpot_ms": 23.938,
+     "mean_itl_ms": 70.701,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 28.7814,
+   "request_throughput_rps": 0.278,
+   "prompt_tokens": 24600,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 854.719,
+   "output_throughput_tok_s": 35.579,
+   "mean_ttft_ms": 3322.898,
+   "p50_ttft_ms": 2831.544,
+   "p95_ttft_ms": 5772.178,
+   "mean_tpot_ms": 81.524,
+   "p50_tpot_ms": 72.481,
+   "p95_tpot_ms": 136.258,
+   "mean_itl_ms": 196.732,
+   "metric_prompt_tokens": 24600,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 427,
+    "draft_tokens": 1281,
+    "accepted_tokens": 595,
+    "mean_acceptance_length": 2.3934,
+    "draft_token_acceptance_rate": 0.4645
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 10.635977,
+     "ttft_ms": 1872.706,
+     "tpot_ms": 69.002,
+     "mean_itl_ms": 236.842,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 22.050281,
+     "ttft_ms": 3790.383,
+     "tpot_ms": 143.779,
+     "mean_itl_ms": 268.527,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 16.733052,
+     "ttft_ms": 5964.287,
+     "tpot_ms": 84.793,
+     "mean_itl_ms": 269.218,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 20.186833,
+     "ttft_ms": 4655.873,
+     "tpot_ms": 122.291,
+     "mean_itl_ms": 250.499,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 14.533255,
+     "ttft_ms": 5415.405,
+     "tpot_ms": 71.794,
+     "mean_itl_ms": 202.618,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 10.922655,
+     "ttft_ms": 1630.203,
+     "tpot_ms": 73.169,
+     "mean_itl_ms": 142.96,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 8.592474,
+     "ttft_ms": 1627.407,
+     "tpot_ms": 54.843,
+     "mean_itl_ms": 107.154,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 5.756679,
+     "ttft_ms": 1626.921,
+     "tpot_ms": 32.518,
+     "mean_itl_ms": 96.039,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 16.2473,
+   "request_throughput_rps": 0.4924,
+   "prompt_tokens": 24600,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 1514.102,
+   "output_throughput_tok_s": 63.026,
+   "mean_ttft_ms": 7054.644,
+   "p50_ttft_ms": 7186.221,
+   "p95_ttft_ms": 11295.883,
+   "mean_tpot_ms": 61.891,
+   "p50_tpot_ms": 59.379,
+   "p95_tpot_ms": 101.233,
+   "mean_itl_ms": 166.947,
+   "metric_prompt_tokens": 24600,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 381,
+    "draft_tokens": 1143,
+    "accepted_tokens": 638,
+    "mean_acceptance_length": 2.6745,
+    "draft_token_acceptance_rate": 0.5582
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 16.189455,
+     "ttft_ms": 1875.133,
+     "tpot_ms": 112.711,
+     "mean_itl_ms": 210.504,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 13.941391,
+     "ttft_ms": 3791.781,
+     "tpot_ms": 79.918,
+     "mean_itl_ms": 253.738,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 15.3864,
+     "ttft_ms": 6748.903,
+     "tpot_ms": 68.012,
+     "mean_itl_ms": 166.105,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 13.940531,
+     "ttft_ms": 4653.481,
+     "tpot_ms": 73.126,
+     "mean_itl_ms": 238.124,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 14.068225,
+     "ttft_ms": 7623.539,
+     "tpot_ms": 50.746,
+     "mean_itl_ms": 169.596,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 16.24415,
+     "ttft_ms": 11761.679,
+     "tpot_ms": 35.295,
+     "mean_itl_ms": 77.283,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 14.252855,
+     "ttft_ms": 10430.832,
+     "tpot_ms": 30.095,
+     "mean_itl_ms": 100.578,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu\nnu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 3075,
+     "output_tokens": 128,
+     "elapsed_s": 15.295086,
+     "ttft_ms": 9551.806,
+     "tpot_ms": 45.223,
+     "mean_itl_ms": 119.651,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

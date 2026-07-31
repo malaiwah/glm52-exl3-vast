@@ -1,0 +1,112 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T11:17:01Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 512,
+  "concurrency": [],
+  "requests_per_level": 8,
+  "prefill_tokens": [
+   3072,
+   32768
+  ],
+  "warmup": 1,
+  "temperature": 1.0,
+  "seed": 20260730,
+  "prompt_seed": "vllm-r14-field-baseline-steady-v2"
+ },
+ "metadata": {},
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.6264,
+   "request_throughput_rps": 0.6149,
+   "prompt_tokens": 3088,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1898.703,
+   "output_throughput_tok_s": 0.615,
+   "mean_ttft_ms": 1625.82,
+   "p50_ttft_ms": 1625.82,
+   "p95_ttft_ms": 1625.82,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3088,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3088,
+     "output_tokens": 1,
+     "elapsed_s": 1.62588,
+     "ttft_ms": 1625.82,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "apple"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 17.7284,
+   "request_throughput_rps": 0.0564,
+   "prompt_tokens": 32780,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1849.014,
+   "output_throughput_tok_s": 0.056,
+   "mean_ttft_ms": 17727.866,
+   "p50_ttft_ms": 17727.866,
+   "p95_ttft_ms": 17727.866,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 32780,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32780,
+     "output_tokens": 1,
+     "elapsed_s": 17.727944,
+     "ttft_ms": 17727.866,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "batch"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  }
+ ],
+ "concurrency": [],
+ "complete": true,
+ "ok": true
+}

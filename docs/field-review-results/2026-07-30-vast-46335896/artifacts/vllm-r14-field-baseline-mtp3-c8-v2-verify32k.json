@@ -1,0 +1,54 @@
+{
+ "ts": "2026-07-31T11:08:32Z",
+ "base_url": "http://127.0.0.1:18000",
+ "health": true,
+ "short_prompt": {
+  "ok": true,
+  "checks": [
+   {
+    "name": "arithmetic",
+    "ok": true,
+    "detail": "answered '391'"
+   },
+   {
+    "name": "factual",
+    "ok": true,
+    "detail": "answered 'Paris'"
+   },
+   {
+    "name": "instruction",
+    "ok": true,
+    "detail": "answered 'BANANA'"
+   }
+  ]
+ },
+ "structured_output": {
+  "ok": true,
+  "detail": "thinking + strict JSON schema passed",
+  "reasoning_field": true
+ },
+ "long_context": {
+  "attempted": true,
+  "seed": 20260726,
+  "target_tokens": 32768,
+  "tokens": 32858,
+  "tokens_exact": true,
+  "depths": [
+   0.01,
+   0.25,
+   0.5,
+   0.75,
+   0.99
+  ],
+  "found": 5,
+  "total": 5,
+  "degenerate": "",
+  "answer_head": "Kyoto: DPY-6920\nReykjavik: WHW-3981\nValparaiso: XJC-8784\nOuagadougou: MCS-3174\nTrondheim: NUB-9566",
+  "ok": true,
+  "duration_s": 20.513
+ },
+ "long_context_verified": true,
+ "ok": true,
+ "reason": "serving; long-context retrieval verified",
+ "duration_s": 22.3
+}
