@@ -121,9 +121,16 @@ the independent GPU commands, the error is retained in the complete log and
 not counted as a source failure. The corrected static command has its own
 artifact.
 
+Both exact lineages additionally passed a warm 1,025-graph-replay stress
+cycle on four GPUs (6.86 s for #101, 6.73 s for #103), with 64 eager and 64
+multistream iterations and zero residual GPU processes.
+
 [Exact #103 residency GPU gate](artifacts/sparkinfer-replay-residency-103-9db41aa-gpu-cold.log)
 and
 [corrected static gate](artifacts/sparkinfer-replay-residency-103-9db41aa-static-corrected.log).
+[Warm #101 stress](artifacts/sparkinfer-replay-residency-101-6e947cc-gpu-warm1025.log)
+and
+[warm #103 stress](artifacts/sparkinfer-replay-residency-103-9db41aa-gpu-warm1025.log).
 Independent review is still required before publication.
 
 ### B. SparkInfer W4A16 scratch lifetime
