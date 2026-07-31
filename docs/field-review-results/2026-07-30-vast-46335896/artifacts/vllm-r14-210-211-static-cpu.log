@@ -1,0 +1,29 @@
+head=5a7ac1481e1fc24b0bbc35efe160b2ff34797bee
+tree=46f6f5bf387ee2c07712808cfe64f722fa2b99f3
+base_r14_tree=749050edab1b6664937c52fa1b0be360be632c1e
+All checks passed!
+ImportError while loading conftest '/workspace/field-review-tests/worktrees/vllm-r14-exact/tests/conftest.py'.
+tests/conftest.py:45: in <module>
+    from tests.models.utils import (
+tests/models/utils.py:13: in <module>
+    from vllm.config.model import AttnTypeStr, ModelConfig, ModelDType, RunnerOption
+vllm/__init__.py:14: in <module>
+    import vllm.env_override  # noqa: F401
+    ^^^^^^^^^^^^^^^^^^^^^^^^
+vllm/env_override.py:90: in <module>
+    from vllm.utils.torch_utils import is_torch_equal, is_torch_equal_or_newer
+vllm/utils/torch_utils.py:73: in <module>
+    PIN_MEMORY = is_pin_memory_available()
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^
+vllm/utils/platform_utils.py:45: in is_pin_memory_available
+    from vllm.platforms import current_platform
+vllm/platforms/__init__.py:277: in __getattr__
+    _current_platform = resolve_obj_by_qualname(platform_cls_qualname)()
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+vllm/utils/import_utils.py:109: in resolve_obj_by_qualname
+    module = importlib.import_module(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+vllm/platforms/cuda.py:23: in <module>
+    import vllm._C_stable_libtorch  # noqa
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ModuleNotFoundError: No module named 'vllm._C_stable_libtorch'

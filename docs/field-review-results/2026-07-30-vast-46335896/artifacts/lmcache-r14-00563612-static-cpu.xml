@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="2" failures="0" skipped="0" tests="2" time="0.618" timestamp="2026-07-31T08:40:51.175997+00:00" hostname="e9ef92eaa0f4"><testcase classname="" name="tests.v1.multiprocess.test_mq" time="0.000"><error message="collection failure">ImportError while importing test module '/workspace/field-review-tests/worktrees/lmcache-r14-field-00563612/tests/v1/multiprocess/test_mq.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/v1/multiprocess/test_mq.py:38: in &lt;module&gt;
+    from lmcache.v1.multiprocess.server import add_handler_helper
+lmcache/v1/multiprocess/server.py:23: in &lt;module&gt;
+    from lmcache.v1.distributed.storage_manager import StorageManager
+lmcache/v1/distributed/storage_manager.py:14: in &lt;module&gt;
+    from lmcache.native_storage_ops import Bitmap, PeriodicEventNotifier
+E   ModuleNotFoundError: No module named 'lmcache.native_storage_ops'</error></testcase><testcase classname="" name="tests.v1.multiprocess.test_lmcache_driven_event_ordering" time="0.000"><error message="collection failure">ImportError while importing test module '/workspace/field-review-tests/worktrees/lmcache-r14-field-00563612/tests/v1/multiprocess/test_lmcache_driven_event_ordering.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/v1/multiprocess/test_lmcache_driven_event_ordering.py:13: in &lt;module&gt;
+    from lmcache.v1.multiprocess.modules.lmcache_driven_transfer import (
+lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py:39: in &lt;module&gt;
+    from lmcache.v1.multiprocess.engine_context import MPCacheServerContext
+lmcache/v1/multiprocess/engine_context.py:19: in &lt;module&gt;
+    from lmcache.v1.distributed.storage_manager import StorageManager
+lmcache/v1/distributed/storage_manager.py:14: in &lt;module&gt;
+    from lmcache.native_storage_ops import Bitmap, PeriodicEventNotifier
+E   ModuleNotFoundError: No module named 'lmcache.native_storage_ops'</error></testcase></testsuite></testsuites>

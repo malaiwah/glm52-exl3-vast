@@ -1,0 +1,17 @@
+head=e2205cba8d78db03427a3945a75a1f647b51ef5a
+tree=1d378d599538daecfc1e8c11a44010b27d3ddfe5
+base_r14_tree=8110e3ea417794bfb08aff1fba20135102e5536b
+All checks passed!
+.........................................................sssssssssssssss [ 20%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 41%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss [ 62%]
+ssssssssssssssssssss.................sssssssssssssss.........ss......sss [ 82%]
+ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss             [100%]
+=============================== warnings summary ===============================
+../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /workspace/field-review-tests/artifacts/sparkinfer-r14-w4-100-102-static-cpu.xml -
+89 passed, 259 skipped, 1 warning in 3.13s

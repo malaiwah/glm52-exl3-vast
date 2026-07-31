@@ -736,3 +736,77 @@ During repair, PID 1 remains alive while both known child supervisors (PIDs 176
 and 70970 at this checkpoint) are stopped. Always re-check the full process
 tree and `nvidia-smi` before attributing a GPU result. Restore exactly one
 supervisor only after the combined stack has been selected.
+
+### F. Exact r14-base reconstruction
+
+The first focused gates intentionally followed each PR's filed/current base.
+The deployable candidate has an additional boundary: the immutable r14 image
+is a three-repository composition, not any one PR base. The release lock files
+from `blackwell-llm-docker@2464cc03` were therefore replayed before adding the
+accepted field-review deltas.
+
+All three reconstructed trees matched their published lock exactly before a
+single field-review commit was applied:
+
+| component | release base | published r14 tree |
+|---|---|---|
+| vLLM | `f978d009fab996617f9a3cadef36ce727bcd83cd` | `749050edab1b6664937c52fa1b0be360be632c1e` |
+| SparkInfer | `9b852b281250123fe323f63ccb1df3cac0f3bbca` | `8110e3ea417794bfb08aff1fba20135102e5536b` |
+| LMCache | `9cebd405d0caf4bebe01d694b5a8bf4e3e354314` | `a5aa59cc8edca462a3f4c198d17fd2b9c1a7ffaa` |
+
+The exact r14 vLLM tree then accepted merged #211 and both #210 commits
+without a conflict. Candidate `5a7ac1481e1fc24b0bbc35efe160b2ff34797bee`
+(tree `46f6f5bf387ee2c07712808cfe64f722fa2b99f3`) passed:
+
+- Ruff on every changed runtime/test file;
+- the #210/#211 CPU union: **16/16**;
+- the probabilistic GPU union on physical GPU 0: **11/11 cold** and
+  **11/11 warm**.
+
+The unchanged r14 extension binaries were temporarily linked into the source
+worktree because `PYTHONPATH` otherwise shadows the installed native modules.
+Their SHA-256 values are in the log; all links were removed and the source
+worktree was clean after each gate.
+
+The exact r14 SparkInfer tree accepted final #100 source and the reviewed
+#100/#102 merge. One source-composition conflict was recorded in
+`tests/moe/test_w4a16_e2e.py`: both PRs edited the same import block. The
+explicit resolution retains #102's `route_pack_capacity` import. Runtime
+changes merged automatically. Candidate
+`e2205cba8d78db03427a3945a75a1f647b51ef5a` (tree
+`1d378d599538daecfc1e8c11a44010b27d3ddfe5`) passed Ruff, `diff --check`,
+and its no-GPU union with **89 passed / 259 expected CUDA skips**. Compared
+with the independently approved exact #100/#102 tree `cae3aad1`, its only
+runtime differences are r14's paged planner and native mixed-K Trellis module;
+the common repaired source is otherwise identical. Final #101/#103 replay
+composition and the r14 GPU union remain pending.
+
+The exact r14 LMCache tree accepted #18/#19/#20 plus the lifecycle repair
+without a conflict. Candidate
+`0056361275815f7b283366d993a9fa8b069ecd8f` (tree
+`00f710eb833ba720027d9f0694b19e82ff0c0f6b`) passed:
+
+- Ruff and `diff --check`;
+- **135 passed / 13 CUDA skips** on CPU;
+- **148/148** on physical GPU 3 cold;
+- all six component suites separately warm, again all passing.
+
+The installed r14 `native_storage_ops` binary was linked only for collection,
+at SHA-256
+`6e99b95161126bfd7fa1638613a726edd9e0f4ad7edb23a9f0b2a70167598eb8`,
+then removed. The recurrent PyTorch
+`Producer process has been terminated before all shared CUDA tensors released`
+warning was isolated to
+`tests/v1/multiprocess/test_mq.py::test_mq_register_kv_cache`: its client
+process exits before the still-running test server releases the shared fixture
+tensors. No other warm suite emits it and no GPU process survives. Independent
+review must still decide whether to accept this as fixture teardown noise or
+require a test-harness repair before the LMCache stack is promoted.
+
+Evidence:
+[vLLM CPU/static](artifacts/vllm-r14-210-211-static-cpu-v2.log),
+[vLLM GPU cold/warm](artifacts/vllm-r14-210-211-gpu0-cold-warm.log),
+[SparkInfer CPU/static](artifacts/sparkinfer-r14-w4-100-102-static-cpu.log),
+[LMCache CPU/static](artifacts/lmcache-r14-00563612-static-cpu-v2.log),
+[LMCache CUDA cold](artifacts/lmcache-r14-00563612-gpu3-cold.log), and
+[LMCache warm split](artifacts/lmcache-r14-00563612-gpu3-warm-split.log).

@@ -1,0 +1,53 @@
+head=0056361275815f7b283366d993a9fa8b069ecd8f
+tree=00f710eb833ba720027d9f0694b19e82ff0c0f6b
+base_r14_tree=a5aa59cc8edca462a3f4c198d17fd2b9c1a7ffaa
+python=Python 3.12.3
+All checks passed!
+
+==================================== ERRORS ====================================
+______________ ERROR collecting tests/v1/multiprocess/test_mq.py _______________
+ImportError while importing test module '/workspace/field-review-tests/worktrees/lmcache-r14-field-00563612/tests/v1/multiprocess/test_mq.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/v1/multiprocess/test_mq.py:38: in <module>
+    from lmcache.v1.multiprocess.server import add_handler_helper
+lmcache/v1/multiprocess/server.py:23: in <module>
+    from lmcache.v1.distributed.storage_manager import StorageManager
+lmcache/v1/distributed/storage_manager.py:14: in <module>
+    from lmcache.native_storage_ops import Bitmap, PeriodicEventNotifier
+E   ModuleNotFoundError: No module named 'lmcache.native_storage_ops'
+_ ERROR collecting tests/v1/multiprocess/test_lmcache_driven_event_ordering.py _
+ImportError while importing test module '/workspace/field-review-tests/worktrees/lmcache-r14-field-00563612/tests/v1/multiprocess/test_lmcache_driven_event_ordering.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/v1/multiprocess/test_lmcache_driven_event_ordering.py:13: in <module>
+    from lmcache.v1.multiprocess.modules.lmcache_driven_transfer import (
+lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py:39: in <module>
+    from lmcache.v1.multiprocess.engine_context import MPCacheServerContext
+lmcache/v1/multiprocess/engine_context.py:19: in <module>
+    from lmcache.v1.distributed.storage_manager import StorageManager
+lmcache/v1/distributed/storage_manager.py:14: in <module>
+    from lmcache.native_storage_ops import Bitmap, PeriodicEventNotifier
+E   ModuleNotFoundError: No module named 'lmcache.native_storage_ops'
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+../../../../opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: 91 warnings
+  /opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: DeprecationWarning: `LoggingHandler` in `opentelemetry-sdk` is deprecated. Use the handler from `opentelemetry-instrumentation-logging` instead.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /workspace/field-review-tests/artifacts/lmcache-r14-00563612-static-cpu.xml -
+=========================== short test summary info ============================
+ERROR tests/v1/multiprocess/test_mq.py
+ERROR tests/v1/multiprocess/test_lmcache_driven_event_ordering.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!
+======================== 92 warnings, 2 errors in 0.62s ========================
