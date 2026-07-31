@@ -1,0 +1,4 @@
+UTC=2026-07-31T07:55:30Z head=292089355d3720af912898b56a3fb275680a111a status=0
+All checks passed!
+Would reformat: lmcache/integration/vllm/vllm_multi_process_adapter.py
+1 file would be reformatted, 6 files already formatted

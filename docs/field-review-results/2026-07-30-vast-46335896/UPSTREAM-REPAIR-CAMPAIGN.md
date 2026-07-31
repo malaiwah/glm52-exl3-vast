@@ -312,6 +312,60 @@ divisible by 16 but not 64 (for example `I=144`): padded-grid validity can
 permit raw W/scale loads beyond logical rows. A separate repair/test track is
 active; the filed GLM shape `I=1856` is not exposed.
 
+Checkpoint (2026-07-31 07:54 UTC): the generic repair is now pinned at exact
+head `9535f545a7538d4e5a95f800e7d6c91e808fccaa`. It extends the prior
+`5ab78a0955e23ae395c33a1832c1893e206dbeee` repair in four ways:
+
+1. E4M3 narrow and wide FC2 readers predicate packed W2 words and scale
+   elements using exact logical indices rather than a coarse 64-row tile;
+2. the M>1 planner only chooses FC1 chunks whose widths are integral
+   16-value blocks, while the M=1 retile path backs down to a valid divisor;
+3. the N=16 path cannot select a zero FC1-chunk count;
+4. native E8M0 W13 uses the independently padded 64-row scale stride instead
+   of the logical 224-row stride.
+
+The investigation retained two useful negative controls. A first graph test
+incorrectly passed the baseline because pytest's working directory shadowed
+the requested `PYTHONPATH`; rerunning from outside the checkout with
+`--import-mode=importlib` made the base fail 6/12 configuration cases and
+abort under Compute Sanitizer with 278 invalid global reads. A first E8M0
+repair padded the tensor but left the reader at stride 224; its ReLU2 cosine
+fell to 0.40–0.58 until the reader stride was corrected. Neither false pass
+nor intermediate failure is counted as candidate evidence.
+
+The exact final head passed on physical GPU 2:
+
+- Ruff, format and `git diff --check`;
+- E4M3 non-64 planner, graph replay and bounds matrix: **40/40**;
+- native E8M0 `I=224` matrix: **24 passed, 8 intentional ReLU2-limit skips**;
+- E4M3 Compute Sanitizer: **8/8, 0 errors**;
+- E8M0 Compute Sanitizer: **24 passed, 8 skips, 0 errors**.
+
+A matched post-warmup A/B used one external harness, fixed 600 W power limit,
+three alternating runs per source, 50 warmups and 500 CUDA-graph replays per
+run. Outputs and all allocation/peak-memory fields were byte-identical for
+GLM-aligned `I=1856`, `K=2688/6144`, M=1/3. Candidate latency deltas were
+respectively -0.07%, -0.12%, -0.15%, and +0.09%: throughput-neutral within
+noise, with no memory change on the already aligned production shape. The
+repair claim is therefore generic correctness/memory safety, not a GLM speed
+or memory gain.
+
+Evidence:
+[E4M3 exact-head matrix](artifacts/w4a16-9535f54-e4m3-gpu2.log),
+[E4M3 memcheck](artifacts/w4a16-9535f54-e4m3-memcheck-gpu2.log),
+[E8M0 exact-head matrix](artifacts/w4a16-9535f54-e8m0-i224-gpu2.log),
+[E8M0 memcheck](artifacts/w4a16-9535f54-e8m0-memcheck-gpu2.log), and the
+matched A/B JSON records
+[base 1](artifacts/w4a16-ab-base-1.json) /
+[candidate 1](artifacts/w4a16-ab-candidate-1.json),
+[base 2](artifacts/w4a16-ab-base-2.json) /
+[candidate 2](artifacts/w4a16-ab-candidate-2.json), and
+[base 3](artifacts/w4a16-ab-base-3.json) /
+[candidate 3](artifacts/w4a16-ab-candidate-3.json).
+
+Independent review of this exact final head is still pending. It must approve
+before the repair is published or admitted to the full-model stack.
+
 ### C. LMCache future lifecycle
 
 Owner: `lmcache_lifecycle_fix` subagent.
@@ -339,6 +393,34 @@ are correctness/reliability blockers, not test nitpicks. A new repair branch
 is implementing separate caller/transport lifetime, stop-wins recovery,
 finally-safe cleanup, old-context retirement, consumer serialization, and the
 required deterministic regressions. Nothing has been pushed.
+
+Checkpoint (2026-07-31 07:58 UTC): the replacement repair is now pinned at
+`3d22b3ceb215b1173f262f6ac3a60ad913960dc6`. It separates caller completion
+from the transport lease, quarantines an in-flight CUDA exporter after caller
+timeout until a late reply or transport reset/close makes release safe,
+serializes one-time CUDA-event materialization, contains timeout callbacks,
+publishes timeout observability once, makes recovery stop-wins, atomically
+replaces and closes old transfer contexts, and runs shutdown cleanup even
+when remote unregister fails.
+
+The first exact rerun at predecessor `29208935` is intentionally retained as
+a harness/static failure: Ruff requested one formatting change, and adding
+the source checkout to `PYTHONPATH` hid the image's compiled
+`native_storage_ops` module. The formatting-only successor above was rerun
+with the unchanged image `c_ops` and `native_storage_ops` binaries linked
+temporarily into the source package and removed afterward. Its exact CPU
+union passed **135 tests with 13 CUDA skips** in 57.19 s; Ruff, format and
+`git diff --check` passed, and the post-cleanup tree was clean.
+
+Evidence:
+[retained predecessor static/harness failure](artifacts/lmcache-29208935-static.log),
+[retained predecessor collection failure](artifacts/lmcache-29208935-cpu.log),
+[final static gate](artifacts/lmcache-3d22b3ce-static.log), and
+[final CPU union](artifacts/lmcache-3d22b3ce-cpu.log).
+
+Independent lifecycle review and exact-head CUDA STORE/RETRIEVE,
+timeout/late-reply, outage/recovery and shutdown gates remain mandatory before
+this repair can be accepted.
 
 ### D. vLLM/full appliance
 
