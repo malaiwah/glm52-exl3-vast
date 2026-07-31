@@ -1570,6 +1570,7 @@ appliance
 `ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7`;
 immutable evidence
 [`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
-With those records fixed, the corrected pair is production-qualified. Section L's rejection
+With those records fixed, the corrected pair is qualified for the 131K
+text-only, offload-disabled attribution profile. Section L's rejection
 continues to apply only to the exact `31fa6a4` / `be1e289` predecessor and its
 SHA-only image.

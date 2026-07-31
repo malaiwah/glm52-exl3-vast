@@ -11,7 +11,7 @@ Test plan: `FIELD-REVIEW-PR-TEST-PLAN.md`, generated 2026-07-30
 This document preserves the first-pass attribution and its negative controls;
 the authoritative final result is the corrected r14 successor described in
 [the counter-validation guide](COUNTER-VALIDATION.md) and
-[repair-campaign section M](UPSTREAM-REPAIR-CAMPAIGN.md#M-exact-repaired-successors-pass-full-model-workload-requalification).
+[repair-campaign section M](UPSTREAM-REPAIR-CAMPAIGN.md#m-exact-repaired-successors-pass-full-model-workload-requalification).
 That exact successor exposed **251,392 logical KV tokens**
 (**1.87 GiB/rank**), passed the 13/13 API suite twice, retrieved 5/5 needles at
 32K and 20/20 across cold 65K/126K probes, completed two bounded
@@ -23,6 +23,9 @@ workers/GPU allocations within 19 seconds. Release appliance
 `ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7`;
 immutable evidence
 [`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
+This closes the 131K text-only, offload-disabled attribution profile only;
+512K serving, vision, and live LMCache remain governed by their separate
+qualification records.
 
 Every `FAIL`, `BLOCKED`, “not releasable”, and “not run” statement below is a
 point-in-time result for the immutable first-pass heads. Those statements are

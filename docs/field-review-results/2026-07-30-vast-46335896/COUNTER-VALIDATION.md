@@ -8,8 +8,9 @@ historical predecessors failed, and the final release records. Do not
 substitute moving PR heads or an unpinned image tag and still attribute the
 result to this stack.
 
-> **Qualification status:** production qualification of the exact repaired
-> SparkInfer/vLLM successor is complete. It passed full-model startup, the
+> **Qualification status:** qualification of the exact repaired SparkInfer/vLLM
+> runtime is complete for the 131K text-only, offload-disabled attribution
+> profile below. It passed full-model startup, the
 > complete text feature suite twice, 32K verification, all 20 planted needles
 > across four cold 65K/126K probes, and bounded C1/C2/C4/C8 serving matrices
 > with zero request failures or preemptions; its post-prime warm log window is
@@ -20,8 +21,9 @@ result to this stack.
 > `ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7`;
 > immutable evidence
 > [`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
-> Independent
-> counter-validation remains encouraged, but no listed release gate is open.
+> Independent counter-validation remains encouraged. All gates scoped to this
+> attribution profile are closed; 512K, vision, and live offload remain outside
+> this evidence.
 
 ## Immutable starting point
 
@@ -42,6 +44,13 @@ result to this stack.
 | immutable reviewer-guide commit | `a1376ed23030941a8df69325bc6324e2dad7b8f2` |
 | runtime release commit | `fa52eda06ab516cd7e1a6628d915d2fd2478478f` |
 | runtime image | `ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7` |
+
+GPU qualification used the manifest-matched imported runtime at the exact
+source heads below. The `fa52eda` appliance was built afterward from unchanged
+runtime files and passed
+[CI run 30646550906](https://github.com/malaiwah/glm52-exl3-vast/actions/runs/30646550906),
+but the published digest was not separately GPU-booted. Do not describe the
+image itself as GPU-qualified without an additional boot.
 
 The base image must be pulled by digest:
 
@@ -568,7 +577,8 @@ model quality and performance into a single “passed” line.
 
 ```text
 GLM-5.2 r14 field-repair stack ready for independent counter-validation
-(production-qualified exact release; independent reproduction requested).
+(exact runtime qualified for the 131K attribution profile; independent
+reproduction requested).
 
 Base:
 voipmonitor/vllm@sha256:cb03f2079d8a74915f01cda15f6bdf505762d13cc3fff192f7ebdaaf6e318bf2

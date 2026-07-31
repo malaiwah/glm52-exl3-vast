@@ -189,7 +189,8 @@ mean acceptance length was 3.523 versus 2.992, and mean/p95 TPOT was
 16.962/23.647 ms versus 25.104/48.709 ms for MTP5. MTP5 produced four fast
 samples but two repeatable ~48 ms outliers, so its median alone was misleading.
 The corrected r14 field-repair successor has now completed that gate and is
-the authoritative result: **251,392 logical KV tokens** (**1.87 GiB/rank**),
+the authoritative field-repair attribution result for the 131K text-only,
+offload-disabled profile: **251,392 logical KV tokens** (**1.87 GiB/rank**),
 13/13 API features on both initial and warm passes, 5/5 needles at 32K,
 20/20 needles across cold 65K/126K probes, and two bounded C1/C2/C4/C8
 matrices with no request failure or preemption. Fully warm prefill was
@@ -202,6 +203,10 @@ released the wrapper within 2 seconds and all workers/GPU allocations within
 `ghcr.io/malaiwah/glm52-exl3-vast:fa52eda06ab516cd7e1a6628d915d2fd2478478f@sha256:1152b6e23604cd158017964c5ef14d6290779f7d1e67ced2ba4a39c8ec83a5c7`;
 immutable evidence
 [`5c76a253`](https://github.com/malaiwah/glm52-exl3-vast/tree/5c76a2536e7fc9a5f1cb6bf182531889f5385e65/docs/field-review-results/2026-07-30-vast-46335896/artifacts).
+This gate does not supersede the separate 512K, vision, or cache-offload
+qualification above. The GPU run used the manifest-matched imported runtime;
+CI built the pinned appliance afterward from unchanged runtime files, but that
+published digest was not separately GPU-booted.
 The exact patch order and independent
 reproduction contract are in the
 [counter-validation guide](docs/field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md).
