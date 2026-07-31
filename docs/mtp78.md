@@ -5,7 +5,7 @@ draft: measurements, history, and compatibility paths.
 
 The complete one-by-one justification for every non-default CLI parameter and
 runtime environment value in the balanced profile is kept in
-[`docs/glm52-tuning-rationale.md`](docs/glm52-tuning-rationale.md). It records
+[`docs/glm52-tuning-rationale.md`](glm52-tuning-rationale.md). It records
 the retained benefit, cost, evidence level, current-source defaults, and
 settings removed as unsupported rather than treating the launch environment
 as folklore.

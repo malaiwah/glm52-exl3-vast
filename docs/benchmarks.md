@@ -6,8 +6,8 @@ requalification boundary.
 
 ## Performance: compare like with like
 
-The provider comparison uses the same balanced
-TP4/DCP2/TR3-MTP5 profile and `llm-inference-bench` v0.4.29 protocol.
+The provider comparison uses the balanced
+TP4/DCP2/TR3-MTP5 flagship profile and `llm-inference-bench` v0.4.29 protocol.
 All measured systems used four RTX PRO 6000 Blackwell 96 GB cards. Results are
 aggregate output throughput; PP is a cold unique-prefix request, so prefix
 cache hits do not inflate it. AIBeast is the final GG v20-r5 compute image;

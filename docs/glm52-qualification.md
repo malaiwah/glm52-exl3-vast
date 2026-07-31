@@ -63,7 +63,7 @@ CI built the pinned appliance afterward from unchanged runtime files, but that
 published digest was not separately GPU-booted.
 The exact patch order and independent
 reproduction contract are in the
-[counter-validation guide](docs/field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md).
+[counter-validation guide](field-review-results/2026-07-30-vast-46335896/COUNTER-VALIDATION.md).
 
 The checkpoint's reported dynamic-NVFP4 KLD is 0.095971 versus 0.119525 for
 3.0 bpw. The appliance independently measured **0.0927076684** over the
@@ -71,7 +71,7 @@ standard 2,047 positions, versus its independent 3.0-bpw result of
 0.1167701185. The reference bundle contains one window, so a displayed
 standard deviation of zero is structural (`n=1`), not zero model variance.
 The complete active-KV/offload matrix and exact release boundaries are in
-[the 3.25-bpw qualification report](docs/glm52-3.25-offload-qualification.md).
+[the 3.25-bpw qualification report](glm52-3.25-offload-qualification.md).
 
 The original 3,072-token shape was not runtime-safe with LMCache: it booted,
 then OOMed its first 128K request on a 36 MiB mixed-K output conversion. The
@@ -110,10 +110,11 @@ JSON both with and without thinking,
 one automatic tool call, and tool-result continuation. The former
 `tool_choice=required` duplicate-call behavior came from XGrammar's GLM
 structural-tag grammar allowing another tool tag, but no normal trailing text
-or end-of-turn path. GG r9 retains r8's pinned XGrammar 0.2.5, whose required grammar
-to permit normal completion after one or more calls while still requiring at
-least one. The probe remains optional until this derived r9 image completes
-the live appliance gate; `tool_choice=auto` remains release-required.
+or end-of-turn path. GG r9 retains r8's pinned XGrammar 0.2.5, whose
+`tool_choice=required` grammar permits normal completion after one or more
+calls while still requiring at least one. The probe remains optional until
+this derived r9 image completes the live appliance gate; `tool_choice=auto`
+remains release-required.
 
 Thinking plus structured output also crosses an MTP-specific boundary. The
 draft can have proposed several answer tokens before the reasoning-end marker
@@ -151,7 +152,7 @@ explicit landing-page option and defaults off.
 ## Vision qualification (v20)
 
 The final v20 turnkey image was qualified on the same 4x RTX PRO 6000
-AIBeast stack described above:
+AIBeast stack as the controls above:
 
 | what | result |
 |---|---|

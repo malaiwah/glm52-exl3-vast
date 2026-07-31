@@ -53,8 +53,12 @@ cache cannot silently consume the whole local RAID0 device.
 ### Profile checkpoints
 
 - GLM: `brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw` at `9297b9f1…`
-- higher-fidelity GLM option: `willfalco/GLM-5.2-EXL3-TR3-3.25bpw` at
-  `61d2b6b7…` (mixed 3/4-bit experts; live qualification status below)
+- higher-fidelity GLM option: `willfalco/GLM-5.2-EXL3-TR3-3.25bpw` (mixed
+  3/4-bit experts) at `d7d79c2d…`, the revision pinned by the shipped config
+  and qualified by the r14 field repair
+  ([docs/glm52-r14-maintenance-plan.md](docs/glm52-r14-maintenance-plan.md));
+  the earlier `61d2b6b7…` qualification is recorded in
+  [docs/glm52-3.25-offload-qualification.md](docs/glm52-3.25-offload-qualification.md)
 - MadeBy561 control: `madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid` release bundle
   `66f3623…`; its 184 weight shards remain the immutable `68babde2…` payload
 - Qwen: `nvidia/Qwen3.6-27B-NVFP4` at `0893e160…`
