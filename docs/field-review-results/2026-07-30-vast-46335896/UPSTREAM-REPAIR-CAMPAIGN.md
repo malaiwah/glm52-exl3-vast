@@ -1385,13 +1385,19 @@ exceptions are secondary teardown defects after the primary worker failure,
 not independent startup causes.  All worker processes exited and the four GPUs
 returned to their idle 14 MiB footprint.
 
-The replacement must preserve collective semantic-channel allocation and the
-capture-safety checks while making an eager stream/channel mismatch a typed
-"custom all-reduce unavailable" result so vLLM can use its normal PYNCCL
-fallback.  Capture-time contract mismatches must remain hard failures.  It also
-needs idempotent, process-group-liveness-aware teardown.  Focused tests alone
-will not re-qualify the replacement: the same full-model startup, traffic and
-shutdown gate is mandatory before any benchmark or promotion.
+The complete call trace refined this initial symptom.  vLLM had already entered
+the semantic `vllm:target:profile` capture scope on the affected stream, but its
+descriptor warm-ups run before CUDA itself reports that stream as capturing.
+SparkInfer's active-scope override was conditional only on CUDA's capture bit,
+so the warm-up's static `vllm:eager:allreduce` label incorrectly selected the
+eager channel inside the target profile scope.  The replacement must preserve
+collective semantic-channel allocation and hard mismatch failures outside an
+active scope, while routing a pre-capture warm-up on the scope's owner stream
+to the top semantic channel.  Unrelated side streams must not inherit it.  The
+same rule is required for one-shot and DCP pools.  It also needs idempotent,
+process-group-liveness-aware teardown.  Focused tests alone will not re-qualify
+the replacement: the same full-model startup, traffic and shutdown gate is
+mandatory before any benchmark or promotion.
 
 Evidence:
 [complete rejected server log](artifacts/field-review-final-4c880eb-mtp3-c8-v1-server.log).
