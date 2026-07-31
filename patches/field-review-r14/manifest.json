@@ -105,6 +105,25 @@
             }
         },
         {
+            "name": "vllm-semantic-pcie-finalizer",
+            "base_commit": "be1e289a8ca6cc043b582b26c788efc4b1f5d0a8",
+            "base_tree": "b2374b5a26eb8acd6d8f961eff8b700701f2255d",
+            "tested_head": "f99e1e7b8636ca3811ab6d23084ac6da63420dc3",
+            "tested_tree": "3c9f525e25e2f304d4fda78a03c8e29e9e2ffc2d",
+            "patch": "vllm-semantic-pcie-finalizer.patch",
+            "patch_sha256": "d69ff9c4a212e59838b031d3d2ec8bd40fc8c8e0c5ce6e2b23220fec6bdbf685",
+            "targets": [
+                "vllm-source",
+                "site-packages"
+            ],
+            "files": {
+                "vllm/distributed/device_communicators/custom_all_reduce.py": {
+                    "before": "3867ec1abfa849bcefcc5edb50a9bd4fc031fe1b8ff12504fa3aae1fd2352b11",
+                    "after": "c3cf1c53fb0bd59983482c9dbb61128704ffb8a42729cdfce769f42dcd8f5be3"
+                }
+            }
+        },
+        {
             "name": "sparkinfer-w4a16-100-102",
             "base_commit": "9b852b281250123fe323f63ccb1df3cac0f3bbca",
             "base_tree": "8110e3ea417794bfb08aff1fba20135102e5536b",
@@ -206,6 +225,28 @@
                 "sparkinfer/comm/pcie/pcie_twoshot.py": {
                     "before": "de155562239506265dbe34b504544e6572d389787ac56ea6bfd22c6a7dc44c8e",
                     "after": "f708c0f34f8d268934e5a0e322e22f246b0a191b3b50cbfa68c398143205a85e"
+                }
+            }
+        },
+        {
+            "name": "sparkinfer-pcie-semantic-prewarm",
+            "base_commit": "31fa6a48116471ce423f0338047453ec1032c202",
+            "base_tree": "0f1f3f9d01889cc7177956510657b578f7cb83db",
+            "tested_head": "bc62980543b3ca59a9bee971df1b19ce6181964c",
+            "tested_tree": "d031e45dd38d8091127ea79056542a9faacb661c",
+            "patch": "sparkinfer-pcie-prewarm.patch",
+            "patch_sha256": "be1ce8b40b8e17e30722cce5b335b463c22cff0845c6cb7878f6f5ba736e6e70",
+            "targets": [
+                "site-packages"
+            ],
+            "files": {
+                "sparkinfer/comm/pcie/pcie_dcp_a2a.py": {
+                    "before": "fc9b7e7f12a28c9dffd916a583e39b19b59134c434d4e6dbae42a2375c81c1bd",
+                    "after": "6f69fc0ac2130ef687d297a1b984702989fbcfdac579715f6133877ac1335e56"
+                },
+                "sparkinfer/comm/pcie/pcie_oneshot.py": {
+                    "before": "83f4ca93446bd74e849b67e906a5dd1a86e2ffbda0f3af943cc76eb984ed8670",
+                    "after": "9eea71f308e10fbeb8fb542b18c4c4959e104a74c307ae452cadde5ff7fe4cd7"
                 }
             }
         },
