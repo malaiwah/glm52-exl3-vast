@@ -1351,3 +1351,47 @@ Evidence:
 [LMCache final CUDA union](artifacts/lmcache-f24812e-composed-gpu3-union.log),
 and
 [LMCache clean recovery round trip](artifacts/lmcache-f24812e-same-id-cuda-roundtrip.log).
+
+### L. Full-model gate rejects the frozen PCIe successor
+
+The first complete GLM-5.2 gate rejected the frozen vLLM/SparkInfer pair before
+the API became healthy.  This supersedes the focused-test qualification of
+SparkInfer `31fa6a48116471ce423f0338047453ec1032c202` and vLLM
+`be1e289a8ca6cc043b582b26c788efc4b1f5d0a8`: the pair is **not deployable** in
+its current form, and the successfully built SHA-only appliance image must not
+be promoted to `main` or `latest`.
+
+The disposable shadow runtime applied the exact manifest, retained the image's
+compiled extensions, applied the required parity ABI compatibility patch, and
+let the appliance entrypoint apply its structured-output/spec-decode patch.
+Startup then completed a fresh compile and PCIe calibration, loaded the
+3.25-bpw mixed K3/K4 target and native MTP draft on all four ranks, and entered
+`determine_available_memory()`.  During the uncaptured memory-profiling warm-up,
+a compiled tensor-parallel all-reduce asked for semantic channel
+`vllm:eager:allreduce`.  SparkInfer found the same physical CUDA stream key
+still associated with a different logical graph channel and raised:
+
+```text
+RuntimeError: CUDA stream key ... is already bound to another logical PCIe oneshot channel
+```
+
+The fail-closed check correctly prevented an unsafe silent alias, but it also
+proved that the registry's permanent one-stream-to-one-logical-channel
+assumption is too strict for vLLM's legitimate sequential reuse of a physical
+stream across warm-up and graph phases.  The engine failed before KV capacity,
+health, traffic, performance, or quality could be measured.  The subsequent
+`Process group ... is not initialized in the world group map` destructor
+exceptions are secondary teardown defects after the primary worker failure,
+not independent startup causes.  All worker processes exited and the four GPUs
+returned to their idle 14 MiB footprint.
+
+The replacement must preserve collective semantic-channel allocation and the
+capture-safety checks while making an eager stream/channel mismatch a typed
+"custom all-reduce unavailable" result so vLLM can use its normal PYNCCL
+fallback.  Capture-time contract mismatches must remain hard failures.  It also
+needs idempotent, process-group-liveness-aware teardown.  Focused tests alone
+will not re-qualify the replacement: the same full-model startup, traffic and
+shutdown gate is mandatory before any benchmark or promotion.
+
+Evidence:
+[complete rejected server log](artifacts/field-review-final-4c880eb-mtp3-c8-v1-server.log).

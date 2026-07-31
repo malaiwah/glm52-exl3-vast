@@ -28,6 +28,8 @@ PREFIX_CACHE_DISK_GB_VALUE="${PREFIX_CACHE_DISK_GB_VALUE:-0}"
 VISION_VALUE="${VISION_VALUE:-0}"
 FIELD_REVIEW_SCRIPTS_DIR="${FIELD_REVIEW_SCRIPTS_DIR:-/workspace/field-review-tests/turnkey-scripts}"
 FIELD_REVIEW_STATE_DIR="${FIELD_REVIEW_STATE_DIR:-/tmp/field-review-$RUN_LABEL/state}"
+FIELD_REVIEW_ENTRYPOINT="${FIELD_REVIEW_ENTRYPOINT:-/usr/local/bin/model-turnkey-entry.sh}"
+CANDIDATE_SOURCE_REVIEW="${CANDIDATE_SOURCE_REVIEW:-1}"
 
 # An interactive SSH shell on a rental does not necessarily inherit the OCI
 # image's virtualenv-first PATH even though PID 1 did.  Pin it here so the
@@ -57,6 +59,19 @@ case "$MODE" in
     exit 2
     ;;
 esac
+
+case "$CANDIDATE_SOURCE_REVIEW" in
+  0|1) ;;
+  *)
+    echo "FATAL: CANDIDATE_SOURCE_REVIEW must be 0 or 1" >&2
+    exit 2
+    ;;
+esac
+
+if [ ! -x "$FIELD_REVIEW_ENTRYPOINT" ]; then
+  echo "FATAL: field-review entrypoint is not executable: $FIELD_REVIEW_ENTRYPOINT" >&2
+  exit 2
+fi
 
 case "$PREFILL_CAPACITY" in
   unset) unset VLLM_EXL3_PREFILL_CAPACITY ;;
@@ -166,10 +181,17 @@ fi
 
 if [ "$MODE" = "candidate" ]; then
   export PYTHONPATH="$CANDIDATE_PYTHONPATH${PYTHONPATH:+:$PYTHONPATH}"
-  # Preserve the exact reviewed vLLM tree. The turnkey compatibility patch is
-  # enabled by default in every appliance boot, but mutating a PR worktree
-  # would invalidate exact-SHA attribution for this source-review gate.
-  export STRUCTURED_OUTPUT_SPEC_PATCH=0
+  if [ "$CANDIDATE_SOURCE_REVIEW" = "1" ]; then
+    # Preserve an exact reviewed vLLM tree. The turnkey compatibility patch is
+    # enabled by default in every appliance boot, but mutating a PR worktree
+    # would invalidate exact-SHA attribution for a source-review gate.
+    export STRUCTURED_OUTPUT_SPEC_PATCH=0
+  else
+    # A disposable packaged-runtime shadow should exercise the complete
+    # turnkey mutation order, including the structured-output compatibility
+    # layer that follows the immutable field-review bundle during image build.
+    unset STRUCTURED_OUTPUT_SPEC_PATCH
+  fi
 else
   unset PYTHONPATH
   unset STRUCTURED_OUTPUT_SPEC_PATCH
@@ -243,7 +265,7 @@ command -v setsid >/dev/null || {
   echo "FATAL: setsid is required for an isolated field-review process group" >&2
   exit 4
 }
-setsid /usr/local/bin/model-turnkey-entry.sh &
+setsid "$FIELD_REVIEW_ENTRYPOINT" &
 service_pid=$!
 trap 'kill -TERM -- "-$service_pid" 2>/dev/null || true' TERM INT
 wait "$service_pid"
