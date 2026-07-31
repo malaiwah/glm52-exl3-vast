@@ -314,6 +314,37 @@ uses GMU 0.92 while keeping the candidate, model, MTP, graph, and capacity
 controls fixed.
 [Standard-GMU MTP3 capacity failure](artifacts/vllm-current210-cap1024-mtp3-v2-server.log).
 
+That controlled GMU 0.92 follow-up **passed** at exact composed vLLM head
+`4fa1dd849dccae50ed7fa9104b873ef9a44cfedb`. It exposed 1.91 GiB/rank for
+257,024 KV tokens (1.96 full 131,072-token requests), completed graph capture
+in seven seconds using another 0.14 GiB/rank, and served without request
+errors, preemptions, OOMs, or Xids. The arithmetic smoke returned exactly
+`391`. A tokenizer-measured 126,327-token prompt retrieved the single needle
+at 50% depth (`Kyoto: AJY-4896`) with no degeneration.
+
+The matched steady 3,072-token C1 sample reported:
+
+- median prefill: 1,783.0 tok/s (1.36% below the MTP0/capacity-1,024 control);
+- median TPOT: 15.967 ms, or 62.63 tok/s, versus 29.430 ms / 33.98 tok/s
+  without MTP;
+- mean acceptance length: 3.111 of four total tokens/step;
+- draft-token acceptance: 70.37%;
+- GPU memory during the measured interval: 91,259–92,911 MiB/rank;
+- observed peak power: 438.43 W on GPU 0.
+
+The deliberately fresh JIT cache exposed the already tracked appliance warmup
+gap: four first-request and four first-3,072-prefill kernels compiled after
+readiness. A separate prime absorbed them; the measured sample and 126K
+retrieval caused no further JIT. An unset-capacity MTP3 run at the same GMU is
+the direct memory control and is recorded separately rather than inferred.
+
+Evidence:
+[server](artifacts/vllm-current210-cap1024-mtp3-v3-server.log),
+[arithmetic](artifacts/vllm-current210-cap1024-mtp3-v3-correctness.json),
+[steady benchmark](artifacts/vllm-current210-cap1024-mtp3-v3-bench-measure-a.json),
+[GPU telemetry](artifacts/vllm-current210-cap1024-mtp3-v3-gpu.csv), and
+[126K retrieval](artifacts/vllm-current210-cap1024-mtp3-v3-needle-126k.json).
+
 ### E. PCIe calibration launcher reliability
 
 The full-model gates independently exposed a release-launcher defect outside
@@ -338,8 +369,14 @@ when a shell-local, unexported value already contains the shim. Results:
 Evidence:
 [parent reproduction](artifacts/blackwell-ldpreload-parent-repro.log) and
 [Vast candidate gate](artifacts/blackwell-ldpreload-vast-gate.log).
-Independent re-review and upstream issue/PR publication remain pending; the
-immutable r14 image is still affected even after source main is repaired.
+Independent re-review returned **APPROVE** after reproducing the parent
+failure and checking Bash 3.2/5.3, unset/empty/exported/unexported values,
+entry preservation, metacharacters, idempotence, and child inheritance.
+Published upstream as
+[blackwell-llm-docker issue #12](https://github.com/local-inference-lab/blackwell-llm-docker/issues/12)
+and
+[repair PR #13](https://github.com/local-inference-lab/blackwell-llm-docker/pull/13)
+at exact head `b4a2f25`. The immutable r14 image remains affected.
 
 ## Public status
 

@@ -1,0 +1,39 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T05:48:09Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "max_model_len": 131072,
+ "reserve_tokens": 4096,
+ "requested_sizes": [
+  126000
+ ],
+ "tested_sizes": [
+  126000
+ ],
+ "depths": [
+  0.5
+ ],
+ "seeds": [
+  20260731
+ ],
+ "probes": [
+  {
+   "attempted": true,
+   "seed": 20260731,
+   "target_tokens": 126000,
+   "tokens": 126327,
+   "tokens_exact": true,
+   "depths": [
+    0.5
+   ],
+   "found": 1,
+   "total": 1,
+   "degenerate": "",
+   "answer_head": "Kyoto: AJY-4896",
+   "ok": true,
+   "duration_s": 74.206
+  }
+ ],
+ "ok": true
+}
