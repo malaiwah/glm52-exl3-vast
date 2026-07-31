@@ -1,0 +1,14 @@
+UTC=2026-07-31T08:28:38Z commit=cae3aad137bd739881833c064e1912177698156f warm=1
+...............................................................ssss....s [ 30%]
+sss....ssss....ssss..................................................... [ 61%]
+........................................................................ [ 91%]
+....................                                                     [100%]
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /workspace/field-review-tests/artifacts/sparkinfer-w4a16-cae3aad-full-warm-gpu2.xml -
+220 passed, 16 skipped, 1 warning in 5.91s
+rc=0 end=2026-07-31T08:28:46Z

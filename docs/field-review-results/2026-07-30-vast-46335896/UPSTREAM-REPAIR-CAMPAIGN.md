@@ -394,6 +394,38 @@ Evidence:
 and
 [external residue/control memcheck](artifacts/w4a16-aa2c4c6-external-residues-memcheck-gpu2.log).
 
+Final test-only successor `cae3aad137bd739881833c064e1912177698156f`
+commits all three missed residue representatives plus aligned `I=512`.
+Independent diff review **approved** it. The exact composed head passed:
+
+- contract + poisoned eager/16-replay graph + bounds: **88/88**;
+- all 24 one-expert bounds cases under Compute Sanitizer: **24/24,
+  0 errors**;
+- complete #102 compile-cache + W4A16 GPU union: **220 passed, 16
+  intentional skips** cold in 171.98 s and warm in 5.91 s.
+
+The byte-identical source repair was replayed onto pure PR #100 lineage and
+published as current head `c2f135c66032ac5e9d0778067dd19ae1910cff47`.
+Its focused 88-case matrix and 24-case sanitizer matrix pass. Its broader
+file reports 196 passed, 16 skips, and one inactive-`relu2` helper failure;
+that is the already known defect fixed by PR #102, and the exact repaired
+#100 + #102 composition above passes the complete union.
+
+The final matched three-run A/B remains throughput- and memory-neutral on the
+production `I=1856` shapes. Candidate latency deltas for K=2688/6144,
+M=1/3 were +0.068%, -0.084%, +0.059%, and +0.039%; outputs, allocated,
+reserved, and peak memory were identical. Thus the original
+**64.90904 MiB/rank planner saving remains the only memory-performance claim**;
+the added repairs make that saving safe across generic ModelOpt shapes.
+
+Evidence:
+[final exact matrix](artifacts/sparkinfer-w4a16-cae3aad-full-gpu2.log),
+[final warm union](artifacts/sparkinfer-w4a16-cae3aad-full-warm-gpu2.log),
+[pure PR #100 exact gate](artifacts/sparkinfer-pr100-c2f135c-w4a16-gpu2.log),
+[pure bounds memcheck](artifacts/sparkinfer-pr100-c2f135c-bounds-memcheck-gpu2.log),
+and
+[final matched A/B summary](artifacts/w4a16-final-ab-summary.log).
+
 ### C. LMCache future lifecycle
 
 Owner: `lmcache_lifecycle_fix` subagent.
