@@ -1091,9 +1091,20 @@ All 32 decode requests completed with zero request error or preemption.
 These are rental-host workload measurements, not the r14 release host's CC1
 microbenchmark.
 
+This same matrix closes the plan's separate #211 live-probabilistic gate.
+Unlike the original greedy release recipe, it explicitly used temperature
+1.0 and a fixed seed. In the V2 runner, `method=mtp` selects
+`MTPSpeculator`, which inherits `AutoRegressiveSpeculator`; non-null
+probabilistic draft logits therefore delegate to #211's shared salted sampler.
+The 32 live requests generated 4,096 tokens across 1,526 speculative steps:
+4,578 draft tokens, 2,563 accepted tokens, pooled MAL **2.680**, and pooled
+draft acceptance **55.99%**. The prior exact-r14 GPU distribution suite passed
+11/11 cold and warm, including the greedy/temperature-zero controls. No
+separate plain-checkpoint download is needed to exercise this code path.
+
 This control is **not a clean final-stack PASS** despite correct responses.
-The complete server log records post-ready SparkInfer cache misses/JIT for
-previously unseen request shapes, and XGrammar logged four
+The fail-closed log audit records 28 post-ready SparkInfer cache misses/JIT
+events for previously unseen request shapes, and XGrammar logged four
 `Failed to advance FSM` errors during otherwise successful strict-JSON
 responses. Both are retained as baseline defects that the final appliance
 must eliminate or explicitly reproduce and classify; response-level success
@@ -1105,5 +1116,6 @@ Evidence:
 [32K verification](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-verify32k.json),
 [65K/126K needle matrix](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-needles.json),
 [concurrency matrix](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-benchmark.json),
+[machine-readable log audit](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-log-audit.json),
 and
 [steady prefill control](artifacts/vllm-r14-field-baseline-mtp3-c8-v2-steady-prefill.json).
