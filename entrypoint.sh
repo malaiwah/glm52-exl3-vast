@@ -733,7 +733,7 @@ trap 'stop_soul_supervisor; if [ -n "${SRV_PID:-}" ]; then kill -9 -- "-$SRV_PID
 # the serve process group and the background children, give vLLM a bounded
 # grace to drop its GPU allocations, then exit; the EXIT trap's kill -9 of
 # the serve group is the backstop for anything that ignored TERM.
-# shellcheck disable=SC2329  # invoked indirectly via the TERM/INT trap below
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via the trap below
 on_term() {
   trap ':' TERM INT
   echo ">>> stop requested: releasing serve process group and children" >&2
