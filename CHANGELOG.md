@@ -6,8 +6,12 @@ lineage and exact pins that used to open the README.
 ## GG v20-r14 (current)
 
 The appliance now pins **GG v20-r14**: the reviewed r13 vLLM/LMCache/XGrammar
-stack plus SparkInfer's native mixed-K K3/K4 EXL3 path for the 3.25-bpw
-checkpoint. It retains r9's paired dynamic-token NVFP4 MLA cache ABI and exact
+stack plus SparkInfer's native mixed-K K3/K4 EXL3 loader for the 3.25-bpw
+checkpoint. A fail-closed successor composes vLLM #210's bounded/sliced
+prefill arena with vLLM #219's shape-aware executor: the cooperative one-grid
+path remains active for decode-sized rows, while large-M prefill returns to
+serial homogeneous K3/K4 block-64 plans. It retains r9's paired dynamic-token
+NVFP4 MLA cache ABI and exact
 adaptive sparse-indexer folding, while consolidating EXL3 on SparkInfer's
 fused-MoE API, fixing target/draft small-row plans and using a repeatable
 post-warmup Trellis arena peak for KV sizing. The flagship EXL3 profile uses the complete

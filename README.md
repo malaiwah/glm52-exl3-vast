@@ -167,13 +167,19 @@ speculation shape; it is not merely a different download URL:
 | variant | topology / speculation | context and memory | intended use |
 |---|---|---|---|
 | **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 524,288 max, 542,208-token cold r11 KV pool at GMU 0.957 on AIBeast, 3,072-token prefill batch, 140,000-token CKV gather, 1 GiB workspace, LMCache over 50% host DRAM | balanced flagship; default |
-| `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler batch with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
+| `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals; one-grid decode plus serial K3/K4 block-64 prefill | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
 An independent Terminal-Bench 2.1 reproduction on the Brandon checkpoint
-scored within 2.6 points of Z.ai's vendor result, and the r14 field repair
-passed its full 13/13-feature and retrieval gates. The complete evidence —
+scored within 2.6 points of Z.ai's vendor result. The r14 field repair combines
+[bounded/sliced EXL3 prefill capacity](https://github.com/local-inference-lab/vllm/pull/210)
+with a [shape-aware mixed-K executor](https://github.com/local-inference-lab/vllm/pull/219):
+decode retains the cooperative one-grid route while large prefills use the
+faster homogeneous K3/K4 block-64 plans. It passed the full 13/13-feature and
+retrieval gates. The final capacity-1,024 turnkey gate measured 2,121/1,932/
+1,837 tok/s at 3K/32K/128K, recovered about 665 MiB/GPU, and retrieved all
+three needles in a 509,022-token prompt. The complete evidence —
 feature gates, KLD measurements, LMCache qualification, and release
 boundaries — is in
 [docs/glm52-qualification.md](docs/glm52-qualification.md) and

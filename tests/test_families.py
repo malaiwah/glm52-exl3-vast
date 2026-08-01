@@ -254,7 +254,7 @@ def test_glm_release_integration():
     check("the r14 native EXL3 gate and compatibility fallback are cache-versioned",
           "patch_exl3_parity_abi.py" in dockerfile
           and "patch_exl3_mixk.py" in dockerfile
-          and "34869669548f2f03e29fcdaca0db691f280b609f082de320d99ab58d1db23540"
+          and "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6"
           in dockerfile
           and dockerfile.index("patch_exl3_parity_abi.py")
           < dockerfile.rindex("patch_exl3_mixk.py")

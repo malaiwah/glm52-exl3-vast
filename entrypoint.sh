@@ -733,7 +733,7 @@ trap 'stop_soul_supervisor; if [ -n "${SRV_PID:-}" ]; then kill -9 -- "-$SRV_PID
 # the serve process group and the background children, give vLLM a bounded
 # grace to drop its GPU allocations, then exit; the EXIT trap's kill -9 of
 # the serve group is the backstop for anything that ignored TERM.
-# shellcheck disable=SC2329  # invoked indirectly via the TERM/INT trap below
+# shellcheck disable=SC2317,SC2329  # invoked indirectly via the trap below
 on_term() {
   trap ':' TERM INT
   echo ">>> stop requested: releasing serve process group and children" >&2
@@ -1841,12 +1841,12 @@ fi
 # the persistent path gives warm restarts for the same immutable stack without
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
-# r14's native one-grid mixed-K EXL3 path changes source consumed by
-# Dynamo/Inductor. The field-review bundle additionally changes compiled
-# SparkInfer PCIe kernels and vLLM EXL3 planning. The second field revision
-# changes semantic graph-prewarm routing, so it must not consume Dynamo or
-# Inductor objects made by the rejected first revision. Restarts of this exact
-# appliance should remain warm.
+# r14's native mixed-K EXL3 path and the field-review shape-aware dispatcher
+# change source consumed by Dynamo/Inductor. The field-review bundle also
+# changes compiled SparkInfer PCIe kernels and vLLM EXL3 planning. The second
+# field revision changes semantic graph-prewarm routing, so it must not consume
+# Dynamo or Inductor objects made by the rejected first revision. Restarts of
+# this exact appliance should remain warm.
 CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3native-field2"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")

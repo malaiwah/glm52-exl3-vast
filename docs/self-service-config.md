@@ -111,7 +111,7 @@ knobs to the model. Summary of the trade each one makes:
 | `PREFIX_CACHE_DISK_GB` | 0 is DRAM-only. A positive value enables LMCache's native filesystem L2 and hard-bounds it to that many GiB. It retains derived prompt KV on disk, so use encrypted local NVMe where available (`/mnt/fast/lmcache/...` on AIBeast), never NFS, and make best-effort secure termination available at startup. The 3.25-bpw AIBeast gate used 512 GiB with 748 GiB initially free; it did not preallocate the limit or reduce the 524,288-token GPU pool. |
 | `VISION` | Image input vs long-context correctness on EXL3 (see rule 6) and ~1.99 GiB/GPU on the final v20 qualification shape. |
 | `MAX_NUM_SEQS`, `MAX_NUM_BATCHED_TOKENS`, `GPU_MEMORY_UTILIZATION` | Concurrency and scheduler prefill chunk against the capture window and against VRAM headroom. |
-| `VLLM_EXL3_PREFILL_CAPACITY` | Reusable EXL3 prefill-arena rows inside a scheduler chunk. The retained-host sweep measured 759.8/399.7/279.7/159.7 MiB per target rank at 3072/1536/1024/512; the 3.25-bpw candidate uses 1024. It must not exceed `MAX_NUM_BATCHED_TOKENS`. |
+| `VLLM_EXL3_PREFILL_CAPACITY` | Reusable EXL3 prefill-arena rows inside a scheduler chunk. The retained-host sweeps measured the memory/PP trade directly; the 3.25-bpw profile uses 1,024 rows because 1,536 recovered half as much memory without improving the corrected r14 executor's PP. It must not exceed `MAX_NUM_BATCHED_TOKENS`. |
 | `MAX_CUDAGRAPH_CAPTURE_SIZE`, `CUDAGRAPH_CAPTURE_SIZES`, `VLLM_EXL3_TRELLIS_MAX_M` | The three ceilings that must move together to serve more streams. |
 
 ---
@@ -138,11 +138,15 @@ uses 48 of its 64-wide window.
 `MAX_NUM_BATCHED_TOKENS` scheduler chunk, so it must be less than or equal to
 the scheduler value. The runtime rejects an impossible value rather than
 silently clamping it. Lower values slice the complete chunk, including its
-short tail; they trade extra launches for memory. On the retained rental,
-1,024 rows instead of 2,048 returned 73,472 logical KV tokens in the unpinned
-MTP3 control while changing prefill throughput by 0.29%. The pinned 3.25-bpw
-profile spends that saving as transient safety margin around its exact 512K
-GPU pool.
+short tail; they trade extra launches for memory. The older cooperative
+mixed-K executor measured a noise-sized cost, but that route was also the
+source of r14's large-M regression. With the corrected shape-aware executor,
+1,024 rows recovered about 665 MiB/rank and 1,536 recovered about 332 MiB/rank;
+both added a second serial K3/K4 block-64 launch sequence and measured about
+10-11% below the unsliced 3K/32K/128K control. The selected 1,024-row profile
+still delivered roughly 1.84-1.94K tok/s at 32K/128K on the 280 W AIBeast
+host, preserves the exact 524,288-token GPU-KV pool, and maximizes transient
+headroom for that accepted PP trade.
 
 ### Role-aware Trellis minimum — fixed in v29
 The old base treated target and draft layers as if they shared one minimum.

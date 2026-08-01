@@ -1,8 +1,11 @@
 # GG v20 r14 retains the paired dynamic-token NVFP4 MLA cache ABI, adaptive
 # sparse-indexer folding, DCP-aware LMCache and XGrammar 0.2.5 from r13. It
 # replaces the appliance's compatibility mixed-K adapter with the reviewed
-# native one-grid K3/K4 Trellis path. Dynamic KV scaling remains the flagship
-# EXL3 default after repeatable KLD and exact long-context retrieval gates.
+# native K3/K4 Trellis loader. The field-review successor keeps its one-grid
+# path for decode-sized rows and restores serial homogeneous block-64 plans for
+# large-M prefill; PR #210 independently bounds and slices the reusable arena.
+# Dynamic KV scaling remains the flagship EXL3 default after repeatable KLD and
+# exact long-context retrieval gates.
 # Pin the immutable July 30 manifest. This compute-base change deliberately
 # changes the compile-cache fingerprint and remains a requalification boundary
 # for memory planning, retrieval, degeneration and performance.
@@ -36,7 +39,7 @@ COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # call glm52-entry.sh from its remote onstart field. Keep the old path as a
 # compatibility alias so a stale provider template cannot strand a rental
 # before the landing page is reachable.
-RUN echo "34869669548f2f03e29fcdaca0db691f280b609f082de320d99ab58d1db23540  /opt/scripts/patch_exl3_mixk.py" | sha256sum -c - \
+RUN echo "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6  /opt/scripts/patch_exl3_mixk.py" | sha256sum -c - \
  && /opt/venv/bin/python /opt/scripts/apply_field_review_patches.py \
       --manifest /opt/field-review-patches/manifest.json \
       --site-packages /opt/venv/lib/python3.12/site-packages \
