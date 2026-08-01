@@ -44,7 +44,31 @@
           "after": "d11ed0ee0911f40d4d259c5f66c7696ef50f26e164d0e6f8cc04826be78d41f8"
         }
       }
-        },
+    },
+    {
+      "name": "vllm-exl3-shape-aware-prefill",
+      "base_commit": "5a7ac1481e1fc24b0bbc35efe160b2ff34797bee",
+      "base_tree": "46f6f5bf387ee2c07712808cfe64f722fa2b99f3",
+      "tested_head": "f6dacddaaacbca1ed4f23c58a621f055472b479f",
+      "tested_tree": "8c32c2c5c113f74329febc377395c1578d5e4037",
+      "upstream": {
+        "pr_210": "47dc47d87f428e195f66cd8e7beffd24946a415b",
+        "pr_219": "c9df46b1ce17f9997859edb4570b437657bc315a",
+        "composed_head": "f6dacddaaacbca1ed4f23c58a621f055472b479f"
+      },
+      "patch": "vllm-exl3-shape-aware.patch",
+      "patch_sha256": "0585ad558e96112add53f2af7a2440abc5c54cb7f45b9f5dc75e3cd1b60129be",
+      "targets": [
+        "vllm-source",
+        "site-packages"
+      ],
+      "files": {
+        "vllm/model_executor/layers/quantization/exl3.py": {
+          "before": "bd084b55d0e8ce949e5402762ce35d67a73736ab057bfbf0ee64154f4d76fef4",
+          "after": "c154fbcaa029e7f310b01b121ecd530b1060895cf53bb04634f0135a7916a624"
+        }
+      }
+    },
         {
             "name": "vllm-semantic-pcie-channels",
             "base_commit": "5a7ac1481e1fc24b0bbc35efe160b2ff34797bee",

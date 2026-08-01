@@ -25,6 +25,14 @@ class FieldReviewPatchTests(unittest.TestCase):
         payload = json.loads(manifest.read_text(encoding="utf-8"))
         names = [component["name"] for component in payload["components"]]
         self.assertLess(
+            names.index("vllm-210-211"),
+            names.index("vllm-exl3-shape-aware-prefill"),
+        )
+        self.assertLess(
+            names.index("vllm-exl3-shape-aware-prefill"),
+            names.index("vllm-semantic-pcie-channels"),
+        )
+        self.assertLess(
             names.index("vllm-semantic-pcie-channels"),
             names.index("vllm-semantic-pcie-finalizer"),
         )
@@ -36,6 +44,10 @@ class FieldReviewPatchTests(unittest.TestCase):
             component["name"]: component["tested_head"]
             for component in payload["components"]
         }
+        self.assertEqual(
+            heads["vllm-exl3-shape-aware-prefill"],
+            "f6dacddaaacbca1ed4f23c58a621f055472b479f",
+        )
         self.assertEqual(
             heads["vllm-semantic-pcie-finalizer"],
             "f99e1e7b8636ca3811ab6d23084ac6da63420dc3",
@@ -59,7 +71,7 @@ class FieldReviewPatchTests(unittest.TestCase):
             stderr=subprocess.STDOUT,
         )
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("validated 8 field-review patch components", result.stdout)
+        self.assertIn("validated 9 field-review patch components", result.stdout)
 
     def make_fixture(self, root: Path) -> tuple[Path, Path, Path]:
         patch_dir = root / "bundle"

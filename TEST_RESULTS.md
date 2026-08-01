@@ -1432,6 +1432,29 @@ NVMe only, never the NFS checkpoint store.
 Credential-free artifacts are retained under
 `/mnt/fast/build/r11-qualification/` on AIBeast.
 
+### GG v20-r14 + vLLM #210/#219 production gate (AIBeast, 2026-08-01)
+
+The source-exact turnkey image composes #210's bounded/sliced EXL3 arena and
+#219's shape-aware mixed-K executor. The latter recovered pristine r14's
+prefill regression: before slicing, 3K/32K/128K PP was 2,283.2/2,146.6/
+2,033.1 tok/s, 28.4-29.3% above pristine r14 and within 1.2-1.7% of the
+matched r13 control.
+
+The selected 1,024-row arena returned about 665 MiB/GPU. A 1,536-row arm
+returned only about 332 MiB/GPU but paid the same roughly 10-11% PP cost, so
+it was rejected. On the final immutable image, unique-prefix cold PP was
+2,121.3/1,931.9/1,837.2 tok/s at 3K/32K/128K. Aggregate MTP5 TG was
+93.0/126.4/161.8/240.5 tok/s at C1/C2/C4/C8, with MAL
+3.31/3.17/3.11/3.70 and no failure or preemption.
+
+The final shape retained exactly 524,288 active GPU-KV tokens plus 125 GiB
+aggregate LMCache DRAM and a bounded 512 GiB NVMe tier. It retrieved 3/3
+needles from an actual 509,022-token prompt without degeneration, exposed
+both `GLM-5.2` and `local-primary`, and completed with no exception or CUDA
+OOM. Full provenance and the reason for keeping MTP3 in the shipping profile
+while the AIBeast control used MTP5 are recorded in
+[`docs/glm52-3.25-offload-qualification.md`](docs/glm52-3.25-offload-qualification.md).
+
 ### GG v20-r11 mixed 3.25-bpw qualification (AIBeast, 2026-07-30)
 
 `willfalco/GLM-5.2-EXL3-TR3-3.25bpw` revision `61d2b6b7…` is a
