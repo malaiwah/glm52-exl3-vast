@@ -274,29 +274,31 @@ Only changes with a plausible path to a product requirement advance:
    There is no measured reason to trade away MTP5's higher acceptance ceiling,
    so MTP5/2,048 is the accepted production candidate.
 
-### Next maintenance window: 3.25-bpw runtime-route A/B plan
+### Completed 2026-08-01 maintenance window: 3.25-bpw runtime routes
 
-These experiments are deferred until AIBeast has another explicit maintenance
-window. They apply only to the qualified r13 `exl3-tr3-3.25bpw` shape. Preserve
+These experiments were executed on the qualified r17
+`exl3-tr3-3.25bpw` shape. The full evidence and decisions are in
+[the r17 maintenance report](glm52-r17-maintenance-results.md). The campaign preserved
 TP4/DCP4, MTP5, batch 2,048, C8 graphs/Trellis through row 48, 2,048 GPU KV
 blocks / 524,288 logical tokens, dynamic-token NVFP4 MLA KV, 125 GiB LMCache
-DRAM and the bounded 512 GiB NVMe tier. Change one route at a time and start
-each comparison from the same idle production control.
+DRAM and the bounded 512 GiB NVMe tier. Each route changed one variable from
+the same idle production geometry.
 
-| order | variable | control | candidate | reason to test |
-|---:|---|---:|---:|---|
-| 1 | `VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE` | `0` | `auto` | r13 `auto` routes genuine MTP5 verifier batches as six query rows per request, exactly filling the C8×6 = 48 captured window; determine whether it improves decode without increasing transient memory |
-| 2 | `VLLM_DCP_TOPK_OWNER_MERGE` | `1` | `0` | `0` is the source default and the issue-33 DCP2 winner; isolate whether the current DCP4 owner-local merge helps or hurts long prefill, decode and workspace on this exact mixed-K shape |
-| 3 | `VLLM_DISABLE_SHARED_EXPERTS_STREAM` | `1` | `0` | the current 3.25-bpw profile disables the shared-expert overlap path; test whether re-enabling it improves decode without lifetime, memory or correctness regressions |
-| 3a | `VLLM_SHARED_EXPERTS_STREAM_TOKEN_THRESHOLD` | `16` | `256` | run only if step 3 selects streaming; `16` is the issue-33 profile value and `256` is the r13 source default |
-| 4 | `VLLM_DCP_A2A_MAX_TOKENS` | `16` | `0` | test the qualified hybrid crossover against uncapped B12X A2A; if the result is shape-dependent, follow with `8` and `32` around the current threshold |
+| variable | candidates | result |
+|---|---|---|
+| `VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE` | `0`, `auto` | `auto` was safe but not a repeatable win; retain `0` |
+| `NCCL_BUFFSIZE` | default 4 MiB, 1 MiB | 1 MiB recovered about 208 MiB/GPU with PP parity; retain on AIBeast |
+| `VLLM_PCIE_DMA_MIN_BYTES` | 6 MiB, calibrated 24 MiB | the microbenchmark-selected 24 MiB lost 3-6% sustained PP; retain 6 MiB |
+| `VLLM_DCP_A2A_MAX_TOKENS` | 16, 32, 48 | 48 improved C8 TG/MAL 3.3% and TPOT 9.7% over 32 at negligible memory cost; retain 48 |
+| `VLLM_DCP_TOPK_OWNER_MERGE` | `1`, `0` | `0` improved PP 1.9-4.7%, C1, and memory; accepted for PP-first production despite lower C4/C8 decode |
+| `VLLM_DISABLE_SHARED_EXPERTS_STREAM` | `1`; `0` considered | not tested: upstream still documents incomplete broad TP/DP correctness coverage; retain disabled |
 
-Do **not** test the unprefixed `DCP_A2A_MAX_TOKENS`: no r13 source consumes
+Do **not** test the unprefixed `DCP_A2A_MAX_TOKENS`: no r17 source consumes
 that name. Do not use forced
 `VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE=1` in this 48-row profile: with
 `VLLM_B12X_MLA_SPEC_DECODE_MAX_Q=8` it can plan C8×8 = 64 rows and therefore
 requires a separately qualified 64-row graph/Trellis and memory envelope.
-`B12X_MHC_MAX_TOKENS` also needs no A/B; the r13 source audit found no runtime
+`B12X_MHC_MAX_TOKENS` also needs no A/B; the r17 source audit found no runtime
 consumer for GLM.
 
 For every control/candidate pair, retain the raw launch environment, image and

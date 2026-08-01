@@ -46,6 +46,24 @@ class FieldReviewLogAuditTests(unittest.TestCase):
         self.assertEqual(full["counts"]["post_ready_compile"], 1)
         self.assertTrue(warm["ok"])
 
+    def test_post_ready_disk_cache_hit_is_not_a_compile_failure(self):
+        report = log_audit.audit(
+            "INFO:     Application startup complete.\n"
+            "[sparkinfer cute.compile] disk-hit reason=post-engine-start "
+            "status=disk-cache-hit cache_key=abc\n"
+        )
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["counts"]["post_ready_compile"], 0)
+
+    def test_post_ready_disk_cache_miss_still_fails(self):
+        report = log_audit.audit(
+            "INFO:     Application startup complete.\n"
+            "[sparkinfer cute.compile] miss reason=post-engine-start "
+            "status=disk-cache-miss cache_key=abc\n"
+        )
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["counts"]["post_ready_compile"], 1)
+
     def test_cuda_ipc_warning_is_a_failure(self):
         report = log_audit.audit(
             "INFO:     Application startup complete.\n"

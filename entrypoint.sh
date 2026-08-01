@@ -1438,11 +1438,11 @@ if [ "${MODEL_VARIANT:-exl3-tr3}" = "madeby561-hybrid" ]; then
 else
   unset VLLM_B12X_ABSORB_BMM VLLM_NF3_GRID188_DECODE
 fi
-# r14 retains r13's target/draft ownership and makes m=1 capturable for
-# both roles. Keep the variable absent with MTP so the role-aware backend owns
-# the minimum. The explicit MTP-off value preserves the same m=1 contract for
-# older compatible GG bases and makes that otherwise implicit choice visible
-# in diagnostics.
+# r17's native vLLM #222 path retains role-aware target/draft ownership and
+# makes m=1 capturable for both roles. Keep the variable absent with MTP so the
+# backend owns the minimum. The explicit MTP-off value preserves the same m=1
+# contract for older compatible GG bases and makes that otherwise implicit
+# choice visible in diagnostics.
 if [ "${MTP_TOKENS:-3}" = "0" ]; then
   export VLLM_EXL3_TRELLIS_MIN_M=1
 else
@@ -1841,13 +1841,12 @@ fi
 # the persistent path gives warm restarts for the same immutable stack without
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
-# r14's native mixed-K EXL3 path and the field-review shape-aware dispatcher
-# change source consumed by Dynamo/Inductor. The field-review bundle also
-# changes compiled SparkInfer PCIe kernels and vLLM EXL3 planning. The second
-# field revision changes semantic graph-prewarm routing, so it must not consume
-# Dynamo or Inductor objects made by the rejected first revision. Restarts of
-# this exact appliance should remain warm.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-exl3native-field2"
+# r17's native #222 mixed-K dispatcher, #105 PCIe package, SparkInfer #110 and
+# LMCache lifecycle composition change source consumed by Dynamo/Inductor and
+# runtime JITs. The parent fingerprint still reflects its base repositories,
+# not every composed release head, so keep an explicit r17 suffix and never
+# reuse r14 AOT artifacts. Restarts of this exact appliance should remain warm.
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r17-native1"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2

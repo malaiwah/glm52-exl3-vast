@@ -18,7 +18,11 @@ READY_MARKER = "Application startup complete."
 PATTERNS = (
     (
         "post_ready_compile",
-        re.compile(r"\[sparkinfer cute\.compile\].*reason=post-engine-start"),
+        re.compile(
+            r"\[sparkinfer cute\.compile\]"
+            r"(?![^\n]*\bstatus=disk-cache-hit\b)"
+            r"[^\n]*\breason=post-engine-start\b"
+        ),
     ),
     ("structured_fsm", re.compile(r"Failed to advance FSM")),
     (
