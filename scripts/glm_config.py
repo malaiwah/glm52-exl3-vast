@@ -449,9 +449,9 @@ VARIANTS = {
 # first-request workspace.  The final offload qualification also lowers the
 # prefill chunk and the exact-fold workspace budget so LMCache's four CUDA
 # transfer contexts do not consume the last all-reduce/output-conversion
-# margin. vLLM #210 splits the reusable arena below the 2,048-row scheduler
-# chunk when capacity is more important than peak throughput. The corrected
-# r14 shape-aware path runs one serial K3/K4 block-64 plan per slice: 1,024 and
+# margin. vLLM #222 natively splits the reusable arena below the 2,048-row
+# scheduler chunk when capacity is more important than peak throughput. The
+# r17 shape-aware path runs one serial K3/K4 block-64 plan per slice: 1,024 and
 # 1,536 rows both measured about 10-11% below the unsliced arm at 3K/32K/128K.
 # Since 1,024 recovered about 665 MiB/rank while 1,536 recovered only 332 MiB
 # without improving PP, the qualified profile keeps the 1,024-row trade.

@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "release": {
+    "image": "voipmonitor/vllm:gilded-gnosis-v20-vllmdb29328-sib2bff71-fi801d57a-cu132-20260801-r17",
+    "manifest_digest": "sha256:d1008eb2bce2947110010fcf52b715b49d54ed3bf62a6b1e0a0b698774157727",
+    "image_id": "sha256:1384b6badaa6c7546c062ddc1c0543b0f657e2105a41a92ba6220372890b0e98",
+    "build_commit": "f5ba50b0d986bb9c46c0270eea0bc8df72bafefe"
+  },
+  "composed_sources": {
+    "vllm": "db293280d021d32db0552f3f6e4b95abbd9c69a1",
+    "sparkinfer": "b2bff719ba1be0a5d30cb39cba795f0812db0f3d",
+    "lmcache": "a5aa59cc8edca462a3f4c198d17fd2b9c1a7ffaa"
+  },
+  "retired_r14_overlays": [
+    {
+      "name": "vllm-210-211",
+      "status": "superseded",
+      "by": "vLLM #222@6206ac40fbd75be0ed18817bde64a63b6b838d2f"
+    },
+    {
+      "name": "vllm-exl3-shape-aware-prefill",
+      "status": "superseded",
+      "by": "vLLM #222@6206ac40fbd75be0ed18817bde64a63b6b838d2f"
+    },
+    {
+      "name": "vllm-semantic-pcie-channels",
+      "status": "included",
+      "by": "vLLM #216@52201611"
+    },
+    {
+      "name": "vllm-semantic-pcie-finalizer",
+      "status": "included",
+      "by": "vLLM #216@52201611"
+    },
+    {
+      "name": "sparkinfer-w4a16-100-102",
+      "status": "superseded",
+      "by": "SparkInfer #110@01917253"
+    },
+    {
+      "name": "sparkinfer-pcie-ipc-hardening",
+      "status": "included",
+      "by": "SparkInfer #105@45033eebcf5bb184587a35c528a62721a46acdf5"
+    },
+    {
+      "name": "sparkinfer-pcie-semantic-prewarm",
+      "status": "included",
+      "by": "SparkInfer #105@45033eebcf5bb184587a35c528a62721a46acdf5"
+    },
+    {
+      "name": "lmcache-lifecycle-hardening",
+      "status": "superseded",
+      "by": "r17 LMCache PRs #7-#17"
+    },
+    {
+      "name": "blackwell-launcher-13",
+      "status": "included",
+      "by": "r17 build composition; exact helper hash verified"
+    }
+  ]
+}

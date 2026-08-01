@@ -11,7 +11,7 @@ BrandonMusic's 3.0-bpw EXL3/TR3 GLM-5.2 checkpoint on four RTX PRO 6000
 Blackwell cards, native TR3 MTP-5 speculation, dynamic-token NVFP4 KV, and a
 full 524,288-token request limit. Weights (~309 GiB) auto-download on first
 boot, so network speed dominates rental startup. The release pins **GG
-v20-r14**; the exact runtime trees, checkpoint revisions, and lineage are in
+v20-r17**; the exact runtime trees, checkpoint revisions, and lineage are in
 the [changelog](CHANGELOG.md).
 
 ## Contents
@@ -172,14 +172,18 @@ speculation shape; it is not merely a different download URL:
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
 An independent Terminal-Bench 2.1 reproduction on the Brandon checkpoint
-scored within 2.6 points of Z.ai's vendor result. The r14 field repair combines
-[bounded/sliced EXL3 prefill capacity](https://github.com/local-inference-lab/vllm/pull/210)
-with a [shape-aware mixed-K executor](https://github.com/local-inference-lab/vllm/pull/219):
-decode retains the cooperative one-grid route while large prefills use the
-faster homogeneous K3/K4 block-64 plans. It passed the full 13/13-feature and
-retrieval gates. The final capacity-1,024 turnkey gate measured 2,121/1,932/
-1,837 tok/s at 3K/32K/128K, recovered about 665 MiB/GPU, and retrieved all
-three needles in a 509,022-token prompt. The complete evidence —
+scored within 2.6 points of Z.ai's vendor result. GG r17 now carries the native
+[bounded, shape-aware mixed-K implementation](https://github.com/local-inference-lab/vllm/pull/222)
+and the [complete custom-PCIe package](https://github.com/local-inference-lab/sparkinfer/pull/105);
+the appliance does not stack the superseded #210/#219 overlays. The r17
+AIBeast production gate retained exactly 524,288 active tokens, passed the
+full API suite, and recovered 5/5 needles at both 256K and an actual
+521,276-token prompt without degeneration. A clean production restart reused
+all 27 first-use kernels from disk and repeated the maximum-context gate with
+a second seed. The exact r14/r17 A/B and the
+NCCL/B12X route campaign are in
+[docs/glm52-r17-maintenance-results.md](docs/glm52-r17-maintenance-results.md).
+The broader evidence —
 feature gates, KLD measurements, LMCache qualification, and release
 boundaries — is in
 [docs/glm52-qualification.md](docs/glm52-qualification.md) and
@@ -195,6 +199,7 @@ idle during any one of them.
 
 | environment | measured first click → `/health` | what dominated | practical first-use budget |
 |---|---:|---|---:|
+| AIBeast GG r17, safetensors + compatible r17 AOT reused | 12–14 min | ~252s shard load plus ~7 min mixed-Trellis hydration; AOT reconstruction under 1s | 15 minutes |
 | AIBeast GG r11, safetensors, cold patched EXL3/AOT cache | 9m46s | 91s weight load plus cold extensions, AOT, profiling and graph capture | 10–12 minutes |
 | AIBeast GG r11, same-stack AOT reused during heavy storage traffic | 6m22s | NFS/cachefilesd contention while another checkpoint populated the RAID0 cache; backbone AOT loaded in 0.55s | 7 minutes |
 | AIBeast GG r5, weights/NFS pages cached, fresh AOT | 4m35s | InstantTensor load, compile and graph profile/capture | 5 minutes |
@@ -580,8 +585,8 @@ writable LMCache mount. On an owned host, create a dedicated local NVMe
 directory and bind it at the appliance's secure-erase-aware path:
 
 ```bash
-mkdir -p /mnt/fast/lmcache/glm52-3.25-r13
-export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-3.25-r13
+mkdir -p /mnt/fast/lmcache/glm52-3.25-r17
+export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-3.25-r17
 export PREFIX_CACHE_BACKEND=lmcache
 export PREFIX_CACHE_DISK_GB=512
 bash scripts/run-local-podman.sh

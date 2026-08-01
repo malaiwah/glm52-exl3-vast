@@ -1455,6 +1455,29 @@ OOM. Full provenance and the reason for keeping MTP3 in the shipping profile
 while the AIBeast control used MTP5 are recorded in
 [`docs/glm52-3.25-offload-qualification.md`](docs/glm52-3.25-offload-qualification.md).
 
+### GG v20-r17 native mixed-K production gate (AIBeast, 2026-08-01)
+
+The immutable r17 base replaced the superseded #210/#219 overlays with native
+vLLM #222 and included SparkInfer #105's complete custom-PCIe wheel. A matched
+production-shape r14/r17 comparison retained identical 82.81 GiB weights,
+1.49 GiB activation peak, 0.54 GiB non-Torch allocation, 0.20 GiB graphs, and
+the fixed 524,288-token KV pool. PP geometric mean changed by -1.4%, within the
+matched gate, while the runtime selected `B12X_PCIE_ONESHOT_DMA` rather than
+the r17-candidate packaging fallback.
+
+The AIBeast route campaign selected a 1 MiB NCCL buffer, 6 MiB lossless-DMA
+crossover, DCP A2A cap 48, and source-default owner merge 0 for the explicit
+PP-first agent workload. The resulting cold PP was 2,230/2,052/1,950 tok/s at
+3K/32K/128K. It passed all API/tool/structured-output checks, exposed both
+served aliases, recovered 5/5 needles from exact 261,195- and 521,276-token
+prompts, and showed no degeneration, preemption, OOM, CUDA, NCCL, structured-
+FSM, or process error. A clean production restart then repeated the exact
+521,276-token matrix with a new seed in 312.9 seconds; all 27 post-ready kernel
+lookups were persistent disk-cache hits, including the twelve long-row
+`m=120` artifacts, and none recompiled. Full candidate tables, rejected
+microbenchmark choices, power/memory boundaries, and raw-artifact locations are recorded in
+[`docs/glm52-r17-maintenance-results.md`](docs/glm52-r17-maintenance-results.md).
+
 ### GG v20-r11 mixed 3.25-bpw qualification (AIBeast, 2026-07-30)
 
 `willfalco/GLM-5.2-EXL3-TR3-3.25bpw` revision `61d2b6b7…` is a
