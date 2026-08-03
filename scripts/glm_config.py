@@ -102,7 +102,8 @@ FAMILIES = {
                       "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS",
                       "B12X_PCIE_DMA", "F8_DMA", "PCIE_CALIBRATION",
                       "PCIE_DMA_MIN_BYTES",
-                      "CLAMP_ROPE_TABLES", "VISION", "VISION_CHUNKS"),
+                      "CLAMP_ROPE_TABLES", "ONLINE_QUANT",
+                      "VISION", "VISION_CHUNKS"),
         "defaults": {
             "MAX_MODEL_LEN": 524288, "MODEL_OUTPUT_LIMIT": 131072, "MTP_TOKENS": 3,
             "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
@@ -120,6 +121,7 @@ FAMILIES = {
             "OFFLOAD_FRACTION": 0, "VISION": False,
             "KV_CACHE_DTYPE": "nvfp4_ds_mla",
             "KV_SCALE_MODE": "static-calibrated",
+            "ONLINE_QUANT": "none",
             "LOAD_FORMAT": "safetensors",
             "MTP_DRAFT_SAMPLE_METHOD": "greedy",
             "SERVED_MODEL_NAME": "GLM-5.2",
@@ -511,6 +513,52 @@ VARIANTS["exl3-tr3-3.25bpw"]["runtime_env"].update({
     "SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB": "64",
 })
 
+# r20-qualified high-fidelity profile. The checkpoint's mixed K3/K4/K5/K6
+# allocation raises fidelity while r20 converts eligible BF16 tensors into a
+# persistent K6 Trellis online cache. On AIBeast the exact turnkey image passed
+# the standard 2,047-position KLD gate, warm-cache restart, 521,276-token
+# five-depth retrieval, strict structured output, C8 and LMCache insertion.
+VARIANTS["exl3-tr3-3.36bpw"] = {
+    "family": "glm52",
+    "label": "EXL3-TR3 mixed 3.36bpw + online K6 — high-fidelity 512K",
+    "repo": "willfalco/GLM-5.2-EXL3-TR3-3.36bpw",
+    "revision": "8d9aa923a17502675ca23737349b67f2e66bb69d",
+    "dirname": "GLM-5.2-EXL3-TR3-3.36bpw",
+    "quantization": "exl3",
+    "native_mtp_format": "exl3-tr3",
+    "default_draft": "native",
+    "defaults": dict(VARIANTS["exl3-tr3-3.25bpw"]["defaults"]),
+    "runtime_env": dict(VARIANTS["exl3-tr3-3.25bpw"]["runtime_env"]),
+    "kv_scales_calibrated": True,
+    "download_gib": 327,
+    "tested": True,
+}
+VARIANTS["exl3-tr3-3.36bpw"]["defaults"].update({
+    "MAX_NUM_BATCHED_TOKENS": 3072,
+    "VLLM_EXL3_PREFILL_CAPACITY": 3072,
+    # Automatic sizing exposed 741,888 tokens but left only ~43 MiB for a
+    # 48 MiB first-request mixed-K temporary and OOMed. 2,048 DCP4 blocks are
+    # exactly 524,288 logical tokens and retain roughly 1 GiB/rank under load.
+    "GPU_BLOCKS_OVERRIDE": 2048,
+    "ONLINE_QUANT": "exl3-b6",
+    "PREFIX_CACHE_BACKEND": "lmcache",
+    "PREFIX_CACHE_DISK_GB": 512,
+    "OFFLOAD_FRACTION": 0.5,
+    "PCIE_CALIBRATION": "off",
+    "PCIE_DMA_MIN_BYTES": 6291456,
+})
+VARIANTS["exl3-tr3-3.36bpw"]["runtime_env"].update({
+    # The r17 A/B winners remain in the exact r20-qualified serving shape.
+    "NCCL_BUFFSIZE": "1048576",
+    "VLLM_DCP_A2A_MAX_TOKENS": "48",
+    "VLLM_DCP_TOPK_OWNER_MERGE": "0",
+    "VLLM_EXL3_PREFILL_BLOCK_M": "32",
+    # r20's LMCache wrapper enforces stable virtual addresses for CUDA IPC.
+    # State the resolved value here too so the profile summary is not
+    # misleading before the wrapper starts.
+    "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
+})
+
 # MTP draft types -> the three env knobs the serve path actually consumes.
 # `tr3-graft`   in-place surgery on layer 78 of the target (the ONLY draft with
 #               long-context evidence: needle 6/6 fp8, armC 3/3 at 150/190/250K)
@@ -675,6 +723,22 @@ KNOBS = [
              "retrievals, and a 521,275-token full-envelope pass on GG v20-r9. "
              "Other variants retain "
              "static-calibrated until independently qualified.")),
+
+    dict(key="ONLINE_QUANT", families=("glm52",), type="choice",
+         default="none", choices=["none", "mxfp8", "exl3-b6"],
+         group="Model", scope="engine", label="BF16 online quantization",
+         rationale=(
+             "r20 can convert eligible BF16 projections while leaving serialized "
+             "EXL3 routed experts untouched. none is the byte-faithful control. "
+             "mxfp8 uses the conservative published overlay and preserves q_a_proj, "
+             "kv_a_proj_with_mqa and lm_head in BF16. exl3-b6 additionally converts "
+             "supported dense/shared-expert tensors into a content-addressed six-bit "
+             "Trellis cache. Its generated quantization_config deliberately still says "
+             "mxfp8: that is vLLM's eligible-layer selection hook; "
+             "VLLM_EXL3_ONLINE_TRELLIS_BITS=6 intercepts those layers and K6 is their "
+             "final representation. The first K6 boot is an offline conversion; later boots "
+             "reuse the atomically published cache. Both modes change numerical "
+             "behavior and require KLD plus cold long-context retrieval before use.")),
 
     dict(key="MTP_DRAFT", families=("glm52",), type="choice", default="native", choices=list(DRAFTS),
          group="Speculative decoding", scope="checkpoint", label="MTP draft type",
@@ -1609,6 +1673,37 @@ def family_serve_args(cfg: dict):
         args = ["--quantization", variant["quantization"]] + args
     if variant.get("quantization_config"):
         args += ["--quantization-config", variant["quantization_config"]]
+    online_quant = cfg.get("ONLINE_QUANT", "none")
+    if cfg.get("MODEL_FAMILY") == "glm52" and online_quant != "none":
+        if online_quant == "mxfp8":
+            online_config = {
+                "linear": {"weight": "mxfp8"},
+                "ignore": [
+                    r"re:.*\.q_a_proj$",
+                    r"re:.*kv_a_proj_with_mqa",
+                    "lm_head",
+                ],
+            }
+        else:
+            # exl3-b6 uses vLLM's MXFP8 quantization_config only to select the
+            # eligible BF16 modules. VLLM_EXL3_ONLINE_TRELLIS_BITS=6 below
+            # intercepts them before conversion; their final cached format is
+            # Trellis K6, not MXFP8. Unsupported aligned shapes may retain the
+            # selector's MXFP8 fallback and are called out explicitly in logs.
+            online_config = {
+                "linear": {"weight": "mxfp8"},
+                "shared_experts": {"weight": "mxfp8"},
+                "ignore": [
+                    r"re:.*\.fused_qkv_a_proj$",
+                    r"re:.*\.q_a_proj$",
+                    r"re:.*kv_a_proj_with_mqa",
+                    r"re:.*\.mlp\.gate$",
+                    "model.layers.78.eh_proj",
+                    "lm_head",
+                ],
+            }
+        args += ["--quantization-config",
+                 json.dumps(online_config, separators=(",", ":"))]
     if cfg.get("KV_CACHE_MEMORY_BYTES", 0) > 0:
         args += ["--kv-cache-memory-bytes", str(cfg["KV_CACHE_MEMORY_BYTES"])]
     if cfg.get("MODEL_FAMILY") in ("qwen36", "custom") and not cfg.get("MULTIMODAL"):
@@ -1659,8 +1754,19 @@ def derive(cfg: dict) -> dict:
     out["FAMILY_ENV_BLOCK"] = fam.get("env_block", "generic")
     out["SPEC_METHOD"] = fam.get("spec_method", "mtp")
     out["FAMILY_SERVE_ARGS"] = family_serve_args(cfg)
+    runtime_env = dict(variant.get("runtime_env", {}))
+    if fam_name == "glm52" and cfg.get("ONLINE_QUANT") == "exl3-b6":
+        runtime_env.update({
+            "VLLM_EXL3_ONLINE_TRELLIS_BITS": "6",
+            "VLLM_EXL3_ENCODER_SOURCE": "/opt/exllamav3-python/exllamav3",
+            "VLLM_EXL3_ONLINE_CACHE_DIR": "/cache/exl3-online",
+            "VLLM_EXL3_ONLINE_CACHE_MODE": "readwrite",
+            "VLLM_B12X_ABSORB_BMM": "0",
+        })
+    elif fam_name == "glm52" and cfg.get("ONLINE_QUANT") == "mxfp8":
+        runtime_env["VLLM_B12X_ABSORB_BMM"] = "1"
     out["PROFILE_RUNTIME_ENV"] = [
-        f"{key}={value}" for key, value in variant.get("runtime_env", {}).items()
+        f"{key}={value}" for key, value in runtime_env.items()
     ]
     # The MTP78 draft apparatus is GLM-only; outside it there is no graft, no
     # overlay and no external draft dir, just a speculation depth.
@@ -1736,6 +1842,17 @@ def validate(cfg: dict, context=None):
             f"model variant '{cfg['MODEL_VARIANT']}' belongs to the "
             f"{variant['family']} family, not {fam_name}. Pick one of: "
             + ", ".join(k for k, v in VARIANTS.items() if v.get("family") == fam_name))
+    if (is_glm and cfg.get("ONLINE_QUANT", "none") != "none"
+            and variant.get("quantization") != "exl3"):
+        err("online-quant-needs-exl3", ["ONLINE_QUANT", "MODEL_VARIANT"],
+            "r20's mxfp8 and exl3-b6 overlays are qualified only over an EXL3 "
+            "checkpoint. This variant owns a different serialized quantizer; "
+            "combining both would emit competing --quantization-config values.")
+    if is_glm and cfg.get("ONLINE_QUANT", "none") != "none":
+        warn("online-quant-needs-quality-gate", ["ONLINE_QUANT", "MODEL_VARIANT"],
+             "online quantization changes BF16 tensors at load time. Re-run KLD, "
+             "cold near-maximum retrieval, degeneration, restart-cache and decode "
+             "acceptance gates on this exact checkpoint/runtime combination.")
     if not str(cfg.get("SERVED_MODEL_NAME", "")).strip():
         err("served-name-empty", ["SERVED_MODEL_NAME"],
             "SERVED_MODEL_NAME cannot be blank: it is the id clients pass in "
@@ -2003,6 +2120,19 @@ def validate(cfg: dict, context=None):
             "3,072-token shape OOMed its first 128K request after a successful "
             "boot. Keep MAX_NUM_BATCHED_TOKENS<=2048 for full-context offload, "
             "or re-run the cold 128K and near-maximum request gates.")
+    if (is_glm and cfg["MODEL_VARIANT"] == "exl3-tr3-3.36bpw"
+            and cfg["MAX_MODEL_LEN"] >= 524288
+            and cfg["OFFLOAD_FRACTION"] > 0
+            and not cfg["GPU_BLOCKS_OVERRIDE"]):
+        warn("mixed-336-offload-needs-pool-pin",
+             ["MODEL_VARIANT", "MAX_MODEL_LEN", "GPU_BLOCKS_OVERRIDE",
+              "OFFLOAD_FRACTION"],
+             "the r20 3.36bpw K6 profile booted with 741,888 automatically "
+             "sized KV tokens, then OOMed its first 32K request when a 48 MiB "
+             "mixed-K temporary found only ~43 MiB free. The qualified DCP4 "
+             "profile pins 2,048 blocks / exactly 524,288 tokens, preserving "
+             "about 1 GiB/rank under load. Keep the pin or repeat the cold "
+             "32K, C8, and near-maximum gates.")
     # DCP multiplies logical KV capacity only on the MLA/DCP (GLM) path; for
     # other families a block is 64 tokens, full stop — using the inapplicable
     # GLM DCP value here would wave through a pool 4x too small.

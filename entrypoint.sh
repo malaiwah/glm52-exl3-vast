@@ -1393,6 +1393,11 @@ unset VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER
 
 refresh_family_runtime_env() {
 if [ "${FAMILY_ENV_BLOCK:-glm52}" = "glm52" ]; then
+# These are profile-owned r20 online-quantization controls. Clear them on every
+# supervisor start so changing exl3-b6 -> none cannot retain the previous
+# conversion/cache contract in the same long-lived PID 1 environment.
+unset VLLM_EXL3_ONLINE_TRELLIS_BITS VLLM_EXL3_ENCODER_SOURCE
+unset VLLM_EXL3_ONLINE_CACHE_DIR VLLM_EXL3_ONLINE_CACHE_MODE
 export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_SPARSE_INDEXER=1
 export VLLM_USE_B12X_MOE=1 VLLM_USE_V2_MODEL_RUNNER=1
 if [ "${B12X_PCIE_DMA:-1}" = "1" ]; then
@@ -1438,7 +1443,7 @@ if [ "${MODEL_VARIANT:-exl3-tr3}" = "madeby561-hybrid" ]; then
 else
   unset VLLM_B12X_ABSORB_BMM VLLM_NF3_GRID188_DECODE
 fi
-# r17's native vLLM #222 path retains role-aware target/draft ownership and
+# r20's native path retains role-aware target/draft ownership and
 # makes m=1 capturable for both roles. Keep the variable absent with MTP so the
 # backend owns the minimum. The explicit MTP-off value preserves the same m=1
 # contract for older compatible GG bases and makes that otherwise implicit
@@ -1569,6 +1574,8 @@ else
   # Qwen/custom so a profile switch cannot inherit MLA, EXL3, or custom NCCL
   # behavior merely because the container image was built for GLM.
   unset VLLM_EXL3_EXT_PATH VLLM_EXL3_ABI_SHIM VLLM_EXL3_PREFILL_CAPACITY
+  unset VLLM_EXL3_ONLINE_TRELLIS_BITS VLLM_EXL3_ENCODER_SOURCE
+  unset VLLM_EXL3_ONLINE_CACHE_DIR VLLM_EXL3_ONLINE_CACHE_MODE
   unset VLLM_NVFP4_MLA_SCALES_FILE
   unset VLLM_NVFP4_MLA_DYNAMIC_SCALE KV_FP8_ROPE
   unset SPARKINFER_INDEXER_TWO_LEVEL_FOLD SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB
@@ -1841,12 +1848,12 @@ fi
 # the persistent path gives warm restarts for the same immutable stack without
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
-# r17's native #222 mixed-K dispatcher, #105 PCIe package, SparkInfer #110 and
+# r20's native mixed-K dispatcher, complete PCIe package, and online-K6 path
 # LMCache lifecycle composition change source consumed by Dynamo/Inductor and
 # runtime JITs. The parent fingerprint still reflects its base repositories,
-# not every composed release head, so keep an explicit r17 suffix and never
+# not every composed release head, so keep an explicit r20 suffix and never
 # reuse r14 AOT artifacts. Restarts of this exact appliance should remain warm.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r17-native1"
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r20-native1"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2

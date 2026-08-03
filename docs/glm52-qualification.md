@@ -4,6 +4,10 @@ Extracted from the README's flagship model card: the end-to-end evidence
 behind the `glm52-exl3` profile and its variants. The 3.25-bpw active-KV and
 offload matrix has its own report in
 [glm52-3.25-offload-qualification.md](glm52-3.25-offload-qualification.md);
+the completed r20/3.36-bpw native/MXFP8/K6, MTP3/MTP5, C16, GPU-order, KLD,
+and LMCache campaign is recorded
+in
+[glm52-r20-3.36-qualification-plan.md](glm52-r20-3.36-qualification-plan.md);
 per-flag justifications are in
 [glm52-tuning-rationale.md](glm52-tuning-rationale.md).
 

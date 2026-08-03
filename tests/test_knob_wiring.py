@@ -92,6 +92,11 @@ INDIRECT = {
         "why": "read by glm_config.family_serve_args to add the optional "
                "--kv-cache-memory-bytes override",
     },
+    "ONLINE_QUANT": {
+        "serve_args": True,
+        "why": "read by glm_config.family_serve_args for the r20 online "
+               "quantization config; derive also emits its runtime cache env",
+    },
     "VLLM_EXL3_TRELLIS_MAX_M": {
         "entrypoint": True,
         "why": "exported and consumed by entrypoint.sh as an EXL3 kernel env "

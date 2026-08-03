@@ -1,15 +1,13 @@
-# GG v20 r17 contains vLLM #222's native shape-aware mixed K3/K4 path and
-# bounded serial prefill, SparkInfer #105's complete runtime-JIT PCIe package,
-# and the r17 LMCache lifecycle series. It supersedes the appliance's r14
-# overlays (#210/#219 and their field-review successors); applying those old
-# diffs here would double-patch an unrelated source tree. Pin the immutable
-# August 1 manifest and verify the exact native files before the one remaining
-# parity-call compatibility repair.
-FROM docker.io/voipmonitor/vllm@sha256:d1008eb2bce2947110010fcf52b715b49d54ed3bf62a6b1e0a0b698774157727
+# GG v20 r20 contains the native mixed-K fixes from the appliance's memory
+# campaign plus content-addressed EXL3 online quantization (including K6).
+# Pin the immutable August 2 manifest and verify the exact native files before
+# the one remaining parity-call compatibility repair. Never replay the r14/r17
+# overlay bundles onto this unrelated source tree.
+FROM docker.io/voipmonitor/vllm@sha256:40c891fd3fd573a92708e8a4bfa028ec91127a92491504c59006cf9735b20560
 LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai, Runpod, and JarvisLabs" \
       org.opencontainers.image.description="Profile-driven OpenAI endpoint: validated GLM-5.2 EXL3 production defaults plus a low-cost Qwen3.6-27B NVFP4 development profile. Weights auto-download on first boot." \
-      ai.malaiwah.evidence="GG-v20-r17 vLLM#222 SparkInfer#105 blackwell-llm-docker#14" \
-      ai.malaiwah.base="voipmonitor/vllm@sha256:d1008eb2bce2947110010fcf52b715b49d54ed3bf62a6b1e0a0b698774157727"
+      ai.malaiwah.evidence="GG-v20-r20 vLLM#228 SparkInfer#106/#112/#113 online-EXL3-K6" \
+      ai.malaiwah.base="voipmonitor/vllm@sha256:40c891fd3fd573a92708e8a4bfa028ec91127a92491504c59006cf9735b20560"
 COPY requirements-soul.lock /opt/requirements-soul.lock
 RUN echo "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2  /opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json" | sha256sum -c - \
  && pip install --no-cache-dir huggingface_hub==1.25.1 hf-xet==1.5.2 dnspython==2.8.0 && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux patch && rm -rf /var/lib/apt/lists/* \
@@ -28,7 +26,7 @@ RUN echo "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2  /opt
 COPY sshd_config /etc/ssh/sshd_config.d/99-model-turnkey.conf
 COPY landing.py /opt/landing.py
 COPY scripts/ /opt/scripts/
-COPY patches/field-review-r17/ledger.json /opt/field-review-r17-ledger.json
+COPY patches/field-review-r20/ledger.json /opt/field-review-r20-ledger.json
 COPY soul/ /opt/soul/
 COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # The public Vast template predates the provider-neutral rename and may still
@@ -36,7 +34,9 @@ COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # compatibility alias so a stale provider template cannot strand a rental
 # before the landing page is reachable.
 RUN echo "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6  /opt/scripts/patch_exl3_mixk.py" | sha256sum -c - \
- && /opt/venv/bin/python /opt/scripts/verify_r17_base.py \
+ && echo "4436787d86b0fd90fb844073590111f67c87c4cf990c5310ee8e090fca554751  /opt/scripts/patch_sparkinfer_mixed_trellis_cache_key.py" | sha256sum -c - \
+ && /opt/venv/bin/python /opt/scripts/verify_r20_base.py \
+ && python3 /opt/scripts/patch_sparkinfer_mixed_trellis_cache_key.py \
  && python3 /opt/scripts/patch_exl3_parity_abi.py \
  && python3 /opt/scripts/patch_exl3_mixk.py \
  && chmod +x /usr/local/bin/model-turnkey-entry.sh /opt/scripts/soul_controller.py /opt/scripts/soul_config.py \

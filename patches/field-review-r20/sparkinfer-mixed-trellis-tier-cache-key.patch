@@ -1,0 +1,43 @@
+diff --git a/sparkinfer/moe/_shared/kernels/w4a16/mixed_trellis.py b/sparkinfer/moe/_shared/kernels/w4a16/mixed_trellis.py
+index 881d06b..7d6e10a 100644
+--- a/sparkinfer/moe/_shared/kernels/w4a16/mixed_trellis.py
++++ b/sparkinfer/moe/_shared/kernels/w4a16/mixed_trellis.py
+@@ -115 +115 @@ class W4A16MixedTrellisKernel:
+-    ABI_VERSION = 4
++    ABI_VERSION = 5
+@@ -209,0 +210,5 @@ class W4A16MixedTrellisKernel:
++            # The child kernels dynamically size E and intentionally omit it
++            # from their keys. The mixed dispatcher still specializes the
++            # tier-local descriptor bounds, so the split belongs here.
++            self.tier0.num_experts,
++            self.tier1.num_experts,
+diff --git a/tests/moe/test_w4a16_mixed_trellis.py b/tests/moe/test_w4a16_mixed_trellis.py
+index e8d7d54..2754476 100644
+--- a/tests/moe/test_w4a16_mixed_trellis.py
++++ b/tests/moe/test_w4a16_mixed_trellis.py
+@@ -5,0 +6 @@ import textwrap
++from types import SimpleNamespace
+@@ -33,0 +35,23 @@ from sparkinfer.moe._shared.kernels.w4a16.prepare import (
++def _mixed_cache_key(tier0_experts: int, tier1_experts: int) -> tuple[object, ...]:
++    """Build the key without constructing CUDA-backed kernels."""
++
++    kernel = object.__new__(W4A16MixedTrellisKernel)
++    kernel.driver = SimpleNamespace(__cache_key__=("driver",))
++    kernel.tier0 = SimpleNamespace(
++        __cache_key__=("dynamic-k3",), num_experts=tier0_experts
++    )
++    kernel.tier1 = SimpleNamespace(
++        __cache_key__=("dynamic-k4",), num_experts=tier1_experts
++    )
++    kernel.blocks_per_sm = 1
++    kernel.shared_words = 1
++    return kernel.__cache_key__
++
++
++def test_mixed_kernel_cache_key_tracks_tier_partition() -> None:
++    # GLM-5.2 3.36 bpw uses both partitions in one checkpoint. Before ABI 5
++    # these keys collided because the dynamic child-kernel keys omit E.
++    assert _mixed_cache_key(206, 50) != _mixed_cache_key(160, 96)
++    assert _mixed_cache_key(192, 64) != _mixed_cache_key(206, 50)
++
++

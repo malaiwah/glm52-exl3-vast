@@ -151,7 +151,7 @@ named profile when a model needs more than conventional vLLM flags.
 
 ### GLM-5.2 flagship model card (beta)
 
-There are three measured GLM variants. `exl3-tr3` is the balanced
+There are five measured GLM variants. `exl3-tr3` is the balanced
 provider-template default. `exl3-tr3-max-context` trades ordinary-workload
 speed for the largest DCP4 envelope. `madeby561-hybrid` remains the immutable
 v20 production control:
@@ -168,6 +168,7 @@ speculation shape; it is not merely a different download URL:
 |---|---|---|---|
 | **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 524,288 max, 542,208-token cold r11 KV pool at GMU 0.957 on AIBeast, 3,072-token prefill batch, 140,000-token CKV gather, 1 GiB workspace, LMCache over 50% host DRAM | balanced flagship; default |
 | `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals; one-grid decode plus serial K3/K4 block-64 prefill | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
+| `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; deterministic mixed K3/K4 one-grid block-32 path | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | highest-fidelity qualified profile; KLD 0.082507 with dynamic NVFP4/RoPE8, C1 119.8 tok/s, 5/5 needles in an actual 521,276-token prompt |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
@@ -188,6 +189,8 @@ feature gates, KLD measurements, LMCache qualification, and release
 boundaries — is in
 [docs/glm52-qualification.md](docs/glm52-qualification.md) and
 [docs/glm52-3.25-offload-qualification.md](docs/glm52-3.25-offload-qualification.md);
+the r20/3.36 campaign, including the mixed-tier cache-key repair, is in
+[docs/glm52-r20-3.36-qualification-plan.md](docs/glm52-r20-3.36-qualification-plan.md);
 cross-provider throughput, power, and loader tables are in
 [docs/benchmarks.md](docs/benchmarks.md).
 
@@ -200,6 +203,7 @@ idle during any one of them.
 | environment | measured first click → `/health` | what dominated | practical first-use budget |
 |---|---:|---|---:|
 | AIBeast GG r17, safetensors + compatible r17 AOT reused | 12–14 min | ~252s shard load plus ~7 min mixed-Trellis hydration; AOT reconstruction under 1s | 15 minutes |
+| AIBeast GG r20, 3.36-bpw online K6 cache reused | ~5m10s | 79s shard load, ~45s mixed-Trellis hydration, compile/profile/graphs and the built-in 32K correctness gate | 6 minutes |
 | AIBeast GG r11, safetensors, cold patched EXL3/AOT cache | 9m46s | 91s weight load plus cold extensions, AOT, profiling and graph capture | 10–12 minutes |
 | AIBeast GG r11, same-stack AOT reused during heavy storage traffic | 6m22s | NFS/cachefilesd contention while another checkpoint populated the RAID0 cache; backbone AOT loaded in 0.55s | 7 minutes |
 | AIBeast GG r5, weights/NFS pages cached, fresh AOT | 4m35s | InstantTensor load, compile and graph profile/capture | 5 minutes |
@@ -787,7 +791,8 @@ evidence, and the experimental separate-draft override are in
   (GLM default 0.5 for reusable agentic prefixes), `MTP_TOKENS` (GLM default 5; Qwen
   default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 524288; Qwen 196608),
   `VLLM_EXL3_PREFILL_CAPACITY` (GLM-only reusable EXL3 arena; the mixed
-  3.25-bpw profile selects 1024 rows inside its 2048-token scheduler chunk),
+  3.25-bpw profile selects 1024 rows inside its 2048-token scheduler chunk;
+  the r20/3.36-bpw K6 profile selects its qualified 3072/3072 PP-first shape),
   `SERVED_MODEL_NAME`,
   `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 = stock BF16 draft),
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended

@@ -270,6 +270,15 @@ class OffloadBenchmarkTests(unittest.TestCase):
         self.assertTrue(evidence["native_load_bytes_observed"])
         self.assertTrue(evidence["dram_hit_observed"])
 
+    def test_restart_l2_hit_is_valid_even_when_reload_stage_is_cold(self):
+        evidence = offload.connector_hit_summary(
+            {"external_prefix_hit_tokens": 131072},
+            {"external_prefix_hit_tokens": 0},
+        )
+        self.assertTrue(evidence["initial_external_hit_observed"])
+        self.assertFalse(evidence["external_hit_observed"])
+        self.assertTrue(evidence["any_external_hit_observed"])
+
 
 class NeedleTests(unittest.TestCase):
     def test_verifier_discovers_the_served_model_alias(self):

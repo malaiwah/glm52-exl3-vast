@@ -209,7 +209,7 @@ for config_name in \
   MTP_DRAFT DRAFT_QUANTIZATION MTP_TOKENS \
   MTP_DRAFT_SAMPLE_METHOD MTP_REJECTION_SAMPLE_METHOD CUDAGRAPH_CAPTURE_SIZES \
   MAX_CUDAGRAPH_CAPTURE_SIZE VLLM_EXL3_TRELLIS_MAX_M \
-  KV_CACHE_DTYPE KV_SCALE_MODE LOAD_FORMAT VISION B12X_PCIE_DMA F8_DMA \
+  KV_CACHE_DTYPE KV_SCALE_MODE ONLINE_QUANT LOAD_FORMAT VISION B12X_PCIE_DMA F8_DMA \
   PCIE_CALIBRATION DCP_CKV_PREFETCH_DEPTH DCP_CKV_GATHER_MAX_TOKENS \
   DCP_KV_CACHE_INTERLEAVE_SIZE DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS \
   PCIE_DMA_MIN_BYTES CLAMP_ROPE_TABLES TRANSFORMERS_VERBOSITY
@@ -235,12 +235,17 @@ gpu_args=(--gpus "\"device=${GPU_DEVICES}\"")
 if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   gpu_args=()
 fi
+# CDI/--gpus controls which devices the container may access, but it does not
+# preserve the caller's list as CUDA's logical-rank ordering.  Export the same
+# list so GPU_DEVICES can provide deterministic TP-rank placement (for example
+# cold-to-hot on an owned host) instead of silently reverting to PCI order.
 podman run -d --replace --restart="$restart_policy" \
   --name "$NAME" \
   --health-cmd "curl -sf http://localhost:${PORT}/health || exit 1" \
   --health-interval 30s --health-timeout 10s --health-retries 3 \
   --health-start-period 45m \
   ${gpu_args[@]+"${gpu_args[@]}"} --ipc=host --network host \
+  -e CUDA_VISIBLE_DEVICES="$GPU_DEVICES" \
   -e MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}" \
   -e MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3}" \
   -e MODEL_DIR="$MODEL_DIR_CONTAINER" \

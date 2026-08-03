@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "release": {
+    "image": "voipmonitor/vllm:gilded-gnosis-v20-vllm72c35f1-si2b9bf2a-fi801d57a-cu132-20260802-r20",
+    "manifest_digest": "sha256:40c891fd3fd573a92708e8a4bfa028ec91127a92491504c59006cf9735b20560",
+    "image_id": "sha256:088dcc81983d887471ddf9f84209ec0fff0a93d18c52cfd052a187f5f04d85cc"
+  },
+  "composed_sources": {
+    "vllm": "72c35f14b65857110a7434e9243ca18b8cabd032",
+    "sparkinfer": "2b9bf2a4d15770c0c23e19cc13a75843f2f0a995",
+    "lmcache": "a5aa59cc8edca462a3f4c198d17fd2b9c1a7ffaa"
+  },
+  "turnkey_overlays": [
+    {
+      "name": "sparkinfer-mixed-trellis-tier-cache-key",
+      "status": "field-fix-pending-upstream",
+      "reason": "SparkInfer PR112's mixed dispatcher specializes tier-local expert bounds, but ABI 4 omitted the 206/50 versus 160/96 split from the compile key; ABI 5 prevents stale-kernel reuse on the 3.36bpw checkpoint"
+    },
+    {
+      "name": "exl3-parity-abi-compatibility",
+      "status": "retained",
+      "reason": "r20 still omits the trailing ABI argument at its second EXL3 eager-parity call"
+    },
+    {
+      "name": "exl3-mixed-k-compatibility",
+      "status": "native-verified",
+      "reason": "r20 owns the mixed-K path; the idempotent turnkey patcher verifies and skips it"
+    }
+  ],
+  "supersedes": "patches/field-review-r17/ledger.json"
+}

@@ -80,6 +80,19 @@ def connector_hit_evidence(metrics):
     }
 
 
+def connector_hit_summary(initial_metrics, reload_metrics):
+    """Accept either a post-eviction hit or a persistent hit after restart."""
+    initial = connector_hit_evidence(initial_metrics)
+    reload = connector_hit_evidence(reload_metrics)
+    return {
+        **reload,
+        "initial_external_hit_observed": initial["external_hit_observed"],
+        "any_external_hit_observed": bool(
+            reload["external_hit_observed"]
+            or initial["external_hit_observed"]),
+    }
+
+
 def run_request(base, key, model, prompt, prompt_tokens, output_tokens, timeout,
                 insecure):
     before = bench.get_metrics(base, key, insecure)
@@ -107,6 +120,10 @@ def main(argv=None):
     parser.add_argument("--prefix-tokens", type=int, default=131072)
     parser.add_argument("--eviction-prefixes", type=int, default=5)
     parser.add_argument("--output-tokens", type=int, default=1)
+    parser.add_argument(
+        "--prompt-seed", default="",
+        help=("stable prompt identity for a restart/NVMe-reuse A/B; leave "
+              "empty for a fresh UUID"))
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--insecure", action="store_true")
     parser.add_argument("--out", default="")
@@ -115,7 +132,7 @@ def main(argv=None):
     base = args.base_url.rstrip("/")
     key = bench.read_key(args.api_key_file)
     model = args.model or bench.discover_model(base, key, args.insecure)
-    run_id = uuid.uuid4().hex
+    run_id = args.prompt_seed or uuid.uuid4().hex
     target_prompt, actual = bench.make_prompt(
         base, key, model, args.prefix_tokens, f"offload-target-{run_id}",
         args.insecure)
@@ -137,6 +154,7 @@ def main(argv=None):
             "actual_target_prefix_tokens": actual,
             "eviction_prefixes": args.eviction_prefixes,
             "output_tokens": args.output_tokens,
+            "prompt_seed": args.prompt_seed,
         },
         "cold": {},
         "gpu_hot": {},
@@ -175,13 +193,18 @@ def main(argv=None):
         # that native-only counter produces a false negative despite a
         # chunk-aligned external hit.
         reload_metrics = doc["dram_reload"].get("metrics", {})
-        doc.update(connector_hit_evidence(reload_metrics))
+        # A deterministic prompt can deliberately be warm in persistent L2 on
+        # the first request after an engine restart. Keep that distinct from
+        # the in-process eviction/reload signal while accepting either as
+        # proof that the external tier actually served tokens.
+        doc.update(connector_hit_summary(
+            doc["cold"].get("metrics", {}), reload_metrics))
         write_result(args.out, doc)
     except Exception as error:
         doc["fatal_error"] = f"{type(error).__name__}: {error}"
         write_result(args.out, doc)
         raise
-    return 0 if doc["ok"] and doc["dram_hit_observed"] else 2
+    return 0 if doc["ok"] and doc["any_external_hit_observed"] else 2
 
 
 if __name__ == "__main__":
