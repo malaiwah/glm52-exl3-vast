@@ -3,7 +3,33 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
-## GG v20-r17 (current)
+## GG v20-r25 (current)
+
+The appliance now pins the immutable GG v20-r25 manifest
+`sha256:042936fd8d9e4c2aa579ab9b736dd0a2faf2678c6ba36bf4dfce7db566c6fd11`.
+It contains SparkInfer
+[#117](https://github.com/local-inference-lab/sparkinfer/pull/117) at
+`cfeee9b42d21c19a74d85ed5576f8387168df53c`: mixed-Trellis expert counts are
+runtime artifact data, so one compiled contract safely serves both 3.36-bpw
+partitions (206/50 at layer 3 and 160/96 at layers 4–77). The appliance no
+longer carries its superseded mixed-tier cache-key overlay and instead fails
+closed on the exact r25 source hashes.
+
+AIBeast independently passed TP4/DCP4/MTP3 startup, graphs through 32,
+2,363/2,285/2,144 tok/s unique-prefix PP, 100.7/162.2/240.1/297.0 tok/s
+aggregate C1/C2/C4/C8 decode, strict structured output, and 5/5 needles in an
+actual 521,275-token prompt. Production retains dynamic-token NVFP4 KV because
+the matched FP8 alternative, despite improving KLD from 0.08251 to 0.06867,
+needed a 512-row arena and lost 18–21% PP and 22.9% C8 throughput at its safe
+512,000-token shape. Full evidence is in
+[docs/glm52-r25-3.36-qualification.md](docs/glm52-r25-3.36-qualification.md).
+
+The remaining turnkey overlay suppresses vLLM's misleading sub-8192 scheduler
+warning only when the calculated speculative slot delta is zero, as it is for
+serial GLM MTP. Validation remains unchanged and genuinely slot-consuming
+speculative methods still warn.
+
+## GG v20-r17 (previous)
 
 The appliance now pins **GG v20-r17**. vLLM #222 natively supersedes the
 appliance's former #210/#219 overlays: the one-grid mixed K3/K4 path remains

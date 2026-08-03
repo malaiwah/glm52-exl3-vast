@@ -142,7 +142,7 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r20 runtime integration matches the measured launch contract")
+    section("the GG v20-r25 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
@@ -151,10 +151,10 @@ def test_glm_release_integration():
     kld_runner = open(
         os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r20 manifest",
-          "sha256:40c891fd3fd573a92708e8a4bfa028ec91127a92491504c59006cf9735b20560"
+    check("the base image is the pinned GG v20-r25 manifest",
+          "sha256:042936fd8d9e4c2aa579ab9b736dd0a2faf2678c6ba36bf4dfce7db566c6fd11"
           in dockerfile
-          and "verify_r20_base.py" in dockerfile
+          and "verify_r25_base.py" in dockerfile
           and "apply_field_review_patches.py" not in dockerfile
           and "field-review-r14" not in dockerfile)
     check("static NVFP4 scaling selects and verifies the reviewed artifact",
@@ -250,19 +250,19 @@ def test_glm_release_integration():
           and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
           in entry)
     check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r20-native1"'
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r25-native1"'
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
-    check("the r20 native EXL3 gate and compatibility fallback are cache-versioned",
-          "verify_r20_base.py" in dockerfile
+    check("the r25 native EXL3 gate and compatibility fallback are cache-versioned",
+          "verify_r25_base.py" in dockerfile
           and "patch_exl3_parity_abi.py" in dockerfile
           and "patch_exl3_mixk.py" in dockerfile
           and "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6"
           in dockerfile
           and dockerfile.index("patch_exl3_parity_abi.py")
           < dockerfile.rindex("patch_exl3_mixk.py")
-          and "-turnkey-r20-native1" in entry)
+          and "-turnkey-r25-native1" in entry)
     check("the local Podman runner does not bypass cache fingerprinting",
           "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
           and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)

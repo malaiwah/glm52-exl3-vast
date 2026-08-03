@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed unless the immutable GG v20-r20 source contract is complete."""
+"""Fail closed unless the immutable GG v20-r25 source contract is complete."""
 
 from __future__ import annotations
 
@@ -11,6 +11,11 @@ from pathlib import Path
 
 EXL3_PATH = Path("/opt/vllm/vllm/model_executor/layers/quantization/exl3.py")
 ENV_PATH = Path("/opt/vllm/vllm/envs.py")
+MIXED_TRELLIS_PATH = Path(
+    "/opt/venv/lib/python3.12/site-packages/sparkinfer/moe/_shared/"
+    "kernels/w4a16/mixed_trellis.py"
+)
+VLLM_CONFIG_PATH = Path("/opt/vllm/vllm/config/vllm.py")
 
 EXPECTED = {
     EXL3_PATH:
@@ -37,6 +42,12 @@ EXPECTED = {
         "/opt/venv/lib/python3.12/site-packages/vllm/model_executor/layers/"
         "quantization/exl3_online_cache.py"
     ): "8d2b2098d715d88337207db7d7a2a2bc7eead6e30a7ea435b41e1a4dfe615e9b",
+    MIXED_TRELLIS_PATH:
+        "edf3790e04252fb3d65507ff778e8af1d497dcd119ec0cd7dd61c3af4d47bc82",
+    VLLM_CONFIG_PATH:
+        "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f",
+    Path("/opt/venv/lib/python3.12/site-packages/vllm/config/vllm.py"):
+        "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f",
 }
 
 EXL3_MARKERS = (
@@ -68,13 +79,13 @@ def verify() -> dict[str, object]:
     observed: dict[str, str] = {}
     for path, expected in EXPECTED.items():
         if not path.is_file():
-            failures.append(f"missing required r20 file: {path}")
+            failures.append(f"missing required r25 file: {path}")
             continue
         actual = digest(path)
         observed[str(path)] = actual
         if actual != expected:
             failures.append(
-                f"unexpected r20 file hash: {path}: expected {expected}, got {actual}"
+                f"unexpected r25 file hash: {path}: expected {expected}, got {actual}"
             )
 
     exl3 = EXL3_PATH
@@ -82,20 +93,37 @@ def verify() -> dict[str, object]:
         source = exl3.read_text(encoding="utf-8")
         missing = [marker for marker in EXL3_MARKERS if marker not in source]
         if missing:
-            failures.append(f"incomplete native r20 EXL3 API: {missing!r}")
+            failures.append(f"incomplete native r25 EXL3 API: {missing!r}")
 
     env_source = ENV_PATH
     if env_source.is_file():
         source = env_source.read_text(encoding="utf-8")
         missing = [marker for marker in ENV_MARKERS if marker not in source]
         if missing:
-            failures.append(f"incomplete native r20 env registry: {missing!r}")
+            failures.append(f"incomplete native r25 env registry: {missing!r}")
+
+    if MIXED_TRELLIS_PATH.is_file():
+        source = MIXED_TRELLIS_PATH.read_text(encoding="utf-8")
+        for marker in (
+            "tier0_num_experts",
+            "tier1_num_experts",
+            "Expert counts are runtime artifact data",
+        ):
+            if marker not in source:
+                failures.append(
+                    f"incomplete native r25 SparkInfer #117 contract: {marker!r}"
+                )
+
+    if VLLM_CONFIG_PATH.is_file():
+        source = VLLM_CONFIG_PATH.read_text(encoding="utf-8")
+        if "scheduled_token_delta = (" not in source:
+            failures.append("missing speculative scheduler delta calculation")
 
     result: dict[str, object] = {
-        "release": "GG-v20-r20",
-        "vllm_tree": "72c35f14b65857110a7434e9243ca18b8cabd032",
-        "sparkinfer_tree": "2b9bf2a4d15770c0c23e19cc13a75843f2f0a995",
-        "lmcache_tree": "a5aa59cc8edca462a3f4c198d17fd2b9c1a7ffaa",
+        "release": "GG-v20-r25",
+        "vllm_tree": "f5981f14b4d39979bc0d799c020d42002b707257",
+        "sparkinfer_tree": "978cdb3593367469abd16bc8bdbc4ed0ea2787da",
+        "lmcache_tree": "9a05c8818bae48d15b79c7e876418bb813c08cd0",
         "files": observed,
         "status": "failed" if failures else "verified",
     }
@@ -109,7 +137,7 @@ def main() -> int:
     try:
         result = verify()
     except (OSError, UnicodeError, ValueError) as error:
-        print(f"FATAL: r20 native-source gate: {error}", file=sys.stderr)
+        print(f"FATAL: r25 native-source gate: {error}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

@@ -1541,3 +1541,25 @@ Power sampled once per second across all four 280 W-capped cards:
 
 Credential-free KLD, power, feature, benchmark, needle, and failure artifacts
 are retained under `/mnt/fast/build/r11-qualification/`.
+
+### GG v20-r25 / SparkInfer #117 production gate (AIBeast, 2026-08-03)
+
+The immutable r25 image and exact SparkInfer #117 head were verified by hash.
+The real 3.36-bpw layer shapes—206 K3 + 50 K4 at layer 3 and 160 K3 + 96 K4
+at layers 4–77—loaded in one process and completed CUDA graph capture through
+32. The selected TP4/DCP4, online-K6, native-MTP3, dynamic-NVFP4 profile kept
+exactly 524,288 GPU-KV tokens plus 125 GiB LMCache DRAM and bounded 512 GiB
+NVMe tiers.
+
+Cold unique-prefix PP was 2,362.8/2,284.9/2,143.8 tok/s at 3K/32K/128K.
+Aggregate TG was 100.7/162.2/240.1/297.0 tok/s at C1/C2/C4/C8 with MAL
+3.13/3.43/3.41/3.02 and zero request failures or preemptions. Strict JSON with
+thinking passed, and all five needles were recovered from an actual
+521,275-token prompt without degeneration or OOM.
+
+A matched FP8-KV comparator improved mean KLD from 0.0825070 to 0.0686692,
+but only a 512-row arena was stable at a 512,000-token pool. That shape passed
+5/5 needles at 509,010 actual tokens, yet lost 18–21% PP and 22.9% C8
+throughput and retained only tens of MiB of post-benchmark headroom. It was
+not promoted. Full configuration, memory, and precision evidence is in
+[`docs/glm52-r25-3.36-qualification.md`](docs/glm52-r25-3.36-qualification.md).
