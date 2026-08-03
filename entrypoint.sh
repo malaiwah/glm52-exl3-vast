@@ -1848,12 +1848,13 @@ fi
 # the persistent path gives warm restarts for the same immutable stack without
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
-# r20's native mixed-K dispatcher, complete PCIe package, and online-K6 path
+# r25's native mixed-K dispatcher, complete PCIe package, and online-K6 path
 # LMCache lifecycle composition change source consumed by Dynamo/Inductor and
 # runtime JITs. The parent fingerprint still reflects its base repositories,
-# not every composed release head, so keep an explicit r20 suffix and never
-# reuse r14 AOT artifacts. Restarts of this exact appliance should remain warm.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r20-native1"
+# not every composed release head, so keep an explicit r25 suffix and never
+# reuse older release AOT artifacts. Restarts of this exact appliance should
+# remain warm.
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r25-native1"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2

@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "release": {
+    "image": "voipmonitor/vllm:gilded-gnosis-v20-vllmf5981f1-si978cdb3-fi801d57a-cu132-20260803-r25",
+    "manifest_digest": "sha256:042936fd8d9e4c2aa579ab9b736dd0a2faf2678c6ba36bf4dfce7db566c6fd11",
+    "image_id": "sha256:7b2cdb7cb0e4298a5c0907d53c5bca25287ba10ca6707cb21ede1fb65076dea0"
+  },
+  "composed_sources": {
+    "vllm": "f5981f14b4d39979bc0d799c020d42002b707257",
+    "sparkinfer": "978cdb3593367469abd16bc8bdbc4ed0ea2787da",
+    "lmcache": "9a05c8818bae48d15b79c7e876418bb813c08cd0"
+  },
+  "native_fixes": [
+    {
+      "name": "sparkinfer-mixed-trellis-runtime-counts",
+      "source": "local-inference-lab/sparkinfer#117@cfeee9b42d21c19a74d85ed5576f8387168df53c",
+      "reason": "Runtime tier counts and raw-pointer bindings let one compiled mixed-Trellis launch safely serve the 206/50 and 160/96 layer splits without stale specialization or duplicate compiled kernels"
+    }
+  ],
+  "turnkey_overlays": [
+    {
+      "name": "vllm-serial-spec-warning",
+      "status": "field-fix-pending-upstream",
+      "reason": "Serial GLM MTP adds zero scheduler slots; guard the generic sub-8192 warning with scheduled_token_delta > 0 so a proven 3072-token prefill shape is not mislabeled as undersized"
+    },
+    {
+      "name": "exl3-parity-abi-compatibility",
+      "status": "retained",
+      "reason": "The idempotent compatibility gate remains until the r25 EXL3 eager-parity call contract is independently verified native"
+    },
+    {
+      "name": "exl3-mixed-k-compatibility",
+      "status": "native-verified",
+      "reason": "r25 owns the mixed-K path; the idempotent turnkey patcher verifies and skips it"
+    }
+  ],
+  "supersedes": "patches/field-review-r20/ledger.json"
+}

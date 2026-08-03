@@ -11,7 +11,7 @@ BrandonMusic's 3.0-bpw EXL3/TR3 GLM-5.2 checkpoint on four RTX PRO 6000
 Blackwell cards, native TR3 MTP-5 speculation, dynamic-token NVFP4 KV, and a
 full 524,288-token request limit. Weights (~309 GiB) auto-download on first
 boot, so network speed dominates rental startup. The release pins **GG
-v20-r17**; the exact runtime trees, checkpoint revisions, and lineage are in
+v20-r25**; the exact runtime trees, checkpoint revisions, and lineage are in
 the [changelog](CHANGELOG.md).
 
 ## Contents
@@ -168,12 +168,12 @@ speculation shape; it is not merely a different download URL:
 |---|---|---|---|
 | **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 524,288 max, 542,208-token cold r11 KV pool at GMU 0.957 on AIBeast, 3,072-token prefill batch, 140,000-token CKV gather, 1 GiB workspace, LMCache over 50% host DRAM | balanced flagship; default |
 | `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals; one-grid decode plus serial K3/K4 block-64 prefill | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
-| `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; deterministic mixed K3/K4 one-grid block-32 path | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | highest-fidelity qualified profile; KLD 0.082507 with dynamic NVFP4/RoPE8, C1 119.8 tok/s, 5/5 needles in an actual 521,276-token prompt |
+| `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; r25/#117 runtime-dynamic mixed K3/K4 block-32 path | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | highest-fidelity qualified profile; dynamic-NVFP4 KLD 0.082507, 2,363/2,285/2,144 tok/s PP at 3K/32K/128K, C1 100.7 tok/s, 5/5 needles in an actual 521,275-token prompt |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
 An independent Terminal-Bench 2.1 reproduction on the Brandon checkpoint
-scored within 2.6 points of Z.ai's vendor result. GG r17 now carries the native
+scored within 2.6 points of Z.ai's vendor result. GG r17 introduced the native
 [bounded, shape-aware mixed-K implementation](https://github.com/local-inference-lab/vllm/pull/222)
 and the [complete custom-PCIe package](https://github.com/local-inference-lab/sparkinfer/pull/105);
 the appliance does not stack the superseded #210/#219 overlays. The r17
@@ -190,7 +190,10 @@ boundaries — is in
 [docs/glm52-qualification.md](docs/glm52-qualification.md) and
 [docs/glm52-3.25-offload-qualification.md](docs/glm52-3.25-offload-qualification.md);
 the r20/3.36 campaign, including the mixed-tier cache-key repair, is in
-[docs/glm52-r20-3.36-qualification-plan.md](docs/glm52-r20-3.36-qualification-plan.md);
+[docs/glm52-r20-3.36-qualification-plan.md](docs/glm52-r20-3.36-qualification-plan.md).
+The r25 qualification of SparkInfer #117, plus the matched NVFP4-versus-FP8
+KV/KLD comparison, is in
+[docs/glm52-r25-3.36-qualification.md](docs/glm52-r25-3.36-qualification.md);
 cross-provider throughput, power, and loader tables are in
 [docs/benchmarks.md](docs/benchmarks.md).
 
