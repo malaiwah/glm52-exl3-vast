@@ -1,13 +1,14 @@
-# GG v20 r25 ships SparkInfer #117's runtime-dynamic mixed-Trellis contract
-# natively, including both real 3.36-bpw partitions. Pin the immutable August 3
-# manifest and fail closed on its reviewed source hashes. A small vLLM overlay
-# suppresses a false scheduler warning for serial GLM MTP, whose draft path
-# consumes no additional scheduler slots.
-FROM docker.io/voipmonitor/vllm@sha256:042936fd8d9e4c2aa579ab9b736dd0a2faf2678c6ba36bf4dfce7db566c6fd11
+# GG v20 r26 keeps SparkInfer #117's runtime-dynamic mixed-Trellis contract and
+# fixes the lossless TP4/DCP4 auto policy: owner exchange is disabled for the
+# single query partition and exact indexer work uses two shards. Pin the
+# immutable August 3 manifest and fail closed on its reviewed source hashes.
+# A small vLLM overlay suppresses a false scheduler warning for serial GLM MTP,
+# whose draft path consumes no additional scheduler slots.
+FROM docker.io/voipmonitor/vllm@sha256:c7a202cf3ccd155973a151235acb9677aa98f61765372f839bb0c193ff594ec4
 LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai, Runpod, and JarvisLabs" \
       org.opencontainers.image.description="Profile-driven OpenAI endpoint: validated GLM-5.2 EXL3 production defaults plus a low-cost Qwen3.6-27B NVFP4 development profile. Weights auto-download on first boot." \
-      ai.malaiwah.evidence="GG-v20-r25 SparkInfer#106/#117 online-EXL3-K6 serial-MTP-warning-fix" \
-      ai.malaiwah.base="voipmonitor/vllm@sha256:042936fd8d9e4c2aa579ab9b736dd0a2faf2678c6ba36bf4dfce7db566c6fd11"
+      ai.malaiwah.evidence="GG-v20-r26 TP4-DCP4-lossless-auto SparkInfer#106/#117 online-EXL3-K6 serial-MTP-warning-fix" \
+      ai.malaiwah.base="voipmonitor/vllm@sha256:c7a202cf3ccd155973a151235acb9677aa98f61765372f839bb0c193ff594ec4"
 COPY requirements-soul.lock /opt/requirements-soul.lock
 RUN echo "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2  /opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json" | sha256sum -c - \
  && pip install --no-cache-dir huggingface_hub==1.25.1 hf-xet==1.5.2 dnspython==2.8.0 && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux patch && rm -rf /var/lib/apt/lists/* \
@@ -26,7 +27,7 @@ RUN echo "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2  /opt
 COPY sshd_config /etc/ssh/sshd_config.d/99-model-turnkey.conf
 COPY landing.py /opt/landing.py
 COPY scripts/ /opt/scripts/
-COPY patches/field-review-r25/ledger.json /opt/field-review-r25-ledger.json
+COPY patches/field-review-r26/ledger.json /opt/field-review-r26-ledger.json
 COPY soul/ /opt/soul/
 COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # The public Vast template predates the provider-neutral rename and may still
@@ -35,7 +36,7 @@ COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # before the landing page is reachable.
 RUN echo "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6  /opt/scripts/patch_exl3_mixk.py" | sha256sum -c - \
  && echo "a0b7bc8377a5e29a921da4971d63b5260dac34601598285fee6cce3cd94bc65c  /opt/scripts/patch_vllm_serial_spec_warning.py" | sha256sum -c - \
- && /opt/venv/bin/python /opt/scripts/verify_r25_base.py \
+ && /opt/venv/bin/python /opt/scripts/verify_r26_base.py \
  && python3 /opt/scripts/patch_vllm_serial_spec_warning.py \
  && python3 /opt/scripts/patch_exl3_parity_abi.py \
  && python3 /opt/scripts/patch_exl3_mixk.py \

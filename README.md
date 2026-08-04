@@ -11,7 +11,7 @@ BrandonMusic's 3.0-bpw EXL3/TR3 GLM-5.2 checkpoint on four RTX PRO 6000
 Blackwell cards, native TR3 MTP-5 speculation, dynamic-token NVFP4 KV, and a
 full 524,288-token request limit. Weights (~309 GiB) auto-download on first
 boot, so network speed dominates rental startup. The release pins **GG
-v20-r25**; the exact runtime trees, checkpoint revisions, and lineage are in
+v20-r26**; the exact runtime trees, checkpoint revisions, and lineage are in
 the [changelog](CHANGELOG.md).
 
 ## Contents
@@ -168,7 +168,7 @@ speculation shape; it is not merely a different download URL:
 |---|---|---|---|
 | **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 524,288 max, 542,208-token cold r11 KV pool at GMU 0.957 on AIBeast, 3,072-token prefill batch, 140,000-token CKV gather, 1 GiB workspace, LMCache over 50% host DRAM | balanced flagship; default |
 | `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals; one-grid decode plus serial K3/K4 block-64 prefill | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
-| `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; r25/#117 runtime-dynamic mixed K3/K4 block-32 path | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | highest-fidelity qualified profile; dynamic-NVFP4 KLD 0.082507, 2,363/2,285/2,144 tok/s PP at 3K/32K/128K, C1 100.7 tok/s, 5/5 needles in an actual 521,275-token prompt |
+| `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; r26 exact query-split/full-CKV policy with two indexer shards and owner merge off | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | highest-fidelity qualified profile; dynamic-NVFP4 KLD 0.082507, 2,453--2,458 / 2,350--2,370 / 2,197--2,238 tok/s PP at 3K/32K/128K, 5/5 needles in an actual 522,359-token prompt |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
@@ -194,6 +194,9 @@ the r20/3.36 campaign, including the mixed-tier cache-key repair, is in
 The r25 qualification of SparkInfer #117, plus the matched NVFP4-versus-FP8
 KV/KLD comparison, is in
 [docs/glm52-r25-3.36-qualification.md](docs/glm52-r25-3.36-qualification.md);
+the r26 policy A/B, turnkey integration repair, and repeated 512K production
+gate are in
+[docs/glm52-r26-3.36-qualification.md](docs/glm52-r26-3.36-qualification.md);
 cross-provider throughput, power, and loader tables are in
 [docs/benchmarks.md](docs/benchmarks.md).
 
@@ -205,6 +208,7 @@ idle during any one of them.
 
 | environment | measured first click → `/health` | what dominated | practical first-use budget |
 |---|---:|---|---:|
+| AIBeast GG r26, 3.36-bpw NFS checkpoint + online-K6/JIT cache reused | ~12 min to `/health`, ~13 min through verification | ~4 min NFS shard stream plus ~7 min mixed-Trellis hydration; online-K6 and CuTe artifacts were cache hits | 15 minutes |
 | AIBeast GG r17, safetensors + compatible r17 AOT reused | 12–14 min | ~252s shard load plus ~7 min mixed-Trellis hydration; AOT reconstruction under 1s | 15 minutes |
 | AIBeast GG r20, 3.36-bpw online K6 cache reused | ~5m10s | 79s shard load, ~45s mixed-Trellis hydration, compile/profile/graphs and the built-in 32K correctness gate | 6 minutes |
 | AIBeast GG r11, safetensors, cold patched EXL3/AOT cache | 9m46s | 91s weight load plus cold extensions, AOT, profiling and graph capture | 10–12 minutes |

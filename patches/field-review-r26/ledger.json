@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "release": {
+    "image": "voipmonitor/vllm:gilded-gnosis-v20-vllmf5981f1-sibbbdccc-fi801d57a-cu132-20260803-r26",
+    "manifest_digest": "sha256:c7a202cf3ccd155973a151235acb9677aa98f61765372f839bb0c193ff594ec4",
+    "image_id": "sha256:30a752f0b490a3841610dfbea8f5758eab66924537feaeb1cd06b8e6ac92cce4"
+  },
+  "composed_sources": {
+    "vllm": "f5981f14b4d39979bc0d799c020d42002b707257",
+    "sparkinfer": "bbbdccc338a2691d780ed160db54ef121c3a61c9",
+    "lmcache": "9a05c8818bae48d15b79c7e876418bb813c08cd0"
+  },
+  "native_fixes": [
+    {
+      "name": "sparkinfer-mixed-trellis-runtime-counts",
+      "source": "local-inference-lab/sparkinfer#117@cfeee9b42d21c19a74d85ed5576f8387168df53c",
+      "reason": "Runtime tier counts and raw-pointer bindings let one compiled mixed-Trellis launch safely serve the 206/50 and 160/96 layer splits without stale specialization or duplicate compiled kernels"
+    },
+    {
+      "name": "tp4-dcp4-lossless-auto-policy",
+      "source": "GG-v20-r26 launcher@6a61804c378cc8d5d666ab381c3d56b4f812b52f",
+      "reason": "TP4/DCP4 has one query partition: exact query split plus full CKV gather uses two indexer shards with owner merge disabled, avoiding the old pure-overhead owner exchange while preserving lossless transport"
+    },
+    {
+      "name": "sparkinfer-fp8-gather-validity",
+      "source": "GG-v20-r26 SparkInfer tree@bbbdccc338a2691d780ed160db54ef121c3a61c9",
+      "reason": "The raw E4M3 query-gather ABI uses exact 16-byte transactions and ignores invalid empty-shard contributors instead of allowing zero-times-NaN contamination"
+    },
+    {
+      "name": "sparkinfer-online-k6-e8m0-small-row-scales",
+      "source": "GG-v20-r26 SparkInfer tree@bbbdccc338a2691d780ed160db54ef121c3a61c9",
+      "reason": "The small-row fused-MoE path loads E8M0 K32 scales for online-K6 gate and up projections instead of falling through the older packed-E4M3 branch"
+    }
+  ],
+  "turnkey_overlays": [
+    {
+      "name": "vllm-serial-spec-warning",
+      "status": "field-fix-pending-upstream",
+      "reason": "Serial GLM MTP adds zero scheduler slots; guard the generic sub-8192 warning with scheduled_token_delta > 0 so a proven 3072-token prefill shape is not mislabeled as undersized"
+    },
+    {
+      "name": "exl3-parity-abi-compatibility",
+      "status": "retained",
+      "reason": "The idempotent compatibility gate remains until the r26 EXL3 eager-parity call contract is independently verified native"
+    },
+    {
+      "name": "exl3-mixed-k-compatibility",
+      "status": "native-verified",
+      "reason": "r26 owns the mixed-K path; the idempotent turnkey patcher verifies and skips it"
+    }
+  ],
+  "supersedes": "patches/field-review-r25/ledger.json"
+}

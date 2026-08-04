@@ -1563,3 +1563,28 @@ but only a 512-row arena was stable at a 512,000-token pool. That shape passed
 throughput and retained only tens of MiB of post-benchmark headroom. It was
 not promoted. Full configuration, memory, and precision evidence is in
 [`docs/glm52-r25-3.36-qualification.md`](docs/glm52-r25-3.36-qualification.md).
+
+### GG v20-r26 TP4/DCP4 policy gate (AIBeast, 2026-08-04)
+
+The immutable r26 image was tested first as a matched official-image A/B and
+then through the complete turnkey overlay. On the 3.36-bpw/K6/MTP3 shape, r26
+improved old-auto r25 PP by 10.5/12.2/13.8% at 8K/64K/128K. Its second exact
+indexer shard reduced the auto-sized logical pool from 771,584 to 717,312
+tokens; both remain comfortably above the product's 524,288-token gate.
+
+The appliance had already disabled owner merge, so its production-shape gain
+was smaller and repeatable: 2,453--2,458 / 2,350--2,370 /
+2,197--2,238 tok/s at 3K/32K/128K, about 2.5--4.4% over r25. The profile kept
+exactly 524,288 active tokens, passed the full chat/thinking/streaming/
+structured-output/tool suite, and retrieved all five needles from an actual
+522,359-token request in 295.96 seconds. There were no request failures,
+preemptions, degeneration, CUDA errors, or OOMs.
+
+Qualification found and fixed one appliance integration issue: the PCIe
+calibration subprocess explicitly requested automatic query split but retained
+hard-coded owner and indexer values, bypassing r26's two-shard policy. All
+three policy inputs now resolve through r26's helper, and the 3.36-bpw profile
+keeps its measured 24 MiB lossless DMA crossover. The cold r26 namespace did
+compile first-use shapes after `/health`; the subsequent feature run had zero
+post-ready compiles and zero XGrammar FSM/runtime findings. Full results are in
+[`docs/glm52-r26-3.36-qualification.md`](docs/glm52-r26-3.36-qualification.md).

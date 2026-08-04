@@ -1528,7 +1528,8 @@ unset _GLM_NVFP4_SCALE_FILE _GLM_NVFP4_SCALE_SHA256
       env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS -u VLLM_DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS \
         -u PCIE_DMA_MIN_BYTES -u VLLM_PCIE_DMA_MIN_BYTES \
         TP="${TENSOR_PARALLEL_SIZE:-4}" DCP="${DCP:-4}" GPUS="$_cal_gpus" \
-        DCP_QUERY_SPLIT=auto \
+        DCP_QUERY_SPLIT=auto DCP_TOPK_OWNER_MERGE=auto \
+        DCP_INDEXER_SHARDS=auto \
         DCP_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-auto}" \
         DCP_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}" \
         B12X_PCIE_DMA="${B12X_PCIE_DMA:-1}" F8_DMA="${F8_DMA:-0}" \
@@ -1848,13 +1849,13 @@ fi
 # the persistent path gives warm restarts for the same immutable stack without
 # exposing a new stack to stale kernels that can cause corruption or abnormally
 # low throughput.
-# r25's native mixed-K dispatcher, complete PCIe package, and online-K6 path
+# r26's native mixed-K dispatcher, complete PCIe package, and online-K6 path
 # LMCache lifecycle composition change source consumed by Dynamo/Inductor and
 # runtime JITs. The parent fingerprint still reflects its base repositories,
-# not every composed release head, so keep an explicit r25 suffix and never
+# not every composed release head, so keep an explicit r26 suffix and never
 # reuse older release AOT artifacts. Restarts of this exact appliance should
 # remain warm.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r25-native1"
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r26-native1"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2

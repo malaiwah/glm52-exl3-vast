@@ -40,7 +40,7 @@ shellcheck entrypoint.sh scripts/recover_torch_extension_lock.sh scripts/jarvisl
 python3 -m py_compile landing.py scripts/*.py
 python3 tests/test_termination.py
 python3 tests/test_families.py
-python3 tests/test_r25_base_gate.py
+python3 tests/test_r26_base_gate.py
 python3 tests/test_vllm_serial_spec_warning_patch.py
 python3 tests/test_knob_wiring.py
 python3 tests/test_gpu_detect.py

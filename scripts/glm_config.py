@@ -513,9 +513,9 @@ VARIANTS["exl3-tr3-3.25bpw"]["runtime_env"].update({
     "SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB": "64",
 })
 
-# r20-qualified high-fidelity profile. The checkpoint's mixed K3/K4/K5/K6
-# allocation raises fidelity while r20 converts eligible BF16 tensors into a
-# persistent K6 Trellis online cache. On AIBeast the exact turnkey image passed
+# r26-qualified high-fidelity profile. The checkpoint's mixed K3/K4/K5/K6
+# allocation raises fidelity while the runtime converts eligible BF16 tensors
+# into a persistent K6 Trellis online cache. On AIBeast the exact turnkey image passed
 # the standard 2,047-position KLD gate, warm-cache restart, 521,276-token
 # five-depth retrieval, strict structured output, C8 and LMCache insertion.
 VARIANTS["exl3-tr3-3.36bpw"] = {
@@ -544,11 +544,15 @@ VARIANTS["exl3-tr3-3.36bpw"]["defaults"].update({
     "PREFIX_CACHE_BACKEND": "lmcache",
     "PREFIX_CACHE_DISK_GB": 512,
     "OFFLOAD_FRACTION": 0.5,
-    "PCIE_CALIBRATION": "off",
-    "PCIE_DMA_MIN_BYTES": 6291456,
+    # r26 repairs the TP4/DCP4 auto policy: this topology has a single query
+    # partition, so owner exchange is pure overhead and two exact indexer
+    # shards are the measured policy.  Preserve the topology-calibrated DMA
+    # crossover instead of overriding it with the older r17 6 MiB result.
+    "PCIE_CALIBRATION": "auto",
+    "PCIE_DMA_MIN_BYTES": -1,
 })
 VARIANTS["exl3-tr3-3.36bpw"]["runtime_env"].update({
-    # The r17 A/B winners remain in the exact r20-qualified serving shape.
+    # The earlier A/B winners remain in the exact r26-qualified serving shape.
     "NCCL_BUFFSIZE": "1048576",
     "VLLM_DCP_A2A_MAX_TOKENS": "48",
     "VLLM_DCP_TOPK_OWNER_MERGE": "0",

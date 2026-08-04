@@ -3,7 +3,27 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
-## GG v20-r25 (current)
+## GG v20-r26 (current)
+
+The appliance pins the immutable GG v20-r26 manifest
+`sha256:c7a202cf3ccd155973a151235acb9677aa98f61765372f839bb0c193ff594ec4`.
+r26 repairs TP4/DCP4 automatic prefill policy: that topology has one query
+partition, so exact query split and full CKV gather use two indexer shards with
+owner merge disabled. The entrypoint calibration contract now passes owner and
+indexer selection as `auto`, rather than silently retaining its earlier
+zero-shard value, and the 3.36-bpw profile uses the measured PCIe DMA crossover.
+
+On AIBeast, the NFS-backed 3.36-bpw/K6/MTP3 production shape retained exactly
+524,288 GPU-KV tokens and measured 2,453--2,458 / 2,350--2,370 /
+2,197--2,238 tok/s unique-prefix PP at 3K/32K/128K. It passed every API and
+structured-output gate plus 5/5 needles in an actual 522,359-token prompt with
+no degeneration or OOM. The public 38% headline is valid against r25's old
+automatic policy; the already owner-merge-off appliance gained about 2.5--4.4%
+in production shape and 10.5--13.8% in a matched official-image old-auto A/B.
+Full evidence and the interpretation boundary are in
+[docs/glm52-r26-3.36-qualification.md](docs/glm52-r26-3.36-qualification.md).
+
+## GG v20-r25 (previous)
 
 The appliance now pins the immutable GG v20-r25 manifest
 `sha256:042936fd8d9e4c2aa579ab9b736dd0a2faf2678c6ba36bf4dfce7db566c6fd11`.
