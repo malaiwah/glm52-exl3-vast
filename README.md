@@ -650,10 +650,10 @@ and the TLS cert are untouched.**
 
 Full design note: [docs/self-service-config.md](docs/self-service-config.md).
 
-- **Inheritance**: built-in defaults < startup environment < a JSON state file
-  on the volume. The file wins on purpose: template env cannot be edited after
-  launch, so the page has to be able to override it. The file stores only what
-  you actually changed.
+- **Inheritance**: built-in defaults < family < variant < startup environment
+  < a JSON state file on the volume. The file wins on purpose: template env
+  cannot be edited after launch, so the page has to be able to override it.
+  The file stores only what you actually changed.
 - **Pre-validation**: combinations that are known to be broken are refused
   before anything is written — an NVFP4 draft without
   `DRAFT_QUANTIZATION`, nvfp4 KV on a model with no calibrated MLA scales, a
@@ -834,7 +834,10 @@ The most common first-launch knobs:
 
 Every knob — including KV sizing, offload/memlock behaviour, verification,
 SOUL autonomy, and termination — is documented with its default and rationale
-in [docs/configuration.md](docs/configuration.md).
+in [docs/configuration.md](docs/configuration.md). A final `TUNE_*`
+environment layer (e.g. `TUNE_VLLM_EXL3_TRELLIS_MIN_M`) overrides any resolved
+value and is intended for advanced A/B experiments; it is not exposed in the
+self-service UI.
 
 ## Evidence / why these defaults
 Root-cause investigation of the long-context corruption and the validated
@@ -861,7 +864,16 @@ Relocated deep-dive records:
   deviation ledger
 - [docs/configuration.md](docs/configuration.md) — complete environment
   reference
-- [CHANGELOG.md](CHANGELOG.md) — release pins and lineage
+- [docs/glm52-r14-maintenance-plan.md](docs/glm52-r14-maintenance-plan.md),
+  [docs/glm52-r17-maintenance-results.md](docs/glm52-r17-maintenance-results.md),
+  [docs/glm52-r20-3.36-qualification-plan.md](docs/glm52-r20-3.36-qualification-plan.md),
+  [docs/glm52-r25-3.36-qualification.md](docs/glm52-r25-3.36-qualification.md),
+  [docs/glm52-r26-3.36-qualification.md](docs/glm52-r26-3.36-qualification.md) —
+  per-release GLM-5.2 maintenance and qualification campaigns
+- [docs/glm52-3.25-offload-qualification.md](docs/glm52-3.25-offload-qualification.md)
+  — 3.25-bpw active-KV and DRAM/NVMe offload qualification
+- [docs/glm52-nccl-b12x-jarrel-maintenance-plan.md](docs/glm52-nccl-b12x-jarrel-maintenance-plan.md)
+  — Jarrel quant comparison and NCCL/B12X recalibration plan
 
 ## Security
 
