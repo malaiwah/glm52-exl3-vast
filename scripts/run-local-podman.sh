@@ -239,11 +239,18 @@ fi
 # preserve the caller's list as CUDA's logical-rank ordering.  Export the same
 # list so GPU_DEVICES can provide deterministic TP-rank placement (for example
 # cold-to-hot on an owned host) instead of silently reverting to PCI order.
+health_start_period="${HEALTH_START_PERIOD:-}"
+if [ -z "$health_start_period" ]; then
+  case "${MODEL_VARIANT:-exl3-tr3}" in
+    exl3-tr3-3.42bpw) health_start_period=90m ;;
+    *) health_start_period=45m ;;
+  esac
+fi
 podman run -d --replace --restart="$restart_policy" \
   --name "$NAME" \
   --health-cmd "curl -sf http://localhost:${PORT}/health || exit 1" \
   --health-interval 30s --health-timeout 10s --health-retries 3 \
-  --health-start-period 45m \
+  --health-start-period "$health_start_period" \
   ${gpu_args[@]+"${gpu_args[@]}"} --ipc=host --network host \
   -e CUDA_VISIBLE_DEVICES="$GPU_DEVICES" \
   -e MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}" \

@@ -3,7 +3,37 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
-## GG v20-r26 (current)
+## GG v20-r28 (current)
+
+The appliance pins immutable GG v20-r28 manifest
+`sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0`.
+r28 retains r26's lossless TP4/DCP4 automatic policy and adds the complete
+`shared_h_v1` plus runtime-dynamic mixed-Trellis contract needed by
+`willfalco/GLM-5.2-EXL3-TR3-3.42bpw@a350292c...`. The build fails closed on
+the exact vLLM `e1e9426`, SparkInfer `200c1db`, and LMCache `9a05c88` source
+trees before applying the serial-MTP warning overlay.
+
+AIBeast qualified the online-K6/dynamic-NVFP4 profile with TP4/DCP4/MTP3,
+eight sequences, exactly 2,032 blocks / 520,192 logical KV tokens, a
+3,072-token scheduler/EXL3 arena, and 125 GiB DRAM plus bounded 512 GiB NVMe
+LMCache. The natural 524,800-token pool was rejected after a first-request
+128K OOM; the pinned pool passed C8, all API/tool/structured-output gates, and
+45/45 salted five-depth needles through a 516,096-token prompt with a 4,096
+token reserve. Matched PP was 2,367 / 2,263 / 2,137 tok/s at 3K/32K/128K.
+
+The profile pins probabilistic MTP3 proposals. A matched greedy arm improved
+C1 decode from 60.5 to 76.7 tok/s but reduced aggregate C4/C8 throughput from
+149.4/173.5 to 125.5/153.5 tok/s and lowered acceptance at concurrency. MTP5
+was rejected because its 48-wide graph/trellis contract consumes the execution
+margin required by the workload-safe 520,192-token pool.
+
+Matched one-window KLD was 0.082039 with native weights and dynamic NVFP4,
+0.089888 with online K6 and dynamic NVFP4, and 0.077949 with online K6 plus
+FP8 KV/BF16 RoPE. FP8 remains experimental because its 656-byte record reduced
+the practical context envelope to about 295K; production keeps the 368-byte
+dynamic-NVFP4 record for the 520K Hermes Agents requirement.
+
+## GG v20-r26 (previous)
 
 The appliance pins the immutable GG v20-r26 manifest
 `sha256:c7a202cf3ccd155973a151235acb9677aa98f61765372f839bb0c193ff594ec4`.

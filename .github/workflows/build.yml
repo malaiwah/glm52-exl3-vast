@@ -36,8 +36,8 @@ jobs:
       # stay scoped to the family they were measured on.
       - name: model family tests
         run: python3 tests/test_families.py
-      - name: immutable GG r26 source gate
-        run: python3 tests/test_r26_base_gate.py
+      - name: immutable GG r28 source gate
+        run: python3 tests/test_r28_base_gate.py
       - name: serial speculative scheduler warning patch
         run: python3 tests/test_vllm_serial_spec_warning_patch.py
       - name: mixed-K EXL3 patch

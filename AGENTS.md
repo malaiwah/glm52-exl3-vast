@@ -28,7 +28,7 @@ Configuration is data-driven. `FAMILIES`, `VARIANTS`, `KNOBS`, and validation ru
 
 - `scripts/`: runtime orchestration helpers, configuration/state logic, provider operations, serving verification, checkpoint transforms, vLLM/SparkInfer patches, field-review tooling, SOUL controller/config, and qualification benchmarks. 35 `.py` tools + shell helpers.
 - `tests/`: flat, dependency-free Python test modules (17 `.py`) plus two Bash tests and `fixtures/`. Tests are runnable directly and are designed not to require a GPU or network.
-- `docs/`: design and operator references — model families, self-service config, SOUL, termination/erase, configuration reference, benchmarks, plus per-release GLM qualification evidence (`glm52-r14/r17/r20/r25/r26-*`, `glm52-3.25-offload-qualification.md`), MTP78, and Qwen OMP guide.
+- `docs/`: design and operator references — model families, self-service config, SOUL, termination/erase, configuration reference, benchmarks, plus per-release GLM qualification evidence (`glm52-r14/r17/r20/r25/r26/r28-*`, `glm52-3.25-offload-qualification.md`), MTP78, and Qwen OMP guide.
 - `soul/`: immutable SOUL role and trust-boundary instructions (`SOUL.md`) copied read-only into the image.
 - `patches/field-review-r26/`: the r26 field-review ledger copied into the image.
 - `.github/workflows/`: CI lint, test, profile-smoke, template validation, and Docker build/publish workflow.
@@ -108,9 +108,9 @@ Commit both dependency files together. The Docker build installs the lock with `
 - `scripts/reconcile_checkpoint.py`: authoritative checkpoint metadata reconciliation after model transitions.
 - `scripts/provider.py`, `scripts/terminate_worker.py`, `scripts/secure_erase.py`: provider detection and safety-critical destruction workflow.
 - `scripts/soul_config.py`, `scripts/soul_controller.py`: diagnostic configuration, redaction, durable journal, and async controller.
-- `scripts/verify_r17_base.py`, `scripts/verify_r26_base.py`: immutable native-source contract gates (fail closed).
+- `scripts/verify_r17_base.py`, `scripts/verify_r26_base.py`, `scripts/verify_r28_base.py`: immutable native-source contract gates (fail closed).
 - `scripts/apply_field_review_patches.py`, `scripts/field_review_log_audit.py`: fail-closed field-review patch applier and runtime-log audit.
-- `Dockerfile`: pinned vLLM/CUDA base (`voipmonitor/vllm@sha256:c7a202...`), isolated SOUL environment, copied runtime files, exposed ports, and entrypoint.
+- `Dockerfile`: pinned vLLM/CUDA base (`voipmonitor/vllm@sha256:501e10...`), isolated SOUL environment, copied runtime files, exposed ports, and entrypoint.
 - `requirements-soul.in`, `requirements-soul.lock`: direct (`nanobot-ai==0.3.0`) and hash-locked SOUL dependencies.
 - `runpod-template.json`, `runpod-template-qwen36.json`: checked-in Pod profiles; keep their ports, volume mount, and model profile coherent with runtime behavior.
 - `scripts/jarvislabs_vm_bootstrap.sh`: full-VM launcher for JarvisLabs, whose managed template catalog does not accept a user Docker image.

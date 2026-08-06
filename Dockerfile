@@ -1,14 +1,14 @@
-# GG v20 r26 keeps SparkInfer #117's runtime-dynamic mixed-Trellis contract and
-# fixes the lossless TP4/DCP4 auto policy: owner exchange is disabled for the
-# single query partition and exact indexer work uses two shards. Pin the
-# immutable August 3 manifest and fail closed on its reviewed source hashes.
+# GG v20 r28 keeps r26's lossless TP4/DCP4 policy and adds the complete
+# shared_h_v1 + runtime-dynamic mixed-Trellis contract needed by the 3.42bpw
+# quality checkpoint. Pin the immutable August 4 manifest and fail closed on
+# its reviewed source hashes.
 # A small vLLM overlay suppresses a false scheduler warning for serial GLM MTP,
 # whose draft path consumes no additional scheduler slots.
-FROM docker.io/voipmonitor/vllm@sha256:c7a202cf3ccd155973a151235acb9677aa98f61765372f839bb0c193ff594ec4
+FROM docker.io/voipmonitor/vllm@sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0
 LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai, Runpod, and JarvisLabs" \
       org.opencontainers.image.description="Profile-driven OpenAI endpoint: validated GLM-5.2 EXL3 production defaults plus a low-cost Qwen3.6-27B NVFP4 development profile. Weights auto-download on first boot." \
-      ai.malaiwah.evidence="GG-v20-r26 TP4-DCP4-lossless-auto SparkInfer#106/#117 online-EXL3-K6 serial-MTP-warning-fix" \
-      ai.malaiwah.base="voipmonitor/vllm@sha256:c7a202cf3ccd155973a151235acb9677aa98f61765372f839bb0c193ff594ec4"
+      ai.malaiwah.evidence="GG-v20-r28 shared_h_v1 TP4-DCP4-lossless-auto online-EXL3-K6 serial-MTP-warning-fix" \
+      ai.malaiwah.base="voipmonitor/vllm@sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0"
 COPY requirements-soul.lock /opt/requirements-soul.lock
 RUN echo "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2  /opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json" | sha256sum -c - \
  && pip install --no-cache-dir huggingface_hub==1.25.1 hf-xet==1.5.2 dnspython==2.8.0 && apt-get update -qq && apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux patch && rm -rf /var/lib/apt/lists/* \
@@ -36,7 +36,7 @@ COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # before the landing page is reachable.
 RUN echo "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6  /opt/scripts/patch_exl3_mixk.py" | sha256sum -c - \
  && echo "a0b7bc8377a5e29a921da4971d63b5260dac34601598285fee6cce3cd94bc65c  /opt/scripts/patch_vllm_serial_spec_warning.py" | sha256sum -c - \
- && /opt/venv/bin/python /opt/scripts/verify_r26_base.py \
+ && /opt/venv/bin/python /opt/scripts/verify_r28_base.py \
  && python3 /opt/scripts/patch_vllm_serial_spec_warning.py \
  && python3 /opt/scripts/patch_exl3_parity_abi.py \
  && python3 /opt/scripts/patch_exl3_mixk.py \

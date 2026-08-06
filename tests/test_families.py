@@ -142,7 +142,7 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r26 runtime integration matches the measured launch contract")
+    section("the GG v20-r28 runtime integration matches the measured launch contract")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
@@ -151,10 +151,10 @@ def test_glm_release_integration():
     kld_runner = open(
         os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r26 manifest",
-          "sha256:c7a202cf3ccd155973a151235acb9677aa98f61765372f839bb0c193ff594ec4"
+    check("the base image is the pinned GG v20-r28 manifest",
+          "sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0"
           in dockerfile
-          and "verify_r26_base.py" in dockerfile
+          and "verify_r28_base.py" in dockerfile
           and "apply_field_review_patches.py" not in dockerfile
           and "field-review-r14" not in dockerfile)
     check("static NVFP4 scaling selects and verifies the reviewed artifact",
@@ -250,24 +250,27 @@ def test_glm_release_integration():
           and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
           in entry)
     check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r26-native1"'
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r28-native1"'
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
-    check("the r26 native EXL3 gate and compatibility fallback are cache-versioned",
-          "verify_r26_base.py" in dockerfile
+    check("the r28 native EXL3 gate and compatibility fallback are cache-versioned",
+          "verify_r28_base.py" in dockerfile
           and "patch_exl3_parity_abi.py" in dockerfile
           and "patch_exl3_mixk.py" in dockerfile
           and "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6"
           in dockerfile
           and dockerfile.index("patch_exl3_parity_abi.py")
           < dockerfile.rindex("patch_exl3_mixk.py")
-          and "-turnkey-r26-native1" in entry)
+          and "-turnkey-r28-native1" in entry)
     check("the local Podman runner does not bypass cache fingerprinting",
           "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
           and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
     check("the local Podman runner preserves the requested CUDA rank order",
           '-e CUDA_VISIBLE_DEVICES="$GPU_DEVICES"' in local_runner)
+    check("the cold 3.42 profile gets its measured 90-minute health grace",
+          'exl3-tr3-3.42bpw) health_start_period=90m' in local_runner
+          and '--health-start-period "$health_start_period"' in local_runner)
     check("auto profile sentinels do not leak into the calibration helper",
           "env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" in entry
           and "-u PCIE_DMA_MIN_BYTES" in entry)
@@ -587,6 +590,27 @@ def test_r20_336_online_quant_candidate():
     check("removing the pool pin reports the observed first-request OOM",
           "mixed-336-offload-needs-pool-pin"
           in ids(gc.validate(unpinned)))
+
+
+def test_r28_342_shared_h_profile():
+    section("the r28-qualified shared-H 3.42bpw profile")
+    eff, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3-3.42bpw")
+    derived = gc.derive(eff)
+    check("the profile pins the immutable 3.42bpw checkpoint",
+          derived["MODEL_REPO"] ==
+          "willfalco/GLM-5.2-EXL3-TR3-3.42bpw"
+          and derived["MODEL_REVISION"] ==
+          "a350292cb2038f2c31732569a711a89e5d72fd46")
+    check("the profile pins the workload-safe 520,192-token pool",
+          eff["GPU_BLOCKS_OVERRIDE"] == 2032
+          and eff["GPU_MEMORY_UTILIZATION"] == 0.95
+          and eff["MAX_MODEL_LEN"] == 520192)
+    check("the profile retains K6, dynamic NVFP4 and production LMCache",
+          eff["ONLINE_QUANT"] == "exl3-b6"
+          and eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"
+          and eff["MTP_DRAFT_SAMPLE_METHOD"] == "probabilistic"
+          and eff["PREFIX_CACHE_BACKEND"] == "lmcache"
+          and eff["PREFIX_CACHE_DISK_GB"] == 512)
 
 
 def test_qwen_preset():
@@ -967,6 +991,7 @@ def main():
         run(test_madeby561_hybrid)
         run(test_higher_fidelity_exl3_candidate)
         run(test_r20_336_online_quant_candidate)
+        run(test_r28_342_shared_h_profile)
         run(test_qwen_preset)
         run(test_custom_profile)
         run(test_inapplicable_knobs)
