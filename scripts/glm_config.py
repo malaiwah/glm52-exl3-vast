@@ -563,6 +563,36 @@ VARIANTS["exl3-tr3-3.36bpw"]["runtime_env"].update({
     "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
 })
 
+# r28 shared-H quality profile. Natural KV profiling exposed 524,800 logical
+# tokens, but a cold 128K prefill then OOMed when a 48 MiB mixed-Trellis
+# temporary had only 32.81 MiB free. The qualified 2,032-block pool exposes an
+# exact 520,192-token envelope and passed C8 plus a 45-cell five-depth needle
+# matrix through a 516,096-token prompt with a 4,096-token generation reserve.
+VARIANTS["exl3-tr3-3.42bpw"] = {
+    "family": "glm52",
+    "label": "EXL3-TR3 shared-H 3.42bpw + online K6 — high-fidelity 520K",
+    "repo": "willfalco/GLM-5.2-EXL3-TR3-3.42bpw",
+    "revision": "a350292cb2038f2c31732569a711a89e5d72fd46",
+    "dirname": "GLM-5.2-EXL3-TR3-3.42bpw",
+    "quantization": "exl3",
+    "native_mtp_format": "exl3-tr3",
+    "default_draft": "native",
+    "defaults": dict(VARIANTS["exl3-tr3-3.36bpw"]["defaults"]),
+    "runtime_env": dict(VARIANTS["exl3-tr3-3.36bpw"]["runtime_env"]),
+    "kv_scales_calibrated": True,
+    "download_gib": 328,
+    "tested": True,
+}
+VARIANTS["exl3-tr3-3.42bpw"]["defaults"].update({
+    "MAX_MODEL_LEN": 520192,
+    "GPU_MEMORY_UTILIZATION": 0.95,
+    "GPU_BLOCKS_OVERRIDE": 2032,
+    # Greedy drafting raised C1 but reduced aggregate C4/C8 throughput and
+    # acceptance on the matched AIBeast workload. Pin the measured choice so
+    # a future parent-profile edit cannot silently change production.
+    "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
+})
+
 # MTP draft types -> the three env knobs the serve path actually consumes.
 # `tr3-graft`   in-place surgery on layer 78 of the target (the ONLY draft with
 #               long-context evidence: needle 6/6 fp8, armC 3/3 at 150/190/250K)

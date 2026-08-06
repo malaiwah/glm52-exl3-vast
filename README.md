@@ -151,7 +151,7 @@ named profile when a model needs more than conventional vLLM flags.
 
 ### GLM-5.2 flagship model card (beta)
 
-There are five measured GLM variants. `exl3-tr3` is the balanced
+There are six measured GLM variants. `exl3-tr3` is the balanced
 provider-template default. `exl3-tr3-max-context` trades ordinary-workload
 speed for the largest DCP4 envelope. `madeby561-hybrid` remains the immutable
 v20 production control:
@@ -168,9 +168,18 @@ speculation shape; it is not merely a different download URL:
 |---|---|---|---|
 | **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 524,288 max, 542,208-token cold r11 KV pool at GMU 0.957 on AIBeast, 3,072-token prefill batch, 140,000-token CKV gather, 1 GiB workspace, LMCache over 50% host DRAM | balanced flagship; default |
 | `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals; one-grid decode plus serial K3/K4 block-64 prefill | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
-| `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; r26 exact query-split/full-CKV policy with two indexer shards and owner merge off | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | highest-fidelity qualified profile; dynamic-NVFP4 KLD 0.082507, 2,453--2,458 / 2,350--2,370 / 2,197--2,238 tok/s PP at 3K/32K/128K, 5/5 needles in an actual 522,359-token prompt |
+| `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; r26 exact query-split/full-CKV policy with two indexer shards and owner merge off | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | previous high-fidelity profile; dynamic-NVFP4 KLD 0.082507, 2,453--2,458 / 2,350--2,370 / 2,197--2,238 tok/s PP at 3K/32K/128K, 5/5 needles in an actual 522,359-token prompt |
+| **`exl3-tr3-3.42bpw`** | TP4/DCP4, shared-H checkpoint + online Trellis K6, native MTP-3 with probabilistic proposals; r28 lossless query-split/full-CKV policy | exactly 2,032 KV blocks / 520,192 logical tokens, GMU 0.95, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | selected high-fidelity profile; K6/dynamic-NVFP4 KLD 0.089888 (native weights 0.082039), PP 2,367 / 2,263 / 2,137 tok/s at 3K/32K/128K, complete 45/45 five-depth needles through a 516,096-token prompt plus 4,096-token reserve |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
+
+The 3.42 profile deliberately keeps dynamic NVFP4 MLA KV with FP8 RoPE. A
+matched 2,047-position KLD arm improved from `0.089888` to `0.077949` when the
+same K6 model used FP8 KV with BF16 RoPE, and the healed Aider run also favored
+FP8. That higher-fidelity KV record is 656 bytes/token versus 368 for NVFP4 and
+reduced the practical serving envelope to about 295K. FP8 is therefore a useful
+quality/latency experiment, not the flagship default: it cannot meet the
+520K-context Hermes Agents requirement on four 96 GB cards.
 
 An independent Terminal-Bench 2.1 reproduction on the Brandon checkpoint
 scored within 2.6 points of Z.ai's vendor result. GG r17 introduced the native
@@ -197,17 +206,22 @@ KV/KLD comparison, is in
 the r26 policy A/B, turnkey integration repair, and repeated 512K production
 gate are in
 [docs/glm52-r26-3.36-qualification.md](docs/glm52-r26-3.36-qualification.md);
+the r28 shared-H 3.42-bpw capacity, KLD, API, and 45-cell maximum-context gate
+are in
+[docs/glm52-r28-3.42-qualification.md](docs/glm52-r28-3.42-qualification.md);
 cross-provider throughput, power, and loader tables are in
 [docs/benchmarks.md](docs/benchmarks.md).
 
 ## What startup looks like
 
-Plan for three separate stages: image pull, roughly 309 GiB of weights, then
-model load/calibration/compile. The dashboard and provider status can look
-idle during any one of them.
+Plan for three separate stages: image pull, roughly 309--328 GiB of weights
+depending on the GLM variant, then model load/calibration/compile. The
+dashboard and provider status can look idle during any one of them.
 
 | environment | measured first click → `/health` | what dominated | practical first-use budget |
 |---|---:|---|---:|
+| AIBeast GG r28, 3.42-bpw NFS checkpoint + online-K6/JIT cache reused | 12--15.5 min | 5--7 min NFS shard stream plus mixed-Trellis hydration; online-K6 artifacts were cache hits | 17 minutes |
+| AIBeast GG r28, 3.42-bpw cold online-K6 encode | ~89 min | ~64 min weight/K6 pass plus ~25 min mixed-Trellis hydration | 90–105 minutes; health start grace is 90 minutes |
 | AIBeast GG r26, 3.36-bpw NFS checkpoint + online-K6/JIT cache reused | ~12 min to `/health`, ~13 min through verification | ~4 min NFS shard stream plus ~7 min mixed-Trellis hydration; online-K6 and CuTe artifacts were cache hits | 15 minutes |
 | AIBeast GG r17, safetensors + compatible r17 AOT reused | 12–14 min | ~252s shard load plus ~7 min mixed-Trellis hydration; AOT reconstruction under 1s | 15 minutes |
 | AIBeast GG r20, 3.36-bpw online K6 cache reused | ~5m10s | 79s shard load, ~45s mixed-Trellis hydration, compile/profile/graphs and the built-in 32K correctness gate | 6 minutes |
