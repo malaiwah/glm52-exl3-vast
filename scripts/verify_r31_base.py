@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed on the immutable GG v20-r31 and vLLM #258 contract."""
+"""Fail closed on the immutable GG v20-r31 runtime-memory stack."""
 
 from __future__ import annotations
 
@@ -33,17 +33,20 @@ VLLM_FILES = {
         "5e3768d2e9652eafeea4df56342af0d1657879413ecc92d8537652be43815ca9",
         "d5447f2240b00ccdaf0e78d261d496de4fb2c35188ef5ca5dea2a362780637de",
     ),
+    "vllm/v1/worker/gpu_model_runner.py": (
+        "8e37247f11a2c97d6bbe97d0687f3adbf0e20aca632f2fb8d785d52908273fe0",
+        "6e96f2810959aeb7003eeb1e4ce64f46d8e72bebbe38a27f33b6904d25e861ed",
+    ),
 }
 
 EXPECTED = {
-    EXL3_PATH:
+    EXL3_PATH: (
         "70c1abb81af3c93b1015bddbeb42c9e4139a2752fe6ce413b9176e37aa48d0f9",
+        "049ef17bad2072f6bf4cf719f2fa0096dcf5addfbf085f42512122eed6fa7370",
+    ),
     VLLM_SITE / "vllm/model_executor/layers/quantization/exl3.py": (
         "70c1abb81af3c93b1015bddbeb42c9e4139a2752fe6ce413b9176e37aa48d0f9",
-        # Turnkey's reviewed parity-call compatibility overlay. The source
-        # checkout remains immutable; the installed runtime gains only the
-        # extension binding's final integer argument.
-        "7ad8637502b00cb8f95155f305acd4bba5512d884c9ec36a2696386f25e553a3",
+        "049ef17bad2072f6bf4cf719f2fa0096dcf5addfbf085f42512122eed6fa7370",
     ),
     VLLM_CONFIG_PATH: (
         "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f",
@@ -53,10 +56,18 @@ EXPECTED = {
         "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f",
         "49ee79fd79dde0453009577a2a82549cf63e91427f1aa50f2df4a3cb29c2e477",
     ),
-    B12X_SITE / "moe/_shared/kernels/w4a16/host.py":
+    B12X_SITE / "moe/_shared/kernels/w4a16/host.py": (
         "02d37b856702fde1f0b2ddacb2e380c3b5584022a00a4458564dfbe34cbe5e0a",
-    B12X_SITE / "moe/_shared/kernels/w4a16/mixed_trellis.py":
+        "0887badd6632db5ef84b88669078bd3009cb31d7e67a93218b5cde812a7e65eb",
+    ),
+    B12X_SITE / "moe/_shared/kernels/w4a16/mixed_trellis.py": (
         "313022ca6ed5785a081a95e6e58b08c96cf3a706976f6721b99c36f3943c54e1",
+        "de28efd288b0ce77b0d60ecfa927397a10d9cd153ff52b3442a3d5c05d005ad4",
+    ),
+    B12X_SITE / "moe/_shared/w4a16_layout.py": (
+        None,
+        "72d7aa9380a9b9654782d9f39051af3e00eeb6b2a0722db5b085cefd222acc4e",
+    ),
     B12X_SITE / "moe/fused_moe/_impl.py":
         "060c3d04a567f3f907236470781ed8c4f6c28c99ce59c724e4793b20c5acf942",
 }
@@ -68,6 +79,12 @@ EXL3_MARKERS = (
     "warmup_mixed_trellis_route_pack=module.warmup_mixed_trellis_route_pack",
     "def warmup_exl3_mixed_trellis_route_pack(",
     '"warmup_exl3_mixed_trellis_route_pack"',
+)
+
+EXL3_RUNTIME_MEMORY_MARKERS = (
+    "mixed_trellis_buffer_layout=getattr(",
+    "def _allocate_rank_sliced_parity_staging(",
+    "refusing a late allocation",
 )
 
 B12X_MARKERS = {
@@ -85,6 +102,26 @@ B12X_MARKERS = {
     ),
 }
 
+B12X_RUNTIME_MEMORY_MARKERS = {
+    B12X_SITE / "moe/_shared/kernels/w4a16/mixed_trellis.py": (
+        "def mixed_trellis_buffer_layout(",
+        "does not match launch SMS count",
+    ),
+    B12X_SITE / "moe/_shared/w4a16_layout.py": (
+        "class MixedTrellisBufferLayout",
+        "def plan_mixed_trellis_buffers(",
+    ),
+}
+
+B12X_RUNTIME_MEMORY_HASHES = {
+    B12X_SITE / "moe/_shared/kernels/w4a16/mixed_trellis.py": (
+        "de28efd288b0ce77b0d60ecfa927397a10d9cd153ff52b3442a3d5c05d005ad4"
+    ),
+    B12X_SITE / "moe/_shared/w4a16_layout.py": (
+        "72d7aa9380a9b9654782d9f39051af3e00eeb6b2a0722db5b085cefd222acc4e"
+    ),
+}
+
 PROMPT_LOGPROBS_MARKERS = {
     "vllm/envs.py": ("VLLM_PROMPT_LOGPROBS_CHUNK_SIZE",),
     "vllm/v1/core/kv_cache_utils.py": (
@@ -98,6 +135,10 @@ PROMPT_LOGPROBS_MARKERS = {
         "LogprobsTensors.empty_cpu(",
         "self.chunk_size",
     ),
+    "vllm/v1/worker/gpu_model_runner.py": (
+        "compute_prompt_logprobs_with_chunking(",
+        "envs.VLLM_PROMPT_LOGPROBS_CHUNK_SIZE",
+    ),
 }
 
 
@@ -109,12 +150,15 @@ def verify() -> dict[str, object]:
     failures: list[str] = []
     observed: dict[str, str] = {}
     for path, expected in EXPECTED.items():
+        allowed = (expected,) if isinstance(expected, str) else expected
         if not path.is_file():
+            if None in allowed:
+                observed[str(path)] = "absent"
+                continue
             failures.append(f"missing required r31 file: {path}")
             continue
         actual = digest(path)
         observed[str(path)] = actual
-        allowed = (expected,) if isinstance(expected, str) else expected
         if actual not in allowed:
             failures.append(
                 f"unexpected r31 file hash: {path}: expected one of "
@@ -126,6 +170,15 @@ def verify() -> dict[str, object]:
         missing = [marker for marker in EXL3_MARKERS if marker not in source]
         if missing:
             failures.append(f"incomplete native r31 vLLM #228 contract: {missing!r}")
+        if digest(EXL3_PATH) == EXPECTED[EXL3_PATH][-1]:
+            missing = [
+                marker for marker in EXL3_RUNTIME_MEMORY_MARKERS
+                if marker not in source
+            ]
+            if missing:
+                failures.append(
+                    f"incomplete vLLM #270 runtime-memory contract: {missing!r}"
+                )
 
     for path, markers in B12X_MARKERS.items():
         if not path.is_file():
@@ -134,6 +187,14 @@ def verify() -> dict[str, object]:
         missing = [marker for marker in markers if marker not in source]
         if missing:
             failures.append(f"incomplete native r31 b12x #126 contract: {missing!r}")
+
+    for path, markers in B12X_RUNTIME_MEMORY_MARKERS.items():
+        if not path.is_file() or digest(path) != B12X_RUNTIME_MEMORY_HASHES[path]:
+            continue
+        source = path.read_text(encoding="utf-8")
+        missing = [marker for marker in markers if marker not in source]
+        if missing:
+            failures.append(f"incomplete b12x #130 runtime-memory contract: {missing!r}")
 
     for root in (VLLM_SOURCE, VLLM_SITE):
         for relative, markers in PROMPT_LOGPROBS_MARKERS.items():
@@ -146,10 +207,11 @@ def verify() -> dict[str, object]:
                 failures.append(f"incomplete vLLM #258 overlay: {path}: {missing!r}")
 
     result: dict[str, object] = {
-        "release": "GG-v20-r31+vLLM-258",
+        "release": "GG-v20-r31+vLLM-258-270+B12X-130",
         "vllm_tree": "fa13d334a2962756f9f7e9b562deb85387359f42",
         "b12x_tree": "acee6e504209068bd0cbb01cb2b98966bddcf042",
-        "vllm_overlay": "02fb59c5367a3650a0ae6f8805e4f4d3f5cf815f",
+        "vllm_overlay": "cc5a286de507cbd5263510eeca4b32824a970317+244d85a6fe99eca9b9b4180638334a4486bde16a",
+        "b12x_overlay": "9ead9eaa188c2d36f091c8e5225e196896545721",
         "files": observed,
         "status": "failed" if failures else "verified",
     }

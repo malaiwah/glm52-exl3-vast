@@ -1,0 +1,323 @@
+diff --git a/b12x/moe/_shared/kernels/w4a16/host.py b/b12x/moe/_shared/kernels/w4a16/host.py
+index f15d89372320b6457a53e42452fcd3156257108f..a8db075a57b9e407bea743b60197b40f1bcf8abb 100644
+--- a/b12x/moe/_shared/kernels/w4a16/host.py
++++ b/b12x/moe/_shared/kernels/w4a16/host.py
+@@ -11,6 +11,10 @@ from b12x.moe._shared.kernels.activations import (
+     is_gated_moe_activation,
+     normalize_moe_activation,
+ )
++from b12x.moe._shared.w4a16_layout import (
++    max_packed_route_slots,
++    packed_gemm_scratch_elements,
++)
+ 
+ 
+ _W4A16_ALLOWED_ROUTED_SIZES = (8, 16, 32, 48, 64)
+@@ -233,16 +237,6 @@ def route_block_sizes_for_capacity(
+     return _W4A16_ALLOWED_ROUTED_SIZES[first_idx : last_idx + 1]
+ 
+ 
+-def max_packed_route_slots(numel: int, block_size: int, num_experts: int) -> int:
+-    max_packed_routes = int(numel) + int(num_experts) * (int(block_size) - 1)
+-    if int(numel) < int(num_experts):
+-        max_packed_routes = min(
+-            int(numel) * int(block_size),
+-            max_packed_routes,
+-        )
+-    return max_packed_routes
+-
+-
+ def route_pack_numel_capacity(numel: int, topk: int = 1) -> int:
+     topk = max(int(topk), 1)
+     tokens = (max(int(numel), 1) + topk - 1) // topk
+@@ -315,22 +309,6 @@ def max_w4a16_route_capacity(routed_rows: int, num_experts: int) -> tuple[int, i
+     return max(route_slots, 1), max(route_blocks, 1)
+ 
+ 
+-def packed_gemm_scratch_elements(
+-    *,
+-    size_n: int,
+-    route_slots: int,
+-    moe_block_size: int,
+-    sms: int,
+-) -> int:
+-    elements = min(
+-        int(size_n) * int(route_slots),
+-        int(sms) * 4 * int(moe_block_size) * 256,
+-    )
+-    if moe_block_size == 8:
+-        elements *= 2
+-    return max(elements, 1)
+-
+-
+ def plan_w4a16_buffers(
+     prepared,
+     *,
+diff --git a/b12x/moe/_shared/kernels/w4a16/mixed_trellis.py b/b12x/moe/_shared/kernels/w4a16/mixed_trellis.py
+index a0e52af56479afec791651beb0c8d08f8e5edadf..64f58fc3a045ade3270cd98999f1bfedd52138d9 100644
+--- a/b12x/moe/_shared/kernels/w4a16/mixed_trellis.py
++++ b/b12x/moe/_shared/kernels/w4a16/mixed_trellis.py
+@@ -26,10 +26,13 @@ from b12x._lib.compiler import KernelCompileSpec, compile as b12x_compile
+ from b12x._lib.intrinsics import shared_ptr_to_u32
+ from b12x._lib.runtime_control import raise_if_kernel_resolution_frozen
+ from b12x._lib.utils import current_cuda_stream, make_ptr
++from b12x.moe._shared.w4a16_layout import (
++    MixedTrellisBufferLayout,
++    plan_mixed_trellis_buffers,
++)
+ 
+ from .host import (
+     max_packed_route_slots,
+-    packed_gemm_scratch_elements,
+     route_pack_warmup_token_counts,
+ )
+ from .kernel import (
+@@ -1066,73 +1069,91 @@ def compile_mixed_trellis(
+     return result
+ 
+ 
++def mixed_trellis_buffer_layout(
++    launch: MixedTrellisCompileResult,
++    *,
++    sms: int,
++) -> MixedTrellisBufferLayout:
++    if int(sms) != int(launch.sms):
++        raise ValueError(
++            f"buffer SMS count {sms} does not match launch SMS count {launch.sms}"
++        )
++    return plan_mixed_trellis_buffers(
++        size_m=launch.size_m,
++        hidden_size=launch.hidden_size,
++        intermediate_size=launch.intermediate_size,
++        top_k=launch.top_k,
++        total_experts=launch.tier0_num_experts + launch.tier1_num_experts,
++        moe_block_size=launch.moe_block_size,
++        max_m_blocks=launch.max_m_blocks,
++        blocks_per_sm=launch.blocks_per_sm,
++        sms=launch.sms,
++    )
++
++
+ def make_mixed_trellis_buffers(
+     launch: MixedTrellisCompileResult,
+     *,
+     device: torch.device,
+     sms: int,
+ ) -> MixedTrellisBuffers:
+-    capacity_rows = launch.size_m * launch.top_k
+-    total_experts = launch.tier0_num_experts + launch.tier1_num_experts
+-    route_slots = max_packed_route_slots(
+-        capacity_rows, launch.moe_block_size, total_experts
+-    )
+-    route_blocks = (route_slots + launch.moe_block_size - 1) // launch.moe_block_size
+-    if route_blocks > launch.max_m_blocks:
+-        raise ValueError(
+-            "mixed Trellis route buffers require "
+-            f"{route_blocks} blocks, but the launch was compiled for "
+-            f"{launch.max_m_blocks}"
+-        )
+-    fc1_cols = 2 * launch.intermediate_size
++    layout = mixed_trellis_buffer_layout(launch, sms=sms)
+     # FC1 consumes rotation_gate before the grid-wide activation barrier. FC2
+     # starts only after that barrier, so its output can safely reuse the same
+     # storage without changing either phase's tensor layout.
+     rotation_gate = torch.empty(
+-        (capacity_rows, launch.hidden_size), dtype=torch.float16, device=device
++        (layout.capacity_rows, layout.hidden_size),
++        dtype=torch.float16,
++        device=device,
+     )
+     return MixedTrellisBuffers(
+         rotation_gate=rotation_gate,
+         rotation_up=torch.empty(
+-            (capacity_rows, launch.hidden_size), dtype=torch.float16, device=device
++            (layout.capacity_rows, layout.hidden_size),
++            dtype=torch.float16,
++            device=device,
++        ),
++        fc1=torch.empty(
++            (layout.capacity_rows, layout.fc1_cols),
++            dtype=torch.float16,
++            device=device,
+         ),
+-        fc1=torch.empty((capacity_rows, fc1_cols), dtype=torch.float16, device=device),
+         activated=torch.empty(
+-            (capacity_rows, launch.intermediate_size),
++            (layout.capacity_rows, layout.intermediate_size),
+             dtype=torch.float16,
+             device=device,
+         ),
+         fc2=rotation_gate,
+         output=torch.empty(
+-            (launch.size_m, launch.hidden_size), dtype=torch.float32, device=device
++            (layout.size_m, layout.hidden_size),
++            dtype=torch.float32,
++            device=device,
++        ),
++        packed_route_indices=torch.empty(
++            layout.route_slots, dtype=torch.int32, device=device
++        ),
++        block_expert_ids=torch.empty(
++            layout.route_blocks, dtype=torch.int32, device=device
+         ),
+-        packed_route_indices=torch.empty(route_slots, dtype=torch.int32, device=device),
+-        block_expert_ids=torch.empty(route_blocks, dtype=torch.int32, device=device),
+         packed_route_count=torch.empty(1, dtype=torch.int32, device=device),
+-        expert_offsets=torch.empty(total_experts + 1, dtype=torch.int32, device=device),
+-        expert_counts=torch.empty(total_experts, dtype=torch.int32, device=device),
++        expert_offsets=torch.empty(
++            layout.total_experts + 1, dtype=torch.int32, device=device
++        ),
++        expert_counts=torch.empty(
++            layout.total_experts, dtype=torch.int32, device=device
++        ),
+         fc1_scratch=torch.empty(
+-            packed_gemm_scratch_elements(
+-                size_n=fc1_cols,
+-                route_slots=route_slots,
+-                moe_block_size=launch.moe_block_size,
+-                sms=sms,
+-            ),
++            layout.fc1_scratch_elements,
+             dtype=torch.float32,
+             device=device,
+         ),
+         fc2_scratch=torch.empty(
+-            packed_gemm_scratch_elements(
+-                size_n=launch.hidden_size,
+-                route_slots=route_slots,
+-                moe_block_size=launch.moe_block_size,
+-                sms=sms,
+-            ),
++            layout.fc2_scratch_elements,
+             dtype=torch.float32,
+             device=device,
+         ),
+         workspace=torch.zeros(
+-            max(sms * 4, launch.blocks_per_sm * sms) + 2,
++            layout.workspace_elements,
+             dtype=torch.int32,
+             device=device,
+         ),
+@@ -1577,6 +1598,7 @@ def run_mixed_trellis(
+ 
+ 
+ __all__ = [
++    "MixedTrellisBufferLayout",
+     "MixedTrellisBuffers",
+     "MixedTrellisCompileResult",
+     "MixedTrellisRotations",
+@@ -1585,6 +1607,7 @@ __all__ = [
+     "combine_trellis_rotations",
+     "compile_mixed_trellis",
+     "make_mixed_trellis_buffers",
++    "mixed_trellis_buffer_layout",
+     "run_mixed_trellis",
+     "warmup_mixed_trellis_route_pack",
+ ]
+diff --git a/b12x/moe/_shared/w4a16_layout.py b/b12x/moe/_shared/w4a16_layout.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..347bbd551d7aaa5a5664eebe5aee9241e67f310a
+--- /dev/null
++++ b/b12x/moe/_shared/w4a16_layout.py
+@@ -0,0 +1,100 @@
++"""Pure host-side allocation planning for W4A16 mixed Trellis."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True)
++class MixedTrellisBufferLayout:
++    """Allocation identity for a mixed-Trellis persistent buffer set."""
++
++    size_m: int
++    hidden_size: int
++    intermediate_size: int
++    capacity_rows: int
++    total_experts: int
++    route_slots: int
++    route_blocks: int
++    fc1_cols: int
++    fc1_scratch_elements: int
++    fc2_scratch_elements: int
++    workspace_elements: int
++
++
++def max_packed_route_slots(numel: int, block_size: int, num_experts: int) -> int:
++    max_packed_routes = int(numel) + int(num_experts) * (int(block_size) - 1)
++    if int(numel) < int(num_experts):
++        max_packed_routes = min(
++            int(numel) * int(block_size),
++            max_packed_routes,
++        )
++    return max_packed_routes
++
++
++def packed_gemm_scratch_elements(
++    *,
++    size_n: int,
++    route_slots: int,
++    moe_block_size: int,
++    sms: int,
++) -> int:
++    elements = min(
++        int(size_n) * int(route_slots),
++        int(sms) * 4 * int(moe_block_size) * 256,
++    )
++    if moe_block_size == 8:
++        elements *= 2
++    return max(elements, 1)
++
++
++def plan_mixed_trellis_buffers(
++    *,
++    size_m: int,
++    hidden_size: int,
++    intermediate_size: int,
++    top_k: int,
++    total_experts: int,
++    moe_block_size: int,
++    max_m_blocks: int,
++    blocks_per_sm: int,
++    sms: int,
++) -> MixedTrellisBufferLayout:
++    """Plan the complete persistent allocation without constructing tensors."""
++
++    capacity_rows = int(size_m) * int(top_k)
++    route_slots = max_packed_route_slots(
++        capacity_rows,
++        int(moe_block_size),
++        int(total_experts),
++    )
++    route_blocks = (route_slots + int(moe_block_size) - 1) // int(moe_block_size)
++    if route_blocks > int(max_m_blocks):
++        raise ValueError(
++            "mixed Trellis route capacity exceeds compiled max_m_blocks: "
++            f"needed {route_blocks}, compiled {max_m_blocks}"
++        )
++    fc1_cols = 2 * int(intermediate_size)
++    return MixedTrellisBufferLayout(
++        size_m=int(size_m),
++        hidden_size=int(hidden_size),
++        intermediate_size=int(intermediate_size),
++        capacity_rows=capacity_rows,
++        total_experts=int(total_experts),
++        route_slots=route_slots,
++        route_blocks=route_blocks,
++        fc1_cols=fc1_cols,
++        fc1_scratch_elements=packed_gemm_scratch_elements(
++            size_n=fc1_cols,
++            route_slots=route_slots,
++            moe_block_size=int(moe_block_size),
++            sms=int(sms),
++        ),
++        fc2_scratch_elements=packed_gemm_scratch_elements(
++            size_n=int(hidden_size),
++            route_slots=route_slots,
++            moe_block_size=int(moe_block_size),
++            sms=int(sms),
++        ),
++        workspace_elements=max(int(sms) * 4, int(blocks_per_sm) * int(sms)) + 2,
++    )

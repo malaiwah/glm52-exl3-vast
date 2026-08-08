@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "components": [
+    {
+      "name": "vllm-runtime-memory-accounting",
+      "base_tree": "fa13d334a2962756f9f7e9b562deb85387359f42",
+      "tested_head": "vllm#258@cc5a286de507cbd5263510eeca4b32824a970317+vllm#270@244d85a6fe99eca9b9b4180638334a4486bde16a",
+      "patch": "vllm-258-270-runtime.patch",
+      "patch_sha256": "f7365099b396eb208fdd3cfa5528e1809ef06b9fe75453af9999628ab1740a96",
+      "targets": [
+        "site-packages",
+        "vllm-source"
+      ],
+      "files": {
+        "vllm/envs.py": {
+          "before": "6fb1c8f2f5b9cd6a515caa416a90da632180556816a4812c41ed65a5d3f11eaf",
+          "after": "3eee46ffa0eb7c7c021b12415d24c560ab477d36075aafa4dda7e5cb308bff0a"
+        },
+        "vllm/model_executor/layers/quantization/exl3.py": {
+          "before": "70c1abb81af3c93b1015bddbeb42c9e4139a2752fe6ce413b9176e37aa48d0f9",
+          "after": "049ef17bad2072f6bf4cf719f2fa0096dcf5addfbf085f42512122eed6fa7370"
+        },
+        "vllm/v1/core/kv_cache_utils.py": {
+          "before": "3860730aaf287e4307d64ab2144356ad129fe7d46e86b668eb1563c52c582291",
+          "after": "b71b7819066a912c3b9743219447a8147a3d60656418801f6189a142fe5f41e8"
+        },
+        "vllm/v1/worker/gpu/model_runner.py": {
+          "before": "feb877f6eaf09249fb95e76a9dc2a2b4d75b201cade30f1915f47d7585c90eea",
+          "after": "e8f13cbabadc6c591bc644874abbfcca5a0c935396993e1046ace173f227b0d0"
+        },
+        "vllm/v1/worker/gpu/sample/prompt_logprob.py": {
+          "before": "5e3768d2e9652eafeea4df56342af0d1657879413ecc92d8537652be43815ca9",
+          "after": "d5447f2240b00ccdaf0e78d261d496de4fb2c35188ef5ca5dea2a362780637de"
+        },
+        "vllm/v1/worker/gpu_model_runner.py": {
+          "before": "8e37247f11a2c97d6bbe97d0687f3adbf0e20aca632f2fb8d785d52908273fe0",
+          "after": "6e96f2810959aeb7003eeb1e4ce64f46d8e72bebbe38a27f33b6904d25e861ed"
+        }
+      }
+    },
+    {
+      "name": "b12x-mixed-trellis-buffer-layout",
+      "base_tree": "acee6e504209068bd0cbb01cb2b98966bddcf042",
+      "tested_head": "b12x#130@9ead9eaa188c2d36f091c8e5225e196896545721",
+      "patch": "b12x-130-runtime.patch",
+      "patch_sha256": "51ab0b08f31a408e10b88ec22644a55b337d52eb3af31640f3e642af8414e423",
+      "targets": [
+        "site-packages"
+      ],
+      "files": {
+        "b12x/moe/_shared/kernels/w4a16/host.py": {
+          "before": "02d37b856702fde1f0b2ddacb2e380c3b5584022a00a4458564dfbe34cbe5e0a",
+          "after": "0887badd6632db5ef84b88669078bd3009cb31d7e67a93218b5cde812a7e65eb"
+        },
+        "b12x/moe/_shared/kernels/w4a16/mixed_trellis.py": {
+          "before": "313022ca6ed5785a081a95e6e58b08c96cf3a706976f6721b99c36f3943c54e1",
+          "after": "de28efd288b0ce77b0d60ecfa927397a10d9cd153ff52b3442a3d5c05d005ad4"
+        },
+        "b12x/moe/_shared/w4a16_layout.py": {
+          "before": null,
+          "after": "72d7aa9380a9b9654782d9f39051af3e00eeb6b2a0722db5b085cefd222acc4e"
+        }
+      }
+    }
+  ]
+}

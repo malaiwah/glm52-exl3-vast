@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the immutable GG v20-r31 and vLLM #258 source gate."""
+"""Tests for the immutable GG v20-r31 runtime-memory source gate."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ class R31BaseGateTests(unittest.TestCase):
                     gate.verify()
 
     def test_release_ledger_pins_included_and_overlay_heads(self) -> None:
-        bundle = ROOT / "patches" / "v20-r31-vllm258"
+        bundle = ROOT / "patches" / "v20-r31-memory-stack"
         ledger = json.loads((bundle / "ledger.json").read_text())
         dockerfile = (ROOT / "Dockerfile").read_text()
         self.assertIn(ledger["release"]["manifest_digest"], dockerfile)
@@ -64,31 +64,46 @@ class R31BaseGateTests(unittest.TestCase):
             "acee6e504209068bd0cbb01cb2b98966bddcf042",
         )
         native = {item["name"]: item for item in ledger["native_fixes"]}
-        self.assertEqual(
-            native["b12x-target-and-native-mtp-route-pack-prewarm"]["source"],
-            "local-inference-lab/b12x#126@6022e6e7c7ea1199a06a27cf5a777c2804b13cfb",
+        self.assertIn(
+            "local-inference-lab/b12x#126@6022e6e7c7ea",
+            native["target-and-native-mtp-route-pack-prewarm"]["source"],
         )
-        self.assertEqual(
-            native["vllm-mixed-trellis-route-pack-prewarm"]["supersedes"],
-            "local-inference-lab/vllm#250@2a34b0760f4d9bbd5d2ff6809238593098bd46ff",
+        overlays = {
+            item["name"]: item["source"] for item in ledger["turnkey_overlays"]
+        }
+        self.assertIn(
+            "vllm#258@cc5a286de507",
+            overlays["prompt-logprobs-memory-accounting-and-bounded-v1-runtime"],
         )
-        self.assertEqual(
-            ledger["turnkey_overlays"][0]["source"],
-            "local-inference-lab/vllm#258@02fb59c5367a3650a0ae6f8805e4f4d3f5cf815f",
+        self.assertIn(
+            "vllm#270@244d85a6fe99",
+            overlays["mixed-prefill-buffer-sharing-and-parity-staging-accounting"],
+        )
+        self.assertIn(
+            "b12x#130@9ead9eaa188c",
+            overlays["mixed-trellis-persistent-buffer-layout-contract"],
         )
 
-    def test_parity_overlay_runtime_hash_is_explicitly_pinned(self) -> None:
-        expected = gate.EXPECTED[
+    def test_runtime_memory_output_hashes_are_explicitly_pinned(self) -> None:
+        exl3_expected = gate.EXPECTED[
             gate.VLLM_SITE
             / "vllm/model_executor/layers/quantization/exl3.py"
         ]
         self.assertIn(
-            "7ad8637502b00cb8f95155f305acd4bba5512d884c9ec36a2696386f25e553a3",
-            expected,
+            "049ef17bad2072f6bf4cf719f2fa0096dcf5addfbf085f42512122eed6fa7370",
+            exl3_expected,
+        )
+        layout_expected = gate.EXPECTED[
+            gate.B12X_SITE / "moe/_shared/w4a16_layout.py"
+        ]
+        self.assertIn(None, layout_expected)
+        self.assertIn(
+            "72d7aa9380a9b9654782d9f39051af3e00eeb6b2a0722db5b085cefd222acc4e",
+            layout_expected,
         )
 
-    def test_vllm_258_bundle_validates_and_build_order_is_fail_closed(self) -> None:
-        bundle = ROOT / "patches" / "v20-r31-vllm258"
+    def test_runtime_memory_bundle_validates_and_build_order_is_fail_closed(self) -> None:
+        bundle = ROOT / "patches" / "v20-r31-memory-stack"
         manifest = bundle / "manifest.json"
         result = subprocess.run(
             [
@@ -104,7 +119,7 @@ class R31BaseGateTests(unittest.TestCase):
             stderr=subprocess.STDOUT,
         )
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("validated 1 field-review patch components", result.stdout)
+        self.assertIn("validated 2 field-review patch components", result.stdout)
 
         dockerfile = (ROOT / "Dockerfile").read_text()
         before = dockerfile.index("verify_r31_base.py")
