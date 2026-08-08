@@ -61,10 +61,10 @@ class R28BaseGateTests(unittest.TestCase):
     def test_r28_base_and_inherited_r26_ledger_are_explicit(self) -> None:
         ledger = json.loads(
             (ROOT / "patches" / "field-review-r26" / "ledger.json").read_text())
-        dockerfile = (ROOT / "Dockerfile").read_text()
+        changelog = (ROOT / "CHANGELOG.md").read_text()
         self.assertIn(
             "sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0",
-            dockerfile,
+            changelog,
         )
         self.assertEqual(ledger["composed_sources"]["vllm"],
                          "f5981f14b4d39979bc0d799c020d42002b707257")

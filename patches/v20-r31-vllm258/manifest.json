@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "components": [
+    {
+      "name": "vllm-prompt-logprobs-memory-accounting",
+      "base_tree": "fa13d334a2962756f9f7e9b562deb85387359f42",
+      "tested_head": "02fb59c5367a3650a0ae6f8805e4f4d3f5cf815f",
+      "patch": "vllm-258-runtime.patch",
+      "patch_sha256": "4bdfe6b1563c1a7844ce534a277081fbbb199836b7b28dac0a02cf4760666b20",
+      "targets": [
+        "site-packages",
+        "vllm-source"
+      ],
+      "files": {
+        "vllm/envs.py": {
+          "before": "6fb1c8f2f5b9cd6a515caa416a90da632180556816a4812c41ed65a5d3f11eaf",
+          "after": "3eee46ffa0eb7c7c021b12415d24c560ab477d36075aafa4dda7e5cb308bff0a"
+        },
+        "vllm/v1/core/kv_cache_utils.py": {
+          "before": "3860730aaf287e4307d64ab2144356ad129fe7d46e86b668eb1563c52c582291",
+          "after": "b71b7819066a912c3b9743219447a8147a3d60656418801f6189a142fe5f41e8"
+        },
+        "vllm/v1/worker/gpu/model_runner.py": {
+          "before": "feb877f6eaf09249fb95e76a9dc2a2b4d75b201cade30f1915f47d7585c90eea",
+          "after": "e8f13cbabadc6c591bc644874abbfcca5a0c935396993e1046ace173f227b0d0"
+        },
+        "vllm/v1/worker/gpu/sample/prompt_logprob.py": {
+          "before": "5e3768d2e9652eafeea4df56342af0d1657879413ecc92d8537652be43815ca9",
+          "after": "d5447f2240b00ccdaf0e78d261d496de4fb2c35188ef5ca5dea2a362780637de"
+        }
+      }
+    }
+  ]
+}

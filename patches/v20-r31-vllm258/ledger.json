@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "release": {
+    "name": "GG-v20-r31",
+    "image": "voipmonitor/vllm:gilded-gnosis-v20-vllmfa13d33-b12xacee6e5-fi1ac6942-cu132-20260807-r31",
+    "manifest_digest": "sha256:3230c25ff95f8678a8eeb52a463f0d3b9f96f6ad550418cc51ea12177a55b41c"
+  },
+  "composed_sources": {
+    "vllm": "fa13d334a2962756f9f7e9b562deb85387359f42",
+    "b12x": "acee6e504209068bd0cbb01cb2b98966bddcf042",
+    "flashinfer": "1ac6942776b383c6b03c7a5805a22e72a3e3349f",
+    "lmcache": "9a05c8818bae48d15b79c7e876418bb813c08cd0"
+  },
+  "native_fixes": [
+    {
+      "name": "b12x-target-and-native-mtp-route-pack-prewarm",
+      "source": "local-inference-lab/b12x#126@6022e6e7c7ea1199a06a27cf5a777c2804b13cfb"
+    },
+    {
+      "name": "vllm-mixed-trellis-route-pack-prewarm",
+      "source": "local-inference-lab/vllm#228@5ec935796f0afa19e3d8e41888ecc51a6a637528",
+      "supersedes": "local-inference-lab/vllm#250@2a34b0760f4d9bbd5d2ff6809238593098bd46ff"
+    }
+  ],
+  "turnkey_overlays": [
+    {
+      "name": "vllm-prompt-logprobs-memory-accounting",
+      "source": "local-inference-lab/vllm#258@02fb59c5367a3650a0ae6f8805e4f4d3f5cf815f",
+      "status": "upstream-open"
+    }
+  ]
+}

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """patch_exl3_mixk.py (v5) — mixed-K (per-expert 3/4 bpw) rank-sliced EXL3 MoE
-for the installed vLLM exl3.py (GG v20 r11-r14).
+for the installed vLLM exl3.py (GG v20 r11-r31).
 
-GG v20-r14 carries the reviewed one-grid mixed-K implementation natively. On
-that lineage this compatibility installer verifies the complete native API and
-leaves the immutable upstream source untouched. The appended v5 implementation
-remains the r11-r13 fallback.
+GG v20-r14 and later reviewed releases carry mixed-K implementations natively.
+On those lineages this compatibility installer verifies a complete native API
+generation and leaves the immutable upstream source untouched. The appended v5
+implementation remains the r11-r13 fallback.
 
 v5 over v4:
   * inherits r13's backend-declared minimum capturable Trellis row count
@@ -43,11 +43,32 @@ MARKER_V1 = "# === EXL3-MIXK-PATCH v1 ==="
 MARKER_V3 = "# === EXL3-MIXK-PATCH v3 (shared runtime, aliased arenas) ==="
 MARKER_V4 = "# === EXL3-MIXK-PATCH v4 (r13 consolidated fused-MoE API) ==="
 MARKER_V5 = "# === EXL3-MIXK-PATCH v5 (backend Trellis minimum) ==="
-NATIVE_R14_MARKERS = (
-    "def _load_sparkinfer_mixed_trellis(",
-    "def _prepare_mixed_rank_sliced_weights(",
-    "def _apply_mixed_rank_sliced(",
+NATIVE_API_GENERATIONS = (
+    (
+        "def _load_sparkinfer_mixed_trellis(",
+        "def _prepare_mixed_rank_sliced_weights(",
+        "def _apply_mixed_rank_sliced(",
+    ),
+    (
+        "def _load_b12x_mixed_trellis(",
+        "def _prepare_mixed_rank_sliced_weights(",
+        "def _apply_mixed_rank_sliced(",
+    ),
 )
+
+
+def native_api_status(src: str) -> tuple[bool, list[str]]:
+    """Recognize complete reviewed native APIs while failing closed on fragments."""
+    for markers in NATIVE_API_GENERATIONS:
+        if all(marker in src for marker in markers):
+            return True, []
+    present = sorted({
+        marker
+        for markers in NATIVE_API_GENERATIONS
+        for marker in markers
+        if marker in src
+    })
+    return False, present
 
 
 def find_exl3() -> Path:
@@ -469,18 +490,14 @@ def main() -> None:
         return
     path = find_exl3()
     src = path.read_text()
-    native_markers = tuple(marker in src for marker in NATIVE_R14_MARKERS)
-    if all(native_markers):
+    native_complete, native_present = native_api_status(src)
+    if native_complete:
         print(f"upstream native mixed-K present; compatibility patch skipped: {path}")
         return
-    if any(native_markers):
-        present = [
-            marker for marker, found in zip(NATIVE_R14_MARKERS, native_markers)
-            if found
-        ]
+    if native_present:
         sys.exit(
-            f"INCOMPLETE NATIVE MIXED-K API {present!r} in {path}; "
-            "image lineage differs from reviewed r14 — do not patch blindly."
+            f"INCOMPLETE NATIVE MIXED-K API {native_present!r} in {path}; "
+            "image lineage differs from reviewed releases — do not patch blindly."
         )
     if MARKER_V5 in src:
         print(f"already patched (v5): {path}")

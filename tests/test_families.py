@@ -142,7 +142,7 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r28 runtime integration matches the measured launch contract")
+    section("the GG v20-r31 + vLLM #258 runtime integration")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
@@ -151,11 +151,12 @@ def test_glm_release_integration():
     kld_runner = open(
         os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r28 manifest",
-          "sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0"
+    check("the base image is the pinned GG v20-r31 manifest",
+          "sha256:3230c25ff95f8678a8eeb52a463f0d3b9f96f6ad550418cc51ea12177a55b41c"
           in dockerfile
-          and "verify_r28_base.py" in dockerfile
-          and "apply_field_review_patches.py" not in dockerfile
+          and "verify_r31_base.py" in dockerfile
+          and "v20-r31-vllm258/manifest.json" in dockerfile
+          and "apply_field_review_patches.py" in dockerfile
           and "field-review-r14" not in dockerfile)
     check("static NVFP4 scaling selects and verifies the reviewed artifact",
           "KV_SCALE_MODE:-static-calibrated" in entry
@@ -250,19 +251,19 @@ def test_glm_release_integration():
           and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
           in entry)
     check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r28-native1"'
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r31-vllm258"'
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
-    check("the r28 native EXL3 gate and compatibility fallback are cache-versioned",
-          "verify_r28_base.py" in dockerfile
+    check("the r31 native EXL3 gate and compatibility fallback are cache-versioned",
+          "verify_r31_base.py" in dockerfile
           and "patch_exl3_parity_abi.py" in dockerfile
           and "patch_exl3_mixk.py" in dockerfile
-          and "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6"
+          and "09ec9cbbf576ae6b4c51f1a64e1b0583d33f8c5b3c70be2ae93c56c234a2e7da"
           in dockerfile
           and dockerfile.index("patch_exl3_parity_abi.py")
           < dockerfile.rindex("patch_exl3_mixk.py")
-          and "-turnkey-r28-native1" in entry)
+          and "-turnkey-r31-vllm258" in entry)
     check("the local Podman runner does not bypass cache fingerprinting",
           "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
           and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
@@ -400,7 +401,9 @@ def test_glm_max_context_profile():
     check("the maximum-context profile is retrieval-qualified",
           gc.VARIANTS["exl3-tr3-max-context"]["tested"] is True)
     check("the profile has no balanced DCP2 route overrides",
-          gc.derive(eff)["PROFILE_RUNTIME_ENV"] == [])
+          gc.derive(eff)["PROFILE_RUNTIME_ENV"] == [
+              "VLLM_PROMPT_LOGPROBS_CHUNK_SIZE=128"
+          ])
     check("the profile is accepted without a DCP capacity warning",
           "dcp-reduces-pool" not in ids(gc.validate(eff)))
     line = " ".join(gc.family_serve_args(eff))
@@ -592,8 +595,8 @@ def test_r20_336_online_quant_candidate():
           in ids(gc.validate(unpinned)))
 
 
-def test_r28_342_shared_h_profile():
-    section("the r28-qualified shared-H 3.42bpw profile")
+def test_r31_342_shared_h_profile():
+    section("the r31-safe shared-H 3.42bpw profile")
     eff, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3-3.42bpw")
     derived = gc.derive(eff)
     check("the profile pins the immutable 3.42bpw checkpoint",
@@ -601,10 +604,16 @@ def test_r28_342_shared_h_profile():
           "willfalco/GLM-5.2-EXL3-TR3-3.42bpw"
           and derived["MODEL_REVISION"] ==
           "a350292cb2038f2c31732569a711a89e5d72fd46")
-    check("the profile pins the workload-safe 520,192-token pool",
-          eff["GPU_BLOCKS_OVERRIDE"] == 2032
+    check("the profile auto-sizes KV after complete memory profiling",
+          eff["GPU_BLOCKS_OVERRIDE"] == 0
           and eff["GPU_MEMORY_UTILIZATION"] == 0.95
-          and eff["MAX_MODEL_LEN"] == 520192)
+          and eff["MAX_MODEL_LEN"] == 500224)
+    runtime_env = dict(
+        item.split("=", 1) for item in derived["PROFILE_RUNTIME_ENV"]
+    )
+    check("GLM bounds prompt-logprobs full-vocabulary workspace to 128 rows",
+          runtime_env.get("VLLM_PROMPT_LOGPROBS_CHUNK_SIZE") == "128",
+          str(runtime_env))
     check("the profile retains K6, dynamic NVFP4 and production LMCache",
           eff["ONLINE_QUANT"] == "exl3-b6"
           and eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"
@@ -991,7 +1000,7 @@ def main():
         run(test_madeby561_hybrid)
         run(test_higher_fidelity_exl3_candidate)
         run(test_r20_336_online_quant_candidate)
-        run(test_r28_342_shared_h_profile)
+        run(test_r31_342_shared_h_profile)
         run(test_qwen_preset)
         run(test_custom_profile)
         run(test_inapplicable_knobs)

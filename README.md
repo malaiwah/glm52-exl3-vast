@@ -164,12 +164,20 @@ MODEL_VARIANT=madeby561-hybrid
 Selecting a variant applies its entire coherent memory, transport and
 speculation shape; it is not merely a different download URL:
 
+The current candidate image is based on GG v20-r31. Its immutable composition
+already includes b12x #126 and vLLM #228's implementation superseding #250;
+the turnkey adds vLLM #258 because it was published after the release froze.
+This prewarms target/native-MTP route packing and accounts for bounded
+prompt-logprobs memory before KV sizing. The performance, KLD, and retrieval
+numbers below remain the last qualified r28 evidence until the r31 derivative
+completes its GPU gate.
+
 | variant | topology / speculation | context and memory | intended use |
 |---|---|---|---|
 | **`exl3-tr3`** | TP4/DCP2, native/external TR3 MTP-5, probabilistic proposals | 524,288 max, 542,208-token cold r11 KV pool at GMU 0.957 on AIBeast, 3,072-token prefill batch, 140,000-token CKV gather, 1 GiB workspace, LMCache over 50% host DRAM | balanced flagship; default |
 | `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals; one-grid decode plus serial K3/K4 block-64 prefill | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
 | `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; r26 exact query-split/full-CKV policy with two indexer shards and owner merge off | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | previous high-fidelity profile; dynamic-NVFP4 KLD 0.082507, 2,453--2,458 / 2,350--2,370 / 2,197--2,238 tok/s PP at 3K/32K/128K, 5/5 needles in an actual 522,359-token prompt |
-| **`exl3-tr3-3.42bpw`** | TP4/DCP4, shared-H checkpoint + online Trellis K6, native MTP-3 with probabilistic proposals; r28 lossless query-split/full-CKV policy | exactly 2,032 KV blocks / 520,192 logical tokens, GMU 0.95, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | selected high-fidelity profile; K6/dynamic-NVFP4 KLD 0.089888 (native weights 0.082039), PP 2,367 / 2,263 / 2,137 tok/s at 3K/32K/128K, complete 45/45 five-depth needles through a 516,096-token prompt plus 4,096-token reserve |
+| **`exl3-tr3-3.42bpw`** | TP4/DCP4, shared-H checkpoint + online Trellis K6, native MTP-3 with probabilistic proposals; r31 route-pack prewarm | 500,224-token request limit, auto-profiled dynamic-NVFP4 KV, GMU 0.95, 3,072-token scheduler/arena, 128-row prompt-logprobs workspace, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | selected high-fidelity candidate; last qualified r28 reference: K6/dynamic-NVFP4 KLD 0.089888 (native weights 0.082039), PP 2,367 / 2,263 / 2,137 tok/s at 3K/32K/128K, complete 45/45 five-depth needles through a 516,096-token prompt plus 4,096-token reserve |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
@@ -179,7 +187,7 @@ same K6 model used FP8 KV with BF16 RoPE, and the healed Aider run also favored
 FP8. That higher-fidelity KV record is 656 bytes/token versus 368 for NVFP4 and
 reduced the practical serving envelope to about 295K. FP8 is therefore a useful
 quality/latency experiment, not the flagship default: it cannot meet the
-520K-context Hermes Agents requirement on four 96 GB cards.
+roughly 500K-context Hermes Agents requirement on four 96 GB cards.
 
 An independent Terminal-Bench 2.1 reproduction on the Brandon checkpoint
 scored within 2.6 points of Z.ai's vendor result. GG r17 introduced the native

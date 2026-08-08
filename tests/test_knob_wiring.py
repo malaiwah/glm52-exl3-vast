@@ -31,6 +31,7 @@ import glm_config as gc  # noqa: E402
 #                           in entrypoint.sh (the entrypoint reads the derived value)
 #   "serve_args": True      the knob is consumed by gc.family_serve_args() (the
 #                           function source is inspected for the key name)
+#   "runtime_env": True     gc.derive() emits the knob into PROFILE_RUNTIME_ENV
 #   "landing": True         the knob is read by landing.py
 #   "config_env": True       the knob is exported via config_cli.py's env command
 INDIRECT = {
@@ -96,6 +97,11 @@ INDIRECT = {
         "serve_args": True,
         "why": "read by glm_config.family_serve_args for the r20 online "
                "quantization config; derive also emits its runtime cache env",
+    },
+    "VLLM_PROMPT_LOGPROBS_CHUNK_SIZE": {
+        "runtime_env": True,
+        "why": "read by glm_config.derive and emitted into the "
+               "PROFILE_RUNTIME_ENV array consumed by entrypoint.sh",
     },
     "VLLM_EXL3_TRELLIS_MAX_M": {
         "entrypoint": True,
@@ -173,6 +179,7 @@ def main():
     # renamed or an entrypoint rewrite would leave the claim stale.  Now we
     # assert the claim against the real source.
     serve_args_src = inspect.getsource(gc.family_serve_args)
+    derive_src = inspect.getsource(gc.derive)
     config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
     for knob, spec in sorted(INDIRECT.items()):
         for dk in spec.get("derives", []):
@@ -185,6 +192,13 @@ def main():
             check(f"{knob} is consumed by family_serve_args()",
                   knob in serve_args_src,
                   f"{knob} not found in family_serve_args source")
+        if spec.get("runtime_env"):
+            runtime_env = dict(
+                item.split("=", 1) for item in derived["PROFILE_RUNTIME_ENV"]
+            )
+            check(f"{knob} is emitted through PROFILE_RUNTIME_ENV",
+                  knob in derive_src and knob in runtime_env,
+                  f"{knob} not emitted by derive()")
         if spec.get("landing"):
             check(f"{knob} is read by landing.py",
                   knob in landing, f"{knob} not found in landing.py")

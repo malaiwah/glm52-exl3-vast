@@ -96,6 +96,7 @@ FAMILIES = {
                       "MTP_REJECTION_SAMPLE_METHOD",
                       "KV_SCALE_MODE",
                       "VLLM_EXL3_TRELLIS_MAX_M",
+                      "VLLM_PROMPT_LOGPROBS_CHUNK_SIZE",
                       "DCP_PREFILL_WORKSPACE_MIB", "DCP_CKV_PREFETCH_DEPTH",
                       "DCP_CKV_GATHER_MAX_TOKENS",
                       "DCP_KV_CACHE_INTERLEAVE_SIZE",
@@ -107,6 +108,7 @@ FAMILIES = {
         "defaults": {
             "MAX_MODEL_LEN": 524288, "MODEL_OUTPUT_LIMIT": 131072, "MTP_TOKENS": 3,
             "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
+            "VLLM_PROMPT_LOGPROBS_CHUNK_SIZE": 128,
             "DCP_PREFILL_WORKSPACE_MIB": 1024,
             "DCP_CKV_PREFETCH_DEPTH": "auto",
             "DCP_CKV_GATHER_MAX_TOKENS": 140000,
@@ -563,14 +565,16 @@ VARIANTS["exl3-tr3-3.36bpw"]["runtime_env"].update({
     "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
 })
 
-# r28 shared-H quality profile. Natural KV profiling exposed 524,800 logical
-# tokens, but a cold 128K prefill then OOMed when a 48 MiB mixed-Trellis
-# temporary had only 32.81 MiB free. The qualified 2,032-block pool exposes an
-# exact 520,192-token envelope and passed C8 plus a 45-cell five-depth needle
-# matrix through a 516,096-token prompt with a 4,096-token generation reserve.
+# r28 shared-H quality evidence used a fixed 2,032-block/520,192-token pool.
+# A later prompt_logprobs workload proved that a fixed override bypasses vLLM's
+# profiled safety budget: the engine had 218.81 MiB free when a 304 MiB TP
+# logits all-gather arrived. r31 prewarms the late mixed-Trellis route kernels;
+# the #258 overlay profiles prompt-logprobs and bounds the same runtime path.
+# Keep a 500,224-token request envelope and let vLLM size the actual pool from
+# the complete profile instead of defeating that accounting with an override.
 VARIANTS["exl3-tr3-3.42bpw"] = {
     "family": "glm52",
-    "label": "EXL3-TR3 shared-H 3.42bpw + online K6 — high-fidelity 520K",
+    "label": "EXL3-TR3 shared-H 3.42bpw + online K6 — safe high-fidelity 500K",
     "repo": "willfalco/GLM-5.2-EXL3-TR3-3.42bpw",
     "revision": "a350292cb2038f2c31732569a711a89e5d72fd46",
     "dirname": "GLM-5.2-EXL3-TR3-3.42bpw",
@@ -584,9 +588,9 @@ VARIANTS["exl3-tr3-3.42bpw"] = {
     "tested": True,
 }
 VARIANTS["exl3-tr3-3.42bpw"]["defaults"].update({
-    "MAX_MODEL_LEN": 520192,
+    "MAX_MODEL_LEN": 500224,
     "GPU_MEMORY_UTILIZATION": 0.95,
-    "GPU_BLOCKS_OVERRIDE": 2032,
+    "GPU_BLOCKS_OVERRIDE": 0,
     # Greedy drafting raised C1 but reduced aggregate C4/C8 throughput and
     # acceptance on the matched AIBeast workload. Pin the measured choice so
     # a future parent-profile edit cannot silently change production.
@@ -879,6 +883,18 @@ KNOBS = [
              "headroom and decode latency (a decode step queued behind a big prefill "
              "chunk waits for it). 3072 is the shipped balance for a 512K-context "
              "single-stream workload.")),
+
+    dict(key="VLLM_PROMPT_LOGPROBS_CHUNK_SIZE", families=("glm52",), type="int",
+         default=128, min=1, max=65536,
+         group="Memory", scope="engine", label="Prompt-logprobs workspace rows",
+         rationale=(
+             "Bounds the full-vocabulary logits materialized at once for prompt "
+             "logprobs. GLM's roughly 155K-token vocabulary needs about 304 MiB "
+             "per TP rank at the upstream 1,024-row default; 128 rows reduce that "
+             "transient to about 38 MiB. The r31 + vLLM #258 image profiles this "
+             "exact path before sizing KV and accumulates long-prompt results on "
+             "CPU. Raising the value may speed rare prompt_logprobs requests but "
+             "directly reduces profiled KV headroom.")),
 
     dict(key="VLLM_EXL3_PREFILL_CAPACITY", families=("glm52",), type="int",
          default=3072, min=1, max=65536,
@@ -1789,6 +1805,10 @@ def derive(cfg: dict) -> dict:
     out["SPEC_METHOD"] = fam.get("spec_method", "mtp")
     out["FAMILY_SERVE_ARGS"] = family_serve_args(cfg)
     runtime_env = dict(variant.get("runtime_env", {}))
+    if fam_name == "glm52":
+        runtime_env["VLLM_PROMPT_LOGPROBS_CHUNK_SIZE"] = str(
+            cfg["VLLM_PROMPT_LOGPROBS_CHUNK_SIZE"]
+        )
     if fam_name == "glm52" and cfg.get("ONLINE_QUANT") == "exl3-b6":
         runtime_env.update({
             "VLLM_EXL3_ONLINE_TRELLIS_BITS": "6",

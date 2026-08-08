@@ -68,7 +68,16 @@ class Exl3MixedKPatchTests(unittest.TestCase):
     def test_r14_native_mixed_k_is_left_untouched(self):
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / "exl3.py"
-            source = "\n\n".join(PATCH.NATIVE_R14_MARKERS) + "\n"
+            source = "\n\n".join(PATCH.NATIVE_API_GENERATIONS[0]) + "\n"
+            target.write_text(source)
+            with mock.patch.object(PATCH, "find_exl3", return_value=target):
+                PATCH.main()
+            self.assertEqual(target.read_text(), source)
+
+    def test_r31_b12x_native_mixed_k_is_left_untouched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory) / "exl3.py"
+            source = "\n\n".join(PATCH.NATIVE_API_GENERATIONS[1]) + "\n"
             target.write_text(source)
             with mock.patch.object(PATCH, "find_exl3", return_value=target):
                 PATCH.main()
@@ -77,7 +86,7 @@ class Exl3MixedKPatchTests(unittest.TestCase):
     def test_partial_native_mixed_k_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / "exl3.py"
-            target.write_text(PATCH.NATIVE_R14_MARKERS[0] + "\n")
+            target.write_text(PATCH.NATIVE_API_GENERATIONS[1][0] + "\n")
             with mock.patch.object(PATCH, "find_exl3", return_value=target):
                 with self.assertRaisesRegex(
                     SystemExit, "INCOMPLETE NATIVE MIXED-K API"

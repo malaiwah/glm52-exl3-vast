@@ -3,7 +3,31 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
-## GG v20-r28 (current)
+## GG v20-r31 + vLLM #258 (candidate)
+
+The appliance now builds from immutable GG v20-r31 manifest
+`sha256:3230c25ff95f8678a8eeb52a463f0d3b9f96f6ad550418cc51ea12177a55b41c`.
+Its locked b12x tree already contains
+[b12x #126](https://github.com/local-inference-lab/b12x/pull/126) at
+`6022e6e`: target and rank-sliced native-MTP route-pack specializations are
+prewarmed before serving. Its locked vLLM tree already contains #250's
+superseding implementation through
+[vLLM #228](https://github.com/local-inference-lab/vllm/pull/228) at
+`5ec9357`; the closed #250 patch is deliberately not stacked a second time.
+
+[vLLM #258](https://github.com/local-inference-lab/vllm/pull/258) was published
+after r31 froze, so the turnkey applies its four runtime files fail-closed to
+both `/opt/vllm` and installed site-packages. It profiles the same bounded
+full-vocabulary prompt-logprobs path before KV sizing, accumulates long-prompt
+results on CPU, and warns when a manual block override bypasses the available
+memory budget. GLM uses a 128-row chunk (about 38 MiB/rank rather than about
+304 MiB at 1,024 rows). The 3.42-bpw candidate removes the fixed KV override
+so the new profile can actually reserve this memory and lowers the accepted
+request envelope to 500,224 tokens. The previous r28 qualification remains
+the performance and quality reference until this exact derivative passes a
+GPU gate.
+
+## GG v20-r28 (previous qualified)
 
 The appliance pins immutable GG v20-r28 manifest
 `sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0`.
