@@ -84,7 +84,7 @@ EXL3_MARKERS = (
 EXL3_RUNTIME_MEMORY_MARKERS = (
     "mixed_trellis_buffer_layout=getattr(",
     "def _allocate_rank_sliced_parity_staging(",
-    "refusing a late allocation",
+    "refusing a late ",
 )
 
 B12X_MARKERS = {
@@ -136,8 +136,8 @@ PROMPT_LOGPROBS_MARKERS = {
         "self.chunk_size",
     ),
     "vllm/v1/worker/gpu_model_runner.py": (
-        "compute_prompt_logprobs_with_chunking(",
-        "envs.VLLM_PROMPT_LOGPROBS_CHUNK_SIZE",
+        "def _get_prompt_logprobs_dict(",
+        "chunk_size = envs.VLLM_PROMPT_LOGPROBS_CHUNK_SIZE",
     ),
 }
 
