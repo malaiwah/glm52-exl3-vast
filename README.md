@@ -11,7 +11,7 @@ BrandonMusic's 3.0-bpw EXL3/TR3 GLM-5.2 checkpoint on four RTX PRO 6000
 Blackwell cards, native TR3 MTP-5 speculation, dynamic-token NVFP4 KV, and a
 full 524,288-token request limit. Weights (~309 GiB) auto-download on first
 boot, so network speed dominates rental startup. The release pins **GG
-v20-r26**; the exact runtime trees, checkpoint revisions, and lineage are in
+v20-r28**; the exact runtime trees, checkpoint revisions, and lineage are in
 the [changelog](CHANGELOG.md).
 
 ## Contents
@@ -815,7 +815,7 @@ evidence, and the experimental separate-draft override are in
   3.25-bpw profile selects 1024 rows inside its 2048-token scheduler chunk;
   the r20/3.36-bpw K6 profile selects its qualified 3072/3072 PP-first shape),
   `SERVED_MODEL_NAME`,
-  `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 = stock BF16 draft),
+  `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 folds into `MTP_DRAFT=native`, i.e. the native in-checkpoint draft — which on the pinned EXL3-TR3 checkpoint is itself a trellis draft, not a BF16 one),
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
   extra env: `OPEN_BUTTON_PORT=1111` — the dashboard **Open** button then hits
   the landing page: live boot status (weight-download progress, TLS, engine),

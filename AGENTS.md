@@ -26,8 +26,8 @@ Configuration is data-driven. `FAMILIES`, `VARIANTS`, `KNOBS`, and validation ru
 
 ## Key Directories
 
-- `scripts/`: runtime orchestration helpers, configuration/state logic, provider operations, serving verification, checkpoint transforms, vLLM/SparkInfer patches, field-review tooling, SOUL controller/config, and qualification benchmarks. 35 `.py` tools + shell helpers.
-- `tests/`: flat, dependency-free Python test modules (17 `.py`) plus two Bash tests and `fixtures/`. Tests are runnable directly and are designed not to require a GPU or network.
+- `scripts/`: runtime orchestration helpers, configuration/state logic, provider operations, serving verification, checkpoint transforms, vLLM/SparkInfer patches, field-review tooling, SOUL controller/config, and qualification benchmarks. 36 `.py` tools + shell helpers.
+- `tests/`: flat, dependency-free Python test modules (20 `.py`) plus two Bash tests. Tests are runnable directly and are designed not to require a GPU or network.
 - `docs/`: design and operator references — model families, self-service config, SOUL, termination/erase, configuration reference, benchmarks, plus per-release GLM qualification evidence (`glm52-r14/r17/r20/r25/r26/r28-*`, `glm52-3.25-offload-qualification.md`), MTP78, and Qwen OMP guide.
 - `soul/`: immutable SOUL role and trust-boundary instructions (`SOUL.md`) copied read-only into the image.
 - `patches/field-review-r26/`: the r26 field-review ledger copied into the image.
@@ -39,12 +39,12 @@ Configuration is data-driven. `FAMILIES`, `VARIANTS`, `KNOBS`, and validation ru
 Run from the repository root. CI uses these exact checks:
 
 ```bash
-shellcheck entrypoint.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh
+shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh
 python3 -m py_compile landing.py scripts/*.py
 python3 tests/test_field_review_patches.py
 python3 tests/test_termination.py
 python3 tests/test_families.py
-python3 tests/test_r26_base_gate.py
+python3 tests/test_r28_base_gate.py
 python3 tests/test_vllm_serial_spec_warning_patch.py
 python3 tests/test_exl3_mixk_patch.py
 python3 tests/test_desec_acme_guard.py
@@ -57,6 +57,8 @@ python3 tests/test_serving_tools.py
 python3 tests/test_nvfp4_mtp_draft.py
 python3 tests/test_feature_suite.py
 python3 tests/test_structured_output_patch.py
+python3 tests/test_exl3_parity_abi_patch.py
+python3 tests/test_field_review_log_audit.py
 python3 tests/test_checkpoint_reconcile.py
 python3 tests/test_soul.py
 ```
@@ -140,6 +142,6 @@ For every change:
 - Dashboard/OpenAI features: run `test_feature_suite.py`; manually exercise the changed HTTP path when behavior changes.
 - SOUL state, probes, redaction, or retention: run `test_soul.py`.
 - Benchmark or long-context tooling: run `test_serving_tools.py`.
-- vLLM/SparkInfer patches: run the corresponding `test_*_patch.py` and `test_r26_base_gate.py`/`test_r17_base_gate.py`.
+- vLLM/SparkInfer patches: run the corresponding `test_*_patch.py` and `test_r28_base_gate.py` (the current immutable-source gate; `test_r17`/`test_r26` remain for the older bases).
 
 There is no configured coverage threshold; coverage is structural/invariant-focused (pinning exact serve argv, ledger/digest pins, knob-to-consumer wiring, fail-closed patch idempotency, switch-ratchet monotonicity, secret redaction, landing-page security headers). CI is GPU-free and validates syntax, pure logic, stubbed integrations, profile rendering, templates, and image construction. Changes to kernels, memory/topology defaults, long-context correctness, TLS/provider behavior, or production profiles also require the cost-controlled live workflow in `TEST_PLAN.md`; record observed results in `TEST_RESULTS.md` rather than claiming qualification from local tests.

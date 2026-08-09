@@ -1,7 +1,7 @@
 # Configuration reference
 
 The complete environment-knob table, extracted from the README. Values resolve
-as `defaults < family < startup env < state file`; see
+as `defaults < family < variant < startup env < state file`; see
 [self-service-config.md](self-service-config.md) and
 [model-families.md](model-families.md).
 
@@ -12,8 +12,7 @@ as `defaults < family < startup env < state file`; see
 | `MODEL_PROFILE` | `glm52-exl3` | select `qwen36-27b-nvfp4` for low-cost testing, or `custom` with `MODEL_ID` |
 | `MODEL_ID` | profile checkpoint | use a compatible alternate checkpoint without changing its profile defaults |
 | `MODEL_DIR` | profile-specific path under `/workspace` | point at weights you already have; the download marker is tied to `MODEL_ID` |
-| `MODEL_DISPLAY_NAME` | profile name | dashboard and provider label |
-| `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working |
+| `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working; this is also the name every dashboard page displays |
 | `TENSOR_PARALLEL_SIZE` | 4 GLM / 1 Qwen | match a supported profile topology |
 | `MAX_MODEL_LEN` | 524288 GLM / 196608 Qwen | change a qualified scheduler/memory envelope only with a fresh near-maximum retrieval and vision gate |
 | `MULTIMODAL` | n/a GLM / 1 Qwen | Qwen `0` saves vision VRAM with `--language-model-only`; GLM vision remains controlled by `VISION` (default 0) |
@@ -21,7 +20,6 @@ as `defaults < family < startup env < state file`; see
 | `QUANTIZATION` | custom profile only | vLLM quantizer name such as `modelopt` |
 | `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |
 | `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
-| `ALLOW_UNSUPPORTED_GPU` | `0` | bypass the profile GPU-name check; the required visible GPU count still applies |
 | `MIN_NVIDIA_DRIVER_VERSION` | `590.48.01` | lower bound of the qualified driver/CUDA pair; the gate runs before model download |
 | `MIN_NVIDIA_CUDA_VERSION` | `13.2` | reported CUDA capability paired with the driver floor; prevents an r590/CUDA 13.1 host from passing |
 | `ALLOW_UNSUPPORTED_NVIDIA_DRIVER` | `0` | bypass both admission floors only for a separately qualified compatibility stack |
@@ -103,9 +101,9 @@ margin on this machine.
 ## Checkpoint downloads
 
 Checkpoint downloads use `huggingface_hub.snapshot_download` with the bundled
-`hf-xet` transport and `HF_XET_HIGH_PERFORMANCE=1`. `MODEL_DOWNLOAD_WORKERS`
-defaults to 16 concurrent files. Hugging Face's adaptive Xet concurrency remains
-the default for each file; advanced deployments can pass through
+`hf-xet` transport and `HF_XET_HIGH_PERFORMANCE=1`, with the file-level worker
+count fixed at 16 (`max_workers=16`). Hugging Face's adaptive Xet concurrency
+remains the default for each file; advanced deployments can pass through
 `HF_XET_FIXED_DOWNLOAD_CONCURRENCY` after measuring their route. An `HF_TOKEN`
 authenticates the request and can avoid anonymous rate limits, but does not by
 itself guarantee that a particular host-to-CAS route will be fast. See Hugging
