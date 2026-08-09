@@ -169,7 +169,7 @@ def _moe_layers(cfg):
     return None
 
 
-def baseline(model_dir, current_text, log):
+def baseline(model_dir, current_text, log, dry_run=False):
     """Pristine moe_layers + the layer-78 ignore patterns, cached on the volume.
 
     Sources, best first: the cached baseline, the graft's own pre-graft backup,
@@ -229,7 +229,10 @@ def baseline(model_dir, current_text, log):
            "moe_layers": moe, "moe_layers_source": moe_src,
            "layer78_ignore": ign, "layer78_ignore_source": ign_src,
            "architectures": current_text.get("architectures")}
-    gc.write_json_atomic(gc.p_baseline(), doc, mode=0o644)
+    # --dry-run must change nothing on disk: persisting the baseline cache here
+    # was a side effect the "changes nothing" contract (and its test) missed.
+    if not dry_run:
+        gc.write_json_atomic(gc.p_baseline(), doc, mode=0o644)
     log(f">>> reconcile: captured checkpoint baseline (moe_layers={moe} from {moe_src}, "
         f"{len(ign)} layer-78 ignore pattern(s) from {ign_src})")
     return doc
@@ -463,7 +466,7 @@ def main(argv):
         log("!!! reconcile: layer-78 shard missing; leaving the MTP fields "
             "untouched")
 
-    base = baseline(model_dir, text, log)
+    base = baseline(model_dir, text, log, dry_run=args.dry_run)
     if layer78 != "absent":
         text = reconcile_text_config(text, base, layer78, log)
 

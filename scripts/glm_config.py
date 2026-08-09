@@ -23,7 +23,9 @@ Every rule in VALIDATIONS below was measured on real hardware; the `why`
 strings are the operator-facing explanation and are quoted verbatim in
 docs/self-service-config.md.
 """
+import contextlib
 import datetime
+import fcntl
 import json
 import math
 import os
@@ -1227,6 +1229,36 @@ def write_json_atomic(path, obj, mode=0o600):
         f.write("\n")
     os.chmod(tmp, mode)
     os.replace(tmp, path)
+
+
+@contextlib.contextmanager
+def state_lock():
+    """Cross-process advisory lock over the config state directory.
+
+    landing.py (root) and config_cli.py (the PID-1 supervisor) both mutate
+    config.json / apply-state.json / known-good.json. The landing page's
+    in-process threading.Lock does not serialize against the supervisor's
+    rollback, so a self-service apply landing between a verify failure and the
+    supervisor's rollback could be silently clobbered while the UI reports
+    "Applied". Both sides take this flock around their read-validate-write so the
+    state that persists is one a reader actually saw. Advisory and best-effort:
+    if the lock file cannot be opened, proceed rather than brick the editor."""
+    lock_f = None
+    try:
+        os.makedirs(state_dir(), exist_ok=True)
+        lock_f = open(os.path.join(state_dir(), ".state.lock"), "w")
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+    except OSError:
+        lock_f = None
+    try:
+        yield
+    finally:
+        if lock_f is not None:
+            try:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            lock_f.close()
 
 
 def env_layer(env=None, invalid=None) -> dict:

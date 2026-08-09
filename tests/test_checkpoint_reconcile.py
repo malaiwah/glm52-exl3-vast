@@ -187,13 +187,26 @@ class ReconcileTests(unittest.TestCase):
             write_safetensors(
                 os.path.join(directory, reconcile.LSHARD),
                 ["model.layers.78.mlp.experts.0.down_proj.weight"])
-            before = read_bytes(os.path.join(directory, reconcile.CFG))
             state = os.path.join(directory, ".state")
+
+            def snapshot():
+                out = {}
+                for root, _dirs, files in os.walk(directory):
+                    for name in files:
+                        path = os.path.join(root, name)
+                        out[path] = read_bytes(path)
+                return out
+
+            before = snapshot()
             with mock.patch.dict(os.environ, {"GLM_STATE_DIR": state}, clear=False):
                 self.assertEqual(reconcile.main(
                     [directory, "--vision", "0", "--dry-run", "--quiet"]), 0)
-            self.assertEqual(
-                read_bytes(os.path.join(directory, reconcile.CFG)), before)
+            # --dry-run must not create, delete, or modify ANY file — including
+            # the checkpoint-baseline cache under the state dir, which reconcile
+            # used to persist even in dry-run mode.
+            self.assertEqual(snapshot(), before)
+            self.assertFalse(os.path.exists(
+                os.path.join(state, "checkpoint-baseline.json")))
 
 
 if __name__ == "__main__":

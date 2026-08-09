@@ -535,9 +535,17 @@ PY
 # scripts dir (for the shared knob registry in glm_config.py).
 if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
    && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+  # Whether the operator set it explicitly, captured BEFORE we default it: on
+  # Runpod's managed-proxy mode we default proxy-trust ON, but an operator who
+  # exposes the dashboard port as a DIRECT TCP mapping can set
+  # LANDING_TRUST_PROXY_HTTPS=0 to refuse a forgeable X-Forwarded-Proto — honor
+  # that explicit choice instead of forcing 1.
+  _lthp_explicit="${LANDING_TRUST_PROXY_HTTPS+set}"
   LANDING_TRUST_PROXY_HTTPS="${LANDING_TRUST_PROXY_HTTPS:-0}"
   if [ "$PLATFORM" = "runpod" ] || [ "$PLATFORM" = "jarvislabs" ]; then
-    [ "$PLATFORM" != "runpod" ] || LANDING_TRUST_PROXY_HTTPS=1
+    if [ "$PLATFORM" = "runpod" ] && [ -z "$_lthp_explicit" ]; then
+      LANDING_TRUST_PROXY_HTTPS=1
+    fi
     if [ -z "${OPEN_BUTTON_TOKEN:-}" ]; then
       OPEN_BUTTON_TOKEN_FILE="${OPEN_BUTTON_TOKEN_FILE:-/workspace/.model-turnkey-landing-token}"
       mkdir -p "$(dirname "$OPEN_BUTTON_TOKEN_FILE")"
@@ -552,11 +560,36 @@ if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
     export OPEN_BUTTON_TOKEN
   fi
   status_update booting
-  MODEL_DIR="$MODEL_DIR" STATUS_FILE="$STATUS_FILE" GLM_SCRIPTS_DIR="$SCRIPTS_DIR" \
-    GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
-    MODEL_PROFILE="$MODEL_PROFILE" LANDING_TRUST_PROXY_HTTPS="$LANDING_TRUST_PROXY_HTTPS" \
-    LANDING_API_PORT="${PORT:-8000}" python3 /opt/landing.py &
-  echo ">>> Landing page (Open button) live on :1111"
+  # Supervise the landing page: it is the appliance's recovery surface (on
+  # RunPod, with no console log and possibly no sshd, the :1111 page is the ONLY
+  # way in), so a process death during the long weight download or engine load
+  # must not leave it gone for the rest of the session. Run it in a subshell
+  # that restarts it with bounded backoff. The page is the subshell's child, so
+  # the subshell's own TERM/INT trap reaps it on shutdown; on_term stops this
+  # supervisor (a PID-1 job, so it is in `jobs -p`), which fires that trap. The
+  # token is NOT re-minted on restart — OPEN_BUTTON_TOKEN is already resolved
+  # and exported above, so every restart serves the same tokenized URL.
+  (
+    trap '[ -z "${_lp:-}" ] || kill "$_lp" 2>/dev/null || true; exit 0' TERM INT
+    _lp=""; _lp_fails=0
+    while :; do
+      if [ -z "$_lp" ] || ! kill -0 "$_lp" 2>/dev/null; then
+        if [ -n "$_lp" ]; then
+          boot_note "!!! landing: dashboard process exited; restarting the :1111 recovery surface"
+          _lp_fails=$((_lp_fails + 1))
+          case "$_lp_fails" in 1) sleep 2 ;; 2) sleep 5 ;; *) sleep 15 ;; esac
+        fi
+        MODEL_DIR="$MODEL_DIR" STATUS_FILE="$STATUS_FILE" GLM_SCRIPTS_DIR="$SCRIPTS_DIR" \
+          GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
+          MODEL_PROFILE="$MODEL_PROFILE" LANDING_TRUST_PROXY_HTTPS="$LANDING_TRUST_PROXY_HTTPS" \
+          LANDING_API_PORT="${PORT:-8000}" python3 /opt/landing.py &
+        _lp=$!
+      fi
+      sleep 5
+    done
+  ) &
+  LANDING_SUPERVISOR_PID=$!
+  echo ">>> Landing page (Open button) live on :1111 (supervised)"
   if [ "$PLATFORM" = "runpod" ]; then
     echo ">>> Runpod dashboard: https://${RUNPOD_POD_ID}-1111.proxy.runpod.net/?token=${OPEN_BUTTON_TOKEN}"
   elif [ "$PLATFORM" = "jarvislabs" ]; then
@@ -771,7 +804,7 @@ stop_soul_supervisor() {
 # reconcile remains authoritative, and this trap prevents the signal from
 # terminating PID 1 on minimal shells.
 trap ':' USR1
-trap 'stop_soul_supervisor; if [ -n "${SRV_PID:-}" ]; then kill -9 -- "-$SRV_PID" 2>/dev/null || true; fi' EXIT
+trap 'stop_soul_supervisor; [ -z "${LANDING_SUPERVISOR_PID:-}" ] || kill "$LANDING_SUPERVISOR_PID" 2>/dev/null || true; if [ -n "${SRV_PID:-}" ]; then kill -9 -- "-$SRV_PID" 2>/dev/null || true; fi' EXIT
 
 # This script is container PID 1, and PID 1 ignores default-disposition
 # signals: an untrapped `docker stop` / provider stop would hang for the full
@@ -1762,6 +1795,68 @@ PUBLIC_IP_CURRENT="$(current_public_ip)"
 PUBLIC_API_PORT="${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-${JARVISLABS_PUBLIC_PORT_8000:-${PORT:-8000}}}}"
 PUBLIC_DASHBOARD_PORT="${VAST_TCP_PORT_1111:-${JARVISLABS_PUBLIC_PORT_1111:-1111}}"
 
+# Wire an ISSUED certificate into the serving path: vLLM's --ssl-* args (or the
+# Runpod direct-TLS socat listener), the internal /etc/hosts alias + verify
+# flag, and the endpoint/status/LOCAL_BASE picture. Idempotent and safe to call
+# again — this is what lets a certificate that only arrives from the BACKGROUND
+# acme retry, minutes into the session, become usable on the next vLLM restart
+# instead of requiring a whole container replacement. Returns 0 iff TLS is
+# active afterwards. CRT/KEY/ACME_DIRECT are globals set by the ACME block below.
+wire_tls_endpoint() {
+  if [ "${TLS_ENABLED:-0}" != "1" ] && [ "${ACME_DIRECT:-0}" = "1" ] &&
+     [ -n "${CRT:-}" ] && [ -n "${KEY:-}" ] &&
+     [ -f "$CRT" ] && [ -f "$KEY" ] && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+    TLS_ENABLED=1
+    if [ "$PLATFORM" = "runpod" ]; then
+      if [ -z "${TLS_PROXY_PID:-}" ] || ! kill -0 "${TLS_PROXY_PID:-0}" 2>/dev/null; then
+        socat "OPENSSL-LISTEN:8443,cert=${CRT},key=${KEY},verify=0,reuseaddr,fork" \
+          "TCP4:127.0.0.1:${PORT:-8000}" &
+        TLS_PROXY_PID=$!
+        sleep 1
+        kill -0 "$TLS_PROXY_PID" 2>/dev/null || {
+          echo "!!! Runpod direct-TLS proxy failed to start; using managed HTTPS proxy"
+          TLS_ENABLED=0
+        }
+      fi
+    else
+      TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY")
+      # Reach the engine by the certificate hostname (resolved to loopback) so
+      # internal TLS clients verify the cert; anchor the /etc/hosts match so a
+      # sub.$ACME_DOMAIN entry does not suppress installing the real name.
+      case "$ACME_DOMAIN" in
+        ""|*[!A-Za-z0-9.-]*)
+          echo "!!! Unsafe ACME hostname; internal TLS alias was not installed"
+          ;;
+        *)
+          if ! grep -Eq "(^|[[:space:]])${ACME_DOMAIN}([[:space:]]|\$)" /etc/hosts 2>/dev/null; then
+            printf '127.0.0.1\t%s\n' "$ACME_DOMAIN" >> /etc/hosts
+          fi
+          TLS_INTERNAL_ALIAS=1
+          ;;
+      esac
+    fi
+    [ "$TLS_ENABLED" = "1" ] &&
+      echo ">>> TLS enabled: https://$ACME_DOMAIN:${PUBLIC_API_PORT}/v1"
+  fi
+  if [ "${TLS_ENABLED:-0}" = "1" ]; then
+    EP_URL="https://${ACME_DOMAIN}:${PUBLIC_API_PORT}"
+    TLS_STATE="https://${ACME_DOMAIN}"
+    [ "$PLATFORM" != "runpod" ] && HTTPS_HOSTPORT="${ACME_DOMAIN}:${PUBLIC_DASHBOARD_PORT}"
+    CERT_PATH="$CRT" KEY_PATH="$KEY"
+    LOCAL_SCHEME="http"; LOCAL_HOST="localhost"
+    if [ "$PLATFORM" != "runpod" ]; then
+      LOCAL_SCHEME="https"
+      if [ "${TLS_INTERNAL_ALIAS:-0}" = "1" ]; then
+        LOCAL_HOST="$ACME_DOMAIN"
+        export GLM_INTERNAL_TLS_VERIFY=1
+      fi
+    fi
+    LOCAL_BASE="$LOCAL_SCHEME://$LOCAL_HOST:${PORT:-8000}"
+    return 0
+  fi
+  return 1
+}
+
 # Runpod's HTTP proxy terminates TLS and forwards plain HTTP to the container.
 # App-level TLS is only appropriate on the separately exposed direct TCP port.
 ACME_DIRECT=1
@@ -1839,78 +1934,25 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
       bash "$SCRIPTS_DIR/acme_retry.sh" --retry &
     fi
   fi
-  if [ -f "$CRT" ] && [ -f "$KEY" ]; then
-    TLS_ENABLED=1
-    if [ "$PLATFORM" = "runpod" ]; then
-      # Keep vLLM plain on :8000 for the managed proxy; provide a second,
-      # idle-safe direct TLS listener on :8443.
-      socat "OPENSSL-LISTEN:8443,cert=${CRT},key=${KEY},verify=0,reuseaddr,fork" \
-        "TCP4:127.0.0.1:${PORT:-8000}" &
-      TLS_PROXY_PID=$!
-      sleep 1
-      kill -0 "$TLS_PROXY_PID" 2>/dev/null || {
-        echo "!!! Runpod direct-TLS proxy failed to start; using managed HTTPS proxy"
-        TLS_ENABLED=0
-      }
-    else
-      TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY")
-      # Internal appliance clients (SOUL, the correctness verifier, local
-      # diagnostics) must use TLS too: a TLS-enabled vLLM listener cannot accept
-      # loopback HTTP. Resolve the public certificate hostname to loopback so
-      # these clients reach the engine by the name the cert actually covers and
-      # can verify it (the verifier is the authoritative correctness gate; it
-      # sets GLM_INTERNAL_TLS_VERIFY below to turn verification on). LOCAL_BASE
-      # is then built from that name, not "localhost", so the alias is used
-      # rather than being installed and ignored.
-      case "$ACME_DOMAIN" in
-        ""|*[!A-Za-z0-9.-]*)
-          echo "!!! Unsafe ACME hostname; internal TLS alias was not installed"
-          ;;
-        *)
-          # Anchor the match: a bare substring test treats sub.$ACME_DOMAIN as
-          # already-present and skips installing the alias for the real name.
-          if ! grep -Eq "(^|[[:space:]])${ACME_DOMAIN}([[:space:]]|\$)" /etc/hosts 2>/dev/null; then
-            printf '127.0.0.1\t%s\n' "$ACME_DOMAIN" >> /etc/hosts
-          fi
-          TLS_INTERNAL_ALIAS=1
-          ;;
-      esac
-    fi
-    if [ "$TLS_ENABLED" = "1" ]; then
-      echo ">>> TLS enabled: https://$ACME_DOMAIN:${PUBLIC_API_PORT}/v1"
-    fi
-  fi
+  # Wire the cert into the serving path if it is ready now (idempotent; the
+  # supervisor loop calls this again so a late background cert is picked up).
+  wire_tls_endpoint || true
 fi
 
-# Feed the final endpoint/TLS picture to the landing page's status file
-if [ "$TLS_ENABLED" = "1" ]; then
-  EP_URL="https://${ACME_DOMAIN}:${PUBLIC_API_PORT}"
-  TLS_STATE="https://${ACME_DOMAIN}"
-  if [ "$PLATFORM" != "runpod" ]; then
-    HTTPS_HOSTPORT="${ACME_DOMAIN}:${PUBLIC_DASHBOARD_PORT}"
+# Feed the final endpoint/TLS picture to the landing page's status file.
+# wire_tls_endpoint set the TLS endpoint/LOCAL_BASE when a cert came up; fill in
+# the non-TLS fallback (Runpod managed proxy, or plain HTTP) otherwise.
+if [ "${TLS_ENABLED:-0}" != "1" ]; then
+  if [ "$PLATFORM" = "runpod" ]; then
+    EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
+    TLS_STATE="https:// managed by Runpod proxy"
+  else
+    EP_URL="http://${PUBLIC_IP_CURRENT:-localhost}:${PUBLIC_API_PORT}"
   fi
-  CERT_PATH="$CRT" KEY_PATH="$KEY"
-elif [ "$PLATFORM" = "runpod" ]; then
-  EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
-  TLS_STATE="https:// managed by Runpod proxy"
-else
-  EP_URL="http://${PUBLIC_IP_CURRENT:-localhost}:${PUBLIC_API_PORT}"
+  LOCAL_SCHEME="http"
+  LOCAL_HOST="localhost"
+  LOCAL_BASE="$LOCAL_SCHEME://$LOCAL_HOST:${PORT:-8000}"
 fi
-LOCAL_SCHEME="http"
-LOCAL_HOST="localhost"
-if [ "$TLS_ENABLED" = "1" ] && [ "$PLATFORM" != "runpod" ]; then
-  LOCAL_SCHEME="https"
-  # When the /etc/hosts alias was installed, reach the engine by the certificate
-  # hostname (resolved to loopback) so internal TLS actually verifies; export
-  # the flag the Python probes read to switch on verification. Without the alias
-  # (unsafe hostname) fall back to https://localhost with verification off — the
-  # probes tolerate that, but it is not a verified path.
-  if [ "${TLS_INTERNAL_ALIAS:-0}" = "1" ]; then
-    LOCAL_HOST="$ACME_DOMAIN"
-    export GLM_INTERNAL_TLS_VERIFY=1
-  fi
-fi
-LOCAL_BASE="$LOCAL_SCHEME://$LOCAL_HOST:${PORT:-8000}"
 
 if [ "$PLATFORM" = "runpod" ] && [ "$TLS_ENABLED" != "1" ]; then
   echo ">>> Runpod proxy endpoint: ${EP_URL}/v1"
@@ -2365,6 +2407,14 @@ while :; do
   # Re-resolve the config on EVERY start: this is what makes an apply from the
   # landing page take effect without replacing the container.
   apply_config
+  # Pick up a certificate that the BACKGROUND acme retry issued after boot: this
+  # re-evaluates TLS every restart, so a late cert becomes usable without
+  # replacing the container. Idempotent and a no-op once TLS is active or when
+  # no cert exists yet. It updates EP_URL/CERT_PATH/LOCAL_BASE in place; the
+  # loop's own status_update below then publishes them.
+  if [ "${TLS_ENABLED:-0}" != "1" ] && wire_tls_endpoint; then
+    boot_note ">>> TLS: certificate is now available; serving with direct TLS after this restart"
+  fi
   # Family-specific environment and topology calibration must be refreshed too:
   # a self-service apply can change family, DMA mode, DCP or prefetch policy
   # without replacing PID 1.
@@ -2452,6 +2502,17 @@ while :; do
       break
     fi
     if [ -f "$RESTART_FLAG" ]; then
+      reason="requested"
+      break
+    fi
+    # A certificate the BACKGROUND acme retry issued after the engine came up
+    # (it touches .lego/restart-required on success) is otherwise never served:
+    # consume the marker and request a restart so the engine comes back up with
+    # direct TLS. Only while TLS is not already active.
+    if [ "${TLS_ENABLED:-0}" != "1" ] &&
+       [ -f "$MODEL_ROOT/.lego/restart-required" ]; then
+      rm -f "$MODEL_ROOT/.lego/restart-required" 2>/dev/null || true
+      boot_note ">>> TLS: background certificate issuance completed; restarting to serve TLS"
       reason="requested"
       break
     fi
