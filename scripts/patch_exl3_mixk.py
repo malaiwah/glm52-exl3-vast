@@ -485,28 +485,34 @@ def main() -> None:
     if MARKER_V5 in src:
         print(f"already patched (v5): {path}")
         return
-    def write_and_compile(new_src, previous_src, action):
-        """Write, byte-compile, and roll back on a compile failure.
+    def write_and_compile(new_src, action):
+        """Stage in a temp file, byte-compile it, then atomically swap it in.
 
-        The siblings (parity-abi, structured-output) restore their backups on
-        a failed compile; leaving the broken text in place here bricked every
-        subsequent vLLM boot when the applier ran on a retained appliance
-        rather than inside a Docker build."""
-        path.write_text(new_src)
+        Writing exl3.py in place risked a truncated module if the write was
+        interrupted, bricking every subsequent vLLM boot when the applier ran
+        on a retained appliance rather than inside a Docker build. Stage the
+        new text in a sibling temp file and byte-compile *that* file first;
+        only once it compiles do we os.replace() it over the live module, so a
+        compile failure (or an interrupted write) leaves the previous good
+        exl3.py untouched. Matches the tmp-file + os.replace discipline of the
+        sibling appliers (parity-abi, deepseek-mtp)."""
+        import os
         import py_compile
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(new_src)
         try:
-            py_compile.compile(str(path), doraise=True)
+            py_compile.compile(str(tmp), doraise=True)
         except py_compile.PyCompileError:
-            path.write_text(previous_src)
+            tmp.unlink(missing_ok=True)
             sys.exit(f"{action} produced a module that does not compile; "
-                     f"restored the previous source of {path}")
+                     f"left the previous source of {path} in place")
+        os.replace(tmp, path)
 
     if MARKER_V1 in src:
         # rebuild any older mixk install: keep the in-place E-edits, replace
         # the appended block wholesale from the v1 marker onward
-        original = src
         src = src[: src.index(MARKER_V1)].rstrip() + "\n\n" + APPEND + "\n"
-        write_and_compile(src, original, "v1->v5 upgrade")
+        write_and_compile(src, "v1->v5 upgrade")
         print(f"upgraded to v5: {path}")
         return
     missing = [name for name, old in (("E1", E1_OLD), ("E2", E2_OLD),
@@ -525,7 +531,7 @@ def main() -> None:
     backup = path.with_suffix(".py.orig")
     if not backup.exists():
         backup.write_text(original)
-    write_and_compile(src, original, "fresh v5 apply")
+    write_and_compile(src, "fresh v5 apply")
     print(f"patched {path} (v5, backup at {backup})")
 
 

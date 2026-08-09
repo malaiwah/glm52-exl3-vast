@@ -142,36 +142,49 @@ def run(opts, transport=None, runner=None, provider_obj=None, stopper=None,
     pr.step("engine-stopped", detail, engine_stopped=stopped)
 
     # ---- erase -----------------------------------------------------------
+    # Erase is best-effort and off by default; it must never wedge the
+    # termination. A raise anywhere in this phase (e.g. subprocess.TimeoutExpired
+    # escaping erase_ram) would leave the engine stopped, the terminate flag set
+    # and the destroy call unmade — the instance billing with serving down. So
+    # the whole phase is contained: on any failure we record it and press on to
+    # the destructive call the user actually asked for.
     erase_failures = 0
     if opts.get("erase"):
-        pr.step("planning-erase", "listing session data")
-        # gc.p_switches() stays until AFTER the destructive call: the
-        # mid-flight kill-switch re-check below reads it, and erasing it first
-        # would blind that re-check to a lock thrown during this erase (the
-        # env fallback necessarily says "allowed" in any flow that got here).
-        plan_doc = secure_erase.plan(keep=(p_progress(), p_request_stop(),
-                                           p_engine_stopped(),
-                                           gc.p_switches()))
-        pr.step("erasing",
-                f"{plan_doc['count']} files, {plan_doc['total_bytes'] / 2**20:.1f} MiB",
-                erase_plan={k: plan_doc[k] for k in
-                            ("count", "total_bytes", "groups", "manifest_used")},
-                unknown_large=plan_doc["unknown_large"])
-        result = secure_erase.erase(plan_doc, dry_run=dry_run)
-        erase_failures = len(result.get("failed") or [])
-        _detail = (f"{result['erased']} file(s), "
-                   f"{result['bytes'] / 2**20:.1f} MiB overwritten")
-        if erase_failures:
-            # A partial erase must not read like a clean one in the progress
-            # headline a UI renders; the full list stays in erase_result.
-            _detail += f"; {erase_failures} file(s) FAILED to erase"
-        pr.step("erased", _detail, erase_result=result)
-        if opts.get("ram"):
-            pr.step("erasing-ram", "dropping caches and overwriting free RAM")
-            pr.step("erased-ram", "", ram_result=secure_erase.erase_ram(dry_run=dry_run))
-        if opts.get("vram"):
-            pr.step("erasing-vram", "zeroing device memory")
-            pr.step("erased-vram", "", vram_result=secure_erase.erase_vram(dry_run=dry_run))
+        try:
+            pr.step("planning-erase", "listing session data")
+            # gc.p_switches() stays until AFTER the destructive call: the
+            # mid-flight kill-switch re-check below reads it, and erasing it first
+            # would blind that re-check to a lock thrown during this erase (the
+            # env fallback necessarily says "allowed" in any flow that got here).
+            plan_doc = secure_erase.plan(keep=(p_progress(), p_request_stop(),
+                                               p_engine_stopped(),
+                                               gc.p_switches()))
+            pr.step("erasing",
+                    f"{plan_doc['count']} files, {plan_doc['total_bytes'] / 2**20:.1f} MiB",
+                    erase_plan={k: plan_doc[k] for k in
+                                ("count", "total_bytes", "groups", "manifest_used")},
+                    unknown_large=plan_doc["unknown_large"])
+            result = secure_erase.erase(plan_doc, dry_run=dry_run)
+            erase_failures = len(result.get("failed") or [])
+            _detail = (f"{result['erased']} file(s), "
+                       f"{result['bytes'] / 2**20:.1f} MiB overwritten")
+            if erase_failures:
+                # A partial erase must not read like a clean one in the progress
+                # headline a UI renders; the full list stays in erase_result.
+                _detail += f"; {erase_failures} file(s) FAILED to erase"
+            pr.step("erased", _detail, erase_result=result)
+            if opts.get("ram"):
+                pr.step("erasing-ram", "dropping caches and overwriting free RAM")
+                pr.step("erased-ram", "", ram_result=secure_erase.erase_ram(dry_run=dry_run))
+            if opts.get("vram"):
+                pr.step("erasing-vram", "zeroing device memory")
+                pr.step("erased-vram", "", vram_result=secure_erase.erase_vram(dry_run=dry_run))
+        except Exception as e:
+            # Do NOT abort: continue to the destroy call. The user asked to
+            # terminate; a failed best-effort erase must not strand the instance.
+            pr.step("erase-failed",
+                    f"secure erase did not complete ({type(e).__name__}: {e}); "
+                    "continuing to the destructive call")
     else:
         pr.step("erase-skipped", "secure erase was not requested (it is off by default)")
 

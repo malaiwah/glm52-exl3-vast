@@ -111,7 +111,8 @@ def cmd_env(_args):
     # would be a second source of truth for one flag — the kind of thing the knob
     # wiring audit exists to catch.
     for key in ("MODEL_REPO", "MODEL_REVISION", "MODEL_DIRNAME", "MTP78_MODE",
-                "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK", "SPEC_METHOD"):
+                "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK", "SPEC_METHOD",
+                "NATIVE_MTP_FORMAT"):
         lines.append("export %s=%s" % (key, shlex.quote(str(derived.get(key, "")))))
     # A bash ARRAY, not a string: these values are JSON with spaces and braces,
     # and word-splitting them would corrupt the serve line. Arrays cannot be

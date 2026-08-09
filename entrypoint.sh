@@ -46,7 +46,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 import sys
 sys.path.insert(0, '${SCRIPTS_DIR:-/opt/scripts}')
 from gpu_detect import parse_cuda_version
-print(parse_cuda_version(sys.stdin.read()))")"
+print(parse_cuda_version(sys.stdin.read()))" || true)"
 fi
 # What can this container ACTUALLY use? nvidia-smi intersected with
 # NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES — see scripts/gpu_detect.py.
@@ -293,7 +293,7 @@ apply_config() {
   # MODEL_DIR follows the variant unless the template pinned it.
   if [ -n "$MODEL_DIR_PINNED" ]; then
     MODEL_DIR="$MODEL_DIR_PINNED"
-    if [ -n "${MODEL_DIRNAME:-}" ] && [ "$(basename "$MODEL_DIR")" != "$MODEL_DIRNAME" ]; then
+    if [ -n "${MODEL_DIRNAME:-}" ] && [ "$(basename "$MODEL_DIR")" != "$(basename "$MODEL_DIRNAME")" ]; then
       echo "!!! MODEL_DIR is pinned to $MODEL_DIR but the resolved model is"
       echo "!!! ${MODEL_REPO:-?} (expected directory '$MODEL_DIRNAME'). Serving from the"
       echo "!!! pinned path anyway — unset MODEL_DIR to let the family choose it."
@@ -404,7 +404,7 @@ setup_sshd() {
     done
     chmod 700 /root/.ssh 2>/dev/null || true
     chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
-    _nkeys=$(grep -c . /root/.ssh/authorized_keys 2>/dev/null || echo 0)
+    _nkeys=$(grep -c . /root/.ssh/authorized_keys 2>/dev/null) || _nkeys=0
     boot_note ">>> sshd: ${_nkeys} authorized key(s) installed from PUBLIC_KEY"
   fi
   if (ss -tln 2>/dev/null || netstat -tln 2>/dev/null) | grep -q ':22 '; then
@@ -767,19 +767,25 @@ fetch_weights() {
   _complete_marker="$MODEL_DIR/.download-complete"
   _complete_repo=""
   [ -f "$_complete_marker" ] && _complete_repo="$(cat "$_complete_marker" 2>/dev/null || true)"
+  # A checkpoint-identity mismatch must RETURN failure, not `exit`: fetch_weights
+  # is invoked as `if ! fetch_weights` (prepare_checkpoint), and an `exit` inside
+  # a function called as an if-condition still terminates PID 1 — bypassing the
+  # supervisor's verify/rollback loop and crash-looping the rental with no
+  # recovery (the state file survives on the volume). Returning 1 lets the caller
+  # roll back to the last known-good config, as the header contract promises.
   if [ -f "$_repo_marker" ]; then
     _have=$(cat "$_repo_marker" 2>/dev/null || echo "")
     if [ -n "$_have" ] && [ "$_have" != "${MODEL_REPO:-}" ]; then
-      echo "FATAL: $MODEL_DIR already holds '$_have' but this configuration wants"
-      echo "       '${MODEL_REPO:-?}'. Refusing to download one model on top of another."
-      echo "       Point MODEL_DIR somewhere else, or delete that directory first."
-      exit 1
+      echo "!!! $MODEL_DIR already holds '$_have' but this configuration wants"
+      echo "    '${MODEL_REPO:-?}'. Refusing to download one model on top of another."
+      echo "    Point MODEL_DIR somewhere else, or delete that directory first."
+      return 1
     fi
   elif [ -n "$_complete_repo" ] &&
        [ "${_complete_repo%%@*}" != "${MODEL_REPO:-}" ]; then
-    echo "FATAL: $MODEL_DIR holds '$_complete_repo' but this configuration wants"
-    echo "       '${MODEL_REPO:-?}'. Refusing to mix checkpoints in one directory."
-    exit 1
+    echo "!!! $MODEL_DIR holds '$_complete_repo' but this configuration wants"
+    echo "    '${MODEL_REPO:-?}'. Refusing to mix checkpoints in one directory."
+    return 1
   fi
   # A local/NFS bind mount is an explicit immutable checkpoint selection. Do
   # not try to update it to the profile's download revision: that would fail on
@@ -917,11 +923,21 @@ snapshot_download(os.environ["MODEL_REPO"], revision=os.environ.get("MODEL_REVIS
 MTP78_DRAFT_DIR=""
 
 fetch_mtp78_overlay() {
-  [ -d "$MODEL_DIR/.mtp78-overlay/3bpw-keep0" ] && return 0
+  local _overlay="$MODEL_DIR/.mtp78-overlay/3bpw-keep0"
+  # Gate on the payload shard, not the directory: snapshot_download creates the
+  # directory before the shards land, so a kill/blip mid-download leaves a dir
+  # that every later boot treats as complete and never re-fetches — permanently
+  # serving the degraded native BF16 draft with no recovery. Re-invoking
+  # snapshot_download resumes safely.
+  if ls "$_overlay"/*.safetensors >/dev/null 2>&1; then
+    return 0
+  fi
   HF_HUB_OFFLINE=0 MODEL_DIR="$MODEL_DIR" python3 -c '
 import os
 from huggingface_hub import snapshot_download
-snapshot_download("malaiwah/GLM-5.2-EXL3-TR3-MTP78", allow_patterns=["3bpw-keep0/*"], local_dir=os.environ["MODEL_DIR"] + "/.mtp78-overlay", max_workers=8)'
+snapshot_download("malaiwah/GLM-5.2-EXL3-TR3-MTP78", allow_patterns=["3bpw-keep0/*"], local_dir=os.environ["MODEL_DIR"] + "/.mtp78-overlay", max_workers=8)' || return 1
+  # Confirm the shard actually landed before declaring the overlay ready.
+  ls "$_overlay"/*.safetensors >/dev/null 2>&1
 }
 
 prepare_nvfp4_mtp78_draft() {
@@ -1749,6 +1765,7 @@ fi
 
 TLS_ARGS=()
 TLS_ENABLED=0
+TLS_INTERNAL_ALIAS=0
 if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
    [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null &&
    [ "${CONFIG_SMOKE:-0}" != "1" ]; then
@@ -1783,18 +1800,25 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
       }
     else
       TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY")
-      # Internal appliance clients (SOUL, probes and local diagnostics) must
-      # use TLS too: a TLS-enabled vLLM listener cannot accept loopback HTTP.
-      # Resolve the public certificate hostname to loopback so these clients
-      # keep normal CA + hostname verification without relying on NAT hairpin.
+      # Internal appliance clients (SOUL, the correctness verifier, local
+      # diagnostics) must use TLS too: a TLS-enabled vLLM listener cannot accept
+      # loopback HTTP. Resolve the public certificate hostname to loopback so
+      # these clients reach the engine by the name the cert actually covers and
+      # can verify it (the verifier is the authoritative correctness gate; it
+      # sets GLM_INTERNAL_TLS_VERIFY below to turn verification on). LOCAL_BASE
+      # is then built from that name, not "localhost", so the alias is used
+      # rather than being installed and ignored.
       case "$ACME_DOMAIN" in
         ""|*[!A-Za-z0-9.-]*)
           echo "!!! Unsafe ACME hostname; internal TLS alias was not installed"
           ;;
         *)
-          if ! grep -Fq "$ACME_DOMAIN" /etc/hosts 2>/dev/null; then
+          # Anchor the match: a bare substring test treats sub.$ACME_DOMAIN as
+          # already-present and skips installing the alias for the real name.
+          if ! grep -Eq "(^|[[:space:]])${ACME_DOMAIN}([[:space:]]|\$)" /etc/hosts 2>/dev/null; then
             printf '127.0.0.1\t%s\n' "$ACME_DOMAIN" >> /etc/hosts
           fi
+          TLS_INTERNAL_ALIAS=1
           ;;
       esac
     fi
@@ -1819,8 +1843,20 @@ else
   EP_URL="http://${PUBLIC_IP_CURRENT:-localhost}:${PUBLIC_API_PORT}"
 fi
 LOCAL_SCHEME="http"
-[ "$TLS_ENABLED" = "1" ] && [ "$PLATFORM" != "runpod" ] && LOCAL_SCHEME="https"
-LOCAL_BASE="$LOCAL_SCHEME://localhost:${PORT:-8000}"
+LOCAL_HOST="localhost"
+if [ "$TLS_ENABLED" = "1" ] && [ "$PLATFORM" != "runpod" ]; then
+  LOCAL_SCHEME="https"
+  # When the /etc/hosts alias was installed, reach the engine by the certificate
+  # hostname (resolved to loopback) so internal TLS actually verifies; export
+  # the flag the Python probes read to switch on verification. Without the alias
+  # (unsafe hostname) fall back to https://localhost with verification off — the
+  # probes tolerate that, but it is not a verified path.
+  if [ "${TLS_INTERNAL_ALIAS:-0}" = "1" ]; then
+    LOCAL_HOST="$ACME_DOMAIN"
+    export GLM_INTERNAL_TLS_VERIFY=1
+  fi
+fi
+LOCAL_BASE="$LOCAL_SCHEME://$LOCAL_HOST:${PORT:-8000}"
 
 if [ "$PLATFORM" = "runpod" ] && [ "$TLS_ENABLED" != "1" ]; then
   echo ">>> Runpod proxy endpoint: ${EP_URL}/v1"
@@ -2198,7 +2234,7 @@ start_verifier() {
       fi ) &
   fi
   python3 "$SCRIPTS_DIR/verify_serving.py" \
-    --base-url "$LOCAL_BASE" --api-key "${VLLM_API_KEY:-}" --model "${_names[0]}" \
+    --base-url "$LOCAL_BASE" --api-key-env VLLM_API_KEY --model "${_names[0]}" \
     --out "$VERIFY_FILE" --pid "$SRV_PID" \
     --max-model-len "${MAX_MODEL_LEN:-524288}" \
     --needle-tokens "${VERIFY_NEEDLE_TOKENS:-32768}" \
@@ -2248,7 +2284,7 @@ maybe_self_analyze() {
   read -r -a _names <<< "${SERVED_MODEL_NAME:-model}"
   echo ">>> Self-analysis: asking the running model why $fdir failed"
   python3 "$SCRIPTS_DIR/analyze_failure.py" --dir "$fdir" \
-    --base-url "$LOCAL_BASE" --api-key "${VLLM_API_KEY:-}" --model "${_names[0]}" \
+    --base-url "$LOCAL_BASE" --api-key-env VLLM_API_KEY --model "${_names[0]}" \
     >/dev/null 2>&1 &
   return 0
 }
@@ -2283,6 +2319,21 @@ while :; do
   apply_tuning_overrides
   if ! prepare_checkpoint; then
     attempt=$((attempt + 1))
+    # A checkpoint that fails preparation on a config that DIFFERS from the last
+    # known-good one is treated like a failed boot: roll back rather than burn the
+    # entire restart budget on a config that can never succeed (e.g. a
+    # checkpoint-identity mismatch after a self-service variant switch). One
+    # retry first absorbs a transient download blip, which snapshot_download
+    # resumes; with no known-good config, should-rollback declines and the
+    # ordinary crash-loop budget applies.
+    if [ "$attempt" -gt 1 ] && python3 "$SCRIPTS_DIR/config_cli.py" should-rollback; then
+      status_update rolling-back
+      echo "!!! checkpoint preparation keeps failing — rolling back to the last known-good configuration" >&2
+      if python3 "$SCRIPTS_DIR/config_cli.py" rollback --log "$SERVE_LOG" --reason "checkpoint preparation failed"; then
+        attempt=0
+        continue
+      fi
+    fi
     if [ "$attempt" -gt "$MAXR" ]; then
       break
     fi

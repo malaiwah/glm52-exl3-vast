@@ -52,11 +52,20 @@ NEW = """\
 
 
 def patch_text(source: str) -> tuple[str, str]:
-    if OLD in source:
-        return source.replace(OLD, NEW, 1), "patched"
+    # Fail closed on an ambiguous anchor: a source carrying the broken call at
+    # more than one site must not be silently half-patched (replace(..., 1)
+    # would fix only the first and report success). Mirror the sibling
+    # appliers, which require the anchor to occur exactly once.
     if NEW in source:
         return source, "already patched"
-    raise ValueError("r11 EXL3 parity-call source anchor not found")
+    if OLD not in source:
+        raise ValueError("r11 EXL3 parity-call source anchor not found")
+    if source.count(OLD) != 1:
+        raise ValueError(
+            "r11 EXL3 parity-call source anchor is ambiguous: expected "
+            f"exactly one eager-parity call site, found {source.count(OLD)}"
+        )
+    return source.replace(OLD, NEW, 1), "patched"
 
 
 def main() -> int:

@@ -74,11 +74,15 @@ class BenchmarkTests(unittest.TestCase):
 # HELP vllm:prompt_tokens_total Total prompt tokens.
 vllm:prompt_tokens_total{model_name="a"} 12
 vllm:prompt_tokens_total{model_name="b"} 8
+vllm:prompt_tokens_total{model_name="c"} NaN
 vllm:num_preemptions_total 2
 not_a_number NaN
 """)
+        # A NaN sample on a real series must not poison its sum, and a purely
+        # NaN-valued metric must be absent rather than recorded as NaN.
         self.assertEqual(metrics["vllm:prompt_tokens_total"], 20)
         self.assertEqual(metrics["vllm:num_preemptions_total"], 2)
+        self.assertNotIn("not_a_number", metrics)
 
     def test_speculative_summary_uses_official_mal_formula(self):
         before = {
@@ -108,8 +112,20 @@ not_a_number NaN
              "ttft_ms": 40, "tpot_ms": 5, "mean_inter_chunk_ms": 6},
             {"ok": False, "error": "timeout"},
         ]
-        before = {"vllm:num_preemptions_total": 2}
-        after = {"vllm:num_preemptions_total": 5}
+        before = {
+            "vllm:num_preemptions_total": 2,
+            "vllm:prefix_cache_queries_total": 100,
+            "vllm:prefix_cache_hits_total": 10,
+            "vllm:external_prefix_cache_queries_total": 40,
+            "vllm:external_prefix_cache_hits_total": 4,
+        }
+        after = {
+            "vllm:num_preemptions_total": 5,
+            "vllm:prefix_cache_queries_total": 250,
+            "vllm:prefix_cache_hits_total": 210,
+            "vllm:external_prefix_cache_queries_total": 60,
+            "vllm:external_prefix_cache_hits_total": 24,
+        }
         summary = bench.summarize_requests(results, 2, before, after, 2)
         self.assertEqual(summary["completed"], 1)
         self.assertEqual(summary["failed"], 1)
@@ -117,6 +133,11 @@ not_a_number NaN
         self.assertEqual(summary["output_throughput_tok_s"], 10)
         self.assertEqual(summary["preemptions"], 3)
         self.assertEqual(summary["errors"], ["timeout"])
+        # Prefix-cache deltas expose a prefix-cache-warm matched-seed rerun.
+        self.assertEqual(summary["prefix_cache_query_tokens"], 150)
+        self.assertEqual(summary["gpu_prefix_cache_hit_tokens"], 200)
+        self.assertEqual(summary["external_prefix_cache_query_tokens"], 20)
+        self.assertEqual(summary["external_prefix_cache_hit_tokens"], 20)
 
     def test_result_write_is_atomic_and_supports_bare_filename(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -253,13 +274,17 @@ class OffloadBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["kv_offload_load_bytes"], 0)
 
     def test_lmcache_external_hit_does_not_require_native_byte_metrics(self):
+        # An external hit with no native byte counter (LMCache served from
+        # persistent NVMe L2) is a genuine external hit but NOT a confirmed
+        # DRAM hit: dram_hit_observed must stay False without the DRAM-specific
+        # native signal, so it actually distinguishes DRAM from generic external.
         evidence = offload.connector_hit_evidence({
             "external_prefix_hit_tokens": 131072,
             "kv_offload_load_bytes": 0,
         })
         self.assertTrue(evidence["external_hit_observed"])
         self.assertFalse(evidence["native_load_bytes_observed"])
-        self.assertTrue(evidence["dram_hit_observed"])
+        self.assertFalse(evidence["dram_hit_observed"])
 
     def test_native_hit_retains_both_evidence_signals(self):
         evidence = offload.connector_hit_evidence({

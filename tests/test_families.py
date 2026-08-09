@@ -180,7 +180,10 @@ def test_glm_release_integration():
           and 'guard_pid=$!' in acme_retry
           and '--dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-45s}"'
           in acme_retry
-          and 'rrsets/_acme-challenge.${sub}/TXT/' in acme_retry
+          # challenge cleanup targets the right rrset (apex-aware: the subname
+          # is "" for the zone apex, else the label below the zone).
+          and 'rrsets/${challenge}/TXT/' in acme_retry
+          and 'challenge="_acme-challenge.${sub}"' in acme_retry
           and 'timeout --signal=TERM --kill-after=10' in acme_retry
           and "dnspython==2.8.0" in dockerfile
           and "lego_v4.35.2_linux_amd64.tar.gz" in dockerfile

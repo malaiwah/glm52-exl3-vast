@@ -28,6 +28,13 @@ class Exl3ParityAbiPatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "source anchor not found"):
             PATCH.patch_text("def unrelated(): pass\n")
 
+    def test_duplicate_anchor_fails_closed(self):
+        source = "a\n" + PATCH.OLD + "b\n" + PATCH.OLD + "c\n"
+        with self.assertRaisesRegex(
+            ValueError, "exactly one eager-parity call site"
+        ):
+            PATCH.patch_text(source)
+
 
 if __name__ == "__main__":
     unittest.main()

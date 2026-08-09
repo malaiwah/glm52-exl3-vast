@@ -329,12 +329,13 @@ def read_journal(limit: int = 20, before: str = "",
             item = json.loads(line)
         except ValueError:
             continue
+        if not isinstance(item, dict):
+            continue
         if not accepting:
             if item.get("id") == before:
                 accepting = True
             continue
-        if isinstance(item, dict):
-            out.append(redact(item))
+        out.append(redact(item))
         if len(out) >= limit:
             break
     return out

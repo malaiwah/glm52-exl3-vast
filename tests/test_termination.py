@@ -722,6 +722,53 @@ def test_worker_dry_run(tmp):
           "the request-stop flag should not exist in a dry run")
 
 
+def test_worker_erase_failure_does_not_wedge(tmp):
+    section("an erase that raises must not wedge the termination")
+    # FINDING A regression: subprocess.TimeoutExpired is NOT an OSError, so it
+    # escaped erase_ram's handler; with no try/except around run()'s erase phase
+    # it propagated out AFTER the engine was stopped and the terminate flag set
+    # but BEFORE the destroy call — the instance kept billing with serving down.
+    root = os.path.join(tmp, "inst-erase-raise")
+    build_fake_instance(root)
+    env = erase_env(root)
+    env.update(VAST_ENV)
+    env["TERMINATE_ENABLED"] = "1"
+    env["TERMINATE_DRY_RUN"] = "1"
+    os.environ.update(env)
+    gc.init_switches({"TERMINATE_ENABLED": "1"})
+
+    saved = secure_erase.erase_ram
+
+    def _boom(*a, **kw):
+        raise subprocess.TimeoutExpired(cmd=["sync"], timeout=60)
+
+    secure_erase.erase_ram = _boom
+    raised = None
+    doc = None
+    t = StubTransport([(0, '{"dry_run": true}')])
+    try:
+        doc = terminate_worker.run(
+            {"confirm": "9876543", "erase": True, "ram": True},
+            transport=t, stopper=lambda _pr: (True, "stub"), env=env)
+    except Exception as e:                       # must NOT happen
+        raised = e
+    finally:
+        secure_erase.erase_ram = saved
+
+    check("run() did not raise; it returned a progress doc",
+          raised is None and isinstance(doc, dict), repr(raised))
+    phases = [s["phase"] for s in (doc or {}).get("steps", [])]
+    check("the erase failure is recorded, not swallowed",
+          "erase-failed" in phases, str(phases))
+    check("and the flow still reached the destructive call",
+          "terminating" in phases, str(phases))
+    check("the destroy step was attempted in dry-run (transport called once)",
+          len(t.calls) == 1 and t.calls[0]["method"] == "DELETE", str(t.calls))
+    check("run() reports success despite the best-effort erase failure",
+          doc.get("ok") is True, json.dumps(doc)[:300])
+    shutil.rmtree(root, ignore_errors=True)
+
+
 # --------------------------------------------------------------------------
 # 5. session erase, in a sandbox
 # --------------------------------------------------------------------------
@@ -1136,6 +1183,7 @@ def main():
         _run(test_worker_gates, tmp)
         _run(test_worker_happy_path, tmp)
         _run(test_worker_dry_run, tmp)
+        _run(test_worker_erase_failure_does_not_wedge, tmp)
         _run(test_erase_plan, tmp)
         _run(test_erase_without_manifest, tmp)
         _run(test_erase_execution, tmp)

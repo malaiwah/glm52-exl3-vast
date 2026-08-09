@@ -168,11 +168,23 @@ def message_text(result):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
-    parser.add_argument("--api-key", default="")
+    parser.add_argument("--api-key", default=os.environ.get("VLLM_API_KEY", ""))
+    parser.add_argument(
+        "--api-key-file", default="",
+        help="read the API key from this file instead of exposing it in argv")
     parser.add_argument("--model", default="GLM-5.2")
     parser.add_argument("--image", required=True)
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
+
+    # Prefer a key file, then --api-key (which defaults to $VLLM_API_KEY), so
+    # the multi-minute run need not expose the key in /proc/*/cmdline. Matches
+    # benchmark_serving.py / needle_matrix.py / feature_suite.py.
+    if args.api_key_file:
+        with open(args.api_key_file) as handle:
+            key = handle.read().strip()
+    else:
+        key = args.api_key
 
     image = dashboard_png(args.image)
     encoded = io.BytesIO()
@@ -187,10 +199,10 @@ def main():
             "readings, the incident timeline, maintenance task/date/owner, "
             "traffic line colors, and the small footer metadata.")},
     ]}
-    first, first_s = post(args.base_url, args.api_key, args.model,
+    first, first_s = post(args.base_url, key, args.model,
                           [first_user], 1600)
     first_text = message_text(first)
-    follow, follow_s = post(args.base_url, args.api_key, args.model, [
+    follow, follow_s = post(args.base_url, key, args.model, [
         first_user,
         {"role": "assistant", "content": first_text},
         {"role": "user", "content": (
@@ -198,7 +210,7 @@ def main():
             "maintenance owner, and link-restoration time, separated by pipes.")},
     ], 100)
     follow_text = message_text(follow)
-    text_only, text_s = post(args.base_url, args.api_key, args.model, [
+    text_only, text_s = post(args.base_url, key, args.model, [
         {"role": "user", "content": "Reply with exactly VISION_TEXT_OK."},
     ], 32)
     text_only_text = message_text(text_only)

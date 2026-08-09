@@ -242,10 +242,19 @@ def _gpu(xid_state: Optional[Path] = None) -> Dict[str, Any]:
     )
     result = _bounded_command(["nvidia-smi", f"--query-gpu={query}",
                                "--format=csv,noheader,nounits"], timeout=8)
-    xid = _bounded_command(["sh", "-c",
-                            "dmesg --level=err 2>/dev/null | grep -E 'NVRM: Xid' | tail -20"],
-                           timeout=5, limit=8000)
-    xid_lines = str(xid.get("output", "")).splitlines()
+    # Read the kernel ring buffer as its own bounded command so its returncode
+    # and stderr are visible. With kernel.dmesg_restrict=1 (a common default)
+    # the unprivileged soul user cannot read dmesg; the old shell pipeline
+    # swallowed that failure with `2>/dev/null | ... | tail`, exiting 0 and
+    # making "cannot read XIDs" indistinguishable from "no XIDs reported".
+    dmesg = _bounded_command(["dmesg", "--level=err"], timeout=5, limit=131_072)
+    if not dmesg.get("ok"):
+        # The buffer is unreadable: flag it as an explicit observation rather
+        # than an empty (implicitly clean) xid string. Never fabricate an XID.
+        result["xidUnavailable"] = True
+        return result
+    xid_lines = [line for line in str(dmesg.get("output", "")).splitlines()
+                 if "NVRM: Xid" in line][-20:]
     seen_doc = _read_json(xid_state, {}) if xid_state else {}
     seen = seen_doc.get("hashes", []) if isinstance(seen_doc, dict) else []
     seen = seen if isinstance(seen, list) else []
@@ -465,20 +474,31 @@ def _severity(snapshot: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
     output = str(gpu.get("output", ""))
     for line in output.splitlines():
         fields = [value.strip() for value in line.split(",")]
-        try:
-            temperature, limit = float(fields[5]), float(fields[6])
-            ecc = float(fields[9])
-        except (IndexError, ValueError):
+        if not fields or not fields[0]:
             continue
         gpu_id = fields[0]
-        if temperature >= limit - 10:
-            checks[f"gpu:thermal:{gpu_id}"] = {
-                "failed": True, "severity": "critical" if temperature >= limit else "warning",
-                "summary": f"GPU {gpu_id} is {temperature}C (slowdown threshold {limit}C)"}
-        if ecc > 0:
-            checks[f"gpu:ecc:{gpu_id}"] = {
-                "failed": True, "severity": "critical",
-                "summary": f"GPU {gpu_id} reports {int(ecc)} uncorrectable ECC errors"}
+        # Parse each metric independently: nvidia-smi prints "[N/A]" for a field
+        # the board does not support (ECC on a 4090, tlimit on some A100s) even
+        # with nounits, and one unparseable field must not disable the other
+        # checks for that row.
+        try:
+            temperature, limit = float(fields[5]), float(fields[6])
+        except (IndexError, ValueError):
+            pass
+        else:
+            if temperature >= limit - 10:
+                checks[f"gpu:thermal:{gpu_id}"] = {
+                    "failed": True, "severity": "critical" if temperature >= limit else "warning",
+                    "summary": f"GPU {gpu_id} is {temperature}C (slowdown threshold {limit}C)"}
+        try:
+            ecc = float(fields[9])
+        except (IndexError, ValueError):
+            pass
+        else:
+            if ecc > 0:
+                checks[f"gpu:ecc:{gpu_id}"] = {
+                    "failed": True, "severity": "critical",
+                    "summary": f"GPU {gpu_id} reports {int(ecc)} uncorrectable ECC errors"}
     return checks
 
 
@@ -1016,25 +1036,62 @@ def enforce_retention(config: Mapping[str, Any],
                 pass
     journal_cutoff = now - int(config["journalRetentionDays"]) * 86400
     journal = p["journal"]
+
+    def _retained_key(line: str):
+        """Return (within_retention, dedup_key) for a raw journal line, or
+        (False, None) when it is unparseable or lacks a usable timestamp."""
+        try:
+            item = json.loads(line)
+            stamp = dt.datetime.fromisoformat(
+                item["timestamp"].replace("Z", "+00:00")).timestamp()
+        except (ValueError, KeyError, TypeError, AttributeError):
+            return False, None
+        if stamp < journal_cutoff:
+            return False, None
+        key = item["id"] if isinstance(item, dict) and "id" in item else line
+        return True, key
+
     try:
-        kept = []
-        for line in journal.read_text(encoding="utf-8").splitlines():
-            try:
-                item = json.loads(line)
-                stamp = dt.datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00")).timestamp()
-            except (ValueError, KeyError, TypeError):
-                continue
-            if stamp >= journal_cutoff:
-                kept.append(item)
-        tmp = journal.with_name(".journal.retained")
-        with tmp.open("w", encoding="utf-8") as stream:
-            for item in kept:
-                stream.write(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, journal)
+        original_lines = journal.read_text(encoding="utf-8").splitlines()
     except OSError:
-        pass
+        original_lines = None
+    if original_lines is not None:
+        kept_lines, kept_keys, dropped = [], set(), False
+        for line in original_lines:
+            keep, key = _retained_key(line)
+            if not keep:
+                dropped = True
+                continue
+            kept_lines.append(line)
+            kept_keys.add(key)
+        # Skip the rewrite entirely when nothing expired: a no-op os.replace()
+        # every cycle (>=30s) would needlessly race a concurrent append by the
+        # root landing page and silently drop it.
+        if dropped:
+            try:
+                # Close the race: re-read immediately before replacing and carry
+                # forward any still-retained line that appeared after our initial
+                # snapshot (notably the "SOUL configuration changed" audit record
+                # the landing page appends as root between our read and replace).
+                try:
+                    current_lines = journal.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    current_lines = original_lines
+                for line in current_lines:
+                    keep, key = _retained_key(line)
+                    if not keep or key in kept_keys:
+                        continue
+                    kept_lines.append(line)
+                    kept_keys.add(key)
+                tmp = journal.with_name(".journal.retained")
+                with tmp.open("w", encoding="utf-8") as stream:
+                    for line in kept_lines:
+                        stream.write(line + "\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(tmp, journal)
+            except OSError:
+                pass
     incident_index = p["incidents"] / "index.json"
     _compact_incident_state(incident_index, book)
     files = [path for path in p["root"].glob("**/*") if path.is_file()]

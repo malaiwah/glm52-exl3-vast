@@ -437,9 +437,14 @@ def main(argv):
     }
 
     def checkpoint(checks):
-        doc["checks"] = checks
-        doc["ok"] = release_ok(checks)
-        write_result(args.out, doc)
+        # Incremental persistence only makes sense with a destination path.
+        # With no --out, write_result streams to stdout, so checkpointing after
+        # every check would emit N concatenated JSON documents (unparseable).
+        # Mirror benchmark_serving.py: no-op here, single final write below.
+        if args.out:
+            doc["checks"] = checks
+            doc["ok"] = release_ok(checks)
+            write_result(args.out, doc)
 
     try:
         models = json_request(base + "/v1/models", key=key).get("data") or []
@@ -460,7 +465,11 @@ def main(argv):
         doc["ok"] = False
         write_result(args.out, doc)
         raise
-    checkpoint(checks)
+    # Single final write (unconditional): emits exactly one document to stdout
+    # in the no-out case, or the completed result to disk.
+    doc["checks"] = checks
+    doc["ok"] = release_ok(checks)
+    write_result(args.out, doc)
     return 0 if doc["ok"] else 1
 
 

@@ -23,8 +23,12 @@ main() {
   # A re-run replaces the container but must not silently drop credentials the
   # previous launch persisted: an image refresh from a fresh shell without
   # re-exported HF_TOKEN/DESEC_TOKEN would rotate the API key and break cert
-  # renewal weeks later. The environment always wins; the previous env file
-  # only fills in what this shell left unset.
+  # renewal weeks later. TERMINATE_ENABLED is carried for the same reason —
+  # otherwise a bare re-run disarms self-termination (writes 0) and, because the
+  # JarvisLabs key is only persisted while the gate is on, drops the persisted
+  # termination key too, permanently losing self-termination. Carrying the gate
+  # forward keeps both. The environment always wins; the previous env file only
+  # fills in what this shell left unset (export TERMINATE_ENABLED=0 to disarm).
   CARRIED=()
   carry_forward() {
     local key="$1" prior
@@ -37,6 +41,7 @@ main() {
     fi
   }
   for key in HF_TOKEN DESEC_TOKEN DESEC_DOMAIN VLLM_API_KEY \
+             TERMINATE_ENABLED \
              JARVISLABS_API_KEY JARVISLABS_TERMINATE_API_KEY; do
     carry_forward "$key"
   done

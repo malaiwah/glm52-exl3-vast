@@ -41,8 +41,8 @@ if OLD not in s:
     print("deepseek_mtp: anchor not found in this image build — cannot patch")
     sys.exit(1)
 if s.count(OLD) != 1:
-    # Every sibling applier enforces exactly-one anchor; an unbounded replace
-    # over a future image that duplicates this block would silently
+    # This applier requires the anchor to occur exactly once; an unbounded
+    # replace over a future image that duplicates this block would silently
     # double-patch it. The exit-1 fallback (BF16 draft) is the safe answer.
     print("deepseek_mtp: anchor is not unique in this image build — cannot patch")
     sys.exit(1)
