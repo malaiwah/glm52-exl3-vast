@@ -186,15 +186,21 @@ def baseline(model_dir, current_text, log):
         log(f">>> reconcile: discarding stale baseline cache (was for "
             f"{cached.get('checkpoint_id')!r}, now {current_checkpoint_id!r})")
 
+    # Priority order, best first (as the docstring promises): the graft's own
+    # pre-graft backup (.orig), then the vision installer's pre-vision backup
+    # (.text-only), then the current config. The previous insert(0) loop reversed
+    # this, consulting the vision backup before the graft backup — so a wrapped
+    # .text-only could win over a pristine .orig.
     candidates = [("config.json.orig", os.path.join(model_dir, CFG + ".orig")),
                   ("config.json.text-only", os.path.join(model_dir, CFG + ".text-only"))]
-    docs = [("current", current_text)]
+    docs = []
     for name, path in candidates:
         if os.path.exists(path):
             try:
-                docs.insert(0, (name, unwrap(load_cfg(path))[0]))
+                docs.append((name, unwrap(load_cfg(path))[0]))
             except (OSError, ValueError):
                 pass
+    docs.append(("current", current_text))
 
     moe, moe_src = None, "fallback"
     for name, doc in docs:
@@ -462,7 +468,19 @@ def main(argv):
         text = reconcile_text_config(text, base, layer78, log)
 
     if vision_on:
-        new_cfg = build_wrapper(model_dir, text, wrapper, log) or text
+        wrapped = build_wrapper(model_dir, text, wrapper, log)
+        if wrapped is None:
+            # The shards are present and vision was requested, but the Glm5v
+            # wrapper could not be built. Writing a text-only config while
+            # reconcile_index/markers still map vision (driven by vision_on)
+            # would bless an inconsistent triple that crash-loops vLLM. Downgrade
+            # the whole reconcile to text-only so config, index and marker agree.
+            log("!!! reconcile: vision requested but the Glm5v wrapper could not be "
+                "built — reverting to a consistent text-only checkpoint")
+            vision_on = False
+            new_cfg = text
+        else:
+            new_cfg = wrapped
     else:
         if wrapper is not None:
             log(">>> reconcile: unwrapping the vision config (vision is off)")

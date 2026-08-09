@@ -499,11 +499,32 @@ PY
     rm -f "$STATUS_FILE.tmp" 2>/dev/null || true
     echo "!!! status_update failed for phase $1 (keeping the previous snapshot)" >&2
   fi
+  # The full status file carries the API key in plaintext, so it stays root-only
+  # (600) even when the soul user exists. SOUL runs deprivileged and must not be
+  # able to read the key: publish a SANITIZED copy (api_key stripped) for the
+  # soul group instead, and point the controller at it. The controller still
+  # receives the key it needs for probes through its own environment, which it
+  # scrubs before spawning any exec shell — so nothing the model can reach ever
+  # contains the key.
+  chmod 600 "$STATUS_FILE" 2>/dev/null || true
   if id soul >/dev/null 2>&1; then
-    chgrp soul "$STATUS_FILE" 2>/dev/null || true
-    chmod 640 "$STATUS_FILE" 2>/dev/null || true
-  else
-    chmod 600 "$STATUS_FILE" 2>/dev/null || true
+    ( umask 077
+      STATUS_FILE="$STATUS_FILE" SOUL_STATUS_DEST="$STATUS_FILE.soul" python3 - <<'PY' 2>/dev/null || true
+import json, os
+src, dst = os.environ["STATUS_FILE"], os.environ["SOUL_STATUS_DEST"]
+try:
+    doc = json.load(open(src))
+except Exception:
+    doc = {}
+doc.pop("api_key", None)
+tmp = dst + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(doc, f)
+os.replace(tmp, dst)
+PY
+    )
+    chgrp soul "$STATUS_FILE.soul" 2>/dev/null || true
+    chmod 640 "$STATUS_FILE.soul" 2>/dev/null || true
   fi
 }
 
@@ -555,9 +576,34 @@ SOUL_STARTED_AT=0
 SOUL_PERMISSIONS_PREPARED=0
 SOUL_PERMISSIONS_LAST=0
 SOUL_SUPERVISOR_PID=""
+SOUL_LEVEL_CACHE=""
+SOUL_LEVEL_CHECK_AT=0
+SOUL_CONFIG_MTIME=""
 
 soul_level() {
   python3 "$SCRIPTS_DIR/soul_config.py" level 2>/dev/null || printf '0\n'
+}
+
+# The 5s reconcile loop asked soul_config.py for the level on EVERY tick — a
+# full interpreter spawn 17k times a day just to be told SOUL is off (the
+# default). Re-derive only when something could actually have changed: a
+# landing-page write drops the reconcile marker (and SIGUSR1s PID 1), the
+# config file's mtime moves, or a 60s fallback elapses. The marker keeps the
+# "reconcile remains authoritative" property while making the idle path free.
+soul_level_cached() {
+  local now mtime=""
+  now=$(date +%s 2>/dev/null || echo 0)
+  [ -f "$SOUL_STATE_DIR/config.json" ] &&
+    mtime=$(stat -c %Y "$SOUL_STATE_DIR/config.json" 2>/dev/null || echo "")
+  if [ -z "$SOUL_LEVEL_CACHE" ] ||
+     [ -f "$SOUL_RUNTIME_DIR/reconcile" ] ||
+     [ "$mtime" != "$SOUL_CONFIG_MTIME" ] ||
+     [ $((now - SOUL_LEVEL_CHECK_AT)) -ge 60 ]; then
+    SOUL_LEVEL_CACHE=$(soul_level)
+    SOUL_LEVEL_CHECK_AT="$now"
+    SOUL_CONFIG_MTIME="$mtime"
+  fi
+  printf '%s\n' "$SOUL_LEVEL_CACHE"
 }
 
 soul_prepare_permissions() {
@@ -625,7 +671,7 @@ start_soul() {
     PATH="/opt/nanobot-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     LANG="C.UTF-8" TERM="dumb" USER="soul" PYTHONUNBUFFERED="1" \
     GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
-    STATUS_FILE="$STATUS_FILE" PORT="${PORT:-8000}" \
+    STATUS_FILE="$STATUS_FILE.soul" PORT="${PORT:-8000}" \
     VLLM_API_KEY="${VLLM_API_KEY:-}" SOUL_PROMPT="/opt/soul/SOUL.md" \
     SOUL_AUTONOMY_LEVEL="${SOUL_AUTONOMY_LEVEL:-0}" \
     SOUL_AUTONOMY_MAX_LEVEL="${SOUL_AUTONOMY_MAX_LEVEL:-3}" \
@@ -639,7 +685,7 @@ start_soul() {
     NVIDIA_VISIBLE_DEVICES="${NVIDIA_VISIBLE_DEVICES:-all}" \
     CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}" \
     /opt/nanobot-venv/bin/python "$SCRIPTS_DIR/soul_controller.py" \
-      --status-file "$STATUS_FILE" --port "${PORT:-8000}" \
+      --status-file "$STATUS_FILE.soul" --port "${PORT:-8000}" \
       >> "$SOUL_LOG" 2>&1 &
   SOUL_PID=$!
   SOUL_STARTED_AT=$(date +%s)
@@ -663,7 +709,7 @@ stop_soul() {
 reconcile_soul() {
   local level now delay_index
   now=$(date +%s)
-  level=$(soul_level)
+  level=$(soul_level_cached)
   rm -f "$SOUL_RUNTIME_DIR/reconcile" 2>/dev/null || true
   if [ "${level:-0}" -le 0 ] 2>/dev/null; then
     stop_soul
@@ -1121,9 +1167,17 @@ snapshot_download(os.environ["VISION_REPO"], local_dir=os.environ["MODEL_DIR"] +
       if [ "$vision_ok" = "1" ] && python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" "$MODEL_DIR/.vision" && python3 /opt/scripts/index_add_vision.py "$MODEL_DIR"; then
         echo ">>> Vision: ENABLED (image input active; VISION=0 to disable)"
       else
-        echo "!!! Vision install failed — falling back to text-only"
+        echo "!!! Vision install failed — falling back to text-only for this boot"
         python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert || true
         python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" --revert || true
+        # The install did NOT succeed, so the achieved state is text-only. Force
+        # VISION=0 for the rest of this boot: prepare_checkpoint runs the
+        # reconciler next with the REQUESTED VISION value, and reconciling to
+        # --vision 1 would immediately re-wrap config.json to Glm5v and recreate
+        # .vision-enabled over a checkpoint whose vLLM plugin never registered —
+        # the exact "Glm5vForConditionalGeneration is not supported" crash-loop
+        # this fallback exists to prevent. A later boot retries the install.
+        VISION=0
       fi
     else
       # The marker lives on the VOLUME but the plugin is installed into the

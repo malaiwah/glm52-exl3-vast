@@ -8,6 +8,7 @@ family-scoped validation matrix, and the exact argv the serve line would be
 given. These tests prove profile plumbing and preserve the measured GLM path;
 full-checkpoint runtime qualification remains a separate live test.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -261,7 +262,11 @@ def test_glm_release_integration():
           "verify_r28_base.py" in dockerfile
           and "patch_exl3_parity_abi.py" in dockerfile
           and "patch_exl3_mixk.py" in dockerfile
-          and "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6"
+          # Computed from the file, not a literal, so a legitimate patcher edit
+          # updates the pin here and in the Dockerfile together instead of
+          # silently drifting (test_r28_base_gate pins parity_abi the same way).
+          and hashlib.sha256(open(os.path.join(
+              REPO, "scripts", "patch_exl3_mixk.py"), "rb").read()).hexdigest()
           in dockerfile
           and dockerfile.index("patch_exl3_parity_abi.py")
           < dockerfile.rindex("patch_exl3_mixk.py")

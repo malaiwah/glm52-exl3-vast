@@ -34,8 +34,9 @@ COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # call glm52-entry.sh from its remote onstart field. Keep the old path as a
 # compatibility alias so a stale provider template cannot strand a rental
 # before the landing page is reachable.
-RUN echo "ad8b9b1d202c65d68f4f3cdcb8c6b1dac0670216f03dfdde4429416b089baae6  /opt/scripts/patch_exl3_mixk.py" | sha256sum -c - \
+RUN echo "99f597b78c83fce4d7d568305ba147d17a8daf866e833eca42be79d8ec185544  /opt/scripts/patch_exl3_mixk.py" | sha256sum -c - \
  && echo "a0b7bc8377a5e29a921da4971d63b5260dac34601598285fee6cce3cd94bc65c  /opt/scripts/patch_vllm_serial_spec_warning.py" | sha256sum -c - \
+ && echo "e5a442f9aac0493f7fefe8584acfee923f99f4c952382dc6e41670d8b7c8a638  /opt/scripts/patch_exl3_parity_abi.py" | sha256sum -c - \
  && /opt/venv/bin/python /opt/scripts/verify_r28_base.py \
  && python3 /opt/scripts/patch_vllm_serial_spec_warning.py \
  && python3 /opt/scripts/patch_exl3_parity_abi.py \
