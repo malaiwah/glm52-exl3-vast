@@ -508,10 +508,12 @@ PY
   # contains the key.
   chmod 600 "$STATUS_FILE" 2>/dev/null || true
   if id soul >/dev/null 2>&1; then
+    _soul_status="$STATUS_FILE.soul"
     ( umask 077
-      STATUS_FILE="$STATUS_FILE" SOUL_STATUS_DEST="$STATUS_FILE.soul" python3 - <<'PY' 2>/dev/null || true
+      SOUL_STATUS_SRC="$STATUS_FILE" SOUL_STATUS_DEST="$_soul_status" \
+        python3 - <<'PY' 2>/dev/null || true
 import json, os
-src, dst = os.environ["STATUS_FILE"], os.environ["SOUL_STATUS_DEST"]
+src, dst = os.environ["SOUL_STATUS_SRC"], os.environ["SOUL_STATUS_DEST"]
 try:
     doc = json.load(open(src))
 except Exception:
@@ -523,8 +525,8 @@ with open(tmp, "w") as f:
 os.replace(tmp, dst)
 PY
     )
-    chgrp soul "$STATUS_FILE.soul" 2>/dev/null || true
-    chmod 640 "$STATUS_FILE.soul" 2>/dev/null || true
+    chgrp soul "$_soul_status" 2>/dev/null || true
+    chmod 640 "$_soul_status" 2>/dev/null || true
   fi
 }
 
