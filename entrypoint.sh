@@ -625,6 +625,13 @@ soul_level() {
 # landing-page write drops the reconcile marker (and SIGUSR1s PID 1), the
 # config file's mtime moves, or a 60s fallback elapses. The marker keeps the
 # "reconcile remains authoritative" property while making the idle path free.
+#
+# This sets $SOUL_LEVEL_CACHE IN PLACE and must be called DIRECTLY, not via
+# command substitution: `level=$(soul_level_cached)` would run it in a subshell
+# whose assignments to the cache globals are discarded, so the cache would never
+# populate and the interpreter would spawn every tick anyway. reconcile_soul
+# runs directly in the persistent supervisor subshell, so a direct call's
+# assignments survive across ticks.
 soul_level_cached() {
   local now mtime=""
   now=$(date +%s 2>/dev/null || echo 0)
@@ -638,7 +645,6 @@ soul_level_cached() {
     SOUL_LEVEL_CHECK_AT="$now"
     SOUL_CONFIG_MTIME="$mtime"
   fi
-  printf '%s\n' "$SOUL_LEVEL_CACHE"
 }
 
 soul_prepare_permissions() {
@@ -744,7 +750,11 @@ stop_soul() {
 reconcile_soul() {
   local level now delay_index
   now=$(date +%s)
-  level=$(soul_level_cached)
+  # Direct call (NOT $()): soul_level_cached sets $SOUL_LEVEL_CACHE in place, and
+  # a subshell would discard the cache — see its header. This function runs
+  # directly in the persistent supervisor subshell, so the cache survives ticks.
+  soul_level_cached
+  level="$SOUL_LEVEL_CACHE"
   rm -f "$SOUL_RUNTIME_DIR/reconcile" 2>/dev/null || true
   if [ "${level:-0}" -le 0 ] 2>/dev/null; then
     stop_soul
