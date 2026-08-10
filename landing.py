@@ -81,11 +81,13 @@ _ssl_ctx = None
 def is_secure_connection(connection, headers=None) -> bool:
     """Runpod's managed proxy terminates TLS before forwarding to this port.
 
-    Trusting that proxy is opt-in AND per-request: the flag alone must not
-    mark a direct plain-TCP hit "secure" (the API key would be embedded over
-    cleartext when the same port is also exposed as a direct mapping), so it
-    only counts when the request actually arrived through the proxy, which
-    stamps X-Forwarded-Proto."""
+    A real TLS socket (or the trusted-LAN LANDING_ALLOW_INSECURE escape) is
+    secure. Beyond that we can only consult X-Forwarded-Proto, which is a header
+    ANY client can set — it is not proof the request traversed the proxy. So
+    trusting it is gated on LANDING_TRUST_PROXY_HTTPS, which the operator (or the
+    entrypoint, only for Runpod's proxy mode) opts into and can turn OFF when the
+    same port is also exposed as a direct TCP mapping, where a forged header
+    would otherwise hand out the API key over cleartext."""
     if isinstance(connection, ssl.SSLSocket) or ALLOW_INSECURE:
         return True
     if TRUST_PROXY_HTTPS and headers is not None:
@@ -1282,8 +1284,10 @@ def apply_values(values: dict):
             "Nothing was applied."
     # The whole read-validate-write sequence runs under one lock so two tabs
     # (or an apply racing a reset) cannot interleave: the state that persists
-    # must be a state one of them was actually shown.
-    with _config_lock:
+    # must be a state one of them was actually shown. gc.state_lock() extends
+    # that serialization ACROSS processes, so a self-service apply cannot be
+    # clobbered by the PID-1 supervisor's concurrent rollback (and vice versa).
+    with _config_lock, gc.state_lock():
         dropped = []
         minimal = gc.minimize(values, dropped)
         effective, _sources, notes = gc.resolve(state_values=minimal)
@@ -1920,7 +1924,7 @@ class Handler(BaseHTTPRequestHandler):
                         body = render_config(tok, secure, msg, "good" if ok else "bad",
                                              [] if ok else findings)
             elif url.path == "/config/reset":
-                with _config_lock:
+                with _config_lock, gc.state_lock():
                     try:
                         os.remove(gc.p_state())
                     except OSError:
@@ -2006,8 +2010,13 @@ class Handler(BaseHTTPRequestHandler):
         secure = is_secure_connection(self.connection, self.headers)
         hostport = status().get("https_hostport", "")
         if not secure and ssl_ctx() and hostport:
-            # Upgrade the Open button's plain-HTTP hit to the TLS view of this page
-            q = f"?token={tok}" if tok else ""
+            # Upgrade the Open button's plain-HTTP hit to the TLS view of this
+            # page, preserving ALL query parameters (not just token — otherwise
+            # e.g. the SOUL journal's ?before= cursor is silently dropped on the
+            # redirect). Strip CR/LF so a crafted value cannot inject header
+            # fields into Location.
+            raw_q = url.query.replace("\r", "").replace("\n", "")
+            q = f"?{raw_q}" if raw_q else ""
             self.send_response(302)
             self.send_header("Location", f"https://{hostport}{url.path}{q}")
             self.end_headers()

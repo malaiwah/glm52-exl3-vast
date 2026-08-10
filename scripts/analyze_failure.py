@@ -115,7 +115,11 @@ def ask(base, key, model, prompt, timeout=600):
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json",
                  **({"Authorization": "Bearer " + key} if key else {})})
-    ctx = ssl._create_unverified_context() if base.startswith("https") else None
+    ctx = None
+    if base.startswith("https"):
+        ctx = (ssl.create_default_context()
+               if os.environ.get("GLM_INTERNAL_TLS_VERIFY") == "1"
+               else ssl._create_unverified_context())
     with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
         doc = json.loads(r.read().decode("utf-8", "replace"))
     return ((doc.get("choices") or [{}])[0].get("message") or {}).get("content", "").strip()
@@ -126,8 +130,13 @@ def main(argv):
     ap.add_argument("--dir", required=True)
     ap.add_argument("--base-url", default="http://localhost:8000")
     ap.add_argument("--api-key", default="")
+    ap.add_argument("--api-key-env", default="",
+                    help="read the API key from this environment variable instead of "
+                         "--api-key, so it never lands in /proc/*/cmdline")
     ap.add_argument("--model", default="model")
     args = ap.parse_args(argv)
+    if args.api_key_env:
+        args.api_key = os.environ.get(args.api_key_env, "")
 
     fdir = args.dir
     meta_path = os.path.join(fdir, "meta.json")

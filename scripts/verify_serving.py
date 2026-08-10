@@ -73,7 +73,16 @@ def _req(url, payload=None, key="", timeout=60):
         headers["Authorization"] = "Bearer " + key
     req = urllib.request.Request(url, data=data, headers=headers,
                                  method="POST" if data else "GET")
-    ctx = ssl._create_unverified_context() if url.startswith("https") else None
+    # When PID 1 has installed the /etc/hosts alias mapping the certificate
+    # hostname to loopback (GLM_INTERNAL_TLS_VERIFY=1), verify the cert like any
+    # client: this is the authoritative correctness gate, so it should not blind
+    # itself to a bad certificate. Loopback/self-hosted TLS without that alias
+    # (or plain HTTP) keeps the tolerant path.
+    ctx = None
+    if url.startswith("https"):
+        ctx = (ssl.create_default_context()
+               if os.environ.get("GLM_INTERNAL_TLS_VERIFY") == "1"
+               else ssl._create_unverified_context())
     with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
         body = r.read().decode("utf-8", "replace")
     return json.loads(body) if body.strip().startswith(("{", "[")) else body

@@ -77,6 +77,12 @@ def parse_metrics(text):
             value = float(fields[-1])
         except ValueError:
             continue
+        # A Prometheus `NaN`/`+Inf` sample parses as a float but would poison
+        # the per-name sum (NaN propagates), silently zeroing a real counter
+        # delta via metric_delta's max(0.0, nan) and writing a bare `NaN` token
+        # into result JSON downstream. Drop non-finite samples entirely.
+        if not math.isfinite(value):
+            continue
         out[name] = out.get(name, 0.0) + value
     return out
 
@@ -270,6 +276,18 @@ def summarize_requests(results, wall_s, before, after, concurrency):
         before, after, "vllm:generation_tokens_total", "vllm:generation_tokens")
     preemptions = metric_delta(
         before, after, "vllm:num_preemptions_total", "vllm:num_preemptions")
+    # Prefix-cache query/hit deltas expose whether these requests were served
+    # warm: with --enable-prefix-caching a matched --prompt-seed B run reuses
+    # the A run's prefix, and without these counters the JSON cannot reveal it.
+    # Same metric names as offload_prefix_benchmark.py's metric_summary.
+    prefix_queries = metric_delta(
+        before, after, "vllm:prefix_cache_queries_total")
+    prefix_hits = metric_delta(
+        before, after, "vllm:prefix_cache_hits_total")
+    external_prefix_queries = metric_delta(
+        before, after, "vllm:external_prefix_cache_queries_total")
+    external_prefix_hits = metric_delta(
+        before, after, "vllm:external_prefix_cache_hits_total")
     return {
         "concurrency": concurrency,
         "requests": len(results),
@@ -291,6 +309,10 @@ def summarize_requests(results, wall_s, before, after, concurrency):
         "metric_prompt_tokens": round(prompt_metric),
         "metric_generation_tokens": round(generation_metric),
         "preemptions": round(preemptions),
+        "prefix_cache_query_tokens": round(prefix_queries),
+        "gpu_prefix_cache_hit_tokens": round(prefix_hits),
+        "external_prefix_cache_query_tokens": round(external_prefix_queries),
+        "external_prefix_cache_hit_tokens": round(external_prefix_hits),
         "speculative": spec_summary(before, after),
         "errors": [item.get("error", "") for item in failed][:10],
         "requests_detail": good,
@@ -361,7 +383,9 @@ def main(argv):
     parser.add_argument(
         "--prompt-seed", default="",
         help=("stable prefix for prompt nonces; use the same value for matched "
-              "A/B runs, or leave empty for a fresh UUID"))
+              "A/B runs, or leave empty for a fresh UUID. Caveat: with "
+              "prefix caching enabled a matched-seed rerun is served "
+              "prefix-cache-warm (see the *prefix_cache_hit_tokens fields)"))
     parser.add_argument("--metadata", action="append", default=[])
     parser.add_argument("--insecure", action="store_true")
     parser.add_argument("--out", default="")

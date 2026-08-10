@@ -478,6 +478,11 @@ def erase_ram(max_gib=None, dry_run=False):
         with open("/proc/sys/vm/drop_caches", "w") as f:
             f.write("3\n")
         out["drop_caches"] = "ok"
+    except subprocess.SubprocessError as e:
+        # TimeoutExpired is a SubprocessError, NOT an OSError, so the handler
+        # below would let it escape erase_ram — and from terminate_worker's
+        # erase phase that would wedge the whole termination. Record and move on.
+        out["drop_caches"] = f"sync timed out/failed ({e})"
     except OSError as e:
         out["drop_caches"] = f"unavailable in this container ({e})"
 

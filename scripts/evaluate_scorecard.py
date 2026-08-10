@@ -404,9 +404,15 @@ def main() -> int:
         "label": args.label,
         "task": args.task,
         "contract": (
-            "EleutherAI lm-evaluation-harness gsm8k_cot v3 eight-shot, chat adaptation"
+            # These name the public harness this evaluation is modeled on, but
+            # answer extraction here takes the LAST match (the public harnesses
+            # take the FIRST) and omits their stop strings, so accuracies are
+            # not byte-identical to those harnesses. Say so plainly.
+            "EleutherAI lm-evaluation-harness gsm8k_cot v3 eight-shot, chat "
+            "adaptation (last-match variant; stop strings omitted)"
             if args.task == "gsm8k_cot"
-            else "OpenAI simple-evals GPQAEval zero-shot"
+            else "OpenAI simple-evals GPQAEval zero-shot "
+                 "(last-match variant; stop strings omitted)"
         ),
         "dataset_url": dataset_url,
         "dataset_sha256": dataset_sha256,

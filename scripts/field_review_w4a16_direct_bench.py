@@ -65,6 +65,10 @@ def _benchmark_shape(
 ) -> dict[str, object]:
     torch.manual_seed(seed + hidden_size + m)
     device = torch.device("cuda")
+    # Reset the peak allocator counter per shape: empty_cache() between records
+    # does not clear it, so without this reset max_memory_allocated_bytes would
+    # report the running max across all prior (larger) shapes, not this one.
+    torch.cuda.reset_peak_memory_stats()
     experts = 1
     topk = 1
     rows = 2 * intermediate_size

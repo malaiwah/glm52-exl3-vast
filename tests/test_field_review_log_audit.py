@@ -83,6 +83,17 @@ class FieldReviewLogAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least 1"):
             log_audit.audit("x", start_line=0)
 
+    def test_error_after_carriage_return_progress_update_is_caught(self):
+        report = log_audit.audit(
+            "INFO:     Application startup complete.\n"
+            "Capturing CUDA graphs: 45%\rERROR 08-04 12:00:01 [core.py:512] "
+            "EngineCore hit an unrecoverable scheduler invariant violation\n"
+            "request 200 OK\n"
+        )
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["counts"]["runtime_error_level"], 1)
+        self.assertEqual(len(report["findings"]), 1)
+
     def test_read_log_preserves_carriage_return_progress_updates(self):
         with tempfile.NamedTemporaryFile() as stream:
             stream.write(b"progress 10%\rprogress 20%\nready\n")

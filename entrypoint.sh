@@ -46,7 +46,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 import sys
 sys.path.insert(0, '${SCRIPTS_DIR:-/opt/scripts}')
 from gpu_detect import parse_cuda_version
-print(parse_cuda_version(sys.stdin.read()))")"
+print(parse_cuda_version(sys.stdin.read()))" || true)"
 fi
 # What can this container ACTUALLY use? nvidia-smi intersected with
 # NVIDIA_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES — see scripts/gpu_detect.py.
@@ -293,7 +293,7 @@ apply_config() {
   # MODEL_DIR follows the variant unless the template pinned it.
   if [ -n "$MODEL_DIR_PINNED" ]; then
     MODEL_DIR="$MODEL_DIR_PINNED"
-    if [ -n "${MODEL_DIRNAME:-}" ] && [ "$(basename "$MODEL_DIR")" != "$MODEL_DIRNAME" ]; then
+    if [ -n "${MODEL_DIRNAME:-}" ] && [ "$(basename "$MODEL_DIR")" != "$(basename "$MODEL_DIRNAME")" ]; then
       echo "!!! MODEL_DIR is pinned to $MODEL_DIR but the resolved model is"
       echo "!!! ${MODEL_REPO:-?} (expected directory '$MODEL_DIRNAME'). Serving from the"
       echo "!!! pinned path anyway — unset MODEL_DIR to let the family choose it."
@@ -404,7 +404,7 @@ setup_sshd() {
     done
     chmod 700 /root/.ssh 2>/dev/null || true
     chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
-    _nkeys=$(grep -c . /root/.ssh/authorized_keys 2>/dev/null || echo 0)
+    _nkeys=$(grep -c . /root/.ssh/authorized_keys 2>/dev/null) || _nkeys=0
     boot_note ">>> sshd: ${_nkeys} authorized key(s) installed from PUBLIC_KEY"
   fi
   if (ss -tln 2>/dev/null || netstat -tln 2>/dev/null) | grep -q ':22 '; then
@@ -499,11 +499,34 @@ PY
     rm -f "$STATUS_FILE.tmp" 2>/dev/null || true
     echo "!!! status_update failed for phase $1 (keeping the previous snapshot)" >&2
   fi
+  # The full status file carries the API key in plaintext, so it stays root-only
+  # (600) even when the soul user exists. SOUL runs deprivileged and must not be
+  # able to read the key: publish a SANITIZED copy (api_key stripped) for the
+  # soul group instead, and point the controller at it. The controller still
+  # receives the key it needs for probes through its own environment, which it
+  # scrubs before spawning any exec shell — so nothing the model can reach ever
+  # contains the key.
+  chmod 600 "$STATUS_FILE" 2>/dev/null || true
   if id soul >/dev/null 2>&1; then
-    chgrp soul "$STATUS_FILE" 2>/dev/null || true
-    chmod 640 "$STATUS_FILE" 2>/dev/null || true
-  else
-    chmod 600 "$STATUS_FILE" 2>/dev/null || true
+    _soul_status="$STATUS_FILE.soul"
+    ( umask 077
+      SOUL_STATUS_SRC="$STATUS_FILE" SOUL_STATUS_DEST="$_soul_status" \
+        python3 - <<'PY' 2>/dev/null || true
+import json, os
+src, dst = os.environ["SOUL_STATUS_SRC"], os.environ["SOUL_STATUS_DEST"]
+try:
+    doc = json.load(open(src))
+except Exception:
+    doc = {}
+doc.pop("api_key", None)
+tmp = dst + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(doc, f)
+os.replace(tmp, dst)
+PY
+    )
+    chgrp soul "$_soul_status" 2>/dev/null || true
+    chmod 640 "$_soul_status" 2>/dev/null || true
   fi
 }
 
@@ -514,9 +537,17 @@ PY
 # scripts dir (for the shared knob registry in glm_config.py).
 if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
    && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+  # Whether the operator set it explicitly, captured BEFORE we default it: on
+  # Runpod's managed-proxy mode we default proxy-trust ON, but an operator who
+  # exposes the dashboard port as a DIRECT TCP mapping can set
+  # LANDING_TRUST_PROXY_HTTPS=0 to refuse a forgeable X-Forwarded-Proto — honor
+  # that explicit choice instead of forcing 1.
+  _lthp_explicit="${LANDING_TRUST_PROXY_HTTPS+set}"
   LANDING_TRUST_PROXY_HTTPS="${LANDING_TRUST_PROXY_HTTPS:-0}"
   if [ "$PLATFORM" = "runpod" ] || [ "$PLATFORM" = "jarvislabs" ]; then
-    [ "$PLATFORM" != "runpod" ] || LANDING_TRUST_PROXY_HTTPS=1
+    if [ "$PLATFORM" = "runpod" ] && [ -z "$_lthp_explicit" ]; then
+      LANDING_TRUST_PROXY_HTTPS=1
+    fi
     if [ -z "${OPEN_BUTTON_TOKEN:-}" ]; then
       OPEN_BUTTON_TOKEN_FILE="${OPEN_BUTTON_TOKEN_FILE:-/workspace/.model-turnkey-landing-token}"
       mkdir -p "$(dirname "$OPEN_BUTTON_TOKEN_FILE")"
@@ -531,11 +562,36 @@ if [ "${LANDING_PAGE:-1}" != "0" ] && [ -f /opt/landing.py ] \
     export OPEN_BUTTON_TOKEN
   fi
   status_update booting
-  MODEL_DIR="$MODEL_DIR" STATUS_FILE="$STATUS_FILE" GLM_SCRIPTS_DIR="$SCRIPTS_DIR" \
-    GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
-    MODEL_PROFILE="$MODEL_PROFILE" LANDING_TRUST_PROXY_HTTPS="$LANDING_TRUST_PROXY_HTTPS" \
-    LANDING_API_PORT="${PORT:-8000}" python3 /opt/landing.py &
-  echo ">>> Landing page (Open button) live on :1111"
+  # Supervise the landing page: it is the appliance's recovery surface (on
+  # RunPod, with no console log and possibly no sshd, the :1111 page is the ONLY
+  # way in), so a process death during the long weight download or engine load
+  # must not leave it gone for the rest of the session. Run it in a subshell
+  # that restarts it with bounded backoff. The page is the subshell's child, so
+  # the subshell's own TERM/INT trap reaps it on shutdown; on_term stops this
+  # supervisor (a PID-1 job, so it is in `jobs -p`), which fires that trap. The
+  # token is NOT re-minted on restart — OPEN_BUTTON_TOKEN is already resolved
+  # and exported above, so every restart serves the same tokenized URL.
+  (
+    trap '[ -z "${_lp:-}" ] || kill "$_lp" 2>/dev/null || true; exit 0' TERM INT
+    _lp=""; _lp_fails=0
+    while :; do
+      if [ -z "$_lp" ] || ! kill -0 "$_lp" 2>/dev/null; then
+        if [ -n "$_lp" ]; then
+          boot_note "!!! landing: dashboard process exited; restarting the :1111 recovery surface"
+          _lp_fails=$((_lp_fails + 1))
+          case "$_lp_fails" in 1) sleep 2 ;; 2) sleep 5 ;; *) sleep 15 ;; esac
+        fi
+        MODEL_DIR="$MODEL_DIR" STATUS_FILE="$STATUS_FILE" GLM_SCRIPTS_DIR="$SCRIPTS_DIR" \
+          GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
+          MODEL_PROFILE="$MODEL_PROFILE" LANDING_TRUST_PROXY_HTTPS="$LANDING_TRUST_PROXY_HTTPS" \
+          LANDING_API_PORT="${PORT:-8000}" python3 /opt/landing.py &
+        _lp=$!
+      fi
+      sleep 5
+    done
+  ) &
+  LANDING_SUPERVISOR_PID=$!
+  echo ">>> Landing page (Open button) live on :1111 (supervised)"
   if [ "$PLATFORM" = "runpod" ]; then
     echo ">>> Runpod dashboard: https://${RUNPOD_POD_ID}-1111.proxy.runpod.net/?token=${OPEN_BUTTON_TOKEN}"
   elif [ "$PLATFORM" = "jarvislabs" ]; then
@@ -555,9 +611,40 @@ SOUL_STARTED_AT=0
 SOUL_PERMISSIONS_PREPARED=0
 SOUL_PERMISSIONS_LAST=0
 SOUL_SUPERVISOR_PID=""
+SOUL_LEVEL_CACHE=""
+SOUL_LEVEL_CHECK_AT=0
+SOUL_CONFIG_MTIME=""
 
 soul_level() {
   python3 "$SCRIPTS_DIR/soul_config.py" level 2>/dev/null || printf '0\n'
+}
+
+# The 5s reconcile loop asked soul_config.py for the level on EVERY tick — a
+# full interpreter spawn 17k times a day just to be told SOUL is off (the
+# default). Re-derive only when something could actually have changed: a
+# landing-page write drops the reconcile marker (and SIGUSR1s PID 1), the
+# config file's mtime moves, or a 60s fallback elapses. The marker keeps the
+# "reconcile remains authoritative" property while making the idle path free.
+#
+# This sets $SOUL_LEVEL_CACHE IN PLACE and must be called DIRECTLY, not via
+# command substitution: `level=$(soul_level_cached)` would run it in a subshell
+# whose assignments to the cache globals are discarded, so the cache would never
+# populate and the interpreter would spawn every tick anyway. reconcile_soul
+# runs directly in the persistent supervisor subshell, so a direct call's
+# assignments survive across ticks.
+soul_level_cached() {
+  local now mtime=""
+  now=$(date +%s 2>/dev/null || echo 0)
+  [ -f "$SOUL_STATE_DIR/config.json" ] &&
+    mtime=$(stat -c %Y "$SOUL_STATE_DIR/config.json" 2>/dev/null || echo "")
+  if [ -z "$SOUL_LEVEL_CACHE" ] ||
+     [ -f "$SOUL_RUNTIME_DIR/reconcile" ] ||
+     [ "$mtime" != "$SOUL_CONFIG_MTIME" ] ||
+     [ $((now - SOUL_LEVEL_CHECK_AT)) -ge 60 ]; then
+    SOUL_LEVEL_CACHE=$(soul_level)
+    SOUL_LEVEL_CHECK_AT="$now"
+    SOUL_CONFIG_MTIME="$mtime"
+  fi
 }
 
 soul_prepare_permissions() {
@@ -625,7 +712,7 @@ start_soul() {
     PATH="/opt/nanobot-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     LANG="C.UTF-8" TERM="dumb" USER="soul" PYTHONUNBUFFERED="1" \
     GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
-    STATUS_FILE="$STATUS_FILE" PORT="${PORT:-8000}" \
+    STATUS_FILE="$STATUS_FILE.soul" PORT="${PORT:-8000}" \
     VLLM_API_KEY="${VLLM_API_KEY:-}" SOUL_PROMPT="/opt/soul/SOUL.md" \
     SOUL_AUTONOMY_LEVEL="${SOUL_AUTONOMY_LEVEL:-0}" \
     SOUL_AUTONOMY_MAX_LEVEL="${SOUL_AUTONOMY_MAX_LEVEL:-3}" \
@@ -639,7 +726,7 @@ start_soul() {
     NVIDIA_VISIBLE_DEVICES="${NVIDIA_VISIBLE_DEVICES:-all}" \
     CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}" \
     /opt/nanobot-venv/bin/python "$SCRIPTS_DIR/soul_controller.py" \
-      --status-file "$STATUS_FILE" --port "${PORT:-8000}" \
+      --status-file "$STATUS_FILE.soul" --port "${PORT:-8000}" \
       >> "$SOUL_LOG" 2>&1 &
   SOUL_PID=$!
   SOUL_STARTED_AT=$(date +%s)
@@ -663,7 +750,11 @@ stop_soul() {
 reconcile_soul() {
   local level now delay_index
   now=$(date +%s)
-  level=$(soul_level)
+  # Direct call (NOT $()): soul_level_cached sets $SOUL_LEVEL_CACHE in place, and
+  # a subshell would discard the cache — see its header. This function runs
+  # directly in the persistent supervisor subshell, so the cache survives ticks.
+  soul_level_cached
+  level="$SOUL_LEVEL_CACHE"
   rm -f "$SOUL_RUNTIME_DIR/reconcile" 2>/dev/null || true
   if [ "${level:-0}" -le 0 ] 2>/dev/null; then
     stop_soul
@@ -725,7 +816,7 @@ stop_soul_supervisor() {
 # reconcile remains authoritative, and this trap prevents the signal from
 # terminating PID 1 on minimal shells.
 trap ':' USR1
-trap 'stop_soul_supervisor; if [ -n "${SRV_PID:-}" ]; then kill -9 -- "-$SRV_PID" 2>/dev/null || true; fi' EXIT
+trap 'stop_soul_supervisor; [ -z "${LANDING_SUPERVISOR_PID:-}" ] || kill "$LANDING_SUPERVISOR_PID" 2>/dev/null || true; if [ -n "${SRV_PID:-}" ]; then kill -9 -- "-$SRV_PID" 2>/dev/null || true; fi' EXIT
 
 # This script is container PID 1, and PID 1 ignores default-disposition
 # signals: an untrapped `docker stop` / provider stop would hang for the full
@@ -767,19 +858,25 @@ fetch_weights() {
   _complete_marker="$MODEL_DIR/.download-complete"
   _complete_repo=""
   [ -f "$_complete_marker" ] && _complete_repo="$(cat "$_complete_marker" 2>/dev/null || true)"
+  # A checkpoint-identity mismatch must RETURN failure, not `exit`: fetch_weights
+  # is invoked as `if ! fetch_weights` (prepare_checkpoint), and an `exit` inside
+  # a function called as an if-condition still terminates PID 1 — bypassing the
+  # supervisor's verify/rollback loop and crash-looping the rental with no
+  # recovery (the state file survives on the volume). Returning 1 lets the caller
+  # roll back to the last known-good config, as the header contract promises.
   if [ -f "$_repo_marker" ]; then
     _have=$(cat "$_repo_marker" 2>/dev/null || echo "")
     if [ -n "$_have" ] && [ "$_have" != "${MODEL_REPO:-}" ]; then
-      echo "FATAL: $MODEL_DIR already holds '$_have' but this configuration wants"
-      echo "       '${MODEL_REPO:-?}'. Refusing to download one model on top of another."
-      echo "       Point MODEL_DIR somewhere else, or delete that directory first."
-      exit 1
+      echo "!!! $MODEL_DIR already holds '$_have' but this configuration wants"
+      echo "    '${MODEL_REPO:-?}'. Refusing to download one model on top of another."
+      echo "    Point MODEL_DIR somewhere else, or delete that directory first."
+      return 1
     fi
   elif [ -n "$_complete_repo" ] &&
        [ "${_complete_repo%%@*}" != "${MODEL_REPO:-}" ]; then
-    echo "FATAL: $MODEL_DIR holds '$_complete_repo' but this configuration wants"
-    echo "       '${MODEL_REPO:-?}'. Refusing to mix checkpoints in one directory."
-    exit 1
+    echo "!!! $MODEL_DIR holds '$_complete_repo' but this configuration wants"
+    echo "    '${MODEL_REPO:-?}'. Refusing to mix checkpoints in one directory."
+    return 1
   fi
   # A local/NFS bind mount is an explicit immutable checkpoint selection. Do
   # not try to update it to the profile's download revision: that would fail on
@@ -917,11 +1014,21 @@ snapshot_download(os.environ["MODEL_REPO"], revision=os.environ.get("MODEL_REVIS
 MTP78_DRAFT_DIR=""
 
 fetch_mtp78_overlay() {
-  [ -d "$MODEL_DIR/.mtp78-overlay/3bpw-keep0" ] && return 0
+  local _overlay="$MODEL_DIR/.mtp78-overlay/3bpw-keep0"
+  # Gate on the payload shard, not the directory: snapshot_download creates the
+  # directory before the shards land, so a kill/blip mid-download leaves a dir
+  # that every later boot treats as complete and never re-fetches — permanently
+  # serving the degraded native BF16 draft with no recovery. Re-invoking
+  # snapshot_download resumes safely.
+  if ls "$_overlay"/*.safetensors >/dev/null 2>&1; then
+    return 0
+  fi
   HF_HUB_OFFLINE=0 MODEL_DIR="$MODEL_DIR" python3 -c '
 import os
 from huggingface_hub import snapshot_download
-snapshot_download("malaiwah/GLM-5.2-EXL3-TR3-MTP78", allow_patterns=["3bpw-keep0/*"], local_dir=os.environ["MODEL_DIR"] + "/.mtp78-overlay", max_workers=8)'
+snapshot_download("malaiwah/GLM-5.2-EXL3-TR3-MTP78", allow_patterns=["3bpw-keep0/*"], local_dir=os.environ["MODEL_DIR"] + "/.mtp78-overlay", max_workers=8)' || return 1
+  # Confirm the shard actually landed before declaring the overlay ready.
+  ls "$_overlay"/*.safetensors >/dev/null 2>&1
 }
 
 prepare_nvfp4_mtp78_draft() {
@@ -1105,9 +1212,17 @@ snapshot_download(os.environ["VISION_REPO"], local_dir=os.environ["MODEL_DIR"] +
       if [ "$vision_ok" = "1" ] && python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" "$MODEL_DIR/.vision" && python3 /opt/scripts/index_add_vision.py "$MODEL_DIR"; then
         echo ">>> Vision: ENABLED (image input active; VISION=0 to disable)"
       else
-        echo "!!! Vision install failed — falling back to text-only"
+        echo "!!! Vision install failed — falling back to text-only for this boot"
         python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert || true
         python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" --revert || true
+        # The install did NOT succeed, so the achieved state is text-only. Force
+        # VISION=0 for the rest of this boot: prepare_checkpoint runs the
+        # reconciler next with the REQUESTED VISION value, and reconciling to
+        # --vision 1 would immediately re-wrap config.json to Glm5v and recreate
+        # .vision-enabled over a checkpoint whose vLLM plugin never registered —
+        # the exact "Glm5vForConditionalGeneration is not supported" crash-loop
+        # this fallback exists to prevent. A later boot retries the install.
+        VISION=0
       fi
     else
       # The marker lives on the VOLUME but the plugin is installed into the
@@ -1692,6 +1807,68 @@ PUBLIC_IP_CURRENT="$(current_public_ip)"
 PUBLIC_API_PORT="${VAST_TCP_PORT_8000:-${RUNPOD_TCP_PORT_8443:-${JARVISLABS_PUBLIC_PORT_8000:-${PORT:-8000}}}}"
 PUBLIC_DASHBOARD_PORT="${VAST_TCP_PORT_1111:-${JARVISLABS_PUBLIC_PORT_1111:-1111}}"
 
+# Wire an ISSUED certificate into the serving path: vLLM's --ssl-* args (or the
+# Runpod direct-TLS socat listener), the internal /etc/hosts alias + verify
+# flag, and the endpoint/status/LOCAL_BASE picture. Idempotent and safe to call
+# again — this is what lets a certificate that only arrives from the BACKGROUND
+# acme retry, minutes into the session, become usable on the next vLLM restart
+# instead of requiring a whole container replacement. Returns 0 iff TLS is
+# active afterwards. CRT/KEY/ACME_DIRECT are globals set by the ACME block below.
+wire_tls_endpoint() {
+  if [ "${TLS_ENABLED:-0}" != "1" ] && [ "${ACME_DIRECT:-0}" = "1" ] &&
+     [ -n "${CRT:-}" ] && [ -n "${KEY:-}" ] &&
+     [ -f "$CRT" ] && [ -f "$KEY" ] && [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+    TLS_ENABLED=1
+    if [ "$PLATFORM" = "runpod" ]; then
+      if [ -z "${TLS_PROXY_PID:-}" ] || ! kill -0 "${TLS_PROXY_PID:-0}" 2>/dev/null; then
+        socat "OPENSSL-LISTEN:8443,cert=${CRT},key=${KEY},verify=0,reuseaddr,fork" \
+          "TCP4:127.0.0.1:${PORT:-8000}" &
+        TLS_PROXY_PID=$!
+        sleep 1
+        kill -0 "$TLS_PROXY_PID" 2>/dev/null || {
+          echo "!!! Runpod direct-TLS proxy failed to start; using managed HTTPS proxy"
+          TLS_ENABLED=0
+        }
+      fi
+    else
+      TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY")
+      # Reach the engine by the certificate hostname (resolved to loopback) so
+      # internal TLS clients verify the cert; anchor the /etc/hosts match so a
+      # sub.$ACME_DOMAIN entry does not suppress installing the real name.
+      case "$ACME_DOMAIN" in
+        ""|*[!A-Za-z0-9.-]*)
+          echo "!!! Unsafe ACME hostname; internal TLS alias was not installed"
+          ;;
+        *)
+          if ! grep -Eq "(^|[[:space:]])${ACME_DOMAIN}([[:space:]]|\$)" /etc/hosts 2>/dev/null; then
+            printf '127.0.0.1\t%s\n' "$ACME_DOMAIN" >> /etc/hosts
+          fi
+          TLS_INTERNAL_ALIAS=1
+          ;;
+      esac
+    fi
+    [ "$TLS_ENABLED" = "1" ] &&
+      echo ">>> TLS enabled: https://$ACME_DOMAIN:${PUBLIC_API_PORT}/v1"
+  fi
+  if [ "${TLS_ENABLED:-0}" = "1" ]; then
+    EP_URL="https://${ACME_DOMAIN}:${PUBLIC_API_PORT}"
+    TLS_STATE="https://${ACME_DOMAIN}"
+    [ "$PLATFORM" != "runpod" ] && HTTPS_HOSTPORT="${ACME_DOMAIN}:${PUBLIC_DASHBOARD_PORT}"
+    CERT_PATH="$CRT" KEY_PATH="$KEY"
+    LOCAL_SCHEME="http"; LOCAL_HOST="localhost"
+    if [ "$PLATFORM" != "runpod" ]; then
+      LOCAL_SCHEME="https"
+      if [ "${TLS_INTERNAL_ALIAS:-0}" = "1" ]; then
+        LOCAL_HOST="$ACME_DOMAIN"
+        export GLM_INTERNAL_TLS_VERIFY=1
+      fi
+    fi
+    LOCAL_BASE="$LOCAL_SCHEME://$LOCAL_HOST:${PORT:-8000}"
+    return 0
+  fi
+  return 1
+}
+
 # Runpod's HTTP proxy terminates TLS and forwards plain HTTP to the container.
 # App-level TLS is only appropriate on the separately exposed direct TCP port.
 ACME_DIRECT=1
@@ -1749,6 +1926,7 @@ fi
 
 TLS_ARGS=()
 TLS_ENABLED=0
+TLS_INTERNAL_ALIAS=0
 if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
    [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null &&
    [ "${CONFIG_SMOKE:-0}" != "1" ]; then
@@ -1768,59 +1946,25 @@ if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
       bash "$SCRIPTS_DIR/acme_retry.sh" --retry &
     fi
   fi
-  if [ -f "$CRT" ] && [ -f "$KEY" ]; then
-    TLS_ENABLED=1
-    if [ "$PLATFORM" = "runpod" ]; then
-      # Keep vLLM plain on :8000 for the managed proxy; provide a second,
-      # idle-safe direct TLS listener on :8443.
-      socat "OPENSSL-LISTEN:8443,cert=${CRT},key=${KEY},verify=0,reuseaddr,fork" \
-        "TCP4:127.0.0.1:${PORT:-8000}" &
-      TLS_PROXY_PID=$!
-      sleep 1
-      kill -0 "$TLS_PROXY_PID" 2>/dev/null || {
-        echo "!!! Runpod direct-TLS proxy failed to start; using managed HTTPS proxy"
-        TLS_ENABLED=0
-      }
-    else
-      TLS_ARGS=(--ssl-certfile "$CRT" --ssl-keyfile "$KEY")
-      # Internal appliance clients (SOUL, probes and local diagnostics) must
-      # use TLS too: a TLS-enabled vLLM listener cannot accept loopback HTTP.
-      # Resolve the public certificate hostname to loopback so these clients
-      # keep normal CA + hostname verification without relying on NAT hairpin.
-      case "$ACME_DOMAIN" in
-        ""|*[!A-Za-z0-9.-]*)
-          echo "!!! Unsafe ACME hostname; internal TLS alias was not installed"
-          ;;
-        *)
-          if ! grep -Fq "$ACME_DOMAIN" /etc/hosts 2>/dev/null; then
-            printf '127.0.0.1\t%s\n' "$ACME_DOMAIN" >> /etc/hosts
-          fi
-          ;;
-      esac
-    fi
-    if [ "$TLS_ENABLED" = "1" ]; then
-      echo ">>> TLS enabled: https://$ACME_DOMAIN:${PUBLIC_API_PORT}/v1"
-    fi
-  fi
+  # Wire the cert into the serving path if it is ready now (idempotent; the
+  # supervisor loop calls this again so a late background cert is picked up).
+  wire_tls_endpoint || true
 fi
 
-# Feed the final endpoint/TLS picture to the landing page's status file
-if [ "$TLS_ENABLED" = "1" ]; then
-  EP_URL="https://${ACME_DOMAIN}:${PUBLIC_API_PORT}"
-  TLS_STATE="https://${ACME_DOMAIN}"
-  if [ "$PLATFORM" != "runpod" ]; then
-    HTTPS_HOSTPORT="${ACME_DOMAIN}:${PUBLIC_DASHBOARD_PORT}"
+# Feed the final endpoint/TLS picture to the landing page's status file.
+# wire_tls_endpoint set the TLS endpoint/LOCAL_BASE when a cert came up; fill in
+# the non-TLS fallback (Runpod managed proxy, or plain HTTP) otherwise.
+if [ "${TLS_ENABLED:-0}" != "1" ]; then
+  if [ "$PLATFORM" = "runpod" ]; then
+    EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
+    TLS_STATE="https:// managed by Runpod proxy"
+  else
+    EP_URL="http://${PUBLIC_IP_CURRENT:-localhost}:${PUBLIC_API_PORT}"
   fi
-  CERT_PATH="$CRT" KEY_PATH="$KEY"
-elif [ "$PLATFORM" = "runpod" ]; then
-  EP_URL="https://${RUNPOD_POD_ID}-${PORT:-8000}.proxy.runpod.net"
-  TLS_STATE="https:// managed by Runpod proxy"
-else
-  EP_URL="http://${PUBLIC_IP_CURRENT:-localhost}:${PUBLIC_API_PORT}"
+  LOCAL_SCHEME="http"
+  LOCAL_HOST="localhost"
+  LOCAL_BASE="$LOCAL_SCHEME://$LOCAL_HOST:${PORT:-8000}"
 fi
-LOCAL_SCHEME="http"
-[ "$TLS_ENABLED" = "1" ] && [ "$PLATFORM" != "runpod" ] && LOCAL_SCHEME="https"
-LOCAL_BASE="$LOCAL_SCHEME://localhost:${PORT:-8000}"
 
 if [ "$PLATFORM" = "runpod" ] && [ "$TLS_ENABLED" != "1" ]; then
   echo ">>> Runpod proxy endpoint: ${EP_URL}/v1"
@@ -2198,7 +2342,7 @@ start_verifier() {
       fi ) &
   fi
   python3 "$SCRIPTS_DIR/verify_serving.py" \
-    --base-url "$LOCAL_BASE" --api-key "${VLLM_API_KEY:-}" --model "${_names[0]}" \
+    --base-url "$LOCAL_BASE" --api-key-env VLLM_API_KEY --model "${_names[0]}" \
     --out "$VERIFY_FILE" --pid "$SRV_PID" \
     --max-model-len "${MAX_MODEL_LEN:-524288}" \
     --needle-tokens "${VERIFY_NEEDLE_TOKENS:-32768}" \
@@ -2248,7 +2392,7 @@ maybe_self_analyze() {
   read -r -a _names <<< "${SERVED_MODEL_NAME:-model}"
   echo ">>> Self-analysis: asking the running model why $fdir failed"
   python3 "$SCRIPTS_DIR/analyze_failure.py" --dir "$fdir" \
-    --base-url "$LOCAL_BASE" --api-key "${VLLM_API_KEY:-}" --model "${_names[0]}" \
+    --base-url "$LOCAL_BASE" --api-key-env VLLM_API_KEY --model "${_names[0]}" \
     >/dev/null 2>&1 &
   return 0
 }
@@ -2275,6 +2419,14 @@ while :; do
   # Re-resolve the config on EVERY start: this is what makes an apply from the
   # landing page take effect without replacing the container.
   apply_config
+  # Pick up a certificate that the BACKGROUND acme retry issued after boot: this
+  # re-evaluates TLS every restart, so a late cert becomes usable without
+  # replacing the container. Idempotent and a no-op once TLS is active or when
+  # no cert exists yet. It updates EP_URL/CERT_PATH/LOCAL_BASE in place; the
+  # loop's own status_update below then publishes them.
+  if [ "${TLS_ENABLED:-0}" != "1" ] && wire_tls_endpoint; then
+    boot_note ">>> TLS: certificate is now available; serving with direct TLS after this restart"
+  fi
   # Family-specific environment and topology calibration must be refreshed too:
   # a self-service apply can change family, DMA mode, DCP or prefetch policy
   # without replacing PID 1.
@@ -2283,6 +2435,21 @@ while :; do
   apply_tuning_overrides
   if ! prepare_checkpoint; then
     attempt=$((attempt + 1))
+    # A checkpoint that fails preparation on a config that DIFFERS from the last
+    # known-good one is treated like a failed boot: roll back rather than burn the
+    # entire restart budget on a config that can never succeed (e.g. a
+    # checkpoint-identity mismatch after a self-service variant switch). One
+    # retry first absorbs a transient download blip, which snapshot_download
+    # resumes; with no known-good config, should-rollback declines and the
+    # ordinary crash-loop budget applies.
+    if [ "$attempt" -gt 1 ] && python3 "$SCRIPTS_DIR/config_cli.py" should-rollback; then
+      status_update rolling-back
+      echo "!!! checkpoint preparation keeps failing — rolling back to the last known-good configuration" >&2
+      if python3 "$SCRIPTS_DIR/config_cli.py" rollback --log "$SERVE_LOG" --reason "checkpoint preparation failed"; then
+        attempt=0
+        continue
+      fi
+    fi
     if [ "$attempt" -gt "$MAXR" ]; then
       break
     fi
@@ -2347,6 +2514,17 @@ while :; do
       break
     fi
     if [ -f "$RESTART_FLAG" ]; then
+      reason="requested"
+      break
+    fi
+    # A certificate the BACKGROUND acme retry issued after the engine came up
+    # (it touches .lego/restart-required on success) is otherwise never served:
+    # consume the marker and request a restart so the engine comes back up with
+    # direct TLS. Only while TLS is not already active.
+    if [ "${TLS_ENABLED:-0}" != "1" ] &&
+       [ -f "$MODEL_ROOT/.lego/restart-required" ]; then
+      rm -f "$MODEL_ROOT/.lego/restart-required" 2>/dev/null || true
+      boot_note ">>> TLS: background certificate issuance completed; restarting to serve TLS"
       reason="requested"
       break
     fi

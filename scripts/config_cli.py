@@ -111,7 +111,8 @@ def cmd_env(_args):
     # would be a second source of truth for one flag — the kind of thing the knob
     # wiring audit exists to catch.
     for key in ("MODEL_REPO", "MODEL_REVISION", "MODEL_DIRNAME", "MTP78_MODE",
-                "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK", "SPEC_METHOD"):
+                "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK", "SPEC_METHOD",
+                "NATIVE_MTP_FORMAT"):
         lines.append("export %s=%s" % (key, shlex.quote(str(derived.get(key, "")))))
     # A bash ARRAY, not a string: these values are JSON with spaces and braces,
     # and word-splitting them would corrupt the serve line. Arrays cannot be
@@ -168,16 +169,18 @@ def _state_values():
 
 
 def cmd_mark_good(args):
-    effective, sources, _notes = _resolved()
-    verify = gc.read_json(gc.p_verify_last())
-    doc = {"ts": _now(), "values": _state_values(), "effective": effective,
-           "sources": sources, "verify": verify}
-    gc.write_json_atomic(gc.p_known_good(), doc, mode=0o644)
-    if args.log and os.path.exists(args.log):
-        os.makedirs(gc.p_logs(), exist_ok=True)
-        with open(os.path.join(gc.p_logs(), "last-good.log"), "w") as f:
-            f.write(_tail(args.log))
-    gc.set_apply_state("steady", since=doc["ts"], detail="verified")
+    # Serialize against a concurrent landing-page apply/reset (see gc.state_lock).
+    with gc.state_lock():
+        effective, sources, _notes = _resolved()
+        verify = gc.read_json(gc.p_verify_last())
+        doc = {"ts": _now(), "values": _state_values(), "effective": effective,
+               "sources": sources, "verify": verify}
+        gc.write_json_atomic(gc.p_known_good(), doc, mode=0o644)
+        if args.log and os.path.exists(args.log):
+            os.makedirs(gc.p_logs(), exist_ok=True)
+            with open(os.path.join(gc.p_logs(), "last-good.log"), "w") as f:
+                f.write(_tail(args.log))
+        gc.set_apply_state("steady", since=doc["ts"], detail="verified")
     print(">>> config marked known-good")
     return 0
 
@@ -193,7 +196,17 @@ def _prune_failures():
 
 
 def cmd_rollback(args):
-    """Preserve the failed config + its log, restore the last known-good."""
+    """Preserve the failed config + its log, restore the last known-good.
+
+    The whole read-known-good / write-state sequence is serialized against a
+    concurrent landing-page apply/reset via gc.state_lock() (a cross-process
+    flock), so a rollback and an apply cannot interleave and persist a state
+    neither actor saw."""
+    with gc.state_lock():
+        return _cmd_rollback_locked(args)
+
+
+def _cmd_rollback_locked(args):
     effective, _sources, _notes = _resolved()
     failed_values = _state_values()
     good = gc.read_json(gc.p_known_good())

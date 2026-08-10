@@ -76,7 +76,11 @@ def connector_hit_evidence(metrics):
     return {
         "external_hit_observed": external,
         "native_load_bytes_observed": native_bytes,
-        "dram_hit_observed": external,
+        # A *confirmed DRAM* hit requires the DRAM-specific native signal
+        # (kv_offload_load_bytes). A bare external hit can be served from
+        # persistent NVMe L2 (e.g. an LMCache reload after restart), so it is
+        # proof of an external hit only, not of a DRAM reload.
+        "dram_hit_observed": native_bytes,
     }
 
 

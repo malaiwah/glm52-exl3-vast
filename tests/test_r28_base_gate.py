@@ -116,6 +116,19 @@ class R28BaseGateTests(unittest.TestCase):
         self.assertIn("python3 /opt/scripts/patch_vllm_serial_spec_warning.py",
                       dockerfile)
 
+    def test_exl3_source_patchers_are_hash_pinned(self) -> None:
+        # Every patcher that rewrites the immutable vLLM/EXL3 tree at build time
+        # must be sha256-pinned in the Dockerfile, so it cannot be edited without
+        # touching the Dockerfile and this gate (patch_exl3_parity_abi.py shipped
+        # without a pin — the one script in the RUN block that could drift).
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        for name in ("patch_exl3_parity_abi.py", "patch_exl3_mixk.py"):
+            patcher = ROOT / "scripts" / name
+            self.assertIn(
+                hashlib.sha256(patcher.read_bytes()).hexdigest(), dockerfile,
+                f"{name} must be sha256-pinned in the Dockerfile")
+            self.assertIn(f"python3 /opt/scripts/{name}", dockerfile)
+
 
 if __name__ == "__main__":
     unittest.main()

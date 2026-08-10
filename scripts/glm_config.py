@@ -23,8 +23,11 @@ Every rule in VALIDATIONS below was measured on real hardware; the `why`
 strings are the operator-facing explanation and are quoted verbatim in
 docs/self-service-config.md.
 """
+import contextlib
 import datetime
+import fcntl
 import json
+import math
 import os
 import re
 
@@ -90,20 +93,8 @@ FAMILIES = {
         "default_variant": "exl3-tr3",
         "kv_dtypes": ["fp8", "nvfp4_ds_mla"],
         "spec_method": "mtp",
-        # knobs that only make sense here; everything else is generic
-        "own_knobs": ("MTP_DRAFT", "DRAFT_MODEL", "DRAFT_QUANTIZATION", "DCP",
-                      "MTP_DRAFT_SAMPLE_METHOD",
-                      "MTP_REJECTION_SAMPLE_METHOD",
-                      "KV_SCALE_MODE",
-                      "VLLM_EXL3_TRELLIS_MAX_M",
-                      "DCP_PREFILL_WORKSPACE_MIB", "DCP_CKV_PREFETCH_DEPTH",
-                      "DCP_CKV_GATHER_MAX_TOKENS",
-                      "DCP_KV_CACHE_INTERLEAVE_SIZE",
-                      "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS",
-                      "B12X_PCIE_DMA", "F8_DMA", "PCIE_CALIBRATION",
-                      "PCIE_DMA_MIN_BYTES",
-                      "CLAMP_ROPE_TABLES", "ONLINE_QUANT",
-                      "VISION", "VISION_CHUNKS"),
+        # Knob applicability is driven per-knob by its `families` attribute via
+        # applies_to(); there is no second per-family knob list to keep in sync.
         "defaults": {
             "MAX_MODEL_LEN": 524288, "MODEL_OUTPUT_LIMIT": 131072, "MTP_TOKENS": 3,
             "MAX_NUM_SEQS": 8, "MAX_NUM_BATCHED_TOKENS": 3072,
@@ -158,7 +149,6 @@ FAMILIES = {
         # nvfp4_ds_mla is an MLA KV layout; it does not exist for this family.
         "kv_dtypes": ["auto", "fp8"],
         "spec_method": "mtp",
-        "own_knobs": ("MULTIMODAL", "MM_MAX_PIXELS"),
         "defaults": {
             "TENSOR_PARALLEL_SIZE": 1,
             "MAX_MODEL_LEN": 196608,
@@ -202,8 +192,6 @@ FAMILIES = {
         "default_variant": "custom",
         "kv_dtypes": ["auto", "fp8"],
         "spec_method": "mtp",
-        "own_knobs": ("MODEL_ID", "QUANTIZATION", "REASONING_PARSER",
-                      "TOOL_CALL_PARSER", "MULTIMODAL"),
         "defaults": {
             "TENSOR_PARALLEL_SIZE": 1,
             "MAX_MODEL_LEN": 32768,
@@ -653,9 +641,10 @@ KNOBS = [
          rationale=(
              "Which checkpoint is served. EXL3-TR3 3.0bpw is what this template "
              "measures and ships: ~77 GiB/rank, which is what buys the 512K pool on "
-             "96 GB cards, at AIME/HMMT/GPQA parity with BF16. The NVFP4 hybrid is "
-             "~6% faster to decode and is the only variant with calibrated MLA outer "
-             "scales (so the only one where nvfp4 KV is safe), but it is BIGGER on "
+             "96 GB cards, at AIME/HMMT/GPQA parity with BF16. Every shipped GLM "
+             "variant carries checkpoint-calibrated MLA outer scales, so nvfp4 KV is "
+             "safe on all of them (the default itself serves nvfp4_ds_mla KV). The "
+             "NVFP4 hybrid is ~6% faster to decode but is BIGGER on "
              "disk, gives up ~30% of the KV pool, and this template's serve args for "
              "it are derived, not measured. Switching variants triggers a fresh "
              "multi-hundred-GB download.")),
@@ -810,10 +799,10 @@ KNOBS = [
          group="Speculative decoding", scope="engine",
          label="Draft sampling method",
          rationale=(
-             "How the MTP draft proposes candidates. The v29 EXL3 release and its "
-             "long-context qualification use greedy drafting, which is the turnkey "
-             "default. Probabilistic drafting remains available for controlled "
-             "quality/acceptance experiments.")),
+             "How the MTP draft proposes candidates. The family default is greedy, "
+             "but every shipped EXL3 variant pins probabilistic drafting (the measured "
+             "production choice), so that is what a stock deployment runs. Greedy "
+             "remains selectable for controlled quality/acceptance experiments.")),
 
     dict(key="MTP_REJECTION_SAMPLE_METHOD", families=("glm52",), type="choice",
          default="standard", choices=["standard", "block"],
@@ -1171,6 +1160,12 @@ def coerce(knob: dict, raw):
             v = float(str(raw).strip())
         except (TypeError, ValueError):
             raise ConfigError(f"{key}: expected a number, got {raw!r}")
+        # NaN/inf parse as floats but slip through every min/max comparison
+        # (all comparisons against NaN are False), so a NaN would pass the
+        # bounds check here and every downstream numeric validation rule, then
+        # reach the serve line. Reject non-finite values up front.
+        if not math.isfinite(v):
+            raise ConfigError(f"{key}: {raw!r} is not a finite number")
         if "min" in knob and v < knob["min"]:
             raise ConfigError(f"{key}: {v} is below the minimum {knob['min']}")
         if "max" in knob and v > knob["max"]:
@@ -1234,6 +1229,36 @@ def write_json_atomic(path, obj, mode=0o600):
         f.write("\n")
     os.chmod(tmp, mode)
     os.replace(tmp, path)
+
+
+@contextlib.contextmanager
+def state_lock():
+    """Cross-process advisory lock over the config state directory.
+
+    landing.py (root) and config_cli.py (the PID-1 supervisor) both mutate
+    config.json / apply-state.json / known-good.json. The landing page's
+    in-process threading.Lock does not serialize against the supervisor's
+    rollback, so a self-service apply landing between a verify failure and the
+    supervisor's rollback could be silently clobbered while the UI reports
+    "Applied". Both sides take this flock around their read-validate-write so the
+    state that persists is one a reader actually saw. Advisory and best-effort:
+    if the lock file cannot be opened, proceed rather than brick the editor."""
+    lock_f = None
+    try:
+        os.makedirs(state_dir(), exist_ok=True)
+        lock_f = open(os.path.join(state_dir(), ".state.lock"), "w")
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+    except OSError:
+        lock_f = None
+    try:
+        yield
+    finally:
+        if lock_f is not None:
+            try:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            lock_f.close()
 
 
 def env_layer(env=None, invalid=None) -> dict:
@@ -1630,6 +1655,18 @@ def resolve(state_values=None, env_values=None):
                        reverse=True)
         effective["DCP"] = str(next(
             (c for c in legal if c <= tp_res and tp_res % c == 0), 1))
+    # MTP_DRAFT='off' means "no speculative decode" (that is its UI label), but
+    # it derives serve inputs byte-identical to 'native' and build_spec_args
+    # gates speculation on MTP_TOKENS alone — so 'off' left the engine serving
+    # at full draft depth. Make the draft choice authoritative: zero MTP_TOKENS
+    # so the one-click "off" actually disables speculation.
+    if fam_name == "glm52" and effective.get("MTP_DRAFT") == "off" \
+            and effective.get("MTP_TOKENS", 0):
+        if sources.get("MTP_TOKENS") in ("env", "file"):
+            notes.append("MTP_DRAFT=off disables speculative decode; the requested "
+                         "MTP_TOKENS is overridden to 0")
+        effective["MTP_TOKENS"] = 0
+        sources["MTP_TOKENS"] = "derived"
     return effective, sources, notes
 
 
@@ -1655,12 +1692,32 @@ def minimize(values: dict, dropped=None) -> dict:
     #    previous family — taking its validation rules with it.
     base, _s1, _n1 = resolve(state_values={"MODEL_FAMILY": fam_name})
     unfiled, _s2, _n2 = resolve(state_values={})
+    # A non-default MODEL_VARIANT is itself an override and must be written, but
+    # every OTHER knob has to be compared against THAT variant's defaults, not
+    # the family default variant's. `base` carries the family default variant,
+    # so comparing a variant's own untouched defaults against it makes them look
+    # like overrides and pins all of them into the file — freezing them against
+    # future retunes and corrupting a later switch back. Resolve a second
+    # baseline that includes the selected variant for the per-knob comparison.
+    sel_variant = base["MODEL_VARIANT"]
+    if "MODEL_VARIANT" in values:
+        try:
+            sel_variant = coerce(KNOB_BY_KEY["MODEL_VARIANT"], values["MODEL_VARIANT"])
+        except ConfigError:
+            pass
+    var_base, _s3, _n3 = resolve(
+        state_values={"MODEL_FAMILY": fam_name, "MODEL_VARIANT": sel_variant})
     out = {}
     if fam_name != unfiled["MODEL_FAMILY"]:
         out["MODEL_FAMILY"] = fam_name
+    # Compared against the family default variant (base), NOT var_base — else the
+    # selected variant always equals its own baseline and is never written.
+    if sel_variant != base["MODEL_VARIANT"]:
+        out["MODEL_VARIANT"] = sel_variant
     for knob in KNOBS:
         key = knob["key"]
-        if key == "MODEL_FAMILY" or key not in values or not knob.get("editable", True):
+        if key in ("MODEL_FAMILY", "MODEL_VARIANT") or key not in values \
+                or not knob.get("editable", True):
             continue
         try:
             value = coerce(knob, values[key])
@@ -1674,7 +1731,7 @@ def minimize(values: dict, dropped=None) -> dict:
             if dropped is not None and value != knob["default"]:
                 dropped.append(key)
             continue
-        if value != base[key]:
+        if value != var_base[key]:
             out[key] = value
     return out
 
@@ -1958,6 +2015,18 @@ def validate(cfg: dict, context=None):
                  f"the largest captured size ({max(sizes)}) does not equal "
                  f"MAX_CUDAGRAPH_CAPTURE_SIZE ({cap_max}); decode above {max(sizes)} runs "
                  "eager whatever the max says.")
+        # The smallest captured size must stay at or above the EXL3 trellis
+        # floor of 4: a capture below 4 falls into the eager parity path and the
+        # engine DIES during capture (see the CUDAGRAPH_CAPTURE_SIZES rationale
+        # and the matching boot-failure SIGNATURE). Without this the apply gate
+        # waves through a config that cannot boot, and the user only finds out
+        # at the failed-restart/rollback the matrix exists to prevent.
+        if is_glm and variant.get("quantization") == "exl3" and min(sizes) < 4:
+            err("capture-sizes-floor", ["CUDAGRAPH_CAPTURE_SIZES"],
+                f"the smallest captured size ({min(sizes)}) is below the EXL3 trellis "
+                "floor of 4. A CUDA-graph capture below 4 enters the eager parity path "
+                "and the engine crashes during capture — this does not degrade, it "
+                "fails to boot. Raise the smallest CUDAGRAPH_CAPTURE_SIZES entry to >= 4.")
     # 2. rank-sliced EXL3 draft compatibility --------------------------------
     # v29 stamps the draft role at construction and gives draft layers a
     # capturable m=1 floor while target layers keep m=4. The former v20 blanket

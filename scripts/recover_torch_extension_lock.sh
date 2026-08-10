@@ -10,6 +10,13 @@
 #   * .ninja_lock and every other extension are untouched;
 #   * a process whose cwd or command line references the extension gets a
 #     bounded grace period;
+#   * owner detection scans THIS container's /proc only, so it is
+#     same-PID-namespace only: a compiler in another container that shares this
+#     persistent /cache lives in a separate PID namespace, is invisible here,
+#     and its LIVE lock would look ownerless. The cross-container safety is a
+#     minimum sentinel-age gate (EXT_LOCK_MIN_AGE_S, default 1800s): an
+#     apparently-ownerless sentinel younger than that is presumed live and left
+#     in place this pass, so a fresh cross-namespace lock is never quarantined;
 #   * an ownerless sentinel is renamed, never deleted.
 set -u
 
@@ -18,12 +25,20 @@ extension_dir="$extensions_root/sparkinfer_pcie_dma_ext"
 sentinel="$extension_dir/lock"
 wait_seconds="${TORCH_EXTENSION_LOCK_WAIT_S:-30}"
 preflight_wait_seconds="${TORCH_EXTENSION_PREFLIGHT_WAIT_S:-10}"
+# Cross-container safety: an apparently-ownerless sentinel younger than this is
+# presumed to be a live FileBaton held by a compiler in another PID namespace
+# (a second container on the same persistent /cache) and is left untouched. The
+# default is the longest plausible build.
+min_age_seconds="${EXT_LOCK_MIN_AGE_S:-1800}"
 
 case "$wait_seconds" in
   ""|*[!0-9]*) wait_seconds=30 ;;
 esac
 case "$preflight_wait_seconds" in
   ""|*[!0-9]*) preflight_wait_seconds=10 ;;
+esac
+case "$min_age_seconds" in
+  ""|*[!0-9]*) min_age_seconds=1800 ;;
 esac
 
 [ "${RECOVER_STALE_EXTENSION_LOCKS:-1}" = "1" ] || exit 0
@@ -84,6 +99,24 @@ if [ -n "$owners" ]; then
   echo "!!! Extension lock still has a live compiler after ${wait_seconds}s (PIDs:${owners})." >&2
   echo "!!! Refusing to move $sentinel; the supervisor will retry instead." >&2
   exit 75
+fi
+
+# No owner is visible in THIS PID namespace. That does NOT prove the lock is
+# stale: a compiler in another container sharing this persistent /cache lives in
+# a separate PID namespace and is invisible above. Require the sentinel to be
+# older than the minimum age before quarantining it, so a fresh cross-namespace
+# lock is presumed live and left in place (the supervisor retries; a genuinely
+# stale sentinel ages past the threshold and is recovered on a later pass).
+now_epoch="$(date +%s 2>/dev/null || echo 0)"
+sentinel_mtime="$(stat -c %Y -- "$sentinel" 2>/dev/null || echo 0)"
+if [ "$sentinel_mtime" -gt 0 ]; then
+  age=$((now_epoch - sentinel_mtime))
+  if [ "$age" -lt "$min_age_seconds" ]; then
+    echo "!!! Apparently-ownerless extension lock $sentinel is only ${age}s old (< ${min_age_seconds}s min age)." >&2
+    echo "!!! A compiler in another PID namespace (a second container on this /cache) may still" >&2
+    echo "!!! hold it, so it is left in place this pass; the supervisor will retry." >&2
+    exit 75
+  fi
 fi
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"

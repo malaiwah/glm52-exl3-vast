@@ -3,7 +3,7 @@
 Reusable qualification protocol for every release. Results are recorded in
 [TEST_RESULTS.md](TEST_RESULTS.md); per-release GLM model qualification
 details are in the `docs/glm52-rXX-*.md` files. Current release: **GG
-v20-r26**.
+v20-r28**.
 
 This plan has two cost tiers. A sub-1B Qwen representative validates provider,
 UI and OpenAI-API plumbing on one GPU. A single four-GPU flagship pass per

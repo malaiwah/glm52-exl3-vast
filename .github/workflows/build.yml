@@ -66,15 +66,29 @@ jobs:
         run: python3 tests/test_feature_suite.py
       - name: structured output + speculative decode compatibility patch
         run: python3 tests/test_structured_output_patch.py
+      - name: EXL3 parity ABI patch
+        run: python3 tests/test_exl3_parity_abi_patch.py
+      - name: field-review runtime log audit
+        run: python3 tests/test_field_review_log_audit.py
       - name: checkpoint reconciliation
         run: python3 tests/test_checkpoint_reconcile.py
       - name: embedded SOUL controller
         run: python3 tests/test_soul.py
       - name: validate profile compatibility and Runpod templates
         run: |
-          CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm52-exl3 bash entrypoint.sh | grep -q 'brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw'
-          CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=qwen36-27b-nvfp4 bash entrypoint.sh | grep -q 'nvidia/Qwen3.6-27B-NVFP4'
-          CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=custom MODEL_ID=Qwen/Qwen3.5-0.8B bash entrypoint.sh | grep -q 'Qwen/Qwen3.5-0.8B'
+          set -euo pipefail
+          # Capture then grep, rather than `entrypoint.sh | grep -q`: a direct
+          # pipe lets grep close the pipe on first match and SIGPIPE the smoke
+          # run mid-flight, and only pipefail (not guaranteed) would surface a
+          # nonzero entrypoint exit. Command substitution runs the entrypoint to
+          # completion and `set -e` fails the step on any nonzero exit, then the
+          # grep checks the expected output.
+          out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm52-exl3 bash entrypoint.sh)
+          grep -q 'brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw' <<<"$out"
+          out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=qwen36-27b-nvfp4 bash entrypoint.sh)
+          grep -q 'nvidia/Qwen3.6-27B-NVFP4' <<<"$out"
+          out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=custom MODEL_ID=Qwen/Qwen3.5-0.8B bash entrypoint.sh)
+          grep -q 'Qwen/Qwen3.5-0.8B' <<<"$out"
           python3 -m json.tool runpod-template.json >/dev/null
           python3 -m json.tool runpod-template-qwen36.json >/dev/null
           python3 -c "import json; ps=[json.load(open(f)) for f in ('runpod-template.json','runpod-template-qwen36.json')]; assert all(p['ports'] == ['8000/http', '8443/tcp', '1111/http', '22/tcp'] and p['volumeMountPath'] == '/workspace' and p['env']['RUNPOD_DIRECT_TLS'] == 'auto' and 'DESEC_TOKEN' not in p['env'] and 'DESEC_DOMAIN' not in p['env'] and p['isPublic'] and not p['isServerless'] for p in ps); assert [p['env']['MODEL_PROFILE'] for p in ps] == ['glm52-exl3','qwen36-27b-nvfp4']"

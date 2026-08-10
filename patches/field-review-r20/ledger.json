@@ -14,7 +14,9 @@
     {
       "name": "sparkinfer-mixed-trellis-tier-cache-key",
       "status": "field-fix-pending-upstream",
-      "reason": "SparkInfer PR112's mixed dispatcher specializes tier-local expert bounds, but ABI 4 omitted the 206/50 versus 160/96 split from the compile key; ABI 5 prevents stale-kernel reuse on the 3.36bpw checkpoint"
+      "reason": "SparkInfer PR112's mixed dispatcher specializes tier-local expert bounds, but ABI 4 omitted the 206/50 versus 160/96 split from the compile key; ABI 5 prevents stale-kernel reuse on the 3.36bpw checkpoint",
+      "patch_sha256": "534027a7c459ae4ae52e2d3ac75d0825d4160a37d703aedf4a0b3817aa81796c",
+      "note": "retained for reference; not auto-applied"
     },
     {
       "name": "exl3-parity-abi-compatibility",

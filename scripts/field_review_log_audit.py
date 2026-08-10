@@ -51,8 +51,11 @@ PATTERNS = (
         ),
     ),
     # Unknown ERROR-level records are failures too.  More specific categories
-    # above win because each physical line is reported once.
-    ("runtime_error_level", re.compile(r"(?:\)|^)\s*ERROR(?:\s|:)")),
+    # above win because each physical line is reported once.  A carriage
+    # return anchors the token as well: an ERROR emitted onto the same physical
+    # line as a `\r` progress update (tqdm-style, normal during CUDA-graph
+    # capture) would otherwise be invisible, since audit() splits only on `\n`.
+    ("runtime_error_level", re.compile(r"(?:\)|\r|^)\s*ERROR(?:\s|:)")),
 )
 
 

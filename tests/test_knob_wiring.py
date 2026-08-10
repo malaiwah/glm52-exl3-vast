@@ -151,7 +151,7 @@ def main():
     # FAMILY_SERVE_ARGS only, and exporting it too would duplicate the flag.
     derived_keys = ("MODEL_REPO", "MODEL_REVISION", "MODEL_DIRNAME", "MTP78_MODE",
                     "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK",
-                    "SPEC_METHOD")
+                    "SPEC_METHOD", "NATIVE_MTP_FORMAT")
     # This is a structural wiring audit, so do not inherit a startup snapshot
     # left in /tmp by an earlier integration test (or a local appliance run).
     # In particular, a custom-family snapshot legitimately has no pinned model

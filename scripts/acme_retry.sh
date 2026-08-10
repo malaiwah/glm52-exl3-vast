@@ -43,24 +43,42 @@ if [[ -n "${DESEC_TOKEN:-}" ]]; then
 fi
 trap '[[ -z "$DESEC_HDR" ]] || rm -f "$DESEC_HDR"' EXIT
 
+# The deSEC subname for ACME_DOMAIN under DESEC_DOMAIN: the label(s) below the
+# zone, or "" for the apex (deSEC's apex representation). Returns non-zero when
+# ACME_DOMAIN is neither the apex nor within the zone, so callers refuse to
+# write a record rather than construct the doubled name example.com.example.com
+# (a bare suffix-strip leaves sub==ACME_DOMAIN in exactly that case).
+desec_subname() {
+  if [[ "$ACME_DOMAIN" == "$DESEC_DOMAIN" ]]; then
+    printf ''
+    return 0
+  fi
+  case "$ACME_DOMAIN" in
+    *."$DESEC_DOMAIN") printf '%s' "${ACME_DOMAIN%."$DESEC_DOMAIN"}" ;;
+    *) return 1 ;;
+  esac
+}
+
 cleanup_challenge() {
   [[ "$ACME_DNS_PROVIDER" == desec && -n "${DESEC_DOMAIN:-}" &&
      -n "${DESEC_TOKEN:-}" ]] || return 0
   [[ -n "$DESEC_HDR" ]] || return 0
-  case "$ACME_DOMAIN" in
-    *."$DESEC_DOMAIN")
-      local sub="${ACME_DOMAIN%."$DESEC_DOMAIN"}"
-      curl -sf --max-time 15 -X DELETE \
-        "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/_acme-challenge.${sub}/TXT/" \
-        -H @"$DESEC_HDR" >/dev/null 2>&1 || true
-      ;;
-  esac
+  local sub challenge
+  sub="$(desec_subname)" || return 0
+  if [[ -n "$sub" ]]; then challenge="_acme-challenge.${sub}"; else challenge="_acme-challenge"; fi
+  curl -sf --max-time 15 -X DELETE \
+    "https://desec.io/api/v1/domains/${DESEC_DOMAIN}/rrsets/${challenge}/TXT/" \
+    -H @"$DESEC_HDR" >/dev/null 2>&1 || true
 }
 
 register_desec() {
   [[ "$ACME_DNS_PROVIDER" == desec && -n "${DESEC_DOMAIN:-}" &&
      -n "${DESEC_TOKEN:-}" ]] || return 0
-  local sub="${ACME_DOMAIN%."$DESEC_DOMAIN"}"
+  local sub
+  if ! sub="$(desec_subname)"; then
+    echo "!!! ACME retry: ACME_DOMAIN=$ACME_DOMAIN is not the apex of, or within, the deSEC zone $DESEC_DOMAIN; refusing to register a bogus record" >&2
+    return 1
+  fi
   local ip="${ACME_PUBLIC_IP:-${PUBLIC_IPADDR:-${RUNPOD_PUBLIC_IP:-}}}"
   [[ -n "$ip" ]] || {
     echo "!!! ACME retry: public IP is not available for deSEC registration"
@@ -115,6 +133,16 @@ if [[ "$mode" == --once ]]; then
   exit $?
 fi
 
+# Exponential backoff with a ceiling and jitter. A persistent failure (bad DNS,
+# firewalled validation, wrong creds) otherwise re-orders every 300s forever,
+# pinning the account against Let's Encrypt's 5-failed-validations-per-hostname-
+# per-hour limit — the same rate-limit hazard the entrypoint guards elsewhere by
+# persisting the DNS suffix and reusing valid certs. An optional attempt cap
+# stops entirely after N consecutive failures.
+max_delay="${ACME_BACKGROUND_RETRY_MAX_S:-3600}"
+max_attempts="${ACME_BACKGROUND_MAX_ATTEMPTS:-0}"   # 0 = unlimited
+delay="$retry_delay"
+attempts=0
 while ! cert_valid; do
   if attempt; then
     echo ">>> ACME background retry succeeded for $ACME_DOMAIN."
@@ -122,6 +150,14 @@ while ! cert_valid; do
     touch "$lego_path/restart-required"
     exit 0
   fi
-  echo "!!! ACME background retry failed; retrying in ${retry_delay}s without blocking serving"
-  sleep "$retry_delay"
+  attempts=$((attempts + 1))
+  if [[ "$max_attempts" -gt 0 && "$attempts" -ge "$max_attempts" ]]; then
+    echo "!!! ACME background retry gave up after $attempts attempts; issue TLS manually or relaunch the instance." >&2
+    exit 1
+  fi
+  jitter=$(( (RANDOM % 30) + 1 ))
+  echo "!!! ACME background retry failed (attempt $attempts); retrying in $((delay + jitter))s without blocking serving"
+  sleep "$((delay + jitter))"
+  delay=$(( delay * 2 ))
+  [[ "$delay" -le "$max_delay" ]] || delay="$max_delay"
 done

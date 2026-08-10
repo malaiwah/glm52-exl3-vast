@@ -35,7 +35,25 @@ if "--revert" in sys.argv:
 
 vision_dir = sys.argv[2]
 if not os.path.exists(BAK):
-    shutil.copy2(CFG, BAK)
+    _cur = json.load(open(CFG))
+    _is_wrapper = ("text_config" in _cur
+                   or any("Glm5v" in a for a in _cur.get("architectures") or []))
+    if _is_wrapper:
+        # config.json is ALREADY a Glm5v wrapper (a prior run wrapped it, or
+        # reconcile rewrote it, without leaving a text-only backup). Copying it
+        # verbatim as config.json.text-only would double-nest text_config on the
+        # next build and make --revert restore a wrapper. Derive the backup from
+        # the wrapper's own text_config instead of snapshotting the wrapper.
+        _inner = _cur.get("text_config")
+        if isinstance(_inner, dict):
+            with open(BAK, "w") as f:
+                json.dump(_inner, f, indent=1)
+        else:
+            sys.exit("FATAL: config.json is already a vision wrapper with no "
+                     "recoverable text_config; refusing to snapshot a wrapper as "
+                     "the text-only backup. Restore a text-only config.json first.")
+    else:
+        shutil.copy2(CFG, BAK)
 
 text_cfg = json.load(open(BAK))              # pristine text config
 vis_cfg = json.load(open(os.path.join(vision_dir, "config.json")))

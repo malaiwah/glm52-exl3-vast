@@ -34,6 +34,10 @@ class ExtensionLockRecoveryTests(unittest.TestCase):
             sentinel = extension / "lock"
             ninja_lock = extension / ".ninja_lock"
             sentinel.touch()
+            # Age the sentinel well past the default minimum age so the
+            # ownerless-quarantine path is exercised, not the fresh-lock guard.
+            old = time.time() - 7200
+            os.utime(sentinel, (old, old))
             ninja_lock.write_text("keep")
 
             result = self.run_helper(temp)
@@ -44,6 +48,39 @@ class ExtensionLockRecoveryTests(unittest.TestCase):
             quarantined = list(extension.glob("lock.stale-*"))
             self.assertEqual(len(quarantined), 1)
             self.assertEqual(quarantined[0].stat().st_size, 0)
+
+    def test_fresh_ownerless_sentinel_is_not_quarantined(self):
+        # A sentinel with no owner visible in this PID namespace is NOT proof of
+        # a stale lock: a compiler in another container sharing this persistent
+        # /cache is invisible here and its live FileBaton looks ownerless. The
+        # default minimum sentinel-age gate must leave a fresh one in place
+        # rather than quarantine a live cross-container lock.
+        with tempfile.TemporaryDirectory() as temp:
+            extension = Path(temp) / "sparkinfer_pcie_dma_ext"
+            extension.mkdir()
+            sentinel = extension / "lock"
+            sentinel.touch()  # brand new: mtime is now
+
+            result = self.run_helper(temp)
+
+            self.assertEqual(result.returncode, 75, result.stderr)
+            self.assertTrue(sentinel.exists())
+            self.assertEqual(list(extension.glob("lock.stale-*")), [])
+
+    def test_old_ownerless_sentinel_recovers_when_age_gate_disabled(self):
+        # EXT_LOCK_MIN_AGE_S=0 opts out of the cross-container age gate; a fresh
+        # ownerless sentinel is then quarantined as before the gate existed.
+        with tempfile.TemporaryDirectory() as temp:
+            extension = Path(temp) / "sparkinfer_pcie_dma_ext"
+            extension.mkdir()
+            sentinel = extension / "lock"
+            sentinel.touch()
+
+            result = self.run_helper(temp, EXT_LOCK_MIN_AGE_S="0")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(sentinel.exists())
+            self.assertEqual(len(list(extension.glob("lock.stale-*"))), 1)
 
     def test_disabled_recovery_leaves_sentinel_in_place(self):
         with tempfile.TemporaryDirectory() as temp:
