@@ -310,6 +310,10 @@ VARIANTS = {
             "SPARKINFER_PAGED_INDEX_SUPERTILE_K": "32768",
             "SPARKINFER_W4A16_SMALL_M_DIRECT": "1",
             "B12X_PAGED_INDEX_SUPERTILE_K": "32768",
+            # DoS protection: chunk prompt-logprobs logits into 128-row
+            # batches so a long prompt with top-k logprobs cannot OOM the
+            # last pipeline stage. Matches the AIBeast production setting.
+            "VLLM_PROMPT_LOGPROBS_CHUNK_SIZE": "128",
         },
         # v29 carries the checkpoint-calibrated GLM-5.2 MLA outer scales at
         # VLLM_NVFP4_MLA_SCALES_FILE. The scales are model-wide, not tied to
