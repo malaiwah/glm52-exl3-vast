@@ -39,7 +39,7 @@ Configuration is data-driven. `FAMILIES`, `VARIANTS`, `KNOBS`, `DRAFTS`, and val
 Run from the repository root. CI uses these exact checks:
 
 ```bash
-shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh
+shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh scripts/field_review_full_gate.sh
 python3 -m py_compile landing.py scripts/*.py
 python3 tests/test_field_review_patches.py
 python3 tests/test_termination.py
