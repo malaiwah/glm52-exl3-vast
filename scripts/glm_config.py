@@ -577,8 +577,13 @@ VARIANTS["exl3-tr3-3.42bpw"] = {
 }
 VARIANTS["exl3-tr3-3.42bpw"]["defaults"].update({
     "MAX_MODEL_LEN": 520192,
-    "GPU_MEMORY_UTILIZATION": 0.95,
-    "GPU_BLOCKS_OVERRIDE": 2032,
+    # 0.93 GMU with auto KV sizing (GPU_BLOCKS_OVERRIDE=0) preserves 520,192
+    # logical tokens on 4x96 GB while leaving ~2 GiB/GPU headroom for the
+    # PCIe DMA allreduce buffer. 0.95 GMU with a 2032-block pin OOMed the
+    # allreduce path on JarvisLabs (36 MB torch.empty_like failed). AIBeast
+    # uses the same auto approach with a fixed KV_CACHE_MEMORY_BYTES.
+    "GPU_MEMORY_UTILIZATION": 0.93,
+    "GPU_BLOCKS_OVERRIDE": 0,
     # Greedy drafting raised C1 but reduced aggregate C4/C8 throughput and
     # acceptance on the matched AIBeast workload. Pin the measured choice so
     # a future parent-profile edit cannot silently change production.

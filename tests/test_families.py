@@ -609,9 +609,9 @@ def test_r28_342_shared_h_profile():
           "willfalco/GLM-5.2-EXL3-TR3-3.42bpw"
           and derived["MODEL_REVISION"] ==
           "a350292cb2038f2c31732569a711a89e5d72fd46")
-    check("the profile pins the workload-safe 520,192-token pool",
-          eff["GPU_BLOCKS_OVERRIDE"] == 2032
-          and eff["GPU_MEMORY_UTILIZATION"] == 0.95
+    check("the profile pins the workload-safe 520,192-token context",
+          eff["GPU_BLOCKS_OVERRIDE"] == 0
+          and eff["GPU_MEMORY_UTILIZATION"] == 0.93
           and eff["MAX_MODEL_LEN"] == 520192)
     check("the profile retains K6, dynamic NVFP4 and production LMCache",
           eff["ONLINE_QUANT"] == "exl3-b6"
