@@ -1,0 +1,11 @@
+3f1171eba7490384767686b004776b6a082be43770550e8d96eb87b12935b052  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/aibeast-r5-512k-envelope-exact.json
+11b6967a528de1dd1c82c9c80780ff5c81bb095483a5e86c5a4625d2ec9da581  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/aibeast-r5-512k-envelope-precise.json
+8101f9896a418a327668ed336969b14945f47c7ba55164278b13728db4cff399  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/aibeast-r5-512k-envelope.json
+b4c64f23cf377a2cedcfc77c1aded9032b6d0ac6e8ed8de7cb13a1216507fbab  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/aibeast-r5-513536-benchmark.json
+2aee08f33b0d2dedbed460d01def22026c54c2c90f5988f2400dd190a6b33fe8  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/aibeast-r5-clean-513536-benchmark.json
+85dcf2a7921245df02b32af83c309fb6d8355e1f018ab81025d0a6be21007130  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/aibeast-r5-clean-nearmax-five-depth.json
+8fb8ddec9dcc8876e4ae87a92100c39c9b22452dd7a2a804e2bed954abe3e87c  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/aibeast-r5-llm-inference-bench-standard.json
+3fb87ccea6c405d99d339d875c368f9466302deddbed49e9a14fe32a0273064e  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/aibeast-r5-reused-513536-benchmark.json
+363dba344273e7d5c78db2839749ec3931efaef0038204763ef6ed6697cc93d3  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/aibeast-r5-reused-nearmax-five-depth.json
+4a41347bec4021792e8d2453799291478de24a2e4599d29cf7b7f093aa7d99cb  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/feature-suite-r5-aiBeast.json
+51a30336a19ba79de04ddb324fc5fad695020923718ce22be6628aa59204b6b5  /home/mbelleau/turnkey-maintenance-20260728/evidence-export/nvidia-smi-summary.csv

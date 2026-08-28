@@ -1,0 +1,536 @@
+{
+ "schema": 1,
+ "ts": "2026-07-28T02:23:44Z",
+ "base_url": "http://127.0.0.1:8000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 256,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 4,
+  "prefill_tokens": [
+   8192,
+   32768,
+   65536,
+   131072
+  ],
+  "warmup": 1,
+  "temperature": 1.0,
+  "seed": 20260728,
+  "prompt_seed": "runpod-secure-v31-gmu0976"
+ },
+ "metadata": {
+  "provider": "runpod-secure,checkpoint=brandon-tr3-native,image=v31,gmu=0.976"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 2.4515,
+   "request_throughput_rps": 0.4079,
+   "prompt_tokens": 7989,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 3258.854,
+   "output_throughput_tok_s": 0.408,
+   "mean_ttft_ms": 2450.877,
+   "p50_ttft_ms": 2450.877,
+   "p95_ttft_ms": 2450.877,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 7989,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 7989,
+     "output_tokens": 1,
+     "elapsed_s": 2.45095,
+     "ttft_ms": 2450.877,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "red"
+    }
+   ],
+   "target_prompt_tokens": 8192
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 9.4021,
+   "request_throughput_rps": 0.1064,
+   "prompt_tokens": 32538,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 3460.715,
+   "output_throughput_tok_s": 0.106,
+   "mean_ttft_ms": 9401.601,
+   "p50_ttft_ms": 9401.601,
+   "p95_ttft_ms": 9401.601,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 32538,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32538,
+     "output_tokens": 1,
+     "elapsed_s": 9.401664,
+     "ttft_ms": 9401.601,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 19.6484,
+   "request_throughput_rps": 0.0509,
+   "prompt_tokens": 65728,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 3345.2,
+   "output_throughput_tok_s": 0.051,
+   "mean_ttft_ms": 19647.973,
+   "p50_ttft_ms": 19647.973,
+   "p95_ttft_ms": 19647.973,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 65728,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 65728,
+     "output_tokens": 1,
+     "elapsed_s": 19.648043,
+     "ttft_ms": 19647.973,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "echo"
+    }
+   ],
+   "target_prompt_tokens": 65536
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 42.9542,
+   "request_throughput_rps": 0.0233,
+   "prompt_tokens": 133723,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 3113.151,
+   "output_throughput_tok_s": 0.023,
+   "mean_ttft_ms": 42953.651,
+   "p50_ttft_ms": 42953.651,
+   "p95_ttft_ms": 42953.651,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 133723,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 133723,
+     "output_tokens": 1,
+     "elapsed_s": 42.953713,
+     "ttft_ms": 42953.651,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "moon"
+    }
+   ],
+   "target_prompt_tokens": 131072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 13.5258,
+   "request_throughput_rps": 0.2957,
+   "prompt_tokens": 4044,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 298.984,
+   "output_throughput_tok_s": 75.707,
+   "mean_ttft_ms": 376.792,
+   "p50_ttft_ms": 328.817,
+   "p95_ttft_ms": 512.004,
+   "mean_tpot_ms": 11.782,
+   "p50_tpot_ms": 11.628,
+   "p95_tpot_ms": 13.103,
+   "mean_itl_ms": 52.038,
+   "metric_prompt_tokens": 4044,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 231,
+    "draft_tokens": 1155,
+    "accepted_tokens": 794,
+    "mean_acceptance_length": 4.4372,
+    "draft_token_acceptance_rate": 0.6874
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 3.305824,
+     "ttft_ms": 541.269,
+     "tpot_ms": 10.841,
+     "mean_itl_ms": 52.16,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 3.023667,
+     "ttft_ms": 308.263,
+     "tpot_ms": 10.649,
+     "mean_itl_ms": 52.218,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 3.683512,
+     "ttft_ms": 311.464,
+     "tpot_ms": 13.224,
+     "mean_itl_ms": 51.877,
+     "output_head": "batch forty-two nominal, pressure nominal, temperature nominal, checksum nominal, operator closed record\nbatch forty-thr"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 3.511926,
+     "ttft_ms": 346.171,
+     "tpot_ms": 12.415,
+     "mean_itl_ms": 51.897,
+     "output_head": "batch forty two nominal pressure temperature checksum reviewed record closed\nbatch forty three nominal pressure temperat"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 7.1896,
+   "request_throughput_rps": 0.5564,
+   "prompt_tokens": 4044,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 562.48,
+   "output_throughput_tok_s": 142.428,
+   "mean_ttft_ms": 429.26,
+   "p50_ttft_ms": 372.832,
+   "p95_ttft_ms": 615.55,
+   "mean_tpot_ms": 12.309,
+   "p50_tpot_ms": 12.549,
+   "p95_tpot_ms": 15.926,
+   "mean_itl_ms": 58.798,
+   "metric_prompt_tokens": 4044,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 213,
+    "draft_tokens": 1065,
+    "accepted_tokens": 816,
+    "mean_acceptance_length": 4.831,
+    "draft_token_acceptance_rate": 0.7662
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 4.213191,
+     "ttft_ms": 313.446,
+     "tpot_ms": 15.293,
+     "mean_itl_ms": 74.994,
+     "output_head": "batch forty two nominal\nbatch forty three nominal\nbatch forty four nominal\nbatch forty five nominal\nbatch forty six nomi"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 4.747694,
+     "ttft_ms": 657.933,
+     "tpot_ms": 16.038,
+     "mean_itl_ms": 71.749,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 2.870742,
+     "ttft_ms": 370.284,
+     "tpot_ms": 9.806,
+     "mean_itl_ms": 46.303,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 2.440675,
+     "ttft_ms": 375.379,
+     "tpot_ms": 8.099,
+     "mean_itl_ms": 42.148,
+     "output_head": "batch forty two nominal\nbatch forty three nominal\nbatch forty four nominal\nbatch forty five nominal\nbatch forty six nomi"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 6.0559,
+   "request_throughput_rps": 0.6605,
+   "prompt_tokens": 4044,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 667.775,
+   "output_throughput_tok_s": 169.09,
+   "mean_ttft_ms": 1009.948,
+   "p50_ttft_ms": 1236.557,
+   "p95_ttft_ms": 1236.942,
+   "mean_tpot_ms": 14.159,
+   "p50_tpot_ms": 13.377,
+   "p95_tpot_ms": 18.395,
+   "mean_itl_ms": 59.065,
+   "metric_prompt_tokens": 4044,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 248,
+    "draft_tokens": 1240,
+    "accepted_tokens": 782,
+    "mean_acceptance_length": 4.1532,
+    "draft_token_acceptance_rate": 0.6306
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 4.299165,
+     "ttft_ms": 329.725,
+     "tpot_ms": 15.566,
+     "mean_itl_ms": 69.639,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 4.038799,
+     "ttft_ms": 1236.956,
+     "tpot_ms": 10.988,
+     "mean_itl_ms": 56.036,
+     "output_head": "batch forty-two nominal\nbatch forty-three nominal\nbatch forty-four nominal\nbatch forty-five nominal\nbatch forty-six nomi"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 4.089593,
+     "ttft_ms": 1236.861,
+     "tpot_ms": 11.187,
+     "mean_itl_ms": 57.054,
+     "output_head": "batch forty-two nominal pressure temperature checksum reviewed closed\nbatch forty-three nominal pressure temperature che"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 6.054231,
+     "ttft_ms": 1236.252,
+     "tpot_ms": 18.894,
+     "mean_itl_ms": 53.532,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 8.8834,
+   "request_throughput_rps": 0.9006,
+   "prompt_tokens": 8088,
+   "output_tokens": 2048,
+   "prompt_throughput_tok_s": 910.466,
+   "output_throughput_tok_s": 230.543,
+   "mean_ttft_ms": 1393.443,
+   "p50_ttft_ms": 1429.649,
+   "p95_ttft_ms": 2099.935,
+   "mean_tpot_ms": 24.566,
+   "p50_tpot_ms": 24.796,
+   "p95_tpot_ms": 27.232,
+   "mean_itl_ms": 108.075,
+   "metric_prompt_tokens": 8088,
+   "metric_generation_tokens": 2048,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 472,
+    "draft_tokens": 2360,
+    "accepted_tokens": 1582,
+    "mean_acceptance_length": 4.3517,
+    "draft_token_acceptance_rate": 0.6703
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 7.315859,
+     "ttft_ms": 1057.548,
+     "tpot_ms": 24.542,
+     "mean_itl_ms": 118.08,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 7.315331,
+     "ttft_ms": 318.531,
+     "tpot_ms": 27.438,
+     "mean_itl_ms": 129.57,
+     "output_head": "batch forty two nominal pressure temperature checksum reviewed record closed\nbatch forty three nominal pressure temperat"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 7.443472,
+     "ttft_ms": 1055.84,
+     "tpot_ms": 25.05,
+     "mean_itl_ms": 116.138,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 7.895565,
+     "ttft_ms": 1049.034,
+     "tpot_ms": 26.849,
+     "mean_itl_ms": 106.976,
+     "output_head": "batch forty-two nominal pressure temperature checksum reviewed closed\nbatch forty-three nominal pressure temperature che"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 7.027496,
+     "ttft_ms": 1802.64,
+     "tpot_ms": 20.49,
+     "mean_itl_ms": 108.85,
+     "output_head": "batch forty-two nominal, operator checked pressure temperature checksum, batch forty-three nominal, operator checked pre"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 7.768579,
+     "ttft_ms": 1802.183,
+     "tpot_ms": 23.398,
+     "mean_itl_ms": 99.439,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 7.615425,
+     "ttft_ms": 1801.751,
+     "tpot_ms": 22.799,
+     "mean_itl_ms": 103.814,
+     "output_head": "batch forty-two nominal pressure temperature checksum\nbatch forty-three nominal pressure temperature checksum\nbatch fort"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1011,
+     "output_tokens": 256,
+     "elapsed_s": 8.880249,
+     "ttft_ms": 2260.017,
+     "tpot_ms": 25.962,
+     "mean_itl_ms": 81.731,
+     "output_head": "batch forty two nominal pressure temperature checksum reviewed and closed batch forty three nominal pressure temperature"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

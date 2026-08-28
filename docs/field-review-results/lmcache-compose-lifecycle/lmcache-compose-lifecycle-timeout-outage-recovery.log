@@ -1,0 +1,71 @@
+head=caf7417be83f225c93e426f0885b935cefcc388c gpu=physical-3 start=2026-07-31T03:38:38Z
+[32;20m[2026-07-31 03:38:39,565] LMCache INFO:[0m torch_dev=<module 'torch.cuda' from '/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py'>, torch_device_type=cuda [3m(__init__.py:249:lmcache.v1.platform)[0m
+[32;20m[2026-07-31 03:38:39,644] LMCache INFO:[0m Using backend: lmcache.c_ops [3m(__init__.py:239:lmcache.v1.platform)[0m
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.1, pluggy-1.6.0 -- /opt/venv/bin/python
+cachedir: .pytest_cache
+rootdir: /workspace/field-review-tests/worktrees/lmcache-compose-lifecycle
+configfile: pytest.ini
+plugins: anyio-4.14.2
+collecting ... [32;20m[2026-07-31 03:38:41,486] LMCache INFO:[0m multi_layer_block_kv_transfer mode: ptr [3m(base.py:94:lmcache.v1.multiprocess.transfer_context.base)[0m
+collected 10 items
+
+tests/v1/multiprocess/test_futures.py::test_timeout_releases_resources_once_and_rejects_late_reply PASSED
+tests/v1/multiprocess/test_futures.py::test_first_success_releases_resources_once_and_rejects_late_failure PASSED
+tests/v1/multiprocess/test_futures.py::test_completion_timeout_race_has_one_terminal_owner PASSED
+tests/v1/multiprocess/test_futures.py::test_cuda_timeout_releases_raw_lease_but_not_caller_lease PASSED
+tests/v1/multiprocess/test_mq.py::test_full_dead_client_queue_does_not_block_healthy_client [31;20m[2026-07-31 03:38:55,444] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=1: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,444] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=2: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,444] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=3: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,444] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=4: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,444] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=5: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,444] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=6: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=7: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=8: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=9: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=10: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=11: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=12: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=13: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=14: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=15: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=16: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=17: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=18: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=19: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=20: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=21: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=22: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=23: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=24: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=25: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=26: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=27: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=28: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=29: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=30: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+[31;20m[2026-07-31 03:38:55,445] LMCache ERROR:[0m Nonblocking LMCache MQ send failed for request_uid=31: send queue full [3m(mq.py:470:lmcache.v1.multiprocess.mq)[0m
+PASSED
+tests/v1/multiprocess/test_mq.py::test_timed_out_future_is_reclaimed_and_late_response_is_ignored PASSED
+tests/v1/multiprocess/test_mq.py::test_connection_reset_discards_stale_pending_and_unsent_work PASSED
+tests/v1/test_vllm_mp_adapter.py::test_heartbeat_retires_outage_session_then_recovers [33;20m[2026-07-31 03:38:56,452] LMCache WARNING:[0m LMCache server is unhealthy — entering degraded mode [3m(vllm_multi_process_adapter.py:564:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[33;20m[2026-07-31 03:38:56,452] LMCache WARNING:[0m LMCache server is healthy again, triggering recovery callback [3m(vllm_multi_process_adapter.py:549:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+[33;20m[2026-07-31 03:38:56,452] LMCache WARNING:[0m LMCache server is healthy again — resuming normal operation [3m(vllm_multi_process_adapter.py:558:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+PASSED
+tests/v1/test_vllm_mp_adapter.py::test_dropped_retrieve_reported_once_via_unhealthy_get_finished [32;20m[2026-07-31 03:38:56,453] LMCache INFO:[0m LMCache MP worker adapter created with instance_id=1806182596044580217 [3m(vllm_multi_process_adapter.py:1170:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+PASSED
+tests/v1/test_vllm_mp_adapter.py::test_dropped_retrieve_reported_once_via_healthy_get_finished [32;20m[2026-07-31 03:38:56,455] LMCache INFO:[0m LMCache MP worker adapter created with instance_id=748741058036405269 [3m(vllm_multi_process_adapter.py:1170:lmcache.integration.vllm.vllm_multi_process_adapter)[0m
+PASSED
+
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+../../../../opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: 120 warnings
+  /opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: DeprecationWarning: `LoggingHandler` in `opentelemetry-sdk` is deprecated. Use the handler from `opentelemetry-instrumentation-logging` instead.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 10 passed, 121 warnings in 15.47s =======================
+rc=0 end=2026-07-31T03:38:58Z

@@ -1,0 +1,536 @@
+{
+ "schema": 1,
+ "ts": "2026-07-28T12:31:22Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 256,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 4,
+  "prefill_tokens": [
+   8192,
+   32768,
+   65536,
+   131072
+  ],
+  "warmup": 1,
+  "temperature": 1.0,
+  "seed": 20260728,
+  "prompt_seed": "aibeast-r5-reused-513536"
+ },
+ "metadata": {
+  "provider": "aibeast-isolated,checkpoint=brandon-tr3-native,image=r5,max_model_len=513536,gmu=0.976,cache=reused"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 2.8002,
+   "request_throughput_rps": 0.3571,
+   "prompt_tokens": 7990,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2853.379,
+   "output_throughput_tok_s": 0.357,
+   "mean_ttft_ms": 2799.822,
+   "p50_ttft_ms": 2799.822,
+   "p95_ttft_ms": 2799.822,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 7990,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 7990,
+     "output_tokens": 1,
+     "elapsed_s": 2.799863,
+     "ttft_ms": 2799.822,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "a"
+    }
+   ],
+   "target_prompt_tokens": 8192
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 11.8361,
+   "request_throughput_rps": 0.0845,
+   "prompt_tokens": 32539,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2749.123,
+   "output_throughput_tok_s": 0.084,
+   "mean_ttft_ms": 11835.744,
+   "p50_ttft_ms": 11835.744,
+   "p95_ttft_ms": 11835.744,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 32539,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32539,
+     "output_tokens": 1,
+     "elapsed_s": 11.835791,
+     "ttft_ms": 11835.744,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 24.7331,
+   "request_throughput_rps": 0.0404,
+   "prompt_tokens": 65729,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2657.533,
+   "output_throughput_tok_s": 0.04,
+   "mean_ttft_ms": 24732.683,
+   "p50_ttft_ms": 24732.683,
+   "p95_ttft_ms": 24732.683,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 65729,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 65729,
+     "output_tokens": 1,
+     "elapsed_s": 24.732771,
+     "ttft_ms": 24732.683,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "cat"
+    }
+   ],
+   "target_prompt_tokens": 65536
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 53.4144,
+   "request_throughput_rps": 0.0187,
+   "prompt_tokens": 133724,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2503.519,
+   "output_throughput_tok_s": 0.019,
+   "mean_ttft_ms": 53414.031,
+   "p50_ttft_ms": 53414.031,
+   "p95_ttft_ms": 53414.031,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 133724,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 133724,
+     "output_tokens": 1,
+     "elapsed_s": 53.414112,
+     "ttft_ms": 53414.031,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "a"
+    }
+   ],
+   "target_prompt_tokens": 131072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 7.3777,
+   "request_throughput_rps": 0.5422,
+   "prompt_tokens": 4048,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 548.679,
+   "output_throughput_tok_s": 138.796,
+   "mean_ttft_ms": 390.505,
+   "p50_ttft_ms": 396.755,
+   "p95_ttft_ms": 398.122,
+   "mean_tpot_ms": 5.701,
+   "p50_tpot_ms": 5.686,
+   "p95_tpot_ms": 5.768,
+   "mean_itl_ms": 30.129,
+   "metric_prompt_tokens": 4048,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 193,
+    "draft_tokens": 965,
+    "accepted_tokens": 837,
+    "mean_acceptance_length": 5.3368,
+    "draft_token_acceptance_rate": 0.8674
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 1.811017,
+     "ttft_ms": 370.384,
+     "tpot_ms": 5.65,
+     "mean_itl_ms": 30.012,
+     "output_head": "batch forty two nominal, pressure ok, temp ok, checksum ok\nbatch forty three nominal, pressure ok, temp ok, checksum ok\n"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 1.844606,
+     "ttft_ms": 395.419,
+     "tpot_ms": 5.683,
+     "mean_itl_ms": 30.19,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 1.872566,
+     "ttft_ms": 398.128,
+     "tpot_ms": 5.782,
+     "mean_itl_ms": 30.09,
+     "output_head": "batch forty two stayed nominal; operator checked pressure, temperature, checksum; closed record. batch forty three staye"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 1.848889,
+     "ttft_ms": 398.091,
+     "tpot_ms": 5.689,
+     "mean_itl_ms": 30.224,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 5.3938,
+   "request_throughput_rps": 0.7416,
+   "prompt_tokens": 4048,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 750.489,
+   "output_throughput_tok_s": 189.847,
+   "mean_ttft_ms": 609.509,
+   "p50_ttft_ms": 617.171,
+   "p95_ttft_ms": 812.957,
+   "mean_tpot_ms": 8.155,
+   "p50_tpot_ms": 8.155,
+   "p95_tpot_ms": 9.054,
+   "mean_itl_ms": 43.794,
+   "metric_prompt_tokens": 4048,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 190,
+    "draft_tokens": 950,
+    "accepted_tokens": 838,
+    "mean_acceptance_length": 5.4105,
+    "draft_token_acceptance_rate": 0.8821
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 2.713682,
+     "ttft_ms": 388.684,
+     "tpot_ms": 9.118,
+     "mean_itl_ms": 49.466,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 2.7445,
+     "ttft_ms": 801.321,
+     "tpot_ms": 7.62,
+     "mean_itl_ms": 41.342,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 2.649244,
+     "ttft_ms": 433.021,
+     "tpot_ms": 8.691,
+     "mean_itl_ms": 46.169,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 2.64853,
+     "ttft_ms": 815.011,
+     "tpot_ms": 7.19,
+     "mean_itl_ms": 38.197,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 4.576,
+   "request_throughput_rps": 0.8741,
+   "prompt_tokens": 4048,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 884.606,
+   "output_throughput_tok_s": 223.774,
+   "mean_ttft_ms": 1115.112,
+   "p50_ttft_ms": 1356.892,
+   "p95_ttft_ms": 1357.198,
+   "mean_tpot_ms": 11.966,
+   "p50_tpot_ms": 11.665,
+   "p95_tpot_ms": 13.934,
+   "mean_itl_ms": 60.377,
+   "metric_prompt_tokens": 4048,
+   "metric_generation_tokens": 1024,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 205,
+    "draft_tokens": 1025,
+    "accepted_tokens": 828,
+    "mean_acceptance_length": 5.039,
+    "draft_token_acceptance_rate": 0.8078
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 4.001787,
+     "ttft_ms": 389.445,
+     "tpot_ms": 14.166,
+     "mean_itl_ms": 76.855,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 4.575356,
+     "ttft_ms": 1357.219,
+     "tpot_ms": 12.62,
+     "mean_itl_ms": 50.282,
+     "output_head": "batch forty two stayed nominal; operator checked pressure temperature checksum\nbatch forty three stayed nominal; operato"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 4.001129,
+     "ttft_ms": 1357.081,
+     "tpot_ms": 10.369,
+     "mean_itl_ms": 57.477,
+     "output_head": "batch forty two stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the reco"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 4.087649,
+     "ttft_ms": 1356.703,
+     "tpot_ms": 10.71,
+     "mean_itl_ms": 56.894,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 6.5624,
+   "request_throughput_rps": 1.2191,
+   "prompt_tokens": 8096,
+   "output_tokens": 2048,
+   "prompt_throughput_tok_s": 1233.696,
+   "output_throughput_tok_s": 312.081,
+   "mean_ttft_ms": 1749.386,
+   "p50_ttft_ms": 1814.434,
+   "p95_ttft_ms": 2570.533,
+   "mean_tpot_ms": 18.13,
+   "p50_tpot_ms": 17.819,
+   "p95_tpot_ms": 21.46,
+   "mean_itl_ms": 96.946,
+   "metric_prompt_tokens": 8096,
+   "metric_generation_tokens": 2048,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 383,
+    "draft_tokens": 1915,
+    "accepted_tokens": 1682,
+    "mean_acceptance_length": 5.3916,
+    "draft_token_acceptance_rate": 0.8783
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 6.2299,
+     "ttft_ms": 1335.521,
+     "tpot_ms": 19.194,
+     "mean_itl_ms": 106.398,
+     "output_head": "batch forty two stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the reco"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 6.373772,
+     "ttft_ms": 1335.42,
+     "tpot_ms": 19.758,
+     "mean_itl_ms": 104.964,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 5.993155,
+     "ttft_ms": 388.419,
+     "tpot_ms": 21.979,
+     "mean_itl_ms": 127.376,
+     "output_head": "batch 42 stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the record.\nbat"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 6.560912,
+     "ttft_ms": 1334.805,
+     "tpot_ms": 20.495,
+     "mean_itl_ms": 100.501,
+     "output_head": "batch forty two nominal, fields checked, record closed\nbatch forty three nominal, fields checked, record closed\nbatch fo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 6.432343,
+     "ttft_ms": 2294.143,
+     "tpot_ms": 16.228,
+     "mean_itl_ms": 86.211,
+     "output_head": "batch forty two nominal, fields reviewed, record closed\nbatch forty three nominal, fields reviewed, record closed\nbatch "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 6.487644,
+     "ttft_ms": 2294.076,
+     "tpot_ms": 16.445,
+     "mean_itl_ms": 85.581,
+     "output_head": "batch forty two nominal, fields reviewed, record closed\nbatch forty three nominal, fields reviewed, record closed\nbatch "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 6.529305,
+     "ttft_ms": 2719.358,
+     "tpot_ms": 14.941,
+     "mean_itl_ms": 77.753,
+     "output_head": "batch forty two nominal, fields reviewed, record closed\nbatch forty three nominal, fields reviewed, record closed\nbatch "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1012,
+     "output_tokens": 256,
+     "elapsed_s": 6.372254,
+     "ttft_ms": 2293.348,
+     "tpot_ms": 15.996,
+     "mean_itl_ms": 86.782,
+     "output_head": "batch forty two stayed nominal; the operator reviewed pressure, temperature, and checksum fields before closing the reco"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

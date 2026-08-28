@@ -1,0 +1,93 @@
+<!doctype html><html><head><title>Appliance SOUL</title><meta name=viewport content="width=device-width,initial-scale=1"><style>
+:root{--bg:#f5f6fa;--card:#ffffff;--fg:#1c1e26;--muted:#6b7280;--line:#e5e7eb;
+--accent:#4f7cff;--accent2:#9a6cff;--ok:#16a34a;--busy:#d97706;
+--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1013;--card:#171a20;--fg:#e7e9ee;
+--muted:#8b93a3;--line:#262b35;--accent:#6d95ff;--accent2:#ae8bff;--ok:#34d17b;--busy:#f0a24b}}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);
+margin:0;line-height:1.5}
+.wrap{max-width:62rem;margin:0 auto;padding:1.2rem 1rem 4rem}
+header.hero{display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap;
+padding:1.4rem 0 .6rem}
+header.hero h1{margin:0;font-size:1.55rem;letter-spacing:-.02em}
+header.hero h1 b{background:linear-gradient(90deg,var(--accent),var(--accent2));
+-webkit-background-clip:text;background-clip:text;color:transparent}
+.sub{color:var(--muted);font-size:.92rem}
+.grid{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));margin:.8rem 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+padding:.9rem 1rem;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.card h3{margin:0 0 .3rem;font-size:.78rem;text-transform:uppercase;
+letter-spacing:.06em;color:var(--muted);font-weight:600}
+.card .v{font-size:1.02rem;font-weight:600}
+.ok{color:var(--ok)}.busy{color:var(--busy)}
+.pill{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;margin-right:.45rem}
+.pill.ok{background:var(--ok)}.pill.busy{background:var(--busy);animation:pulse 1.6s infinite}
+@keyframes pulse{50%{opacity:.35}}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+code{font-family:var(--mono);font-size:.88em;background:var(--bg);
+border:1px solid var(--line);padding:.08rem .35rem;border-radius:6px}
+pre{font-family:var(--mono);font-size:.82rem;background:var(--bg);
+border:1px solid var(--line);padding:.8rem;border-radius:10px;overflow-x:auto;margin:.5rem 0}
+h2{font-size:1.05rem;margin:1.6rem 0 .5rem}
+details{background:var(--card);border:1px solid var(--line);border-radius:12px;
+margin:.5rem 0;padding:.55rem .9rem}
+summary{cursor:pointer;font-weight:600;font-size:.95rem}
+button{font:inherit;font-size:.82rem;background:var(--card);color:var(--fg);
+border:1px solid var(--line);border-radius:8px;padding:.3rem .8rem;cursor:pointer}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{filter:brightness(1.08);color:#fff}
+canvas.chart{width:100%;height:96px;display:block}
+.layout{display:grid;gap:1rem;grid-template-columns:minmax(0,1fr)}
+aside.chatpane{display:none}
+.wrap.wide{max-width:64rem}
+@media(min-width:75rem){
+ .wrap.wide{max-width:96rem}
+ .wrap.wide .layout{grid-template-columns:minmax(0,1fr) 26rem}
+ .wrap.wide aside.chatpane{display:flex;flex-direction:column;position:sticky;top:1rem;
+  height:calc(100vh - 2rem);background:var(--card);border:1px solid var(--line);
+  border-radius:14px;padding:.9rem;overflow:hidden}
+}
+aside.chatpane h2{margin:0 0 .5rem;font-size:.95rem}
+.chatpane #log{flex:1;overflow-y:auto;min-height:0}
+.msg{max-width:85%;padding:.6rem .9rem;border-radius:14px;margin:.35rem 0;
+white-space:pre-wrap;font-size:.92rem;width:fit-content}
+.msg.you{background:linear-gradient(120deg,var(--accent),var(--accent2));color:#fff;
+margin-left:auto;border-bottom-right-radius:4px}
+.msg.bot{background:var(--bg);border:1px solid var(--line);border-bottom-left-radius:4px}
+details.think{color:var(--muted);font-size:.8em;margin:.2rem 0;max-width:85%;
+background:none;border:none;padding:0 .3rem}
+.composer{display:flex;gap:.5rem;align-items:flex-end;padding-top:.5rem;
+border-top:1px solid var(--line)}
+#in{flex:1;font:inherit;background:var(--bg);color:var(--fg);
+border:1px solid var(--line);border-radius:12px;padding:.5rem .7rem;
+min-height:2.6rem;max-height:9rem;resize:vertical}
+.side{display:flex;flex-direction:column;gap:.35rem}
+label.thinkbox{font-size:.78rem;color:var(--muted);white-space:nowrap}
+.chartv{font-family:var(--mono);font-size:1.02rem;font-weight:700;float:right}
+.legend{font-size:.72rem;color:var(--muted)}
+.legend i{display:inline-block;width:.9em;height:3px;border-radius:2px;
+vertical-align:middle;margin:0 .3em 0 .8em}
+.chatempty{height:100%;min-height:10rem;display:grid;place-content:center;text-align:center;
+padding:1.25rem;color:var(--muted)}
+.chatempty-icon{font-size:1.4rem;color:var(--accent);margin-bottom:.45rem}
+.chatempty strong{display:block;color:var(--fg);font-size:.9rem;margin-bottom:.2rem}
+.chatempty span{display:block;font-size:.76rem;max-width:15rem}
+.composer{display:block;padding:.65rem;border-top:1px solid var(--line)}
+.inputrow{display:flex;gap:.5rem;align-items:flex-end}
+.composerbar{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin-top:.5rem}
+.chatprefs,.composer-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+.turncount{color:var(--muted);font-size:.7rem}
+.thinkbox{position:relative;display:flex;align-items:center;gap:.35rem;color:var(--muted);
+font-size:.73rem;white-space:nowrap;cursor:pointer;user-select:none}
+.thinkbox input{position:absolute;opacity:0;pointer-events:none}
+.switch{position:relative;width:1.8rem;height:1rem;border-radius:99px;background:var(--line)}
+.switch:after{content:"";position:absolute;top:.13rem;left:.13rem;width:.74rem;height:.74rem;
+border-radius:50%;background:var(--card);box-shadow:0 1px 3px rgba(0,0,0,.2);
+transition:transform .18s ease}
+.thinkbox input:checked+.switch{background:var(--accent)}
+.thinkbox input:checked+.switch:after{transform:translateX(.8rem)}
+@media(max-width:38rem){.composerbar{align-items:flex-start;flex-direction:column}
+.composer-actions{width:100%;justify-content:flex-end}}
+</style></head><body><div class='wrap'><header class=hero><h1><b>Appliance SOUL</b></h1><span class=sub>A local diagnostic journal. Startup verification and rollback remain authoritative.</span></header><p><a href='/?token=7e7e88218f5c5056e50dcb700f639179a80b20603617503817cfbd260d713ad5'>&larr; Appliance</a></p><div class=card><h3>Appliance SOUL</h3><div class=v><span class='pill busy'></span><span class=busy>Waiting for model</span> <span class=sub>level 1</span></div><div class=sub style='margin-top:.45rem'>The SOUL is waiting for the verified local model. <a href="/soul?token=7e7e88218f5c5056e50dcb700f639179a80b20603617503817cfbd260d713ad5">Open journal &amp; settings &rarr;</a></div></div><div class='card good'>SOUL settings saved. Effective autonomy level is 1.</div><div class=card><h3>Autonomy</h3><p class=sub>Startup ceiling: level 3. A landing-page override can lower or raise the request only within that ceiling; changing it does not restart vLLM.</p><form method=post action='/soul/config?token=7e7e88218f5c5056e50dcb700f639179a80b20603617503817cfbd260d713ad5'><input type=hidden name=token value='7e7e88218f5c5056e50dcb700f639179a80b20603617503817cfbd260d713ad5'><label>Level <select name=autonomyLevel><option value=0>0 — off</option><option value=1 selected>1 — observer</option><option value=2>2 — investigator</option><option value=3>3 — proactive diagnostician</option></select></label><label> Snapshot interval (seconds) <input name=heartbeatIntervalS type=number min=30 max=86400 value='30'></label><label> Journal interval (seconds) <input name=journalIntervalS type=number min=300 max=604800 value='300'></label><label> Timezone <input name=timezone maxlength=64 value='UTC'></label><p><button type=submit>Save SOUL settings</button></p></form></div><h2>Journal</h2><article class=card><h3>SOUL configuration changed</h3><div class=sub>2026-07-29T16:39:38.541769Z &middot; info &middot; audit</div><p>Effective values changed: autonomyLevel, heartbeatIntervalS, journalIntervalS</p></article><p><a href='/soul?token=7e7e88218f5c5056e50dcb700f639179a80b20603617503817cfbd260d713ad5&before=audit-20260729T163938.541754Z'>Older entries</a></p></div></body></html>

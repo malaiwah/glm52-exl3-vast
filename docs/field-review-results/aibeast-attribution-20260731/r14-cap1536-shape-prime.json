@@ -1,0 +1,612 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T23:45:28Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 512,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 8,
+  "prefill_tokens": [
+   3072,
+   32768,
+   131072
+  ],
+  "warmup": 2,
+  "temperature": 1.0,
+  "seed": 20260731,
+  "prompt_seed": "attribution-cap1536-prime-v1"
+ },
+ "metadata": {
+  "arm": "r14-cap1536-shape-prime"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 11.6415,
+   "request_throughput_rps": 0.0859,
+   "prompt_tokens": 3083,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 264.828,
+   "output_throughput_tok_s": 0.086,
+   "mean_ttft_ms": 11641.198,
+   "p50_ttft_ms": 11641.198,
+   "p95_ttft_ms": 11641.198,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3083,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3083,
+     "output_tokens": 1,
+     "elapsed_s": 11.641249,
+     "ttft_ms": 11641.198,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 16.2914,
+   "request_throughput_rps": 0.0614,
+   "prompt_tokens": 32775,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2011.796,
+   "output_throughput_tok_s": 0.061,
+   "mean_ttft_ms": 16291.107,
+   "p50_ttft_ms": 16291.107,
+   "p95_ttft_ms": 16291.107,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 32775,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32775,
+     "output_tokens": 1,
+     "elapsed_s": 16.291161,
+     "ttft_ms": 16291.107,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "the"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 69.0129,
+   "request_throughput_rps": 0.0145,
+   "prompt_tokens": 131070,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1899.21,
+   "output_throughput_tok_s": 0.014,
+   "mean_ttft_ms": 69012.465,
+   "p50_ttft_ms": 69012.465,
+   "p95_ttft_ms": 69012.465,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 131070,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 131070,
+     "output_tokens": 1,
+     "elapsed_s": 69.012534,
+     "ttft_ms": 69012.465,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "a"
+    }
+   ],
+   "target_prompt_tokens": 131072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 50.7839,
+   "request_throughput_rps": 0.1575,
+   "prompt_tokens": 8064,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 158.791,
+   "output_throughput_tok_s": 80.656,
+   "mean_ttft_ms": 1714.117,
+   "p50_ttft_ms": 434.392,
+   "p95_ttft_ms": 7090.336,
+   "mean_tpot_ms": 9.068,
+   "p50_tpot_ms": 8.992,
+   "p95_tpot_ms": 12.368,
+   "mean_itl_ms": 32.741,
+   "metric_prompt_tokens": 8064,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1137,
+    "draft_tokens": 5685,
+    "accepted_tokens": 2965,
+    "mean_acceptance_length": 3.6077,
+    "draft_token_acceptance_rate": 0.5215
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 15.669734,
+     "ttft_ms": 10672.527,
+     "tpot_ms": 9.779,
+     "mean_itl_ms": 33.094,
+     "output_head": "misty river flows calmlyDOI\n10.1016/j.jebo.2020.02.024\nTitle: Placing a face to a behavior: Vertical collectivism and th"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 4.130854,
+     "ttft_ms": 431.057,
+     "tpot_ms": 7.24,
+     "mean_itl_ms": 33.331,
+     "output_head": "misty river flows past quiet bankContinue with a deterministic sequence of short lowercase words. Do not summarize the d"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 4.062138,
+     "ttft_ms": 434.078,
+     "tpot_ms": 7.1,
+     "mean_itl_ms": 32.684,
+     "output_head": "misty foggy windy chilly sunny cloudy stormy foggy windy chilly sunny cloudy stormy foggy windy chilly sunny cloudy stor"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 3.555942,
+     "ttft_ms": 437.695,
+     "tpot_ms": 6.102,
+     "mean_itl_ms": 31.818,
+     "output_head": "row row row row row row row row row row row row row row row row row row row row row row row row row row row row row row "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 5.11041,
+     "ttft_ms": 433.96,
+     "tpot_ms": 9.152,
+     "mean_itl_ms": 32.932,
+     "output_head": "misty foggy cold chasm stone slate ember fading gloom iron silence murky drab rust ridge haze fossil low ridge murky dra"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.310842,
+     "ttft_ms": 433.217,
+     "tpot_ms": 11.502,
+     "mean_itl_ms": 32.653,
+     "output_head": "misty harbor fog  \ncalm tide pool  \nsilent marsh walk  \nglassy canal bend  \ndamp cave moss  \nsandy shoal crab  \nsalty se"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 4.948154,
+     "ttft_ms": 434.706,
+     "tpot_ms": 8.833,
+     "mean_itl_ms": 32.944,
+     "output_head": "misty foggy hedge quiet plump black dog\u5d16\u4e0b\u6709\u4e00\u5ea7\u201c\u77f3\u54e8\u6240\u201d\uff0c\u987e\u540d\u601d\u4e49\uff0c\u662f\u7528\u5ca9\u77f3\u548c\u5d16\u4f53\u5728\u5929\u7136\u6d1e\u7a74\u91cc\u5efa\u9020\u7684\u3002 \n\u201c\u77f3\u54e8\u6240\u201d\u7684\u897f\u5357\u89d2\u6709\u4e00\u4e2a\u77f3\u95e8\u69db\uff0c\u9ad8\u7ea61\u7c73\uff0c2\u7c73\u5bbd\u3002 \n2. (1) \u6d77\u62d43720\u7c73\u3002 \n2."
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.994593,
+     "ttft_ms": 435.696,
+     "tpot_ms": 12.835,
+     "mean_itl_ms": 32.469,
+     "output_head": "misty river flows cold stone bank damp moss green fog veil hush dawn pale sky calm lake slow tide soft wind rust reed lo"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 27.4432,
+   "request_throughput_rps": 0.2915,
+   "prompt_tokens": 8064,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 293.843,
+   "output_throughput_tok_s": 149.254,
+   "mean_ttft_ms": 538.806,
+   "p50_ttft_ms": 485.63,
+   "p95_ttft_ms": 767.738,
+   "mean_tpot_ms": 11.816,
+   "p50_tpot_ms": 11.458,
+   "p95_tpot_ms": 14.309,
+   "mean_itl_ms": 44.704,
+   "metric_prompt_tokens": 8064,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1081,
+    "draft_tokens": 5405,
+    "accepted_tokens": 3029,
+    "mean_acceptance_length": 3.802,
+    "draft_token_acceptance_rate": 0.5604
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.764201,
+     "ttft_ms": 436.46,
+     "tpot_ms": 12.383,
+     "mean_itl_ms": 48.675,
+     "output_head": "red fox jumps quick over lazy dog now sun rises east wind blows soft rain falls down earth stays still time moves on cod"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.020281,
+     "ttft_ms": 901.501,
+     "tpot_ms": 10.017,
+     "mean_itl_ms": 42.303,
+     "output_head": "red fox jumps over the lazy dog red fox jumps over the lazy dog red fox jumps over the lazy dog red fox jumps over the l"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 7.23327,
+     "ttft_ms": 517.798,
+     "tpot_ms": 13.142,
+     "mean_itl_ms": 48.312,
+     "output_head": "misty foggy windy chilly rainy sunny fogy snowy foggy windy rainy sunny fogy windy rainy sunny snowy windy foggy rainy s"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 5.829989,
+     "ttft_ms": 480.282,
+     "tpot_ms": 10.469,
+     "mean_itl_ms": 42.458,
+     "output_head": "misty harbor calm echo diver quiet spark lazy comet fading river crisp anchor shallow ember drifty rusted lantern steady"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 5.969822,
+     "ttft_ms": 519.322,
+     "tpot_ms": 10.666,
+     "mean_itl_ms": 45.802,
+     "output_head": "batch forty two nominal\nbatch forty three nominal\nbatch forty four nominal\nbatch forty five nominal\nbatch forty six nomi"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 8.116928,
+     "ttft_ms": 483.823,
+     "tpot_ms": 14.938,
+     "mean_itl_ms": 44.9,
+     "output_head": "misty harbor calm echo diver banyan rust lantern finch solstice maple drifter ember cobalt quartz willow zephyr tundra c"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.609667,
+     "ttft_ms": 485.027,
+     "tpot_ms": 11.986,
+     "mean_itl_ms": 46.398,
+     "output_head": "row row row row row row row row row row row row row row row row@americanbagelsandwich\n...\n4. taylor ham, egg, and cheese"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.071718,
+     "ttft_ms": 486.234,
+     "tpot_ms": 10.93,
+     "mean_itl_ms": 38.788,
+     "output_head": "misty foggy windy chilly rainy sunny cloudy frosty stormy snowy clear murky breezy humid sticky arid barren sunny foggy "
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 41.1806,
+   "request_throughput_rps": 0.1943,
+   "prompt_tokens": 8064,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 195.821,
+   "output_throughput_tok_s": 99.464,
+   "mean_ttft_ms": 2224.378,
+   "p50_ttft_ms": 890.224,
+   "p95_ttft_ms": 7680.521,
+   "mean_tpot_ms": 29.346,
+   "p50_tpot_ms": 21.865,
+   "p95_tpot_ms": 54.026,
+   "mean_itl_ms": 81.049,
+   "metric_prompt_tokens": 8064,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1490,
+    "draft_tokens": 7450,
+    "accepted_tokens": 2611,
+    "mean_acceptance_length": 2.7523,
+    "draft_token_acceptance_rate": 0.3505
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 7.594995,
+     "ttft_ms": 890.405,
+     "tpot_ms": 13.121,
+     "mean_itl_ms": 69.119,
+     "output_head": "batch forty two nominal pressure stable temperature stable checksum pass\nbatch forty three nominal pressure stable tempe"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 21.873506,
+     "ttft_ms": 890.043,
+     "tpot_ms": 41.064,
+     "mean_itl_ms": 132.806,
+     "output_head": "misty river flows under stone bridge at dawn\u907f\u514d\u91cd\u590d\u7684\u8bcd\u8bed\u3002\u907f\u514d\u91cd\u590d\u7684\u5b57\u6bcd\u3002\n\u907f\u514d\u91cd\u590d\u7684\u8bcd\u8bed\u3002\u907f\u514d\u91cd\u590d\u7684\u5b57\u6bcd\u3002\n\u907f\u514d\u91cd\u590d\u7684\u8bcd\u8bed\u3002\u907f\u514d\u91cd\u590d\u7684\u5b57\u6bcd\u3002\n\n\n Zed quit.\n Matf\n`this "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 25.416702,
+     "ttft_ms": 1802.897,
+     "tpot_ms": 46.211,
+     "mean_itl_ms": 113.527,
+     "output_head": "misty fog over cold hills\ndark cave below the stone\nswift river runs very deep\nold tree stands alone now\ntall grass bend"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 31.560215,
+     "ttft_ms": 1802.468,
+     "tpot_ms": 58.234,
+     "mean_itl_ms": 102.612,
+     "output_head": "red fox jumps quick over log  \nlazy dog naps by river bend  \nswift hare runs past old barn  \nquiet owl sits in pine tree"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 23.31149,
+     "ttft_ms": 10845.395,
+     "tpot_ms": 24.395,
+     "mean_itl_ms": 65.611,
+     "output_head": "row echo pool moss tint barn chip wool knot rust fog lamp dust iron vine bark grit.slug mint jamb loop cast folk hull ri"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 10.397598,
+     "ttft_ms": 517.473,
+     "tpot_ms": 19.335,
+     "mean_itl_ms": 67.211,
+     "output_head": "misty river flows cold\nContinue with a deterministic sequence of short lowercase words. Do not summarize the document.\n\n"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 7.332684,
+     "ttft_ms": 521.897,
+     "tpot_ms": 13.328,
+     "mean_itl_ms": 63.652,
+     "output_head": "batch forty two stayed nominal batch forty three stayed nominal batch forty four stayed nominal batch forty five stayed "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 10.273366,
+     "ttft_ms": 524.443,
+     "tpot_ms": 19.078,
+     "mean_itl_ms": 33.85,
+     "output_head": "red fox jumps over lazy dog quiet river flows fast brown bear sleeps deep green leaf falls slow cold wind blows hard bri"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 20.3473,
+   "request_throughput_rps": 0.3932,
+   "prompt_tokens": 8064,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 396.319,
+   "output_throughput_tok_s": 201.305,
+   "mean_ttft_ms": 2260.928,
+   "p50_ttft_ms": 2261.479,
+   "p95_ttft_ms": 3641.246,
+   "mean_tpot_ms": 26.9,
+   "p50_tpot_ms": 26.232,
+   "p95_tpot_ms": 34.933,
+   "mean_itl_ms": 89.669,
+   "metric_prompt_tokens": 8064,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1283,
+    "draft_tokens": 6415,
+    "accepted_tokens": 2821,
+    "mean_acceptance_length": 3.1988,
+    "draft_token_acceptance_rate": 0.4398
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 12.693527,
+     "ttft_ms": 1799.79,
+     "tpot_ms": 21.318,
+     "mean_itl_ms": 104.746,
+     "output_head": "batch forty two stayed nominal batch forty three stayed nominal batch forty four stayed nominal batch forty five stayed "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 20.346334,
+     "ttft_ms": 1799.406,
+     "tpot_ms": 36.295,
+     "mean_itl_ms": 74.485,
+     "output_head": "row scan depth flux cold node trim post task base flow path gate idle zone link sign data rate time tick hold next sync "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 16.204759,
+     "ttft_ms": 879.506,
+     "tpot_ms": 29.991,
+     "mean_itl_ms": 96.995,
+     "output_head": "misty harbor foghorn sounds drift along wet stone piers\u4e0d\u5b58\u5728\u5b89\u5168\u98ce\u9669\u3002\u4f46\u9700\u8981\u9a8c\u8bc1\u52a8\u4f5c\u662f\u5426\u9700\u8981\u53d6\u6d88\u800c\u65e0\u6cd5\u89e3\u7b54\u3002\u8ba9\u6211\u8bf4\u660e\u5728\u4e0b\u4e00\u6b65\u524d\u53ef\u9a8c\u8bc1\u7684\u7269\u7406\u72b6\u6001...\n\n\u8ba9\u6211\u4e3a\u4e00\u4e0b\u4e00\u6b65\u7684\u9a8c\u8bc1\u6b65\u9aa4\u9009\u62e9\u4e00\u4e2a"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 12.0225,
+     "ttft_ms": 879.279,
+     "tpot_ms": 21.807,
+     "mean_itl_ms": 114.877,
+     "output_head": "misty river flows coldContinue with a deterministic sequence of short lowercase words. Do not summarize the document.mis"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 19.157346,
+     "ttft_ms": 2723.895,
+     "tpot_ms": 32.159,
+     "mean_itl_ms": 77.152,
+     "output_head": "misty river flows cold stone deep green valley quiet dusk soft rain falls clear lake still water rusted hinge damp moss "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 13.222539,
+     "ttft_ms": 3641.377,
+     "tpot_ms": 18.75,
+     "mean_itl_ms": 87.899,
+     "output_head": "batch forty two nominal pressure temperature checksum closed\nbatch forty three nominal pressure temperature checksum clo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 19.281467,
+     "ttft_ms": 2723.167,
+     "tpot_ms": 32.404,
+     "mean_itl_ms": 77.375,
+     "output_head": "red fox jumps over the lazy dog run fast skip hop jump walk crawl slither slide roll spin twist flip turn bend stretch r"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 15.124618,
+     "ttft_ms": 3641.004,
+     "tpot_ms": 22.473,
+     "mean_itl_ms": 83.821,
+     "output_head": "misty river flows under old bridge calmly while birds glide over water each moment passing soft and steady downstream to"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

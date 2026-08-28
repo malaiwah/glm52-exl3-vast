@@ -1,0 +1,80 @@
+Working...
+
+
+## Validation Safety Review: `scripts/glm_config.py`
+
+**Verdict: Strong. The validation layer is one of the more carefully designed pieces in this repo.** Below are the gaps, ranked by severity.
+
+### Correct (Well-Designed)
+
+| Area | Assessment |
+|---|---|
+| **Three-layer inheritance** | Built-in defaults → startup env (snapshotted once) → persistent state file. Snapshot prevents mid-life env drift from silently reordering layers. |
+| **Termination switches** | `FORBIDDEN_STATE_KEYS` rejected (not silently ignored) from state files. Ratchet semantics: `enabled` is AND-only, `locked` is OR-only — loosening is unrepresentable. Per-container (runtime dir), not persistent. |
+| **Coercion** | Every type (`bool`, `int`, `float`, `choice`, `csv`, `str`) validated before entering any layer. Range bounds enforced on `int`/`float`. Control characters rejected from `str`. Bad env values fall back to default rather than crashing resolution. |
+| **Atomic writes** | `write_json_atomic` uses temp-then-rename with `0o600`/`0o644` modes — no torn state files. |
+| **`pool-smaller-than-context`** | Prevents a pinned KV pool smaller than `MAX_MODEL_LEN`. Catches a guaranteed boot failure. |
+| **`concurrency-window`** | Catches silent-fast-path-loss when `MAX_NUM_SEQS × (1+MTP_TOKENS)` exceeds capture/trellis window. |
+| **`dcp-divides-tp`** | Hard error: DCP must divide TP. |
+| **`kv-nvfp4-uncalibrated`** | Blocks NVFP4 KV on variants without calibrated scales — prevents silent long-context degeneration. |
+| **`tr3-draft-needs-exl3`** | Blocks TR3 trellis drafts on non-EXL3 targets. |
+| **`draft-quant-inherit`** | Blocks NVFP4 draft against EXL3 target without explicit quant declaration. |
+| **Family isolation** | `applies_to` gates GLM-specific knobs (DCP, EXL3, vision) from Qwen/custom. |
+| **`resolve` never raises** | Unusable state file degrades to env+defaults with a note — won't brick the instance. |
+| **`minimize`** | Writes only diff values to state file, preventing stale knobs from locking in defaults that should evolve. |
+
+### Issues & Risks
+
+#### 1. DCP defaulting without TP awareness in `resolve`
+
+`resolve` sets DCP to `min(ngpu, 8)` from the *detected* GPU count, but the *final* TP may differ (env or state file overrides). If `env_values` sets `TENSOR_PARALLEL_SIZE=2` and `ngpu=4`, DCP gets `"4"` (detected), then the `dcp-divides-tp` validation would catch it — but only at apply time, not at resolve time. The resolved config could be inconsistent before validation runs.
+
+**Risk:** Low. Validation catches it. But `resolve` returns a potentially invalid config; the contract says "never raises" but doesn't say "returns valid."
+
+#### 2. `resolve_family` ignores variant family coherence
+
+`resolve_family` resolves `MODEL_FAMILY` in isolation, but doesn't check if the state file's `MODEL_VARIANT` is compatible. Variant-family mismatch is only caught in `validate()`, not `resolve()`. If a user sets `MODEL_FAMILY=qwen36` with `MODEL_VARIANT=exl3-tr3` in the state file, `resolve` will silently produce an exl3 variant under qwen36 defaults until `validate` runs.
+
+**Risk:** Low. Validation catches it as an error. But the effective config returned by `resolve` is semantically broken until validation is called.
+
+#### 3. `env_layer` swallows coercion errors silently
+
+Bad env values for knobs fall through with `pass` and no note. A typo in the template env (e.g., `TENSOR_PARALLEL_SIZE=foo`) silently reverts to the built-in default with no diagnostic. The `resolve` function *does* emit notes for env coercion errors on its second pass, but `env_layer` — called during `snapshot_startup_env` — does not.
+
+**Risk:** Low. The second-pass in `resolve` catches most cases. But the startup snapshot will have the wrong value with no record of why.
+
+#### 4. No validation of `CUDAGRAPH_CAPTURE_SIZES` minimum entry
+
+The rationale says "the smallest entry must stay inside the EXL3 trellis window [4, 32]" and that a capture below 4 causes an eager path crash. The `coerce` function validates the format (comma-separated integers) but doesn't enforce `min >= 4`. No validation rule checks this.
+
+**Risk:** Medium. A user setting `CUDAGRAPH_CAPTURE_SIZES=1,2,4,...` would hit the eager capture crash at boot, and the failure signature is "eager parity path entered during CUDA graph capture" — which is also the signature for the draft quantization trap, adding diagnostic ambiguity.
+
+#### 5. `pid1_env` cache never invalidated
+
+`_PID1_ENV` is a module-level global cached on first read. If PID 1 is replaced (e.g., via `exec`), the cache becomes stale. This is an edge case but the comment says "PID 1's environment cannot change under us" — which is true for the entrypoint's lifetime but not if the process is replaced.
+
+**Risk:** Negligible. The entrypoint doesn't exec away.
+
+#### 6. `family_serve_args` string formatting is unsafe for uncontrolled values
+
+`args = [a % subs if "%(" in a else a for ...]` — if a future knob value contained `%` literally, it could be misinterpreted by `%` formatting. Currently all knob values are coerced through `to_text`, and none of the existing values contain `%`. But this is a latent format-string vulnerability.
+
+**Risk:** Low. No current knob value can produce `%`. Would be `str.format()` or `Template` if tightening.
+
+#### 7. Validation rule numbering gap
+
+Rules are numbered 0, 1, 2, 3, 5, 6, 7, 8, 9, 10 — rule 4 is missing. Harmless, but suggests a deleted rule whose interactions with other rules haven't been audited for residual dependencies.
+
+**Risk:** None. Cosmetic.
+
+#### 8. `qualified_r9_512k` is a 15-field exact match
+
+The "qualified shape" exception is an exact match across 15 configuration fields. Any single drift (e.g., `KV_SCALE_MODE` changed by env) collapses the exception and the generic warning fires. This is by design (exact qualification), but the warning message doesn't say *which* field diverged.
+
+**Risk:** Low. Operator friction, not safety. The warning still fires correctly.
+
+### Summary
+
+The validation layer is thorough for the domain. It catches the expensive failures (OOM at boot, silent fast-path loss, draft-target mismatch, uncalibrated NVFP4 KV) as hard errors. The termination switch model is genuinely well-designed: ratchet-only, per-container, forbidden from state.
+
+The main gap is that `resolve` returns configs that may be structurally valid but semantically broken (wrong variant for family, DCP not dividing TP). This is by design — validation is a separate phase — but it means `resolve`'s output should never be trusted without running `validate` first. The callers (`landing.py`, `config_cli.py`) should be audited to confirm they always run validation before applying.

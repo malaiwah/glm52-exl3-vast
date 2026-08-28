@@ -1,0 +1,69 @@
+{
+ "schema": 1,
+ "ts": "2026-07-28T12:19:32Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 507904,
+  "output_tokens": 4096,
+  "concurrency": [
+   1
+  ],
+  "requests_per_level": 1,
+  "prefill_tokens": [],
+  "warmup": 0,
+  "temperature": 1.0,
+  "seed": 20260728,
+  "prompt_seed": "aibeast-r5-512k-envelope-precise"
+ },
+ "metadata": {
+  "provider": "aibeast-isolated,checkpoint=brandon-tr3-native,image=r5,envelope=507904+4096,precise-builder=true"
+ },
+ "prefill": [],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 267.1547,
+   "request_throughput_rps": 0.0037,
+   "prompt_tokens": 507902,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 1901.153,
+   "output_throughput_tok_s": 15.332,
+   "mean_ttft_ms": 224702.375,
+   "p50_ttft_ms": 224702.375,
+   "p95_ttft_ms": 224702.375,
+   "mean_tpot_ms": 10.366,
+   "p50_tpot_ms": 10.366,
+   "p95_tpot_ms": 10.366,
+   "mean_itl_ms": 35.523,
+   "metric_prompt_tokens": 507902,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1197,
+    "draft_tokens": 5985,
+    "accepted_tokens": 2903,
+    "mean_acceptance_length": 3.4252,
+    "draft_token_acceptance_rate": 0.485
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 507902,
+     "output_tokens": 4096,
+     "elapsed_s": 267.152875,
+     "ttft_ms": 224702.375,
+     "tpot_ms": 10.366,
+     "mean_itl_ms": 35.523,
+     "output_head": "The gradient is the key feature and the reason for using nextTick(). I'll look into both the SQLAlchemy and SEVENTHawks "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

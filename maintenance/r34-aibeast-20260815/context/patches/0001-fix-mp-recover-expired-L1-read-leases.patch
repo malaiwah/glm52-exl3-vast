@@ -1,0 +1,336 @@
+From 67561538a08ce3db621f51f0615b67537c0c8361 Mon Sep 17 00:00:00 2001
+From: Michel Belleau <michel.belleau@malaiwah.com>
+Date: Fri, 21 Aug 2026 08:26:05 -0400
+Subject: [PATCH] fix(mp): recover expired L1 read leases
+
+Signed-off-by: Michel Belleau <michel.belleau@malaiwah.com>
+(cherry picked from commit 8e54b34bb105beed4d0b683d3eab16a374e43b03)
+---
+ lmcache/cli/commands/trace/_dispatch.py       |  6 ++-
+ lmcache/v1/distributed/l1_manager.py          | 53 ++++++++++++++++---
+ lmcache/v1/distributed/storage_manager.py     | 24 +++++++--
+ lmcache/v1/multiprocess/config.py             | 23 +++++++-
+ lmcache/v1/multiprocess/engine_context.py     |  6 ++-
+ .../modules/lmcache_driven_transfer.py        |  7 ++-
+ lmcache/v1/multiprocess/modules/lookup.py     |  1 +
+ lmcache/v1/multiprocess/server.py             |  1 +
+ lmcache/v1/multiprocess/session.py            |  1 +
+ 9 files changed, 107 insertions(+), 15 deletions(-)
+
+diff --git a/lmcache/cli/commands/trace/_dispatch.py b/lmcache/cli/commands/trace/_dispatch.py
+index 06951c96..f07f8536 100644
+--- a/lmcache/cli/commands/trace/_dispatch.py
++++ b/lmcache/cli/commands/trace/_dispatch.py
+@@ -174,7 +174,11 @@ def _enter_read_prefetched(ctx: ReplayContext, args: dict[str, Any]) -> None:
+         args: Decoded record arguments.  Must contain ``"keys"``.
+     """
+     keys = args["keys"]
+-    cm = ctx.sm.read_prefetched_results(keys)
++    cm = ctx.sm.read_prefetched_results(
++        keys,
++        recover_expired=bool(args.get("recover_expired", False)),
++        extra_count=int(args.get("extra_count", 0)),
++    )
+     cm.__enter__()
+     key_tuple = tuple(keys)
+     ctx.open_read_contexts.setdefault(key_tuple, deque()).append(cm)
+diff --git a/lmcache/v1/distributed/l1_manager.py b/lmcache/v1/distributed/l1_manager.py
+index 4a2be000..847dea15 100644
+--- a/lmcache/v1/distributed/l1_manager.py
++++ b/lmcache/v1/distributed/l1_manager.py
+@@ -302,15 +302,24 @@ class L1Manager:
+     def unsafe_read(
+         self,
+         keys: list[ObjectKey],
++        recover_expired: bool = False,
++        extra_count: int = 0,
+     ) -> dict[ObjectKey, L1OperationResult]:
+-        """Unsafe read the read-locked objects without adding new read locks.
++        """Read objects whose read locks were reserved beforehand.
+ 
+-        This method does not acquire read locks. Therefore, the caller need
+-        to make sure the `unsafe_read` is called between `reserve_read` and
+-        `finish_read` calls.
++        Normally this method does not acquire read locks, so the caller must
++        call it between matching ``reserve_read`` and ``finish_read`` calls.
++        When ``recover_expired`` is enabled, an object that is still readable
++        after its read-lock TTL elapsed has its reservation restored atomically.
++        The first concurrent reader restores all ``1 + extra_count`` claims;
++        later readers observe the restored lock and do not increment it.
+ 
+         Args:
+             keys: The list of object keys to read.
++            recover_expired: Restore an expired read reservation when the
++                object still exists and is not write-locked.
++            extra_count: Extra reader claims to restore on top of the default
++                one. Must match the value used by ``reserve_read``.
+ 
+         Returns:
+             A dictionary mapping each object key to a tuple of
+@@ -318,9 +327,13 @@ class L1Manager:
+ 
+         Errors:
+             KEY_NOT_EXIST: The key does not exist.
+-            KEY_NOT_READABLE: The key is not readable (in this case, not read-locked).
++            KEY_NOT_READABLE: The key is not read-locked and recovery is
++                disabled, or the object is write-locked during recovery.
+         """
++        extra_count = _validate_extra_count(extra_count)
++        total = 1 + extra_count
+         ret: dict[ObjectKey, L1OperationResult] = {}
++        recovered_keys: list[ObjectKey] = []
+ 
+         for key in keys:
+             entry = self._objects.get(key, None)
+@@ -329,11 +342,37 @@ class L1Manager:
+                 continue
+ 
+             if not entry.read_lock.is_locked():
+-                ret[key] = (L1Error.KEY_NOT_READABLE, None)
+-                continue
++                if not recover_expired or not entry.available_for_read():
++                    ret[key] = (L1Error.KEY_NOT_READABLE, None)
++                    continue
++
++                # The manager lock makes this check-and-restore atomic across
++                # concurrent TP workers. Only the first worker restores the
++                # full multi-reader reservation.
++                for _ in range(total):
++                    entry.read_lock.lock()
++                recovered_keys.append(key)
+ 
+             ret[key] = (L1Error.SUCCESS, entry.memory_obj)
+ 
++        if recovered_keys:
++            logger.warning(
++                "Recovered expired L1 read leases for %d keys (readers per key=%d)",
++                len(recovered_keys),
++                total,
++            )
++            for listener in self._registered_listeners:
++                listener.on_l1_keys_reserved_read(recovered_keys)
++            self._event_bus.publish(
++                Event(
++                    event_type=EventType.L1_READ_RESERVED,
++                    metadata={
++                        "keys": recovered_keys,
++                        "reason": "expired_lease_recovery",
++                    },
++                )
++            )
++
+         return ret
+ 
+     @l1_mgr_synchronized
+diff --git a/lmcache/v1/distributed/storage_manager.py b/lmcache/v1/distributed/storage_manager.py
+index a7da312a..937ebbbd 100644
+--- a/lmcache/v1/distributed/storage_manager.py
++++ b/lmcache/v1/distributed/storage_manager.py
+@@ -280,6 +280,8 @@ class StorageManager:
+     def read_prefetched_results(
+         self,
+         keys: list[ObjectKey],
++        recover_expired: bool = False,
++        extra_count: int = 0,
+     ) -> Iterator[list[MemoryObj] | None]:
+         """
+         Read the memory objects from L1 storage that has been prefetched beforehand.
+@@ -288,6 +290,10 @@ class StorageManager:
+ 
+         Args:
+             keys (list[ObjectKey]): List of object keys to reserve for reading.
++            recover_expired: Restore an expired read reservation for each
++                object that is still present and not write-locked.
++            extra_count: Extra reader claims to restore per key. Must match
++                the value used for the original prefetch reservation.
+ 
+         Returns:
+             Iterator[list[MemoryObj] | None]: An iterator yielding an optional list of
+@@ -311,9 +317,17 @@ class StorageManager:
+             publish_call_event(
+                 "lmcache.v1.distributed.storage_manager."
+                 "StorageManager.read_prefetched_results.__enter__",
+-                {"keys": keys},
++                {
++                    "keys": keys,
++                    "recover_expired": recover_expired,
++                    "extra_count": extra_count,
++                },
+             )
+-        read_results = self._l1_manager.unsafe_read(keys)
++        read_results = self._l1_manager.unsafe_read(
++            keys,
++            recover_expired=recover_expired,
++            extra_count=extra_count,
++        )
+         good_keys: list[ObjectKey] = []
+         good_objs: list[MemoryObj] = []
+         bad_keys: list[ObjectKey] = []
+@@ -392,7 +406,11 @@ class StorageManager:
+                 publish_call_event(
+                     "lmcache.v1.distributed.storage_manager."
+                     "StorageManager.read_prefetched_results.__exit__",
+-                    {"keys": keys},
++                    {
++                        "keys": keys,
++                        "recover_expired": recover_expired,
++                        "extra_count": extra_count,
++                    },
+                 )
+ 
+     @enable_tracing()
+diff --git a/lmcache/v1/multiprocess/config.py b/lmcache/v1/multiprocess/config.py
+index aab4e4f7..b9c67e91 100644
+--- a/lmcache/v1/multiprocess/config.py
++++ b/lmcache/v1/multiprocess/config.py
+@@ -95,13 +95,18 @@ class MPServerConfig:
+     sent a PING (model warmup, or death before its first request). Must be
+     >= worker_reap_timeout_seconds."""
+ 
++    session_ttl_seconds: float = 600.0
++    """Retention window for per-request lookup state. This must cover the
++    longest expected delay between LOOKUP and RETRIEVE. Default is 600."""
++
+     def __post_init__(self) -> None:
+-        """Validate the worker-reaping timeouts.
++        """Validate the worker-reaping and session timeouts.
+ 
+         Raises:
+             ValueError: If a timeout is non-finite, the reap timeout is
+                 negative or a non-zero value below the 30 s floor, or the
+-                registration grace is below the reap timeout.
++                registration grace is below the reap timeout, or the session
++                TTL is not a finite positive value.
+         """
+         reap = self.worker_reap_timeout_seconds
+         grace = self.worker_registration_grace_seconds
+@@ -116,6 +121,11 @@ class MPServerConfig:
+                 "worker registration grace must be >= the worker reap timeout "
+                 f"({reap}s); got {grace}"
+             )
++        session_ttl = self.session_ttl_seconds
++        if not math.isfinite(session_ttl) or session_ttl <= 0:
++            raise ValueError(
++                f"session TTL must be a finite number > 0; got {session_ttl}"
++            )
+ 
+ 
+ @dataclass
+@@ -367,6 +377,14 @@ def add_mp_server_args(
+         "pinged (model warmup or early death). Must be >= the worker reap "
+         "timeout. Default is 3600.",
+     )
++    mp_group.add_argument(
++        "--session-ttl-seconds",
++        type=float,
++        default=600.0,
++        help="Retention window (s) for per-request lookup state. Keep this "
++        "above the longest expected delay between LOOKUP and RETRIEVE. "
++        "Default is 600.",
++    )
+     mp_group.add_argument(
+         "--enable-segmented-prefix",
+         action="store_true",
+@@ -418,6 +436,7 @@ def parse_args_to_mp_server_config(
+         script_allowed_imports=args.script_allowed_imports or [],
+         worker_reap_timeout_seconds=args.worker_reap_timeout_seconds,
+         worker_registration_grace_seconds=args.worker_registration_grace_seconds,
++        session_ttl_seconds=args.session_ttl_seconds,
+     )
+ 
+ 
+diff --git a/lmcache/v1/multiprocess/engine_context.py b/lmcache/v1/multiprocess/engine_context.py
+index f7899075..9a40bb72 100644
+--- a/lmcache/v1/multiprocess/engine_context.py
++++ b/lmcache/v1/multiprocess/engine_context.py
+@@ -172,6 +172,7 @@ class MPCacheServerContext:
+         hash_algorithm: Hash algorithm for token hashing.
+         separate_object_groups: Whether to split kernel groups into one object
+             group per sliding-window size at KV-cache registration. Default True.
++        session_ttl_seconds: Retention window for per-request lookup state.
+     """
+ 
+     def __init__(
+@@ -181,6 +182,7 @@ class MPCacheServerContext:
+         hash_algorithm: str = "blake3",
+         separate_object_groups: bool = True,
+         full_sw_kv: bool = False,
++        session_ttl_seconds: float = SessionManager.DEFAULT_SESSION_TTL,
+     ) -> None:
+         self._chunk_size = chunk_size
+         self._separate_object_groups = separate_object_groups
+@@ -197,7 +199,9 @@ class MPCacheServerContext:
+         self._token_hasher = TokenHasher(
+             chunk_size=chunk_size, hash_algorithm=hash_algorithm
+         )
+-        self._session_manager = SessionManager(self._token_hasher)
++        self._session_manager = SessionManager(
++            self._token_hasher, ttl=session_ttl_seconds
++        )
+         self._event_bus = get_event_bus()
+         self._layout_desc_registry = LayoutDescRegistry()
+ 
+diff --git a/lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py b/lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py
+index 89a7d9f8..65b2a7e6 100644
+--- a/lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py
++++ b/lmcache/v1/multiprocess/modules/lmcache_driven_transfer.py
+@@ -1183,6 +1183,9 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+         obj_keys_per_obj_group = self._ctx.resolve_obj_keys(
+             key, list(range(num_object_groups))
+         )
++        prefetch_extra_count = self._ctx.session_manager.get_or_create(
++            key.request_id
++        ).prefetch_extra_count
+         num_chunks = len(obj_keys_per_obj_group[0])
+ 
+         # CPU-synchronous sentinel: a GPU retrieve is about to be enqueued.
+@@ -1256,7 +1259,9 @@ class LMCacheDrivenTransferModule(InstanceLivenessTarget):
+                 for obj_group_id in range(num_object_groups):
+                     obj_keys = obj_keys_per_obj_group[obj_group_id]
+                     with self._ctx.storage_manager.read_prefetched_results(
+-                        obj_keys
++                        obj_keys,
++                        recover_expired=True,
++                        extra_count=prefetch_extra_count,
+                     ) as memory_objs:
+                         if not memory_objs or len(memory_objs) != len(obj_keys):
+                             logger.error("Some keys not found during retrieve!")
+diff --git a/lmcache/v1/multiprocess/modules/lookup.py b/lmcache/v1/multiprocess/modules/lookup.py
+index 3d1f210f..b64c6673 100644
+--- a/lmcache/v1/multiprocess/modules/lookup.py
++++ b/lmcache/v1/multiprocess/modules/lookup.py
+@@ -319,6 +319,7 @@ class LookupModule:
+         session = self._ctx.session_manager.get_or_create(key.request_id)
+         session.set_tokens(list(key.token_ids))
+         session.lookup_ipc_key = key
++        session.prefetch_extra_count = extra_count
+ 
+         # Lay keys out chunk-major across object groups (see
+         # _chunk_major_object_keys); pass the windows to the prefetch policy.
+diff --git a/lmcache/v1/multiprocess/server.py b/lmcache/v1/multiprocess/server.py
+index 32951751..35ebb9b9 100644
+--- a/lmcache/v1/multiprocess/server.py
++++ b/lmcache/v1/multiprocess/server.py
+@@ -355,6 +355,7 @@ def run_cache_server(
+         hash_algorithm=mp_config.hash_algorithm,
+         separate_object_groups=mp_config.separate_object_groups and not is_blend,
+         full_sw_kv=is_blend,
++        session_ttl_seconds=mp_config.session_ttl_seconds,
+     )
+ 
+     modules = _build_modules(ctx, mp_config, coordinator_config)
+diff --git a/lmcache/v1/multiprocess/session.py b/lmcache/v1/multiprocess/session.py
+index 22a76fe2..ea31457f 100644
+--- a/lmcache/v1/multiprocess/session.py
++++ b/lmcache/v1/multiprocess/session.py
+@@ -41,6 +41,7 @@ class Session:
+     num_chunks_processed: int = 0
+     created_at: float = field(default_factory=time.time)
+     lookup_ipc_key: Optional[IPCCacheServerKey] = None
++    prefetch_extra_count: int = 0
+     extras: dict[str, Any] = field(default_factory=dict)
+     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+ 
+-- 
+2.50.1 (Apple Git-155)
+

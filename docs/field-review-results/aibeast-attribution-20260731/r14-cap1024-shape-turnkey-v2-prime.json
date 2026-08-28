@@ -1,0 +1,612 @@
+{
+ "schema": 1,
+ "ts": "2026-08-01T00:14:23Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 512,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 8,
+  "prefill_tokens": [
+   3072,
+   32768,
+   131072
+  ],
+  "warmup": 2,
+  "temperature": 1.0,
+  "seed": 20260731,
+  "prompt_seed": "turnkey-final-prime-v1"
+ },
+ "metadata": {
+  "arm": "r14-cap1024-shape-turnkey-v2-prime"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 11.6007,
+   "request_throughput_rps": 0.0862,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 265.674,
+   "output_throughput_tok_s": 0.086,
+   "mean_ttft_ms": 11600.366,
+   "p50_ttft_ms": 11600.366,
+   "p95_ttft_ms": 11600.366,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_inter_chunk_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 11.600413,
+     "ttft_ms": 11600.366,
+     "tpot_ms": 0.0,
+     "mean_inter_chunk_ms": 0.0,
+     "output_head": "alpha"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 16.0297,
+   "request_throughput_rps": 0.0624,
+   "prompt_tokens": 32774,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2044.581,
+   "output_throughput_tok_s": 0.062,
+   "mean_ttft_ms": 16029.236,
+   "p50_ttft_ms": 16029.236,
+   "p95_ttft_ms": 16029.236,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_inter_chunk_ms": 0.0,
+   "metric_prompt_tokens": 32774,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32774,
+     "output_tokens": 1,
+     "elapsed_s": 16.029315,
+     "ttft_ms": 16029.236,
+     "tpot_ms": 0.0,
+     "mean_inter_chunk_ms": 0.0,
+     "output_head": "apple"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 68.5963,
+   "request_throughput_rps": 0.0146,
+   "prompt_tokens": 131069,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1910.73,
+   "output_throughput_tok_s": 0.015,
+   "mean_ttft_ms": 68595.861,
+   "p50_ttft_ms": 68595.861,
+   "p95_ttft_ms": 68595.861,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_inter_chunk_ms": 0.0,
+   "metric_prompt_tokens": 131069,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 131069,
+     "output_tokens": 1,
+     "elapsed_s": 68.595944,
+     "ttft_ms": 68595.861,
+     "tpot_ms": 0.0,
+     "mean_inter_chunk_ms": 0.0,
+     "output_head": "alpha"
+    }
+   ],
+   "target_prompt_tokens": 131072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 41.9541,
+   "request_throughput_rps": 0.1907,
+   "prompt_tokens": 8056,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 192.019,
+   "output_throughput_tok_s": 97.63,
+   "mean_ttft_ms": 363.008,
+   "p50_ttft_ms": 362.922,
+   "p95_ttft_ms": 367.594,
+   "mean_tpot_ms": 9.552,
+   "p50_tpot_ms": 9.692,
+   "p95_tpot_ms": 12.015,
+   "mean_inter_chunk_ms": 33.124,
+   "metric_prompt_tokens": 8056,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1180,
+    "draft_tokens": 5900,
+    "accepted_tokens": 2925,
+    "mean_acceptance_length": 3.4788,
+    "draft_token_acceptance_rate": 0.4958
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 5.527945,
+     "ttft_ms": 369.316,
+     "tpot_ms": 10.095,
+     "mean_inter_chunk_ms": 33.068,
+     "output_head": "blue sun rise over calm lake\nwind moves slow thru tall grass\nbirds call out near pine tree\nsoft rain falls on wet stone\n"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 5.107952,
+     "ttft_ms": 360.64,
+     "tpot_ms": 9.29,
+     "mean_inter_chunk_ms": 33.669,
+     "output_head": "batch forty two went nominal. operator checked pressure temperature checksum then closed record.\nbatch forty three went "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 6.846331,
+     "ttft_ms": 359.983,
+     "tpot_ms": 12.693,
+     "mean_inter_chunk_ms": 32.925,
+     "output_head": "blue cold dark easy fast good high iron jump keen long mint nice open pure quiet red soft true valid warm xray yarn zinc"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 5.856164,
+     "ttft_ms": 360.469,
+     "tpot_ms": 10.755,
+     "mean_inter_chunk_ms": 32.908,
+     "output_head": "blue cyan dark edge flux glow halo iris jade keen lime mint navy ochre plum quartz rust sage teal ultraviolet vine white"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 4.696577,
+     "ttft_ms": 363.415,
+     "tpot_ms": 8.48,
+     "mean_inter_chunk_ms": 33.331,
+     "output_head": "blue cold dark easy fast good high iron jade keen lazy mint nice open pure quiet red soft true used very warm xray yarn "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 4.966049,
+     "ttft_ms": 362.789,
+     "tpot_ms": 9.008,
+     "mean_inter_chunk_ms": 33.357,
+     "output_head": "blue cold dark easy fast good high iron jump keen long mint nice open pure quiet rain soft true used very warm xray yarn"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 3.165119,
+     "ttft_ms": 363.055,
+     "tpot_ms": 5.483,
+     "mean_inter_chunk_ms": 31.841,
+     "output_head": "blue green blue green blue green blue green blue green blue green blue green blue green blue green blue green blue green"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 5.786787,
+     "ttft_ms": 364.397,
+     "tpot_ms": 10.611,
+     "mean_inter_chunk_ms": 33.89,
+     "output_head": "blue cold dark easy fast good high iron jump keen long mint nice open pure quiet rush soft true user vain warm xray yarn"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 30.6537,
+   "request_throughput_rps": 0.261,
+   "prompt_tokens": 8056,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 262.807,
+   "output_throughput_tok_s": 133.622,
+   "mean_ttft_ms": 473.215,
+   "p50_ttft_ms": 439.048,
+   "p95_ttft_ms": 677.442,
+   "mean_tpot_ms": 13.987,
+   "p50_tpot_ms": 12.461,
+   "p95_tpot_ms": 23.227,
+   "mean_inter_chunk_ms": 44.372,
+   "metric_prompt_tokens": 8056,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1311,
+    "draft_tokens": 6555,
+    "accepted_tokens": 2782,
+    "mean_acceptance_length": 3.122,
+    "draft_token_acceptance_rate": 0.4244
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 5.945971,
+     "ttft_ms": 792.096,
+     "tpot_ms": 10.086,
+     "mean_inter_chunk_ms": 41.901,
+     "output_head": "blue green yellow red orange purple brown black white gray pink gold silver copper iron steel zinc lead tin bronze cobal"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 6.939827,
+     "ttft_ms": 363.381,
+     "tpot_ms": 12.87,
+     "mean_inter_chunk_ms": 47.312,
+     "output_head": "blue green yellow red orange purple brown black white gray pink gold teal cyan lime mint navy plum rose ruby jade amber "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 6.92958,
+     "ttft_ms": 464.513,
+     "tpot_ms": 12.652,
+     "mean_inter_chunk_ms": 49.731,
+     "output_head": "blue cyan dark easy fish good halo iron jade keen lime mint navy olive plum quay ruby sage teal urn vows wolf xray yolk "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 4.363059,
+     "ttft_ms": 427.746,
+     "tpot_ms": 7.701,
+     "mean_inter_chunk_ms": 44.217,
+     "output_head": "batch forty-two stayed nominal; operator checked pressure, temperature, and checksum fields, then closed record.\nbatch f"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 12.671658,
+     "ttft_ms": 437.358,
+     "tpot_ms": 23.942,
+     "mean_inter_chunk_ms": 41.193,
+     "output_head": "blue cyan dark edge flux glow halo iced jade keep lime mint noon over pale quay rust sage teal umbra vest walk xray yarn"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 11.643024,
+     "ttft_ms": 452.009,
+     "tpot_ms": 21.9,
+     "mean_inter_chunk_ms": 40.992,
+     "output_head": "blue green yellow red orange purple brown black white gray pink lime teal cyan navy mint gold rose ruby jade amber coppe"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 6.677927,
+     "ttft_ms": 407.881,
+     "tpot_ms": 12.27,
+     "mean_inter_chunk_ms": 45.766,
+     "output_head": "blue cold fast green hard late mild new old pale quick red slow soft tall warm wild youngTelemetry batch 42 stayed nomin"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 5.792562,
+     "ttft_ms": 440.738,
+     "tpot_ms": 10.473,
+     "mean_inter_chunk_ms": 43.867,
+     "output_head": "blue green yellow red orange purple brown black white gray pink lime teal cyan navy plum rose Acknowledge the run is com"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 32.66,
+   "request_throughput_rps": 0.2449,
+   "prompt_tokens": 8056,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 246.663,
+   "output_throughput_tok_s": 125.414,
+   "mean_ttft_ms": 2083.14,
+   "p50_ttft_ms": 851.533,
+   "p95_ttft_ms": 7564.156,
+   "mean_tpot_ms": 24.945,
+   "p50_tpot_ms": 23.974,
+   "p95_tpot_ms": 39.344,
+   "mean_inter_chunk_ms": 97.195,
+   "metric_prompt_tokens": 8056,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1125,
+    "draft_tokens": 5625,
+    "accepted_tokens": 2976,
+    "mean_acceptance_length": 3.6453,
+    "draft_token_acceptance_rate": 0.5291
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 21.571501,
+     "ttft_ms": 373.229,
+     "tpot_ms": 41.484,
+     "mean_inter_chunk_ms": 150.342,
+     "output_head": "blue cyan dark edge flux glow halo iced jade kept lime mint navy onyx pale quartz rust silk teal ultra vest warm xray ya"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 7.307099,
+     "ttft_ms": 1215.527,
+     "tpot_ms": 11.921,
+     "mean_inter_chunk_ms": 66.212,
+     "output_head": "batch forty-two stayed nominal; operator checked pressure, temperature, checksum, closed log. batch forty-three stayed n"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 19.736161,
+     "ttft_ms": 1661.899,
+     "tpot_ms": 35.37,
+     "mean_inter_chunk_ms": 157.167,
+     "output_head": "blue cold fast green high idle jump keen left main next open pure quick real slow top user vast warm xray yarn zinc.Cont"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 18.814914,
+     "ttft_ms": 1215.113,
+     "tpot_ms": 34.442,
+     "mean_inter_chunk_ms": 164.484,
+     "output_head": "batch forty two stayed nominal; operator reviewed pressure temperature checksum before closing record.\nbatch forty three"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 25.351866,
+     "ttft_ms": 10742.294,
+     "tpot_ms": 28.59,
+     "mean_inter_chunk_ms": 54.923,
+     "output_head": "blue green yellow red orange purple brown black white gray pink lime teal cyan navy plum gold mint rose ruby jade amber "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 10.377482,
+     "ttft_ms": 485.115,
+     "tpot_ms": 19.359,
+     "mean_inter_chunk_ms": 63.412,
+     "output_head": "blue cold fast green hard high idle jump left main next open pure quick real safe true warm zero rust dawn echo flint gl"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 6.369243,
+     "ttft_ms": 487.953,
+     "tpot_ms": 11.509,
+     "mean_inter_chunk_ms": 65.347,
+     "output_head": "batch forty two stayed nominal; operator reviewed pressure temperature and checksum fields before closing record\nbatch f"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 9.113177,
+     "ttft_ms": 483.988,
+     "tpot_ms": 16.887,
+     "mean_inter_chunk_ms": 55.672,
+     "output_head": "blue cold dark easy fast good high iron jade keen long mint nice open pink quiet red soft true used very warm xray yarn "
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 20.8716,
+   "request_throughput_rps": 0.3833,
+   "prompt_tokens": 8056,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 385.98,
+   "output_throughput_tok_s": 196.248,
+   "mean_ttft_ms": 2007.954,
+   "p50_ttft_ms": 2057.534,
+   "p95_ttft_ms": 3196.763,
+   "mean_tpot_ms": 26.267,
+   "p50_tpot_ms": 25.757,
+   "p95_tpot_ms": 33.69,
+   "mean_inter_chunk_ms": 89.147,
+   "metric_prompt_tokens": 8056,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1285,
+    "draft_tokens": 6425,
+    "accepted_tokens": 2815,
+    "mean_acceptance_length": 3.1907,
+    "draft_token_acceptance_rate": 0.4381
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 13.375487,
+     "ttft_ms": 365.564,
+     "tpot_ms": 25.46,
+     "mean_inter_chunk_ms": 109.326,
+     "output_head": "blue green yellow red orange purple\ntelemetry batch 42 stayed nominal; the operator reviewed pressure, temperature, and "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 16.653644,
+     "ttft_ms": 1205.395,
+     "tpot_ms": 30.231,
+     "mean_inter_chunk_ms": 87.774,
+     "output_head": "blue cold dark easy fast good high iron jade keen lazy mint nice open pale quiet rain soft true used very warm xray yank"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 13.014904,
+     "ttft_ms": 2057.856,
+     "tpot_ms": 21.442,
+     "mean_inter_chunk_ms": 97.83,
+     "output_head": "batch forty two stayed nominal; operator reviewed pressure temperature and checksum fields before closing the record\nbat"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 14.517691,
+     "ttft_ms": 1204.706,
+     "tpot_ms": 26.053,
+     "mean_inter_chunk_ms": 97.889,
+     "output_head": "blue green yellow red orange pink cyan gray gold lime mint rose teal ice navy plum ruby snow mint ruby plum navy snow te"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 12.594761,
+     "ttft_ms": 2057.211,
+     "tpot_ms": 20.621,
+     "mean_inter_chunk_ms": 98.481,
+     "output_head": "blue cold fast good high iron jade keen long moon nine open pure quick real soft true warm zero bold calm dark easy firm"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 19.563708,
+     "ttft_ms": 2911.247,
+     "tpot_ms": 32.588,
+     "mean_inter_chunk_ms": 68.528,
+     "output_head": "blue green yellow red orange purple brown black white gray pink lime teal cyan navy plum gold mint rose olive cobalt rub"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 12.854899,
+     "ttft_ms": 2911.151,
+     "tpot_ms": 19.459,
+     "mean_inter_chunk_ms": 91.226,
+     "output_head": "blue cyan dark edge fade gray hops iron jade keen lime mint navy olive plum quay rust sage teal urn vows wand xray yolk "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 20.869009,
+     "ttft_ms": 3350.502,
+     "tpot_ms": 34.283,
+     "mean_inter_chunk_ms": 62.122,
+     "output_head": "blue sun rise over calm lake\ncold wind blew past old tree\nfast train ran on steel track\nsoft rain fell on green grass\nbr"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

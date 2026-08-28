@@ -1,0 +1,55 @@
+Working...
+
+
+## Startup Reliability Review — `entrypoint.sh` (2149 lines)
+
+### Architecture
+
+PID-1 supervisor with a boot phase → config resolution → checkpoint prep → serve loop with health verification and automatic rollback. Clean separation of persistent state (`$GLM_STATE_DIR`) and ephemeral runtime (`$GLM_RUNTIME_DIR`).
+
+### Strengths
+
+**Failure containment is excellent.** Every risky operation is guarded:
+- `set -e` at top level; `|| true` on destructive kills so dead-process noise doesn't abort the supervisor.
+- Download failures caught explicitly inside `prepare_checkpoint` (not left to errexit, which is suppressed under `if` — correctly annotated).
+- Config validation failure triggers rollback to known-good before vLLM ever starts.
+- Post-start verification gate with long-context needle probe; verify-failed configs roll back rather than serving silently broken models.
+- Crash-loop budget (`SUPERVISOR_MAX_RESTARTS=5`) with exponential backoff (`attempt*15s`); gives up cleanly rather than thrashing.
+
+**Process hygiene is rigorous:**
+- `serve_once &` under `set -m` gives each vLLM invocation its own process group → `kill -9 -$SRV_PID` reaps the entire tree, including orphaned `VLLM::` workers.
+- `kill_server_tree` also pats down known survivor patterns (`VLLM[:]`, `EngineCor[e]`, `vllm serv[e]`) and waits for VRAM to drop below 3 GB before proceeding.
+- SOUL runs as a dedicated `soul` user via `runuser -u soul` with isolated env; its supervisor subshell traps TERM/INT/EXIT.
+- SOUL restart budgeting with exponential delay (5/15/60/300s) prevents diagnostic controller from eating restart attempts.
+
+**Config layering is well-designed:** env snapshot frozen *before* entrypoint exports anything downstream → no self-pollution. Atomic writes for `config.env` (write to `.tmp`, `mv`). State dir on volume, runtime dir on tmpfs — stale restart flags can't survive container replacement.
+
+**Pre-download safety checks are thorough:**
+- NVIDIA driver version gate with CUDA 13.2 floor — refuses to download 309 GiB to an incompatible host.
+- Tensor-parallel size vs. GPU count validated *after* config resolution (not hard-coded to 4).
+- Checkpoint repo mismatch detection prevents one model being downloaded on top of another.
+- Read-only checkpoint mode (`MODEL_READ_ONLY=1`) blocks all mutation paths (graft, vision install, reconciliation writes).
+
+**Log preservation is deliberate:** failed serve logs are timestamped and rotated (5 newest kept). Boot log preserved to `last-good.log` before truncation. Log truncation only happens *after* verification passes, not before.
+
+### Risks & Concerns
+
+1. **`fetch_weights` under `if` suppresses `set -e` for the *entire* function body.** The comment is correct, but the consequence is that *any* internal failure (HF download partial, filesystem error) must be caught explicitly. If a future edit adds a command inside `fetch_weights` without checking its exit code, the completion marker `.download-complete` will be written for a broken download. The function is long enough that this is plausible.
+
+2. **VRAM drain wait in `kill_server_tree` (30 iterations × 5s = 250s max)** is a best-effort heuristic. If `nvidia-smi` is slow or broken, or if a zombie process holds VRAM that won't release on SIGKILL, the supervisor proceeds with a dirty GPU. On Blackwell with NCCL this *should* work (GPU reset on process death), but it's not verified.
+
+3. **`prepare_checkpoint` can take minutes.** The termination flag is checked at the *start* of the function, but not *during* the 10+ minute download or graft operations. A termination request arriving mid-download isn't seen until the download finishes — acceptable but worth noting.
+
+4. **SOUL permission preparation runs `find` on every reconcile cycle (every 5s of the supervisor subshell).** The 60-second throttle on recursive `chown` helps, but the flat-file permission grants run every cycle. Under heavy I/O (checkpoint download) this adds noise to the volume.
+
+5. **ACME cert issuance blocks boot.** Two attempts with 30s sleep between, plus up to 300s DNS propagation wait each. In the worst case, cert issuance adds ~7 minutes before the supervisor loop can even start. This is mitigated by cert reuse when >7 days validity remains, but first boot on a new domain can be slow.
+
+6. **`recover_sparkinfer_extension_lock`** — if the lock recovery script itself hangs or fails unexpectedly (returns non-zero), the supervisor retries the *entire* checkpoint + serve cycle. On a persistent lock contention scenario this could burn restart budget without progress.
+
+7. **Signal handling: `trap ':' USR1`** is correct (no-op), but the EXIT trap tries `kill -9 -- "-$SRV_PID"` which only works if `SRV_PID` is set. On early exit (config smoke, FATAL before serve), this is a no-op because the negative PID kill fails silently — but it's worth confirming `SRV_PID` defaults to empty in all paths.
+
+8. **`apply_config` source of `$CONFIG_ENV`** — if the previous `config.env` was corrupted mid-write (power loss during `mv`), the `source` could fail silently or export partial state. The atomic `mv` mitigates this on POSIX filesystems, but NFS mounts with `noac` or certain COW filesystems could race.
+
+### Verdict
+
+This is a production-grade entrypoint. The failure modes are mapped, guarded, and instrumented. The rollback/verify cycle is the strongest part of the codebase. The main residual risk is the gap between "weights downloaded" and "config verified" — a bad configuration in that window wastes GPU-hours before detection, but the driver gate, repo mismatch checks, and TP-size validation catch the most expensive failures early. No edits required.

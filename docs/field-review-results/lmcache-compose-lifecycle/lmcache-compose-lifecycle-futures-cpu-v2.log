@@ -1,0 +1,43 @@
+head=2014fbb2271eae516b9f2c61dd0098601e99bd19 start=2026-07-31T03:30:34Z
+
+tests/v1/multiprocess/test_futures.py::test_messaging_future_basic_usage PASSED [  3%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_with_thread PASSED [  7%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_wait_success PASSED [ 10%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_wait_timeout PASSED [ 14%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_result_timeout PASSED [ 17%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_wait_no_timeout PASSED [ 21%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_multiple_result_calls PASSED [ 25%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_complex_type PASSED [ 28%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_exception_is_re_raised PASSED [ 32%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_rejects_non_exception PASSED [ 35%]
+tests/v1/multiprocess/test_futures.py::test_cuda_future_retains_exporter_event_until_raw_response PASSED [ 39%]
+tests/v1/multiprocess/test_futures.py::test_raw_future_retains_exporter_when_cuda_future_is_abandoned PASSED [ 42%]
+tests/v1/multiprocess/test_futures.py::test_timeout_releases_resources_once_and_rejects_late_reply PASSED [ 46%]
+tests/v1/multiprocess/test_futures.py::test_first_success_releases_resources_once_and_rejects_late_failure PASSED [ 50%]
+tests/v1/multiprocess/test_futures.py::test_completion_timeout_race_has_one_terminal_owner PASSED [ 53%]
+tests/v1/multiprocess/test_futures.py::test_cuda_timeout_releases_raw_lease_but_not_caller_lease PASSED [ 57%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_basic_usage SKIPPED [ 60%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_with_thread SKIPPED [ 64%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_wait_no_timeout SKIPPED [ 67%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_wait_with_timeout_success SKIPPED [ 71%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_wait_timeout_reached SKIPPED [ 75%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_result_with_timeout_success SKIPPED [ 78%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_result_timeout_reached SKIPPED [ 82%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_multiple_result_calls SKIPPED [ 85%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_query_before_and_after SKIPPED [ 89%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_complex_type SKIPPED [ 92%]
+tests/v1/multiprocess/test_futures.py::test_messaging_future_to_cuda_future SKIPPED [ 96%]
+tests/v1/multiprocess/test_futures.py::test_cuda_messaging_future_with_explicit_device SKIPPED [100%]
+
+=============================== warnings summary ===============================
+../../../../opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63
+  /opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+    import pynvml  # type: ignore[import]
+
+../../../../opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: 66 warnings
+  /opt/venv/lib/python3.12/site-packages/opentelemetry/sdk/_logs/_internal/__init__.py:580: DeprecationWarning: `LoggingHandler` in `opentelemetry-sdk` is deprecated. Use the handler from `opentelemetry-instrumentation-logging` instead.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 16 passed, 12 skipped, 67 warnings in 14.82s =================
+rc=0 end=2026-07-31T03:30:53Z

@@ -1,0 +1,47 @@
+{
+ "schema": 1,
+ "ts": "2026-07-28T12:13:38Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "max_model_len": 513536,
+ "reserve_tokens": 4096,
+ "requested_sizes": [
+  509440
+ ],
+ "tested_sizes": [
+  509440
+ ],
+ "depths": [
+  0.01,
+  0.1,
+  0.5,
+  0.9,
+  0.99
+ ],
+ "seeds": [
+  20260728
+ ],
+ "probes": [
+  {
+   "attempted": true,
+   "seed": 20260728,
+   "target_tokens": 509440,
+   "tokens": 510534,
+   "tokens_exact": true,
+   "depths": [
+    0.01,
+    0.1,
+    0.5,
+    0.9,
+    0.99
+   ],
+   "found": 5,
+   "total": 5,
+   "degenerate": "",
+   "answer_head": "Kyoto: ERQ-2707\nReykjavik: WEU-8645\nValparaiso: ZUR-6554\nOuagadougou: DNZ-1736\nTrondheim: EJH-5749",
+   "ok": true,
+   "duration_s": 231.056
+  }
+ ],
+ "ok": true
+}

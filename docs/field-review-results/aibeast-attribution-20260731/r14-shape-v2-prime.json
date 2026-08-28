@@ -1,0 +1,612 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T22:19:41Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 512,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 8,
+  "prefill_tokens": [
+   3072,
+   32768,
+   131072
+  ],
+  "warmup": 2,
+  "temperature": 1.0,
+  "seed": 20260731,
+  "prompt_seed": "r14-shape-v2-prime"
+ },
+ "metadata": {
+  "arm": "r14-shape-v2-prime"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.3158,
+   "request_throughput_rps": 0.76,
+   "prompt_tokens": 3083,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2343.068,
+   "output_throughput_tok_s": 0.76,
+   "mean_ttft_ms": 1315.49,
+   "p50_ttft_ms": 1315.49,
+   "p95_ttft_ms": 1315.49,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3083,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3083,
+     "output_tokens": 1,
+     "elapsed_s": 1.315542,
+     "ttft_ms": 1315.49,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "river"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 14.6632,
+   "request_throughput_rps": 0.0682,
+   "prompt_tokens": 32775,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2235.183,
+   "output_throughput_tok_s": 0.068,
+   "mean_ttft_ms": 14662.86,
+   "p50_ttft_ms": 14662.86,
+   "p95_ttft_ms": 14662.86,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 32775,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32775,
+     "output_tokens": 1,
+     "elapsed_s": 14.662911,
+     "ttft_ms": 14662.86,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "batch"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 62.5244,
+   "request_throughput_rps": 0.016,
+   "prompt_tokens": 131070,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2096.3,
+   "output_throughput_tok_s": 0.016,
+   "mean_ttft_ms": 62523.951,
+   "p50_ttft_ms": 62523.951,
+   "p95_ttft_ms": 62523.951,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 131070,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 131070,
+     "output_tokens": 1,
+     "elapsed_s": 62.524036,
+     "ttft_ms": 62523.951,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "a"
+    }
+   ],
+   "target_prompt_tokens": 131072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 64.3777,
+   "request_throughput_rps": 0.1243,
+   "prompt_tokens": 8064,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 125.261,
+   "output_throughput_tok_s": 63.624,
+   "mean_ttft_ms": 1721.689,
+   "p50_ttft_ms": 431.927,
+   "p95_ttft_ms": 7141.665,
+   "mean_tpot_ms": 12.378,
+   "p50_tpot_ms": 12.563,
+   "p95_tpot_ms": 18.245,
+   "mean_itl_ms": 32.87,
+   "metric_prompt_tokens": 8064,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1546,
+    "draft_tokens": 7730,
+    "accepted_tokens": 2556,
+    "mean_acceptance_length": 2.6533,
+    "draft_token_acceptance_rate": 0.3307
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 15.409501,
+     "ttft_ms": 10754.21,
+     "tpot_ms": 9.11,
+     "mean_itl_ms": 33.016,
+     "output_head": "misty river flows cold Telemetry batch 42 stayed nominal; the operator reviewed pressure, temperature, and checksum fiel"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 4.833162,
+     "ttft_ms": 431.742,
+     "tpot_ms": 8.613,
+     "mean_itl_ms": 33.344,
+     "output_head": "batch\nforty\ntwo\nstayed\nnominal\nbatch\nforty\nthree\nstayed\nnominal\nbatch\nforty\nfour\nstayed\nnominal\nbatch\nforty\nfive\nstayed\n"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.693809,
+     "ttft_ms": 430.667,
+     "tpot_ms": 12.257,
+     "mean_itl_ms": 32.791,
+     "output_head": "misty harbor calm windy river quiet delta low basin dry plain high ridge cold valley warm cove sunny cape soft dune gree"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 4.129896,
+     "ttft_ms": 431.079,
+     "tpot_ms": 7.238,
+     "mean_itl_ms": 33.025,
+     "output_head": "misty foggy windy chilly frosty snowy sunny foggy windy chilly frosty snowy sunny misty foggy windy chilly frosty snowy "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 7.005061,
+     "ttft_ms": 428.658,
+     "tpot_ms": 12.87,
+     "mean_itl_ms": 33.047,
+     "output_head": "misty harbor calm echo tidal plume black ember steep logic saffron crisp druid rust pilot hinge slate magnet prism harbo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 7.597706,
+     "ttft_ms": 432.652,
+     "tpot_ms": 14.022,
+     "mean_itl_ms": 32.867,
+     "output_head": "misty harbor  \ncalm river  \nsilent glade  \nstill pond  \namber field  \nquiet ridge  \npale dune  \nopen plain  \ngreen vale "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 8.014046,
+     "ttft_ms": 432.111,
+     "tpot_ms": 14.837,
+     "mean_itl_ms": 32.401,
+     "output_head": "misty harbor fog  \ncalm tide pool  \nsilent wind drift  \nglass lake noon  \namber sun dust  \nquiet creek bed  \nblue dusk m"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 10.69307,
+     "ttft_ms": 432.393,
+     "tpot_ms": 20.08,
+     "mean_itl_ms": 32.47,
+     "output_head": "misty fog over cold hills\ndark owl glides past pine\nwet leaves sink into mud\nfaint wind hums low tone\nold stone rests by"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 30.6072,
+   "request_throughput_rps": 0.2614,
+   "prompt_tokens": 8064,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 263.468,
+   "output_throughput_tok_s": 133.825,
+   "mean_ttft_ms": 542.059,
+   "p50_ttft_ms": 495.436,
+   "p95_ttft_ms": 791.187,
+   "mean_tpot_ms": 13.122,
+   "p50_tpot_ms": 13.052,
+   "p95_tpot_ms": 15.781,
+   "mean_itl_ms": 43.593,
+   "metric_prompt_tokens": 8064,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1238,
+    "draft_tokens": 6190,
+    "accepted_tokens": 2867,
+    "mean_acceptance_length": 3.3158,
+    "draft_token_acceptance_rate": 0.4632
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 8.852263,
+     "ttft_ms": 434.36,
+     "tpot_ms": 16.473,
+     "mean_itl_ms": 45.999,
+     "output_head": "misty harbor fog  \ncalm tide pool  \nsilent wind drift  \nglass lake noon  \namber leaf fall  \ncedar path low  \ndark moss b"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.891367,
+     "ttft_ms": 938.712,
+     "tpot_ms": 11.649,
+     "mean_itl_ms": 41.052,
+     "output_head": "misty fog calm dawn pale rose slow tide clear path warm glow still lake dark room blue sky cold wind soft rain high hill"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 7.458772,
+     "ttft_ms": 505.944,
+     "tpot_ms": 13.606,
+     "mean_itl_ms": 45.742,
+     "output_head": "misty harbor brute hedge ember soft glacier vivid pollen lantern quiet thrush bevel drifter cobalt ash fossil velvet mar"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.98285,
+     "ttft_ms": 472.2,
+     "tpot_ms": 12.741,
+     "mean_itl_ms": 45.849,
+     "output_head": "misty river flows coldWhat is the status of telemetry batch 4??\nIt was nominal; the operator reviewed pressure, temperat"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 5.723501,
+     "ttft_ms": 517.212,
+     "tpot_ms": 10.188,
+     "mean_itl_ms": 45.272,
+     "output_head": "misty river flows coldContinue with a deterministic sequence of short lowercase words. Do not summarize the document.mis"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 7.892559,
+     "ttft_ms": 484.928,
+     "tpot_ms": 14.496,
+     "mean_itl_ms": 44.093,
+     "output_head": "row echo slot flux ramp wolf tarn chip node veil foam hush dart plum rift bass bark tint cobweb jolt kink fluke tundra s"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 7.302012,
+     "ttft_ms": 473.781,
+     "tpot_ms": 13.362,
+     "mean_itl_ms": 44.339,
+     "output_head": "misty cobalt hedge apricot\u208dc\u208e saffron \u0935\u0930\u094d\u0937 amethyst teal peach lime teal plum tundra slate teal misty amber cobalt green"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.878486,
+     "ttft_ms": 509.332,
+     "tpot_ms": 12.464,
+     "mean_itl_ms": 36.395,
+     "output_head": "misty harbor\nbrisk river\nsilent glade\nstill pond\ncalm cove\nquiet moor\npale moon\nblue dusk\nred dawn\ngreen vale\nclear sky\n"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 25.795,
+   "request_throughput_rps": 0.3101,
+   "prompt_tokens": 8064,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 312.618,
+   "output_throughput_tok_s": 158.79,
+   "mean_ttft_ms": 841.816,
+   "p50_ttft_ms": 556.128,
+   "p95_ttft_ms": 1515.45,
+   "mean_tpot_ms": 21.965,
+   "p50_tpot_ms": 22.041,
+   "p95_tpot_ms": 31.182,
+   "mean_itl_ms": 64.591,
+   "metric_prompt_tokens": 8064,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1392,
+    "draft_tokens": 6960,
+    "accepted_tokens": 2715,
+    "mean_acceptance_length": 2.9504,
+    "draft_token_acceptance_rate": 0.3901
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 11.145001,
+     "ttft_ms": 437.274,
+     "tpot_ms": 20.954,
+     "mean_itl_ms": 68.638,
+     "output_head": "misty harbor drifts along quiet tide lines\neach ripple maps onto firm channel rails\ncrisp signal locks the data path in "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 18.987197,
+     "ttft_ms": 1236.936,
+     "tpot_ms": 34.736,
+     "mean_itl_ms": 67.236,
+     "output_head": "misty fog over cold hills\ndark fern glows by still waters\ntwo frogs leap into green moss\nblue kites fly over dry plains\n"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 13.751663,
+     "ttft_ms": 1665.419,
+     "tpot_ms": 23.652,
+     "mean_itl_ms": 67.521,
+     "output_head": "misty river flows coldWhat is 14*9?\n126126126\n\n\n\u200b\n\u0000\n\u2423\n\u00eas crescent\n\n\u200b\n\u0000\n\u2423\n\u00eas crescent\n\n\u200b\n\u0000\n\u2423\n\u00eas crescent\n\u0000\n\u2423\n\u00eas crescent\n"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 12.240056,
+     "ttft_ms": 1236.175,
+     "tpot_ms": 21.534,
+     "mean_itl_ms": 66.288,
+     "output_head": "misty harbor calm\nfrozen pine dark\nsilent river cold\nhidden hollow still\nquiet ridge dry\nviolet meadow low\nsolar crater "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 9.065044,
+     "ttft_ms": 583.935,
+     "tpot_ms": 16.597,
+     "mean_itl_ms": 71.269,
+     "output_head": "batch forty two stayed nominal batch forty three stayed nominal batch forty four stayed nominal batch forty five stayed "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 13.087087,
+     "ttft_ms": 526.264,
+     "tpot_ms": 24.581,
+     "mean_itl_ms": 62.182,
+     "output_head": "misty amber quartz hedge vigil bazaar fragment ember lantern meadow parchment riddle thicket rusted amulet magnet prism "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 12.042094,
+     "ttft_ms": 520.204,
+     "tpot_ms": 22.548,
+     "mean_itl_ms": 57.899,
+     "output_head": "misty harbor  \ncalm river  \nsilent glen  \nstill pond  \nclear brook  \nsoft meadow  \npale dune  \nbright cove  \nquiet marsh"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 6.208817,
+     "ttft_ms": 528.321,
+     "tpot_ms": 11.116,
+     "mean_itl_ms": 55.691,
+     "output_head": "misty river flows coldContinue with a deterministic sequence of short lowercase words. Do not summarize the document.mis"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 20.1406,
+   "request_throughput_rps": 0.3972,
+   "prompt_tokens": 8064,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 400.385,
+   "output_throughput_tok_s": 203.37,
+   "mean_ttft_ms": 1969.925,
+   "p50_ttft_ms": 1992.89,
+   "p95_ttft_ms": 3087.786,
+   "mean_tpot_ms": 27.233,
+   "p50_tpot_ms": 25.459,
+   "p95_tpot_ms": 34.219,
+   "mean_itl_ms": 99.324,
+   "metric_prompt_tokens": 8064,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1166,
+    "draft_tokens": 5830,
+    "accepted_tokens": 2943,
+    "mean_acceptance_length": 3.524,
+    "draft_token_acceptance_rate": 0.5048
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 15.124569,
+     "ttft_ms": 439.275,
+     "tpot_ms": 28.738,
+     "mean_itl_ms": 115.632,
+     "output_head": "misty amber quartz hedge hover baffle crisp ember coral finch idle paddle flock singe rust cobalt sift pad prawn teal wi"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 13.399003,
+     "ttft_ms": 1240.516,
+     "tpot_ms": 23.794,
+     "mean_itl_ms": 115.794,
+     "output_head": "misty amber quartz hedge apricot\u20bamisty amber quartz hedge apricot\u20ba\nmisty amber quartz hedge apricot\u20ba\nmisty amber quartz "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 16.854797,
+     "ttft_ms": 1993.441,
+     "tpot_ms": 29.083,
+     "mean_itl_ms": 93.467,
+     "output_head": "misty fog over cold hills\ndark wolf ran past frozen creek\ncalm wind moved dead leaves far\nblue jay perched on old oak\nsh"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 20.139039,
+     "ttft_ms": 1239.873,
+     "tpot_ms": 36.985,
+     "mean_itl_ms": 72.689,
+     "output_head": "misty amber moss hedge clip\nfaint rust fog bank pass\nglassy pebble cold creek run\nquiet willow shade low stone\ngreen vin"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 15.942135,
+     "ttft_ms": 3238.407,
+     "tpot_ms": 24.861,
+     "mean_itl_ms": 94.101,
+     "output_head": "misty harbor fog\ndeep river stone\ncold ocean wind\nsharp mountain peak\nbright forest sun\ncalm lake tide\ndark cave shadow\n"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 14.810192,
+     "ttft_ms": 2808.062,
+     "tpot_ms": 23.488,
+     "mean_itl_ms": 100.016,
+     "output_head": "batch\ncalm\ndata\necho\nflow\ngood\nhalt\nidle\njoin\nkeep\nloop\nmark\nnext\nopen\npass\nquit\nrun\nsync\ntick\nused\nvibe\nwrap\nyaml\nzeroC"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 15.049445,
+     "ttft_ms": 1992.34,
+     "tpot_ms": 25.552,
+     "mean_itl_ms": 106.155,
+     "output_head": "misty river flows under an old stone bridge quietlyQuick A) to D) answer only.\n\nA) Rejected; missing validity check\nB) A"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1008,
+     "output_tokens": 512,
+     "elapsed_s": 15.77023,
+     "ttft_ms": 2807.487,
+     "tpot_ms": 25.367,
+     "mean_itl_ms": 96.736,
+     "output_head": "misty river flows under stone bridge at dawn\u907f\u514d\u91cd\u590d\u7684\u8bcd\u8bed\u3002\u907f\u514d\u91cd\u590d\u7684\u5b57\u6bcd\u3002\n\u907f\u514d\u91cd\u590d\u7684\u8bcd\u8bed\u3002\u907f\u514d\u91cd\u590d\u7684\u5b57\u6bcd\u3002\n\u907f\u514d\u91cd\u590d\u7684\u8bcd\u8bed\u3002\u907f\u514d\u91cd\u590d\u7684\u5b57\u6bcd\u3002\n\u907f\u514d\u91cd\u590d\u7684\u8bcd\u8bed\u3002\u907f\u514d\u91cd\u590d\u7684\u5b57\u6bcd\u3002\n\u907f\u514d\u91cd\u590d\u7684\u8bcd\u8bed\u3002"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

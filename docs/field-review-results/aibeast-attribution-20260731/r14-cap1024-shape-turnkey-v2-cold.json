@@ -1,0 +1,612 @@
+{
+ "schema": 1,
+ "ts": "2026-08-01T00:23:54Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 512,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 8,
+  "prefill_tokens": [
+   3072,
+   32768,
+   131072
+  ],
+  "warmup": 2,
+  "temperature": 1.0,
+  "seed": 20260731,
+  "prompt_seed": "turnkey-final-cold-v2"
+ },
+ "metadata": {
+  "arm": "r14-cap1024-shape-turnkey-v2-cold"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.4529,
+   "request_throughput_rps": 0.6883,
+   "prompt_tokens": 3082,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2121.316,
+   "output_throughput_tok_s": 0.688,
+   "mean_ttft_ms": 1452.516,
+   "p50_ttft_ms": 1452.516,
+   "p95_ttft_ms": 1452.516,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_inter_chunk_ms": 0.0,
+   "metric_prompt_tokens": 3082,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3082,
+     "output_tokens": 1,
+     "elapsed_s": 1.452571,
+     "ttft_ms": 1452.516,
+     "tpot_ms": 0.0,
+     "mean_inter_chunk_ms": 0.0,
+     "output_head": "alpha"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 16.9647,
+   "request_throughput_rps": 0.0589,
+   "prompt_tokens": 32774,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1931.899,
+   "output_throughput_tok_s": 0.059,
+   "mean_ttft_ms": 16964.359,
+   "p50_ttft_ms": 16964.359,
+   "p95_ttft_ms": 16964.359,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_inter_chunk_ms": 0.0,
+   "metric_prompt_tokens": 32774,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32774,
+     "output_tokens": 1,
+     "elapsed_s": 16.964408,
+     "ttft_ms": 16964.359,
+     "tpot_ms": 0.0,
+     "mean_inter_chunk_ms": 0.0,
+     "output_head": "apple"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 71.3416,
+   "request_throughput_rps": 0.014,
+   "prompt_tokens": 131069,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1837.203,
+   "output_throughput_tok_s": 0.014,
+   "mean_ttft_ms": 71341.247,
+   "p50_ttft_ms": 71341.247,
+   "p95_ttft_ms": 71341.247,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_inter_chunk_ms": 0.0,
+   "metric_prompt_tokens": 131069,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 131069,
+     "output_tokens": 1,
+     "elapsed_s": 71.341325,
+     "ttft_ms": 71341.247,
+     "tpot_ms": 0.0,
+     "mean_inter_chunk_ms": 0.0,
+     "output_head": "alpha"
+    }
+   ],
+   "target_prompt_tokens": 131072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 44.0541,
+   "request_throughput_rps": 0.1816,
+   "prompt_tokens": 8056,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 182.866,
+   "output_throughput_tok_s": 92.977,
+   "mean_ttft_ms": 377.364,
+   "p50_ttft_ms": 374.784,
+   "p95_ttft_ms": 390.201,
+   "mean_tpot_ms": 10.038,
+   "p50_tpot_ms": 9.685,
+   "p95_tpot_ms": 12.978,
+   "mean_inter_chunk_ms": 33.276,
+   "metric_prompt_tokens": 8056,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1238,
+    "draft_tokens": 6190,
+    "accepted_tokens": 2864,
+    "mean_acceptance_length": 3.3134,
+    "draft_token_acceptance_rate": 0.4627
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 5.153044,
+     "ttft_ms": 397.866,
+     "tpot_ms": 9.306,
+     "mean_inter_chunk_ms": 33.022,
+     "output_head": "blue green yellow red orange purple pink black white gray brown gold teal cyan lime mint navy plum ruby rose snow smoke "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 6.366282,
+     "ttft_ms": 372.203,
+     "tpot_ms": 11.73,
+     "mean_inter_chunk_ms": 33.3,
+     "output_head": "blue cold data echo form gear halt idle join knot link mint node omit pace quiz rush sign task unit vest walk xray yarn "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 4.537528,
+     "ttft_ms": 374.764,
+     "tpot_ms": 8.146,
+     "mean_inter_chunk_ms": 33.57,
+     "output_head": "blue green yellow red orange purple brown black white gray pinkmoon river wider than a mile\nmoon river wider than a mile"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 4.620913,
+     "ttft_ms": 374.804,
+     "tpot_ms": 8.309,
+     "mean_inter_chunk_ms": 33.699,
+     "output_head": "blue cyan dark edge fog glow haze iron jade keen lime mint navy olive plum quay rust sage teal urn vine wolf xray yolk z"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 5.51689,
+     "ttft_ms": 374.151,
+     "tpot_ms": 10.064,
+     "mean_inter_chunk_ms": 33.394,
+     "output_head": "blue cold dark even fast good high iron jump keen long mint nice open pink quit rain slow tick user very wide xray yarn "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 4.090175,
+     "ttft_ms": 373.409,
+     "tpot_ms": 7.274,
+     "mean_inter_chunk_ms": 33.185,
+     "output_head": "blue green yellow red orange purple brown black white gray pink lime teal cyan navy mint gold tan rust rose plum jade ru"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 7.296859,
+     "ttft_ms": 375.749,
+     "tpot_ms": 13.544,
+     "mean_inter_chunk_ms": 33.274,
+     "output_head": "blue green yellow red orange purple brown black white gray pink violet teal cyan maroon gold indigo silver bronze copper"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 6.470962,
+     "ttft_ms": 375.967,
+     "tpot_ms": 11.928,
+     "mean_inter_chunk_ms": 32.768,
+     "output_head": "blue green yellow red orange purple brown black white gray pink lime teal cyan navy plum gold ruby jade slate coral ambe"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 32.4165,
+   "request_throughput_rps": 0.2468,
+   "prompt_tokens": 8056,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 248.515,
+   "output_throughput_tok_s": 126.355,
+   "mean_ttft_ms": 489.249,
+   "p50_ttft_ms": 453.193,
+   "p95_ttft_ms": 696.972,
+   "mean_tpot_ms": 14.215,
+   "p50_tpot_ms": 14.437,
+   "p95_tpot_ms": 16.944,
+   "mean_inter_chunk_ms": 44.894,
+   "metric_prompt_tokens": 8056,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1295,
+    "draft_tokens": 6475,
+    "accepted_tokens": 2807,
+    "mean_acceptance_length": 3.1676,
+    "draft_token_acceptance_rate": 0.4335
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 9.055763,
+     "ttft_ms": 370.062,
+     "tpot_ms": 16.997,
+     "mean_inter_chunk_ms": 47.205,
+     "output_head": "blue green yellow red orange purple brown black white gray pink gold silver copper iron steel lead zinc tin bronze cobal"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 7.502832,
+     "ttft_ms": 811.915,
+     "tpot_ms": 13.094,
+     "mean_inter_chunk_ms": 42.617,
+     "output_head": "blue cold dark easy fast good high iron jump keen long mint nice open pure quiet ride safe tick used very warm xray yarn"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 7.872397,
+     "ttft_ms": 451.708,
+     "tpot_ms": 14.522,
+     "mean_inter_chunk_ms": 45.248,
+     "output_head": "blue cold dust even frog gone high iron joke knot lime mint nice open port quit rose salt tick user vest walk xray yolk "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 7.775526,
+     "ttft_ms": 442.038,
+     "tpot_ms": 14.351,
+     "mean_inter_chunk_ms": 45.268,
+     "output_head": "blue cold data drop easy flow grid hold iron jump keep lamp moon nest oval plum quiz rain soft tone user vain walk xray "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 5.843195,
+     "ttft_ms": 483.505,
+     "tpot_ms": 10.489,
+     "mean_inter_chunk_ms": 47.43,
+     "output_head": "blue green yellow red orange purple brown black white gray pink violet teal cyan maroon gold tan lime rust olive navy ru"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 9.052542,
+     "ttft_ms": 444.62,
+     "tpot_ms": 16.845,
+     "mean_inter_chunk_ms": 46.279,
+     "output_head": "blue green yellow red orange purple brown black white gray pink violet teal cyan maroon gold silver copper bronze jade r"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 8.388545,
+     "ttft_ms": 455.469,
+     "tpot_ms": 15.525,
+     "mean_inter_chunk_ms": 46.392,
+     "output_head": "blue green yellow red orange purple brown black white gray pink lime teal navy ruby olive cyan silver gold copper bronze"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 6.531971,
+     "ttft_ms": 454.678,
+     "tpot_ms": 11.893,
+     "mean_inter_chunk_ms": 38.709,
+     "output_head": "rain fall fast over the cold wet hill side and made deep pools that soon froze solid in the bitter night wind while low "
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 25.3099,
+   "request_throughput_rps": 0.3161,
+   "prompt_tokens": 8056,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 318.294,
+   "output_throughput_tok_s": 161.834,
+   "mean_ttft_ms": 821.237,
+   "p50_ttft_ms": 510.299,
+   "p95_ttft_ms": 1531.206,
+   "mean_tpot_ms": 21.277,
+   "p50_tpot_ms": 20.262,
+   "p95_tpot_ms": 27.148,
+   "mean_inter_chunk_ms": 66.254,
+   "metric_prompt_tokens": 8056,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1321,
+    "draft_tokens": 6605,
+    "accepted_tokens": 2782,
+    "mean_acceptance_length": 3.106,
+    "draft_token_acceptance_rate": 0.4212
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 13.892971,
+     "ttft_ms": 372.871,
+     "tpot_ms": 26.458,
+     "mean_inter_chunk_ms": 73.478,
+     "output_head": "blue cold dust even frog gate hops iron joke knot lime mint nave oak port quiz rain salt tick user vale wire xylo yarn z"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 15.303629,
+     "ttft_ms": 1240.735,
+     "tpot_ms": 27.52,
+     "mean_inter_chunk_ms": 70.314,
+     "output_head": "blue green yellow red orange purple pink black white gray brown cyan teal lime navy olive maroon coral peach plum ruby j"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 12.836899,
+     "ttft_ms": 1240.437,
+     "tpot_ms": 22.694,
+     "mean_inter_chunk_ms": 68.214,
+     "output_head": "blue green yellow red orange purple brown black white gray pink\u59d3\u5f20\u548c\u5f20\u59d3\u7684\u4eba\n\nBoth refer to people surnamed Zhang. \n\nBut after"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 11.482102,
+     "ttft_ms": 1687.614,
+     "tpot_ms": 19.167,
+     "mean_inter_chunk_ms": 62.785,
+     "output_head": "blue cold dark even fast good high iron jade keen long mint nice open pure quiet red soft true vast warm xray zinc.Conti"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 9.439354,
+     "ttft_ms": 514.049,
+     "tpot_ms": 17.466,
+     "mean_inter_chunk_ms": 73.157,
+     "output_head": "blue green yellow red orange purple brown black white gray pink lime teal cyan navy plum rose olive mint lemon coral rub"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 9.174938,
+     "ttft_ms": 506.549,
+     "tpot_ms": 16.964,
+     "mean_inter_chunk_ms": 68.796,
+     "output_head": "blue cold fast grid hold iron jump keen loop mint next open pale quick rust sand trim user vest wash xray yarn zinc.Cont"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 11.416235,
+     "ttft_ms": 503.289,
+     "tpot_ms": 21.356,
+     "mean_inter_chunk_ms": 58.047,
+     "output_head": "blue cold dark easy fast good high iron jump keen long mint nice open pure quiet rush soft true used very warm xray yarn"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 10.005423,
+     "ttft_ms": 504.352,
+     "tpot_ms": 18.593,
+     "mean_inter_chunk_ms": 55.238,
+     "output_head": "blue cyan dark edge fade gold haze iron jade keen lime mint navy olive plum quay rust sage teal urn vows wand xray yarn "
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 17.0339,
+   "request_throughput_rps": 0.4697,
+   "prompt_tokens": 8056,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 472.939,
+   "output_throughput_tok_s": 240.461,
+   "mean_ttft_ms": 2112.545,
+   "p50_ttft_ms": 2163.71,
+   "p95_ttft_ms": 3342.98,
+   "mean_tpot_ms": 26.338,
+   "p50_tpot_ms": 25.074,
+   "p95_tpot_ms": 30.929,
+   "mean_inter_chunk_ms": 97.667,
+   "metric_prompt_tokens": 8056,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1108,
+    "draft_tokens": 5540,
+    "accepted_tokens": 2991,
+    "mean_acceptance_length": 3.6995,
+    "draft_token_acceptance_rate": 0.5399
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 16.243814,
+     "ttft_ms": 410.712,
+     "tpot_ms": 30.985,
+     "mean_inter_chunk_ms": 107.707,
+     "output_head": "blue cold dark easy fast good high iron jump keen long mint nice open pink quiet red safe true user vain walk xray yarn "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 17.032985,
+     "ttft_ms": 1281.86,
+     "tpot_ms": 30.824,
+     "mean_inter_chunk_ms": 95.461,
+     "output_head": "blue green yellow red orange purple brown black white gray pinkContinue with a deterministic sequence of short lowercase"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 16.826472,
+     "ttft_ms": 1281.589,
+     "tpot_ms": 30.421,
+     "mean_inter_chunk_ms": 98.385,
+     "output_head": "blue green yellow red orange purple black white gray brown pink indigo teal olive lime navy gold silver rust bronze ambe"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 12.966145,
+     "ttft_ms": 2163.764,
+     "tpot_ms": 21.14,
+     "mean_inter_chunk_ms": 102.879,
+     "output_head": "blue green yellow red orange purple brown black white gray pink lime teal cyan navy mint gold ruby jade rose azure olive"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 14.317269,
+     "ttft_ms": 2163.656,
+     "tpot_ms": 23.784,
+     "mean_inter_chunk_ms": 101.279,
+     "output_head": "blue green yellow red orange purple brown black white gray pink violet indigo tan cyan gold silver lime ruby teal navy o"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 15.8273,
+     "ttft_ms": 3048.821,
+     "tpot_ms": 25.007,
+     "mean_inter_chunk_ms": 92.597,
+     "output_head": "blue red green gray gold cyan\nlime mint teal jade rose plum\ncoal jade snow rust olive slate\nivory pearl amber copper bro"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 15.89496,
+     "ttft_ms": 3048.588,
+     "tpot_ms": 25.14,
+     "mean_inter_chunk_ms": 92.419,
+     "output_head": "blue green yellow red orange purple brown black white gray pink gold silver copper iron steel lead zinc tin bronze\n\nbatc"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1007,
+     "output_tokens": 512,
+     "elapsed_s": 15.462096,
+     "ttft_ms": 3501.373,
+     "tpot_ms": 23.407,
+     "mean_inter_chunk_ms": 90.611,
+     "output_head": "blue cold dark even fast good high iron jump keen long mint nice open pure quiet red safe true user very warm xray yarn "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

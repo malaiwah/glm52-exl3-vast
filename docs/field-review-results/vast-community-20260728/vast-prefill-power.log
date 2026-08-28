@@ -1,0 +1,59 @@
+╭──────────────────────────── NVIDIA P2P Override ─────────────────────────────╮
+│ Effective: no                                                                │
+│ Configured file: no (/etc/modprobe.d/nvidia-p2p-override.conf)               │
+│ Runtime: ForceP2P=; RMForceP2PType=; RMPcieP2PType=;                         │
+│ GrdmaPciTopoCheckOverride=; EnableResizableBar=0; DmaRemapPeerMmio=1         │
+│ Suggested modprobe line:                                                     │
+│ options nvidia                                                               │
+│ NVreg_RegistryDwords="ForceP2P=0x11;RMForceP2PType=1;RMPcieP2PType=2;GrdmaPc │
+│ iTopoCheckOverride=1;EnableResizableBar=1"                                   │
+│ Apply requires NVIDIA module reload or reboot after stopping GPU workloads.  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────── Configuration ────────────────────────────────╮
+│ LLM Inference Benchmark                                                      │
+│ Model: GLM-5.2 @ 127.0.0.1:18000                                             │
+│ Decode concurrency: [1, 2, 4, 8, 16, 32, 64, 128]                            │
+│ Decode contexts: ['0', '16k', '32k', '64k', '128k']                          │
+│ Decode: skipped (--prefill-only) | Max tokens: 8192                          │
+│ Pre-decode warmup: C=1 max-runnable context for 3s                           │
+│ Prefill-only: standalone cold profile (client) | Sustained decode: 0 cells   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Engine: vLLM 
+0.11.2.dev280+gilded.gnosis.v20.vllm0c79e41.sic3828fd.fi801d57a.cu132.20260727  
+Models: ['GLM-5.2']
+KV cache budget (vLLM metrics): 523,264 tokens (4088 blocks × 64; local 261,632 
+× CP 2; CP source: argument)
+Model context length: 520,192 tokens
+Prefill tests: standalone cold profile ['8k', '32k', '64k', '128k']
+Calibrating padding text (run=mgkkwnkgizbh, up to 128k)...
+  Token targeting: single-point estimate from 8k (use --token-targeting exact 
+for /tokenize binary search)
+  Calibrated: 6.18 chars/token (cached, source=8k)
+  8k: 50,601 chars (~8,191 tokens)
+  16k: 101,202 chars (~16,383 tokens)
+  32k: 202,404 chars (~32,767 tokens)
+  64k: 404,809 chars (~65,535 tokens)
+  128k: 809,618 chars (~131,071 tokens)
+Done.
+
+
+
+llm-decode-bench v0.4.29
+Prefill Speed (C=1, client ISL / TTFT)                                          
+                                                                                
+                                                                PCIe rx/tx      
+  Context    Tokens   TTFT (s)   Client tok/s   Server tok/s           avg   N  
+ ────────────────────────────────────────────────────────────────────────────── 
+  8k          8,201       2.69          3,046              —   40791/41159   4  
+  32k        32,323      11.00          2,939              —   46447/47417   1  
+  64k        64,515      22.44          2,875              —   43550/45447   1  
+  128k      128,889      47.74          2,700              —   45239/47185   1  
+                                                                                
+Client tok/s = prompt_tokens / TTFT. Integrated scout rows come from the 
+prefix-cache scout request that decode needs anyway. Server tok/s is optional 
+Prometheus validation when the engine exports prefill counters and the exact 
+counter delta is uncontaminated; for vLLM this uses newly computed KV tokens, 
+not request prompt tokens.
+
+
+Results saved to /workspace/vast-prefill-power.json

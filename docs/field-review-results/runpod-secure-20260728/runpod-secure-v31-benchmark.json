@@ -1,0 +1,147 @@
+{
+ "schema": 1,
+ "ts": "2026-07-28T02:14:02Z",
+ "base_url": "http://127.0.0.1:8000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 256,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 4,
+  "prefill_tokens": [
+   8192,
+   32768,
+   65536,
+   131072
+  ],
+  "warmup": 1,
+  "temperature": 1.0,
+  "seed": 20260728,
+  "prompt_seed": "runpod-secure-v31"
+ },
+ "metadata": {
+  "provider": "runpod-secure,checkpoint=brandon-tr3-native,image=v31"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 2.4063,
+   "request_throughput_rps": 0.4156,
+   "prompt_tokens": 7984,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 3317.963,
+   "output_throughput_tok_s": 0.416,
+   "mean_ttft_ms": 2405.611,
+   "p50_ttft_ms": 2405.611,
+   "p95_ttft_ms": 2405.611,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 7984,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 7984,
+     "output_tokens": 1,
+     "elapsed_s": 2.405757,
+     "ttft_ms": 2405.611,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "red"
+    }
+   ],
+   "target_prompt_tokens": 8192
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 0,
+   "failed": 1,
+   "duration_s": 0.7411,
+   "request_throughput_rps": 0.0,
+   "prompt_tokens": 0,
+   "output_tokens": 0,
+   "prompt_throughput_tok_s": 0.0,
+   "output_throughput_tok_s": 0.0,
+   "mean_ttft_ms": 0.0,
+   "p50_ttft_ms": 0.0,
+   "p95_ttft_ms": 0.0,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 0,
+   "metric_generation_tokens": 0,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [
+    "stream returned no text-bearing deltas"
+   ],
+   "requests_detail": [],
+   "target_prompt_tokens": 32768
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 0,
+   "failed": 1,
+   "duration_s": 0.0037,
+   "request_throughput_rps": 0.0,
+   "prompt_tokens": 0,
+   "output_tokens": 0,
+   "prompt_throughput_tok_s": 0.0,
+   "output_throughput_tok_s": 0.0,
+   "mean_ttft_ms": 0.0,
+   "p50_ttft_ms": 0.0,
+   "p95_ttft_ms": 0.0,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 0,
+   "metric_generation_tokens": 0,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [
+    "HTTP 500: {\"error\":{\"message\":\"EngineCore encountered an issue. See stack trace (above) for the root cause.\",\"type\":\"InternalServerError\",\"param\":null,\"code\":500}}"
+   ],
+   "requests_detail": [],
+   "target_prompt_tokens": 65536
+  }
+ ],
+ "concurrency": [],
+ "complete": false,
+ "ok": false,
+ "fatal_error": "URLError: <urlopen error [Errno 111] Connection refused>"
+}

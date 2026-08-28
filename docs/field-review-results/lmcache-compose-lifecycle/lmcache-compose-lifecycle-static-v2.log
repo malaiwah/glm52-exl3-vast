@@ -1,0 +1,79 @@
+head=2014fbb2271eae516b9f2c61dd0098601e99bd19 start=2026-07-31T03:32:19Z
+B023 Function definition does not bind loop variable `timeout_notifications`
+   --> tests/v1/multiprocess/test_futures.py:330:32
+    |
+328 |         weakref.finalize(resource, releases.append, "released")
+329 |         future = MessagingFuture[int](
+330 |             on_timeout=lambda: timeout_notifications.append("timeout")
+    |                                ^^^^^^^^^^^^^^^^^^^^^
+331 |         )
+332 |         future.retain_until_complete(resource)
+    |
+
+B023 Function definition does not bind loop variable `start`
+   --> tests/v1/multiprocess/test_futures.py:338:13
+    |
+337 |         def _expire() -> None:
+338 |             start.wait()
+    |             ^^^^^
+339 |             try:
+340 |                 observed.append(future.result(timeout=0))
+    |
+
+B023 Function definition does not bind loop variable `observed`
+   --> tests/v1/multiprocess/test_futures.py:340:17
+    |
+338 |             start.wait()
+339 |             try:
+340 |                 observed.append(future.result(timeout=0))
+    |                 ^^^^^^^^
+341 |             except BaseException as exc:
+342 |                 observed.append(exc)
+    |
+
+B023 Function definition does not bind loop variable `future`
+   --> tests/v1/multiprocess/test_futures.py:340:33
+    |
+338 |             start.wait()
+339 |             try:
+340 |                 observed.append(future.result(timeout=0))
+    |                                 ^^^^^^
+341 |             except BaseException as exc:
+342 |                 observed.append(exc)
+    |
+
+B023 Function definition does not bind loop variable `observed`
+   --> tests/v1/multiprocess/test_futures.py:342:17
+    |
+340 |                 observed.append(future.result(timeout=0))
+341 |             except BaseException as exc:
+342 |                 observed.append(exc)
+    |                 ^^^^^^^^
+343 |
+344 |         def _complete() -> None:
+    |
+
+B023 Function definition does not bind loop variable `start`
+   --> tests/v1/multiprocess/test_futures.py:345:13
+    |
+344 |         def _complete() -> None:
+345 |             start.wait()
+    |             ^^^^^
+346 |             future.set_result(11)
+    |
+
+B023 Function definition does not bind loop variable `future`
+   --> tests/v1/multiprocess/test_futures.py:346:13
+    |
+344 |         def _complete() -> None:
+345 |             start.wait()
+346 |             future.set_result(11)
+    |             ^^^^^^
+347 |
+348 |         expiry_thread = threading.Thread(target=_expire)
+    |
+
+Found 7 errors.
+Would reformat: tests/v1/test_vllm_mp_adapter.py
+1 file would be reformatted, 16 files already formatted
+ruff_check_rc=1 ruff_format_rc=1 end=2026-07-31T03:32:19Z

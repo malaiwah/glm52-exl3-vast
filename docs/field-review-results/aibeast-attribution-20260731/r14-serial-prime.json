@@ -1,0 +1,612 @@
+{
+ "schema": 1,
+ "ts": "2026-07-31T21:15:22Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 512,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 8,
+  "prefill_tokens": [
+   3072,
+   32768,
+   131072
+  ],
+  "warmup": 2,
+  "temperature": 1.0,
+  "seed": 20260731,
+  "prompt_seed": "bisect-r14-serial-prime-v1"
+ },
+ "metadata": {
+  "arm": "r14-serial-prime"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 1.3125,
+   "request_throughput_rps": 0.7619,
+   "prompt_tokens": 3085,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2350.543,
+   "output_throughput_tok_s": 0.762,
+   "mean_ttft_ms": 1312.034,
+   "p50_ttft_ms": 1312.034,
+   "p95_ttft_ms": 1312.034,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 3085,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 3085,
+     "output_tokens": 1,
+     "elapsed_s": 1.312113,
+     "ttft_ms": 1312.034,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "alpha"
+    }
+   ],
+   "target_prompt_tokens": 3072
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 14.5855,
+   "request_throughput_rps": 0.0686,
+   "prompt_tokens": 32777,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2247.23,
+   "output_throughput_tok_s": 0.069,
+   "mean_ttft_ms": 14585.061,
+   "p50_ttft_ms": 14585.061,
+   "p95_ttft_ms": 14585.061,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 32777,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32777,
+     "output_tokens": 1,
+     "elapsed_s": 14.585137,
+     "ttft_ms": 14585.061,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "red"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 62.2661,
+   "request_throughput_rps": 0.0161,
+   "prompt_tokens": 131072,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2105.031,
+   "output_throughput_tok_s": 0.016,
+   "mean_ttft_ms": 62265.666,
+   "p50_ttft_ms": 62265.666,
+   "p95_ttft_ms": 62265.666,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 131072,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 131072,
+     "output_tokens": 1,
+     "elapsed_s": 62.265713,
+     "ttft_ms": 62265.666,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "this"
+    }
+   ],
+   "target_prompt_tokens": 131072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 54.0979,
+   "request_throughput_rps": 0.1479,
+   "prompt_tokens": 8080,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 149.359,
+   "output_throughput_tok_s": 75.715,
+   "mean_ttft_ms": 1643.424,
+   "p50_ttft_ms": 360.339,
+   "p95_ttft_ms": 7033.797,
+   "mean_tpot_ms": 10.017,
+   "p50_tpot_ms": 10.714,
+   "p95_tpot_ms": 11.798,
+   "mean_itl_ms": 36.195,
+   "metric_prompt_tokens": 8080,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1141,
+    "draft_tokens": 5705,
+    "accepted_tokens": 2960,
+    "mean_acceptance_length": 3.5942,
+    "draft_token_acceptance_rate": 0.5188
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 16.337314,
+     "ttft_ms": 10626.347,
+     "tpot_ms": 11.176,
+     "mean_itl_ms": 35.918,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 4.852416,
+     "ttft_ms": 358.266,
+     "tpot_ms": 8.795,
+     "mean_itl_ms": 38.086,
+     "output_head": "batch forty two stayed nominal\nbatch forty three stayed nominal\nbatch forty four stayed nominal\nbatch forty five stayed "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 5.950465,
+     "ttft_ms": 361.918,
+     "tpot_ms": 10.936,
+     "mean_itl_ms": 35.595,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 4.018739,
+     "ttft_ms": 358.997,
+     "tpot_ms": 7.162,
+     "mean_itl_ms": 36.597,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 5.793427,
+     "ttft_ms": 360.212,
+     "tpot_ms": 10.633,
+     "mean_itl_ms": 36.221,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 4.706871,
+     "ttft_ms": 360.466,
+     "tpot_ms": 8.506,
+     "mean_itl_ms": 36.524,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 6.561077,
+     "ttft_ms": 361.339,
+     "tpot_ms": 12.133,
+     "mean_itl_ms": 35.027,
+     "output_head": "cow dog ant bat owl fox bee rat pug eel yak emu crow toad hare bear lion hawk moth wolf carp swan ibis seal crab deer mu"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 5.876152,
+     "ttft_ms": 359.846,
+     "tpot_ms": 10.795,
+     "mean_itl_ms": 35.589,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 30.2926,
+   "request_throughput_rps": 0.2641,
+   "prompt_tokens": 8080,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 266.732,
+   "output_throughput_tok_s": 135.214,
+   "mean_ttft_ms": 496.793,
+   "p50_ttft_ms": 413.111,
+   "p95_ttft_ms": 784.334,
+   "mean_tpot_ms": 12.645,
+   "p50_tpot_ms": 11.782,
+   "p95_tpot_ms": 16.808,
+   "mean_itl_ms": 48.818,
+   "metric_prompt_tokens": 8080,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1077,
+    "draft_tokens": 5385,
+    "accepted_tokens": 3035,
+    "mean_acceptance_length": 3.818,
+    "draft_token_acceptance_rate": 0.5636
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 6.607757,
+     "ttft_ms": 357.556,
+     "tpot_ms": 12.231,
+     "mean_itl_ms": 56.308,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 6.571564,
+     "ttft_ms": 780.247,
+     "tpot_ms": 11.333,
+     "mean_itl_ms": 54.124,
+     "output_head": "cow dog ant bat owl fox bee rat pug cat elk yak ram emu hen fly nay\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440\n\u54ce\u5440"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 5.210473,
+     "ttft_ms": 395.83,
+     "tpot_ms": 9.422,
+     "mean_itl_ms": 50.152,
+     "output_head": "batch forty two nominal\nbatch forty three nominal\nbatch forty four nominal\nbatch forty five nominal\nbatch forty six nomi"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 8.095948,
+     "ttft_ms": 786.535,
+     "tpot_ms": 14.304,
+     "mean_itl_ms": 48.088,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 7.886738,
+     "ttft_ms": 419.589,
+     "tpot_ms": 14.613,
+     "mean_itl_ms": 48.488,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 9.601369,
+     "ttft_ms": 408.368,
+     "tpot_ms": 17.99,
+     "mean_itl_ms": 47.143,
+     "output_head": "cow dog ant bat eel fox owl pig rat yak bee cat fly hen emu ape ram cow dog ant bat eel fox owl pig rat yak bee cat fly "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 5.708615,
+     "ttft_ms": 413.457,
+     "tpot_ms": 10.362,
+     "mean_itl_ms": 48.579,
+     "output_head": "cow dog ant bat owl fox bee rat pug cat elk yak ram emu eel auk doe hen cow dog ant bat owl fox bee rat pug cat elk yak "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 5.986578,
+     "ttft_ms": 412.765,
+     "tpot_ms": 10.908,
+     "mean_itl_ms": 37.66,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 20.6272,
+   "request_throughput_rps": 0.3878,
+   "prompt_tokens": 8080,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 391.715,
+   "output_throughput_tok_s": 198.573,
+   "mean_ttft_ms": 746.938,
+   "p50_ttft_ms": 475.009,
+   "p95_ttft_ms": 1392.23,
+   "mean_tpot_ms": 17.895,
+   "p50_tpot_ms": 18.137,
+   "p95_tpot_ms": 23.776,
+   "mean_itl_ms": 67.829,
+   "metric_prompt_tokens": 8080,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1074,
+    "draft_tokens": 5370,
+    "accepted_tokens": 3027,
+    "mean_acceptance_length": 3.8184,
+    "draft_token_acceptance_rate": 0.5637
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 11.343998,
+     "ttft_ms": 365.853,
+     "tpot_ms": 21.484,
+     "mean_itl_ms": 75.711,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 13.859787,
+     "ttft_ms": 1079.428,
+     "tpot_ms": 25.01,
+     "mean_itl_ms": 71.799,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 10.419667,
+     "ttft_ms": 1078.959,
+     "tpot_ms": 18.279,
+     "mean_itl_ms": 69.19,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 9.212288,
+     "ttft_ms": 1560.662,
+     "tpot_ms": 14.974,
+     "mean_itl_ms": 64.297,
+     "output_head": "cow dog hen fox owl bat ant bee cat rat pig cow dog hen fox owl bat ant bee cat rat pig cow dog hen fox owl bat ant bee "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 9.672422,
+     "ttft_ms": 476.242,
+     "tpot_ms": 17.996,
+     "mean_itl_ms": 72.985,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 10.02778,
+     "ttft_ms": 467.709,
+     "tpot_ms": 18.709,
+     "mean_itl_ms": 64.595,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 7.825986,
+     "ttft_ms": 472.874,
+     "tpot_ms": 14.39,
+     "mean_itl_ms": 66.846,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 6.766454,
+     "ttft_ms": 473.775,
+     "tpot_ms": 12.314,
+     "mean_itl_ms": 57.206,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 17.7397,
+   "request_throughput_rps": 0.451,
+   "prompt_tokens": 8080,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 455.475,
+   "output_throughput_tok_s": 230.894,
+   "mean_ttft_ms": 1810.099,
+   "p50_ttft_ms": 1861.441,
+   "p95_ttft_ms": 2896.251,
+   "mean_tpot_ms": 26.707,
+   "p50_tpot_ms": 25.962,
+   "p95_tpot_ms": 31.876,
+   "mean_itl_ms": 102.688,
+   "metric_prompt_tokens": 8080,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 1082,
+    "draft_tokens": 5410,
+    "accepted_tokens": 3022,
+    "mean_acceptance_length": 3.793,
+    "draft_token_acceptance_rate": 0.5586
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 14.071558,
+     "ttft_ms": 365.734,
+     "tpot_ms": 26.822,
+     "mean_itl_ms": 120.226,
+     "output_head": "batch forty two batch forty three batch forty four batch forty five batch forty six batch forty seven batch forty eight "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 17.738785,
+     "ttft_ms": 1080.726,
+     "tpot_ms": 32.599,
+     "mean_itl_ms": 95.189,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 13.907741,
+     "ttft_ms": 1080.434,
+     "tpot_ms": 25.102,
+     "mean_itl_ms": 115.561,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 17.463189,
+     "ttft_ms": 1861.461,
+     "tpot_ms": 30.532,
+     "mean_itl_ms": 92.867,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 13.816845,
+     "ttft_ms": 1861.42,
+     "tpot_ms": 23.396,
+     "mean_itl_ms": 109.682,
+     "output_head": "cow dog ant bat eel fox owl pug yak emu ram hen cow dog ant bat eel fox owl pug yak emu ram hen cow dog ant bat eel fox "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 17.699564,
+     "ttft_ms": 2583.309,
+     "tpot_ms": 29.582,
+     "mean_itl_ms": 87.885,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 14.814549,
+     "ttft_ms": 2582.949,
+     "tpot_ms": 23.937,
+     "mean_itl_ms": 100.258,
+     "output_head": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi om"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 512,
+     "elapsed_s": 14.14636,
+     "ttft_ms": 3064.758,
+     "tpot_ms": 21.686,
+     "mean_itl_ms": 99.834,
+     "output_head": "batch forty two batch forty three batch forty four batch forty five batch forty six batch forty seven batch forty eight "
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

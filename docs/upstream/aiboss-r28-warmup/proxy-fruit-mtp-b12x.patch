@@ -1,0 +1,10 @@
+diff --git a/fruit_serve_mtp.py b/fruit_serve_mtp.py
+--- a/fruit_serve_mtp.py
++++ b/fruit_serve_mtp.py
+@@ -35,6 +35,7 @@ def main() -> None:
+                       trust_remote_code=False, enforce_eager=True,
+                       gpu_memory_utilization=util,
+                       disable_log_stats=False,
++                      attention_backend="B12X_MLA_SPARSE",
+                       speculative_config={"method": method,
+                                           "num_speculative_tokens": k})

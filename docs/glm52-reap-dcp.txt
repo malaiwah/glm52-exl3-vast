@@ -1,0 +1,21 @@
+podman run -d --name glm-dcp --shm-size=8g -p 30000:30000 \
+  --device /dev/nvidia0 --device /dev/nvidia1 --device /dev/nvidia2 --device /dev/nvidia3 \
+  --device /dev/nvidiactl --device /dev/nvidia-uvm --device /dev/nvidia-uvm-tools --device /dev/nvidia-modeset \
+  -e SGLANG_NSA_DECODE_DCP=1 -e SGLANG_NSA_DCP_SHARD_POOL=1 \
+  -e B12X_MOE_FORCE_A16=1 -e B12X_W4A16_TC_DECODE=1 -e B12X_DENSE_SPLITK_TURBO=1 \
+  -e SGLANG_NSA_B12X_LOGITS=1 -e SGLANG_ENABLE_JIT_DEEPGEMM=0 -e NCCL_IB_DISABLE=1 \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  -v /mnt/vault/llm/huggingface:/root/.cache/huggingface \
+  docker.io/malaiwah/sglang:glm52-reap-dcp \
+  sglang serve \
+    --model-path /root/.cache/huggingface/local-models/GLM-5.2-NVFP4-REAP-469B-contig \
+    --served-model-name glm52-reap --host 0.0.0.0 --trust-remote-code \
+    --tensor-parallel-size 4 --attention-context-parallel-size 1 \
+    --reasoning-parser glm45 --tool-call-parser glm47 \
+    --json-model-override-args '{"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}' \
+    --quantization modelopt_fp4 --fp4-gemm-backend b12x --moe-runner-backend b12x \
+    --kv-cache-dtype fp8_e4m3 --page-size 64 \
+    --prefill-attention-backend nsa --decode-attention-backend nsa \
+    --mem-fraction-static 0.90 --context-length 250000 \
+    --chunked-prefill-size 1024 --cuda-graph-max-bs 1 --max-running-requests 1 \
+    --enable-pcie-oneshot-allreduce --pcie-oneshot-allreduce-max-size auto

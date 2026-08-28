@@ -1,0 +1,71 @@
+Working...
+
+
+## UX & Security Review — `landing.py`
+
+### Architecture
+
+Single-file HTTP server on `:1111` with dual-protocol TLS peeking, token-gated auth, config editor, live metrics charts, a chat widget, and a destructive termination UI. ~1850 lines, stdlib-only. No CSP, no CSRF tokens, no session cookies.
+
+---
+
+### Security — Strengths
+
+| Area | What works |
+|---|---|
+| **Token auth** | `hmac.compare_digest` prevents timing attacks. Token is required on all config/terminate/chat paths. |
+| **Header hygiene** | `no-store`, `no-referrer`, `nosniff`, `DENY` framing — set on every response. |
+| **XSS mitigation** | `html.escape()` on all dynamic content; `js_literal()` escapes `< > &` and U+2028/2029 for inline script safety. |
+| **Token injection** | CR/LF stripped from `token` query param to prevent header injection via the plain→HTTPS `Location` redirect. |
+| **API key visibility** | The real API key is only embedded in HTML/JS when `secure AND TOKEN AND key AND endpoint` are all true. Otherwise a placeholder is shown. |
+| **Termination gates** | 6 layers: module importable, token auth, kill-switch enabled, anti-kill-switch not locked, typed instance-id match, "I understand" checkbox. Thread lock prevents double-fire. |
+| **Erase honesty** | The UI explicitly names limitations (SSD wear levelling, overlay fs, provider snapshots) instead of overclaiming. |
+| **Bounded form reads** | 1 MB cap on POST bodies. Socket timeout on every connection. |
+| **SOUL evidence** | Path traversal blocked: resolved target must be a descendant of the soul root. |
+| **Destructive actions opt-in** | `TERMINATE_ENABLED` is off by default; dry-run mode supported. |
+
+### Security — Gaps
+
+| # | Severity | Issue |
+|---|---|---|
+| **1** | **Medium** | **No CSRF protection.** All mutations use `GET/POST` with the token in the query string or form body. A malicious page visited in the same browser could trigger `POST /config/reset` or `POST /terminate` via an auto-submitted form. `X-Frame-Options: DENY` mitigates iframing but not direct navigation. Adding a per-session CSRF token synced to a cookie would close this. |
+| **2** | **Medium** | **Token in URL query params.** The token appears in every navigation link (`/config?token=…`), in `Location` redirects, and in `<a href>`. Browser history, proxy logs, and referrer headers (partially mitigated by `no-referrer`) all capture it. POST targets carry it in the form body too, but the *initial GET* that renders the page exposes it in the URL bar. |
+| **3** | **Low-Medium** | **No Content Security Policy.** Inline `<script>` blocks are pervasive (metrics, chat, copy buttons, auto-refresh). Without CSP, a reflected XSS would execute unhindered. Adding `script-src 'unsafe-inline'` with `nonce` or `strict-dynamic` is a stretch given the template-driven rendering, but a baseline CSP denying everything else (`default-src 'none'; frame-ancestors 'none'`) would help. |
+| **4** | **Low** | **`ALLOW_INSECURE=1` bypasses TLS entirely.** This is intentional for LAN/demo, but the banner warning is visual-only. If a tokened page is served over plain HTTP with this flag, the API key is embedded in inline JS for anyone on the network. |
+| **5** | **Low** | **`TRUST_PROXY_HTTPS` trust model is opaque.** When `1`, any connection is treated as secure regardless of actual transport. On a misconfigured reverse proxy, this leaks the API key in JS. |
+| **6** | **Low** | **`/terminate/status` requires token but returns live progress including HTTP URLs, methods, and erase results.** If the token is compromised, an attacker can observe termination progress in real time. This is acceptable for an appliance token but worth noting. |
+
+---
+
+### UX — Strengths
+
+| Area | What works |
+|---|---|
+| **Boot timeline** | The page is live from minute one. Auto-refreshes every 20s while booting. Status cards show download progress, engine state, TLS status independently. |
+| **Correctness vs liveness** | Separated. A card says "engine: serving" and another says "correctness: long-context UNVERIFIED." This prevents the false confidence of `/health` passing but long context failing. |
+| **Config editor** | Pre-validation before apply. Family-aware: N/A knobs are greyed out with explanation. Dropped knobs are reported even on "no change." Source badges show whether a value comes from file, env, or default. |
+| **Rollback visibility** | Failed configs are listed with diff, model analysis, and signature matches. Banner warns on the main config page. |
+| **Termination UX** | Excellent. Explains what is destroyed vs what survives. Type-the-instance-id confirmation (not just a checkbox). Dry-run mode. Lock/disable ratchet. Progress tracking with step details. |
+| **Client configs** | Pre-filled snippets for oh-my-pi, opencode, Claude Code, Codex — with endpoint, key, model, context. Reduces copy-paste errors. |
+| **Live metrics** | Client-side canvas charts for throughput, queue depth, KV cache, prefix-cache hit rate. No server-side proxy — scrapes vLLM directly. |
+| **Chat widget** | Streaming with thinking/reasoning display, preserve-thinking toggle, turn count, stop button. Integrated on the dashboard at wide viewport. |
+| **Boot log relay** | On RunPod (no console log view), boot notes are surfaced in the page. |
+
+### UX — Gaps
+
+| # | Impact | Issue |
+|---|---|---|
+| **1** | **Medium** | **No onboarding.** First-time users see a dense dashboard with 8+ status cards, metrics charts, config snippets, and a chat widget — but no guided walkthrough. There's no "what to do first" path. A first-time indicator (e.g., a collapsible card with 3 steps: check weights → check correctness → connect your client) would reduce cognitive load. |
+| **2** | **Medium** | **Token discovery is obscure.** The token lives in `OPEN_BUTTON_TOKEN` env var and is injected via the "Open" button on vast.ai/RunPod. If that button is broken or the user launched manually, there's no way to discover the token from the page itself. The `/` page without a token returns 403 with `"bad token (use the vast console Open button)"` — unhelpful if you don't have one. |
+| **3** | **Low** | **API key retrieval is provider-dependent.** On vast.ai it points to "instance logs." On RunPod it says "pod container logs" with a big bold warning that RunPod has no log view. This is a painful first-time path: you need the key to use chat or client configs, but can't see it without the token, and the token comes from the provider UI. |
+| **4** | **Low** | **Config page has no "what changed since last apply" diff until after submission.** The apply state card shows "steady/trial/rolled-back" but doesn't show pending changes before you hit Apply. |
+| **5** | **Low** | **SOUL card is always rendered even when disabled.** When `autonomyLevel=0`, it says "Proactive diagnostics are off" with a busy pill — visually noisy for users who don't care about SOUL. |
+| **6** | **Low** | **Mobile layout for config is cramped.** The knob table uses fixed-width value cells (`td.v{width:14rem}`) on mobile, which can overflow. The `@media(max-width:38rem)` breakpoint handles the chat composer but not the config table. |
+
+---
+
+### Summary
+
+**Security posture is solid for its threat model** — a rented GPU appliance accessed via a single bearer token through a cloud provider's "Open" button. The big gap is CSRF protection (fixable with a cookie-synced token). Token-in-URL is a known trade-off for cookieless statelessness; `Referrer-Policy: no-referrer` mitigates leakage but doesn't cover history or proxy logs.
+
+**UX is information-dense and correct, but not onboarding-friendly.** A first-time user needs to know: "is it ready?" → the cards answer this well. But "what do I do with it?" requires scanning 6+ client config snippets and finding the API key in a location that depends on which provider they're on. A single "Get Started" card that appears only on first visit (or when `phase != "serving"`) would cost little and pay off in reduced support noise.

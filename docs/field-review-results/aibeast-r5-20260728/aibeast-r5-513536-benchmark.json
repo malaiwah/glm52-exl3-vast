@@ -1,0 +1,536 @@
+{
+ "schema": 1,
+ "ts": "2026-07-28T11:59:38Z",
+ "base_url": "http://127.0.0.1:8000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 1024,
+  "output_tokens": 256,
+  "concurrency": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "requests_per_level": 4,
+  "prefill_tokens": [
+   8192,
+   32768,
+   65536,
+   131072
+  ],
+  "warmup": 1,
+  "temperature": 1.0,
+  "seed": 20260728,
+  "prompt_seed": "aibeast-r5-513536"
+ },
+ "metadata": {
+  "provider": "aibeast,checkpoint=brandon-tr3-native,image=r5,max_model_len=513536,gmu=0.976"
+ },
+ "prefill": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 2.8279,
+   "request_throughput_rps": 0.3536,
+   "prompt_tokens": 7988,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2824.757,
+   "output_throughput_tok_s": 0.354,
+   "mean_ttft_ms": 2827.472,
+   "p50_ttft_ms": 2827.472,
+   "p95_ttft_ms": 2827.472,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 7988,
+   "metric_generation_tokens": 1,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 7988,
+     "output_tokens": 1,
+     "elapsed_s": 2.827554,
+     "ttft_ms": 2827.472,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 8192
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 11.906,
+   "request_throughput_rps": 0.084,
+   "prompt_tokens": 32537,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2732.824,
+   "output_throughput_tok_s": 0.084,
+   "mean_ttft_ms": 11905.565,
+   "p50_ttft_ms": 11905.565,
+   "p95_ttft_ms": 11905.565,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 36199,
+   "metric_generation_tokens": 2,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32537,
+     "output_tokens": 1,
+     "elapsed_s": 11.905647,
+     "ttft_ms": 11905.565,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 32768
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 25.2973,
+   "request_throughput_rps": 0.0395,
+   "prompt_tokens": 65727,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 2598.184,
+   "output_throughput_tok_s": 0.04,
+   "mean_ttft_ms": 25296.939,
+   "p50_ttft_ms": 25296.939,
+   "p95_ttft_ms": 25296.939,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 65727,
+   "metric_generation_tokens": 91,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 23,
+    "draft_tokens": 115,
+    "accepted_tokens": 69,
+    "mean_acceptance_length": 4.0,
+    "draft_token_acceptance_rate": 0.6
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 65727,
+     "output_tokens": 1,
+     "elapsed_s": 25.296996,
+     "ttft_ms": 25296.939,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "cat"
+    }
+   ],
+   "target_prompt_tokens": 65536
+  },
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 1,
+   "failed": 0,
+   "duration_s": 80.7777,
+   "request_throughput_rps": 0.0124,
+   "prompt_tokens": 133722,
+   "output_tokens": 1,
+   "prompt_throughput_tok_s": 1655.431,
+   "output_throughput_tok_s": 0.012,
+   "mean_ttft_ms": 80777.274,
+   "p50_ttft_ms": 80777.274,
+   "p95_ttft_ms": 80777.274,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 199225,
+   "metric_generation_tokens": 166,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 44,
+    "draft_tokens": 220,
+    "accepted_tokens": 120,
+    "mean_acceptance_length": 3.7273,
+    "draft_token_acceptance_rate": 0.5455
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 133722,
+     "output_tokens": 1,
+     "elapsed_s": 80.777366,
+     "ttft_ms": 80777.274,
+     "tpot_ms": 0.0,
+     "mean_itl_ms": 0.0,
+     "output_head": "Te"
+    }
+   ],
+   "target_prompt_tokens": 131072
+  }
+ ],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 25.7465,
+   "request_throughput_rps": 0.1554,
+   "prompt_tokens": 4040,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 156.914,
+   "output_throughput_tok_s": 39.772,
+   "mean_ttft_ms": 730.698,
+   "p50_ttft_ms": 484.285,
+   "p95_ttft_ms": 1399.904,
+   "mean_tpot_ms": 22.376,
+   "p50_tpot_ms": 17.526,
+   "p95_tpot_ms": 41.822,
+   "mean_itl_ms": 98.583,
+   "metric_prompt_tokens": 195241,
+   "metric_generation_tokens": 2462,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 656,
+    "draft_tokens": 3280,
+    "accepted_tokens": 1811,
+    "mean_acceptance_length": 3.7607,
+    "draft_token_acceptance_rate": 0.5521
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 3.717914,
+     "ttft_ms": 1554.561,
+     "tpot_ms": 8.484,
+     "mean_itl_ms": 43.266,
+     "output_head": "aibeast-r5-513536-c1-0\nbatch zero nominal\npressure ok\ntemperature ok\nchecksum ok\nbatch one nominal\npressure ok\ntemperatu"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 12.120661,
+     "ttft_ms": 399.661,
+     "tpot_ms": 45.965,
+     "mean_itl_ms": 244.186,
+     "output_head": "aibeast r5 513536 c1 1 batch 0 nominal pressure temperature checksum closed batch 1 nominal pressure temperature checksu"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 4.783914,
+     "ttft_ms": 523.511,
+     "tpot_ms": 16.707,
+     "mean_itl_ms": 45.323,
+     "output_head": "pack each token tight, fold, stack, bind, ship, log, scan, mark, sort, wrap, seal, queue, route, check, pass, hold, drop"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 5.123337,
+     "ttft_ms": 445.059,
+     "tpot_ms": 18.346,
+     "mean_itl_ms": 61.556,
+     "output_head": "ant bat cat dog elk fox gnu hog ion jam key log man net owl pig ram sun top urn vow wax yak zenContinue with a determini"
+    }
+   ]
+  },
+  {
+   "concurrency": 2,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 10.7853,
+   "request_throughput_rps": 0.3709,
+   "prompt_tokens": 4040,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 374.583,
+   "output_throughput_tok_s": 94.944,
+   "mean_ttft_ms": 646.879,
+   "p50_ttft_ms": 647.051,
+   "p95_ttft_ms": 770.81,
+   "mean_tpot_ms": 18.081,
+   "p50_tpot_ms": 18.608,
+   "p95_tpot_ms": 24.824,
+   "mean_itl_ms": 57.927,
+   "metric_prompt_tokens": 4040,
+   "metric_generation_tokens": 1724,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 491,
+    "draft_tokens": 2455,
+    "accepted_tokens": 1245,
+    "mean_acceptance_length": 3.5356,
+    "draft_token_acceptance_rate": 0.5071
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 3.989157,
+     "ttft_ms": 770.887,
+     "tpot_ms": 12.621,
+     "mean_itl_ms": 63.102,
+     "output_head": "aibeast r5 513536 c2 0\nbatch zero was nominal\npressure temperature checksum reviewed\nbatch one was nominal\npressure temp"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 7.110595,
+     "ttft_ms": 770.377,
+     "tpot_ms": 24.864,
+     "mean_itl_ms": 62.774,
+     "output_head": "pack the quick brown fox jumps over the lazy dog while five birds sit near calm lakes in quiet pine woodsThe user has a "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 6.795647,
+     "ttft_ms": 523.724,
+     "tpot_ms": 24.596,
+     "mean_itl_ms": 53.606,
+     "output_head": "ant bat cat dog elk fox gnu hog imp jay kit leo mun new owl pig que ram sow tug udo vew xob yak zed air bit cow doe eel "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 3.133859,
+     "ttft_ms": 522.527,
+     "tpot_ms": 10.241,
+     "mean_itl_ms": 52.226,
+     "output_head": "aibeast r5 513536 c2 3 batch 0 nominal pressure temperature checksum closed batch 1 nominal pressure temperature checksu"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 4,
+   "completed": 4,
+   "failed": 0,
+   "duration_s": 5.9667,
+   "request_throughput_rps": 0.6704,
+   "prompt_tokens": 4040,
+   "output_tokens": 1024,
+   "prompt_throughput_tok_s": 677.092,
+   "output_throughput_tok_s": 171.619,
+   "mean_ttft_ms": 1127.311,
+   "p50_ttft_ms": 1371.662,
+   "p95_ttft_ms": 1372.396,
+   "mean_tpot_ms": 15.12,
+   "p50_tpot_ms": 15.686,
+   "p95_tpot_ms": 17.779,
+   "mean_itl_ms": 66.77,
+   "metric_prompt_tokens": 90927,
+   "metric_generation_tokens": 1080,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 248,
+    "draft_tokens": 1240,
+    "accepted_tokens": 837,
+    "mean_acceptance_length": 4.375,
+    "draft_token_acceptance_rate": 0.675
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 5.966225,
+     "ttft_ms": 1372.46,
+     "tpot_ms": 18.015,
+     "mean_itl_ms": 62.077,
+     "output_head": "ant bat cat dog elk fox gnu hog imp jay kit leo mun new owl pig que ram sow tug uak vee wig xis yak zeb0e7266960c6646e0a"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 4.200696,
+     "ttft_ms": 1372.03,
+     "tpot_ms": 11.093,
+     "mean_itl_ms": 60.183,
+     "output_head": "aibeast r5 513536 c4 1 batch 0 nominal pressure temperature checksum closed\naibeast r5 513536 c4 1 batch 1 nominal press"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 4.200158,
+     "ttft_ms": 393.457,
+     "tpot_ms": 14.928,
+     "mean_itl_ms": 79.305,
+     "output_head": "aibeast r5 513536 c4 2 batch 0 nominal pressure temperature checksum closed batch 1 nominal pressure temperature checksu"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 5.56442,
+     "ttft_ms": 1371.295,
+     "tpot_ms": 16.444,
+     "mean_itl_ms": 65.516,
+     "output_head": "pack each token tight, fold, bind, mark, ship, log, scan, next, loop, loop, loop, loopThe above is one...\n...doc, doc, l"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 13.089,
+   "request_throughput_rps": 0.6112,
+   "prompt_tokens": 8080,
+   "output_tokens": 2048,
+   "prompt_throughput_tok_s": 617.31,
+   "output_throughput_tok_s": 156.467,
+   "mean_ttft_ms": 2502.818,
+   "p50_ttft_ms": 2076.072,
+   "p95_ttft_ms": 6147.916,
+   "mean_tpot_ms": 32.403,
+   "p50_tpot_ms": 34.088,
+   "p95_tpot_ms": 42.995,
+   "mean_itl_ms": 114.803,
+   "metric_prompt_tokens": 95447,
+   "metric_generation_tokens": 2577,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 708,
+    "draft_tokens": 3540,
+    "accepted_tokens": 1867,
+    "mean_acceptance_length": 3.637,
+    "draft_token_acceptance_rate": 0.5274
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 7.577049,
+     "ttft_ms": 1049.995,
+     "tpot_ms": 25.596,
+     "mean_itl_ms": 138.87,
+     "output_head": "the batch was nominal and all checks passed\nthe batch was nominal and all checks passed\nthe batch was nominal and all ch"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 9.27837,
+     "ttft_ms": 1049.588,
+     "tpot_ms": 32.27,
+     "mean_itl_ms": 139.469,
+     "output_head": "aibeast r5 513536 c8 1\nbatch zero nominal ok\npressure temperature checksum done\nbatch one nominal ok\npressure temperatur"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 12.331336,
+     "ttft_ms": 1049.432,
+     "tpot_ms": 44.243,
+     "mean_itl_ms": 118.756,
+     "output_head": "ant bat cat dog elk fox gnu hen ice jam key log mop net owl pig ram sun top urn vet wig xray yak zooCheck aibeast-r5-513"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 11.508549,
+     "ttft_ms": 2076.454,
+     "tpot_ms": 36.989,
+     "mean_itl_ms": 109.675,
+     "output_head": "aib beat cell data echo flux grid hold item jump keys list map node orb port quiz rush sync tag user view wall xray yarn"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 8.167338,
+     "ttft_ms": 2076.251,
+     "tpot_ms": 23.887,
+     "mean_itl_ms": 126.896,
+     "output_head": "pack batch zero stayed nominal and pressure temperature checksum were reviewed before closing the record\npack batch one "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 11.727006,
+     "ttft_ms": 2570.972,
+     "tpot_ms": 35.906,
+     "mean_itl_ms": 104.045,
+     "output_head": "ant bat cat dog elk fox gnu hog\nimp jay kit log man net owl pig\nquy rat sow tot udo vex wan xis\nyak zeb ant bat cat dog "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 12.448183,
+     "ttft_ms": 2075.892,
+     "tpot_ms": 40.676,
+     "mean_itl_ms": 104.77,
+     "output_head": "ant bat cat dog elk fox gnu hog\nimp jot kin log map net owl pig\nquq ram sow tun urn vex wit xis\nyak zap arc bun cob dew "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 1010,
+     "output_tokens": 256,
+     "elapsed_s": 13.086447,
+     "ttft_ms": 8073.962,
+     "tpot_ms": 19.657,
+     "mean_itl_ms": 75.946,
+     "output_head": "the batch was nominal and closed```json\n{\"benchmark\": \"aibeast-r5-513536-c8-7\", \"records\": [ {\"id\": 0, \"summary\": \"batch"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

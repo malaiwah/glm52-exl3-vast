@@ -1,0 +1,60 @@
+{
+ "schema": 1,
+ "ts": "2026-07-28T12:18:31Z",
+ "base_url": "http://127.0.0.1:18000",
+ "model": "GLM-5.2",
+ "settings": {
+  "input_tokens": 506367,
+  "output_tokens": 4096,
+  "concurrency": [
+   1
+  ],
+  "requests_per_level": 1,
+  "prefill_tokens": [],
+  "warmup": 0,
+  "temperature": 1.0,
+  "seed": 20260728,
+  "prompt_seed": "aibeast-r5-512k-envelope-exact"
+ },
+ "metadata": {
+  "provider": "aibeast-isolated,checkpoint=brandon-tr3-native,image=r5,envelope=507904-served-prompt+4096"
+ },
+ "prefill": [],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 1,
+   "completed": 0,
+   "failed": 1,
+   "duration_s": 0.7158,
+   "request_throughput_rps": 0.0,
+   "prompt_tokens": 0,
+   "output_tokens": 0,
+   "prompt_throughput_tok_s": 0.0,
+   "output_throughput_tok_s": 0.0,
+   "mean_ttft_ms": 0.0,
+   "p50_ttft_ms": 0.0,
+   "p95_ttft_ms": 0.0,
+   "mean_tpot_ms": 0.0,
+   "p50_tpot_ms": 0.0,
+   "p95_tpot_ms": 0.0,
+   "mean_itl_ms": 0.0,
+   "metric_prompt_tokens": 0,
+   "metric_generation_tokens": 0,
+   "preemptions": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [
+    "HTTP 400: {\"error\":{\"message\":\"This model's maximum context length is 513536 tokens. However, you requested 4096 output tokens and your prompt contains at least 509441 input tokens, for a total of at least 513537 tokens. Please reduce the length of the input prompt or the number of requested output tokens. (parameter=input_tokens, value=509441)\",\"type\":\"BadRequestError\",\"param\":\"input_tokens\",\"code\":400}}"
+   ],
+   "requests_detail": []
+  }
+ ],
+ "complete": true,
+ "ok": false
+}
