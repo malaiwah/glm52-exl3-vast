@@ -530,7 +530,7 @@ VARIANTS["exl3-tr3-3.36bpw"]["defaults"].update({
     "GPU_BLOCKS_OVERRIDE": 2048,
     "ONLINE_QUANT": "exl3-b6",
     "PREFIX_CACHE_BACKEND": "lmcache",
-    "PREFIX_CACHE_DISK_GB": 512,
+    "PREFIX_CACHE_DISK_GB": 0,
     "OFFLOAD_FRACTION": 0.5,
     # r26 repairs the TP4/DCP4 auto policy: this topology has a single query
     # partition, so owner exchange is pure overhead and two exact indexer
@@ -1088,6 +1088,17 @@ KNOBS = [
              "local encrypted storage where possible, enable secure termination, and "
              "treat erase as best effort because SSD wear levelling and provider "
              "snapshots are outside the appliance's control.")),
+
+    dict(key="PREFIX_CACHE_DISK_FRACTION", type="float", default=0.0, min=0.0, max=1.0,
+         group="Memory", scope="engine", label="LMCache NVMe fraction of free disk",
+         rationale=(
+             "0 (default) disables fraction-based sizing; use PREFIX_CACHE_DISK_GB "
+             "for a fixed GiB limit. A value between 0 and 1 (e.g. 0.5 for 50%%) "
+             "sets the L2 disk tier to that fraction of free disk space on the "
+             "model root's filesystem, measured at container startup. Takes "
+             "precedence over PREFIX_CACHE_DISK_GB when non-zero. The same "
+             "security caveats apply: derived prompt KV may contain session "
+             "material.")),
 
     dict(key="VISION", families=("glm52",), type="bool", default=False, group="Multimodal", scope="checkpoint",
          label="Vision (image input) — EXPERIMENTAL on EXL3",
@@ -2115,6 +2126,23 @@ def validate(cfg: dict, context=None):
             ["PREFIX_CACHE_DISK_GB", "OFFLOAD_FRACTION"],
             "LMCache's bounded filesystem L2 is supervised by its DRAM L1 manager. "
             "Set OFFLOAD_FRACTION above zero before enabling the disk tier.")
+    if cfg.get("PREFIX_CACHE_DISK_FRACTION") and cfg["PREFIX_CACHE_BACKEND"] != "lmcache":
+        err("disk-fraction-needs-lmcache",
+            ["PREFIX_CACHE_DISK_FRACTION", "PREFIX_CACHE_BACKEND"],
+            "The native OffloadingConnector has no filesystem tier. Select "
+            "PREFIX_CACHE_BACKEND=lmcache, or set PREFIX_CACHE_DISK_FRACTION=0.")
+    if cfg.get("PREFIX_CACHE_DISK_FRACTION") and not cfg["OFFLOAD_FRACTION"]:
+        err("disk-fraction-needs-l1",
+            ["PREFIX_CACHE_DISK_FRACTION", "OFFLOAD_FRACTION"],
+            "LMCache's bounded filesystem L2 is supervised by its DRAM L1 manager. "
+            "Set OFFLOAD_FRACTION above zero before enabling the disk tier.")
+    if cfg.get("PREFIX_CACHE_DISK_FRACTION"):
+        warn("disk-fraction-sensitive",
+             ["PREFIX_CACHE_DISK_FRACTION", "PREFIX_CACHE_BACKEND"],
+             f"LMCache L2 will use {cfg['PREFIX_CACHE_DISK_FRACTION']:.0%} of free disk "
+             "space on the model root's filesystem. Derived prompt KV may contain "
+             "session material. Use encrypted local NVMe where possible and enable "
+             "secure termination.")
     if cfg["PREFIX_CACHE_DISK_GB"]:
         warn("disk-cache-sensitive",
              ["PREFIX_CACHE_DISK_GB", "PREFIX_CACHE_BACKEND"],

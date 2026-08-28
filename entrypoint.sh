@@ -1438,6 +1438,18 @@ compute_offload() {
     if [ "$cache_backend" = "lmcache" ]; then
       export LMCACHE_L1_GB="$((OFF_TOTAL_BYTES/1073741824))"
       [ "$LMCACHE_L1_GB" -gt 0 ] || export LMCACHE_L1_GB=1
+      # Fraction-based L2 sizing: if PREFIX_CACHE_DISK_FRACTION is set (0-1),
+      # compute L2 as that fraction of free disk on the model root filesystem.
+      # This takes precedence over the fixed PREFIX_CACHE_DISK_GB value.
+      if [ -n "${PREFIX_CACHE_DISK_FRACTION:-}" ] && \
+         python3 -c "import sys; sys.exit(0 if float('${PREFIX_CACHE_DISK_FRACTION}') > 0 else 1)" 2>/dev/null; then
+        _free_disk_bytes="$(df -B1 --output=avail "${MODEL_ROOT:-/workspace}" 2>/dev/null | tail -1 | tr -d '[:space:]')"
+        _fraction="$(python3 -c "print(float('${PREFIX_CACHE_DISK_FRACTION}'))" 2>/dev/null || echo 0)"
+        _computed_l2_gb="$(python3 -c "print(int(${_free_disk_bytes:-0} * ${_fraction} / 1073741824))" 2>/dev/null || echo 0)"
+        export PREFIX_CACHE_DISK_GB="$_computed_l2_gb"
+        echo ">>> LMCache L2: PREFIX_CACHE_DISK_FRACTION=${_fraction} of free disk (${_free_disk_bytes:-unknown} bytes) -> ${_computed_l2_gb} GiB"
+        unset _free_disk_bytes _fraction _computed_l2_gb
+      fi
       export LMCACHE_L2_GB="${PREFIX_CACHE_DISK_GB:-0}"
       if [ "$LMCACHE_L2_GB" -gt 0 ] 2>/dev/null; then
         export LMCACHE_MODE=disk

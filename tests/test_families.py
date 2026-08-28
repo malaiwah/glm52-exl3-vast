@@ -558,7 +558,7 @@ def test_r20_336_online_quant_candidate():
     check("the measured LMCache and transport posture is explicit",
           eff["PREFIX_CACHE_BACKEND"] == "lmcache"
           and eff["OFFLOAD_FRACTION"] == 0.5
-          and eff["PREFIX_CACHE_DISK_GB"] == 512
+          and eff["PREFIX_CACHE_DISK_GB"] == 0
           and eff["PCIE_DMA_MIN_BYTES"] == -1
           and runtime["NCCL_BUFFSIZE"] == "1048576"
           and runtime["VLLM_DCP_A2A_MAX_TOKENS"] == "48"
@@ -618,7 +618,7 @@ def test_r28_342_shared_h_profile():
           and eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"
           and eff["MTP_DRAFT_SAMPLE_METHOD"] == "probabilistic"
           and eff["PREFIX_CACHE_BACKEND"] == "lmcache"
-          and eff["PREFIX_CACHE_DISK_GB"] == 512)
+          and eff["PREFIX_CACHE_DISK_GB"] == 0)
 
 
 def test_qwen_preset():
