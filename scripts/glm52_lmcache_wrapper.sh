@@ -62,22 +62,28 @@ if [[ "$mode" == disk ]]; then
   l2="${LMCACHE_L2_PATH:?LMCACHE_L2_PATH is required in disk mode}"
   mkdir -p "$l2"
   l2_json="$(python3 - "$l2" "${LMCACHE_L2_WORKERS:-4}" \
-      "${LMCACHE_L2_GB:-256}" <<'PY'
+      "${LMCACHE_L2_GB:-256}" "${LMCACHE_L2_EVICTION_POLICY:-LRU}" \
+      "${LMCACHE_L2_EVICTION_TRIGGER_WATERMARK:-0.90}" \
+      "${LMCACHE_L2_EVICTION_RATIO:-0.10}" <<'PY'
 import json, sys
 print(json.dumps({"type":"fs_native","base_path":sys.argv[1],
  "num_workers":int(sys.argv[2]),"use_odirect":False,
- "max_capacity_gb":float(sys.argv[3])}, separators=(",",":")))
+ "max_capacity_gb":float(sys.argv[3]),"eviction":{
+  "eviction_policy":sys.argv[4],"trigger_watermark":float(sys.argv[5]),
+  "eviction_ratio":float(sys.argv[6])}}, separators=(",",":")))
 PY
 )"
   args+=(--l2-adapter "$l2_json")
 fi
 
-transfer="$(python3 - "$host" "$port" <<'PY'
+transfer="$(python3 - "$host" "$port" \
+    "${LMCACHE_RETRIEVE_TIMEOUT_SECONDS:-180}" <<'PY'
 import json, sys
 print(json.dumps({"kv_connector":"LMCacheMPConnector","kv_role":"kv_both",
  "kv_connector_extra_config":{"lmcache.mp.host":"tcp://"+sys.argv[1],
  "lmcache.mp.port":int(sys.argv[2]),"lmcache.mp.mq_timeout":60,
- "lmcache.mp.heartbeat_interval":5}}, separators=(",",":")))
+ "lmcache.mp.heartbeat_interval":5,
+ "lmcache.mp.retrieve_timeout":float(sys.argv[3])}}, separators=(",",":")))
 PY
 )"
 

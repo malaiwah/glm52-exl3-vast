@@ -30,6 +30,10 @@ as `defaults < family < variant < startup env < state file`; see
 | `PREFIX_CACHE_BACKEND` | `lmcache` GLM / `native` other profiles | `lmcache` is the r13-qualified supervised DCP-aware process; `native` keeps the in-process OffloadingConnector rollback control. Both use `OFFLOAD_FRACTION` for aggregate DRAM and neither enlarges active context. |
 | `LMCACHE_L1_INIT_GB` | min(20, configured L1) | initial LMCache DRAM arena; the remaining configured tier grows lazily. Raise only if first-hit allocation latency matters more than model page-in and host-memory headroom. |
 | `PREFIX_CACHE_DISK_GB` | `0` | positive values enable LMCache's native filesystem L2 with this hard GiB limit under `<MODEL_ROOT>/.lmcache`; derived prompt KV may be sensitive, so prefer encrypted local NVMe and enable best-effort secure termination |
+| `LMCACHE_L2_EVICTION_POLICY` | `LRU` | L2 disk-tier eviction policy; `LRU` evicts least-recently-used entries when the watermark is hit |
+| `LMCACHE_L2_EVICTION_TRIGGER_WATERMARK` | `0.90` | L2 usage fraction that triggers eviction (0.90 = evict when 90% full); without this the L2 fills without garbage collection |
+| `LMCACHE_L2_EVICTION_RATIO` | `0.10` | fraction of cached entries to evict per trigger (0.10 = evict 10% of entries) |
+| `LMCACHE_RETRIEVE_TIMEOUT_SECONDS` | `180` | max seconds to wait for an LMCache MP retrieve before treating it as a miss and recomputing |
 | `MTP78_MODE` | `off` (native) | the current Brandon revision contains a native rank-sliced TR3 draft; `graft` and `override` remain experimental compatibility paths. MadeBy561's native draft uses serialized NVFP4 experts. Prefer the `MTP_DRAFT` knob on the config page. |
 | `MTP_DRAFT_SAMPLE_METHOD` | `probabilistic` GLM | measured MTP-5 proposal mode; `greedy` remains available for controlled A/B tests |
 | `F8_DMA` | `0` family / `ring` MadeBy561 | compressed PCIe collective mode; the hybrid override passed the 521K five-depth gate |

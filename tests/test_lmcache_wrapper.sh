@@ -57,12 +57,16 @@ if grep -Fq -- '--l2-adapter' "$tmp/ram-server.args"; then
 fi
 grep -Fq -- '--kv-transfer-config' "$tmp/ram-model.args"
 grep -Fq -- '"lmcache.mp.port":5557' "$tmp/ram-model.args"
+grep -Fq -- 'retrieve_timeout' "$tmp/ram-model.args"
 grep -Fxq 'expandable_segments:False' "$tmp/ram-model.env"
 
 run_mode disk 8003
 grep -Fq -- '--l2-adapter' "$tmp/disk-server.args"
 grep -Fq -- 'fs_native' "$tmp/disk-server.args"
 grep -Fq -- 'max_capacity_gb' "$tmp/disk-server.args"
+grep -Fq -- 'eviction_policy' "$tmp/disk-server.args"
+grep -Fq -- 'trigger_watermark' "$tmp/disk-server.args"
+grep -Fq -- 'eviction_ratio' "$tmp/disk-server.args"
 
 run_mode ram 8005 125
 grep -Fq -- '--l1-size-gb 125' "$tmp/ram-server.args"
