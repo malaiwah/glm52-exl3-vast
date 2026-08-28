@@ -289,7 +289,11 @@ apply_config() {
     fi
     unset _p2p_matrix _p2p_matrix_rows
   fi
-  python3 "$SCRIPTS_DIR/config_cli.py" show || true
+  if [ -z "${_CONFIG_SHOWN:-}" ]; then
+    python3 "$SCRIPTS_DIR/config_cli.py" show || true
+    _CONFIG_SHOWN=1
+    export _CONFIG_SHOWN
+  fi
   # MODEL_DIR follows the variant unless the template pinned it.
   if [ -n "$MODEL_DIR_PINNED" ]; then
     MODEL_DIR="$MODEL_DIR_PINNED"
@@ -348,7 +352,9 @@ fi
 # The argv half runs further down, once serve_once and the arg builders exist.
 if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   echo "=== CONFIG SMOKE (nothing will be downloaded, no GPU will be touched) ==="
-  python3 "$SCRIPTS_DIR/config_cli.py" show || true
+  if [ -z "${_CONFIG_SHOWN:-}" ]; then
+    python3 "$SCRIPTS_DIR/config_cli.py" show || true
+  fi
   echo ">>> model repo    : ${MODEL_REPO:-<unset>}"
   echo ">>> model dir     : ${MODEL_DIR:-<unset>}"
   echo ">>> family env    : ${FAMILY_ENV_BLOCK:-<unset>}"

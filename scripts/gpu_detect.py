@@ -139,8 +139,8 @@ def visible(devices, env=None):
     # as a UUID list turns four observed GPUs into zero and strands the rental.
     if nvd is not None and nvd.strip() == "void":
         notes.append(
-            "NVIDIA_VISIBLE_DEVICES=void ignored because nvidia-smi observed "
-            f"{len(sel)} mounted GPU(s)")
+            "NVIDIA_VISIBLE_DEVICES is unset (Vast 'void' sentinel) but "
+            f"nvidia-smi observed {len(sel)} mounted GPU(s); using all of them")
     elif nvd is not None and nvd.strip() not in ("", "all"):
         if nvd.strip() == "none":
             notes.append("NVIDIA_VISIBLE_DEVICES=none: the runtime exposed no GPUs")

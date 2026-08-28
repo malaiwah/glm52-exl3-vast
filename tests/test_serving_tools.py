@@ -21,30 +21,30 @@ import verify_serving as verify  # noqa: E402
 
 
 class DownloadProgressTests(unittest.TestCase):
-    def test_fresh_download_reports_zero_then_crossed_deciles(self):
+    def test_fresh_download_reports_zero_then_crossed_5pct(self):
         expected = 10 * download_progress.GIB
         self.assertEqual(
             download_progress.crossed_milestones(None, 0, expected), [0])
         self.assertEqual(
             download_progress.crossed_milestones(0, 3.4 * download_progress.GIB,
                                                  expected),
-            [10, 20, 30],
+            [5, 10, 15, 20, 25, 30],
         )
 
-    def test_resumed_download_reports_only_current_decile(self):
+    def test_resumed_download_reports_only_current_5pct(self):
         expected = 20 * download_progress.GIB
         self.assertEqual(
             download_progress.crossed_milestones(
                 None, 17 * download_progress.GIB, expected),
-            [80],
+            [85],
         )
 
     def test_in_progress_report_never_claims_completion(self):
         expected = 21 * download_progress.GIB
         self.assertEqual(
             download_progress.crossed_milestones(
-                80, 30 * download_progress.GIB, expected),
-            [90],
+                85, 30 * download_progress.GIB, expected),
+            [90, 95],
         )
 
     def test_directory_size_tolerates_normal_files(self):

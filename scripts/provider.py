@@ -720,6 +720,11 @@ def detect(env=None):
         return override if override in PROVIDERS else UNKNOWN
     if env.get("JARVISLABS_MACHINE_ID"):
         return JARVISLABS
+    # JarvisLabs VMs are named jl-vm-<machine_id>; detect from hostname
+    # when the machine ID env was not explicitly set.
+    import socket
+    if socket.gethostname().startswith("jl-vm-"):
+        return JARVISLABS
     if env.get("RUNPOD_POD_ID"):
         return RUNPOD
     if env.get("CONTAINER_ID") and env.get("CONTAINER_API_KEY"):

@@ -142,8 +142,10 @@ def cmd_show(_args):
             print("      %-*s = %-28s [not applicable to this family]" % (
                 width, key, "-"))
             continue
-        print("      %-*s = %-28s [%s]" % (width, key,
-                                           gc.to_text(knob, effective[key]), sources[key]))
+        val = gc.to_text(knob, effective[key])
+        if key == "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" and val == "-1":
+            val = "disabled"
+        print("      %-*s = %-28s [%s]" % (width, key, val, sources[key]))
     for note in notes:
         print(f"!!! config: {note}")
     for f in findings:

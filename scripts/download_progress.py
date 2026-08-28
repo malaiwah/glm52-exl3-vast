@@ -37,15 +37,15 @@ def directory_bytes(directory: str) -> int:
 
 
 def crossed_milestones(previous: int | None, done: int, expected: int) -> list[int]:
-    """Return newly crossed deciles, capping in-progress reports at 90%."""
+    """Return newly crossed 5-percent milestones, capping in-progress reports at 95%."""
     if expected <= 0:
         return []
-    current = min(90, max(0, int(done * 100 / expected)) // 10 * 10)
+    current = min(95, max(0, int(done * 100 / expected) // 5 * 5))
     if previous is None:
         # A resumed download should describe where it resumed, rather than
-        # claiming that ten old thresholds were crossed at this instant.
+        # claiming that twenty old thresholds were crossed at this instant.
         return [current]
-    return list(range(max(10, previous + 10), current + 1, 10))
+    return list(range(max(5, previous + 5), current + 1, 5))
 
 
 def process_alive(pid: int) -> bool:
