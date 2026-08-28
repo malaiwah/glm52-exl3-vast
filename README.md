@@ -59,12 +59,12 @@ answers only to you.
 
 | profile | provider | launch | hardware | disk | first-boot budget |
 |---|---|---|---|---|---|
-| GLM-5.2 flagship | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405) | 4x RTX PRO 6000 Blackwell 96 GB | 450 GB | 60–90 min |
-| GLM-5.2 flagship | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93) | 4x RTX PRO 6000 Blackwell 96 GB | 450 GB | ~30 min (Secure) |
-| GLM-5.2 flagship | JarvisLabs | [▶ VM guide](#launch-on-jarvislabs) | 4x RTX-PRO6000 VM | 500 GB | ~30 min |
-| Qwen3.6 vision (low-cost) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=214d2e120a6718558fa207d4579d4316) | 1x RTX 5090 32 GB | 100 GB | ~6 min on a well-connected host |
+| GLM-5.2 flagship (3.42bpw) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | 60–90 min |
+| GLM-5.2 flagship (3.42bpw) | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | ~30 min (Secure) |
+| GLM-5.2 flagship (3.42bpw) | JarvisLabs | [▶ VM guide](#launch-on-jarvislabs) | 4x RTX-PRO6000 VM | **650 GB** | ~30 min |
+| Qwen3.6 vision (low-cost) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=214d2e120a6718558fa2078d4579d4316) | 1x RTX 5090 32 GB | 100 GB | ~6 min on a well-connected host |
 | Qwen3.6 vision (low-cost) | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=7ufac3b4zw&ref=4ahycj93) | 1x RTX 5090 32 GB | 100 GB | ~30 min |
-| GLM-5.2 flagship | self-serve (own hardware) | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | 450 GB | 2–12 min once weights are local |
+| GLM-5.2 flagship (3.42bpw) | self-serve (own hardware) | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | 2–12 min once weights are local |
 | Qwen3.6 vision (low-cost) | self-serve (own hardware) | [▶ docker/podman](#self-serve-with-docker-or-podman) | 1x RTX 5090 32 GB | 100 GB | ~1 min warm |
 
 **Requirements that fail fast:** Blackwell (`sm120+`) GPUs only, and the
@@ -313,11 +313,11 @@ not evidence that all peer transport is disabled.
 
 **[▶ Launch GLM-5.2 on Vast.ai](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405)**.
 The linked public **Model Turnkey: GLM-5.2 EXL3** template
-preconfigures the image, `args` launch mode, ports, 450 GB disk and Blackwell
+preconfigures the image, `args` launch mode, ports, 600 GB disk and Blackwell
 host filters.
 Before accepting an offer, verify it is exactly 4x RTX PRO 6000 Blackwell,
 advertises **CUDA 13.2 or newer / driver 590.48.01 or newer**, adequate
-disk/network performance, and actually allocates at least 450 GB. Wait for
+disk/network performance, and actually allocates at least 600 GB. Wait for
 `Application startup complete` and the verification result in the instance
 logs, then use the generated API key and labeled endpoint.
 
@@ -339,7 +339,7 @@ SSH mode):
 ```bash
 vastai create instance <offer-id> \
   --image ghcr.io/malaiwah/glm52-exl3-vast:latest \
-  --disk 450 --label glm52-turnkey \
+  --disk 600 --label glm52-turnkey \
   --env '-p 22:22 -p 8000:8000 -p 8443:8443 -p 1111:1111 -e MODEL_PROFILE=glm52-exl3' \
   --cancel-unavail --args ''
 ```
@@ -407,7 +407,7 @@ implement Runpod's Serverless handler contract.
 The checked-in manifests follow Runpod's current
 [Pod template REST schema](https://docs.runpod.io/pods/templates/manage-templates):
 
-- [`runpod-template.json`](runpod-template.json): GLM profile, 450 GB volume.
+- [`runpod-template.json`](runpod-template.json): GLM profile, 600 GB volume.
 - [`runpod-template-qwen36.json`](runpod-template-qwen36.json): vision-enabled
   Qwen profile, 100 GB volume.
 
@@ -434,7 +434,7 @@ the same values:
   the system logs; its
   REST API's `allowedCudaVersions` currently stops at CUDA 13.0 and cannot
   express this CUDA 13.2 requirement.
-- **Storage:** use a 50 GB container disk; mount at least 450 GB for GLM or
+- **Storage:** use a 50 GB container disk; mount at least 600 GB for GLM or
   100 GB for Qwen at `/workspace`. A volume disk survives stops/restarts but is
   deleted with the Pod; use a network volume if weights must survive deletion. See
   [Runpod storage options](https://docs.runpod.io/pods/storage/types).
@@ -509,7 +509,7 @@ Connect panel. To force proxy-only API access, remove `8443/tcp` and set
 ## Launch on JarvisLabs
 
 Choose **[▶ RTX PRO 6000 Blackwell VM on JarvisLabs](https://jarvislabs.ai/dashboard/vm)**,
-then select exactly four `RTX-PRO6000` GPUs, at least 500 GB of disk, and the
+then select exactly four `RTX-PRO6000` GPUs, at least 650 GB of disk, and the
 current Ubuntu VM image. JarvisLabs' managed Templates page is a fixed
 provider catalog; as of July 2026 its documentation and authenticated
 dashboard expose neither user-published Docker templates nor self-service
@@ -568,7 +568,7 @@ Jarvis host remains a fresh topology gate.
 Create and connect with the current CLI:
 
 ```bash
-jl create --gpu RTX-PRO6000 --vm --num-gpus 4 --storage 500 \
+jl create --gpu RTX-PRO6000 --vm --num-gpus 4 --storage 650 \
   --region IN1 --name glm52-turnkey --yes
 jl list
 ssh ubuntu@<public-ip>
@@ -858,7 +858,7 @@ evidence, and the experimental separate-draft override are in
   the landing page.
 - **Profile**: `MODEL_PROFILE=glm52-exl3` (default), or
   `MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU vision model.
-- **Disk**: >=450 GB for GLM; >=100 GB for Qwen.
+- **Disk**: >=600 GB for GLM (3.42bpw weights ~339 GB + image ~39 GB + JIT caches ~15 GB + margin); >=100 GB for Qwen.
 - **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB) for GLM; one RTX PRO 6000
   Blackwell or RTX 5090 for Qwen.
 - **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
@@ -1018,7 +1018,13 @@ on hardware you own.
   `DO_NOT_TRACK`, `HF_HUB_DISABLE_TELEMETRY`), `HF_HUB_OFFLINE=1` once weights
   are local, and the boot log prints the listening-socket audit. Full egress
   firewalling is not possible without NET_ADMIN (not granted on vast).
-- **Disk note**: verify the allocated disk matches the profile. GLM needs at
-  least 450 GB for weights, overlays, graft backup, vision and compile cache.
-  Qwen's checkpoint is about 21 GiB; its 100 GB volume leaves room for cache and
-  experiments.
+- **Disk note**: GLM-5.2 3.42bpw needs at least **600 GB** to avoid
+  ENOSPC during inference. The real budget: ~339 GB weights + ~39 GB image
+  + ~15 GB SparkInfer/CuTe JIT compile caches + ~10 GB container writable
+  layer + operational margin. A 450 GB disk fills to 100% and crashes the
+  engine when JIT caches write. JarvisLabs VMs should use `--storage 650`
+  to leave room; Vast/Runpod should provision 600 GB. If you must use a
+  smaller disk, disable the LMCache L2 tier (`PREFIX_CACHE_DISK_GB=0`,
+  which is the default) and be aware JIT compilation may still fail.
+  Qwen's checkpoint is about 21 GiB; its 100 GB volume leaves room for
+  cache and experiments.
