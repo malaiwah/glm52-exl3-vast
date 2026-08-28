@@ -100,6 +100,60 @@ This is the same shape the JarvisLabs VM launcher uses. Select
 both behind your LAN or an SSH tunnel, or configure TLS as described in
 [Security](#security).
 
+**Prerequisite — NVIDIA P2P driver override (critical for multi-GPU PCIe performance).**
+On direct-attach multi-GPU systems where `nvidia-smi topo -m` shows `PHB` or
+`NODE` between GPUs, create `/etc/modprobe.d/nvidia-p2p-override.conf`:
+
+```bash
+echo 'options nvidia NVreg_RegistryDwords="ForceP2P=0x11;RMForceP2PType=1;RMPcieP2PType=2;GrdmaPciTopoCheckOverride=1;EnableResizableBar=1"' \
+  | sudo tee /etc/modprobe.d/nvidia-p2p-override.conf
+echo 'options nvidia_uvm uvm_disable_hmm=1' \
+  | sudo tee /etc/modprobe.d/uvm.conf
+sudo modprobe -r nvidia_uvm nvidia_drm nvidia_modeset nvidia
+sudo modprobe nvidia && sudo modprobe nvidia_uvm
+```
+
+Without this, CUDA kernels that issue direct peer-GPU memory loads silently
+fall back to SysMem staging (~15× slower for PCIe allreduce). See the
+[RTX PRO 6000 wiki](https://github.com/local-inference-lab/rtx6kpro) for
+full PCIe topology and tuning guidance.
+
+**Using docker-compose.** Create a `docker-compose.yml`:
+
+```yaml
+services:
+  glm52-turnkey:
+    image: ghcr.io/malaiwah/glm52-exl3-vast:latest
+    container_name: glm52-turnkey
+    restart: unless-stopped
+    ipc: host
+    network_mode: host
+    ulimits:
+      memlock: -1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - MODEL_PROFILE=glm52-exl3
+      # - MODEL_VARIANT=exl3-tr3-3.42bpw  # higher fidelity, ~328 GiB
+      # - HF_TOKEN=hf_your_token_here     # faster authenticated downloads
+      # - PREFIX_CACHE_DISK_GB=32         # LMCache L2 disk tier (GiB)
+      # - PREFIX_CACHE_DISK_FRACTION=0.5  # ...or fraction of free disk
+    volumes:
+      - /srv/turnkey:/workspace
+```
+
+Then:
+
+```bash
+docker compose up -d
+docker compose logs -f
+```
+
 For rootless Podman against a checkpoint already on disk — no download, the
 checkpoint mounted read-only — use the checked-in runner:
 
