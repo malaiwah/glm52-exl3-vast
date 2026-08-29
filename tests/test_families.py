@@ -174,6 +174,10 @@ def test_glm_release_integration():
           and "export KV_FP8_ROPE=1" in entry
           and "export VLLM_NVFP4_MLA_DYNAMIC_SCALE=1" in entry
           and "unset VLLM_NVFP4_MLA_SCALES_FILE" in entry)
+    check("the full GLM family clears inherited Flash NoPE state",
+          "unset VLLM_B12X_GLM_NOPE_NVFP4 B12X_GL53_ROUTE128_WIDE" in entry
+          and "unset B12X_GL53_ROUTE128_HYBRID_TAIL "
+              "VLLM_ALLREDUCE_USE_SYMM_MEM" in entry)
     check("adaptive exact indexer folding stays bounded",
           'SPARKINFER_INDEXER_TWO_LEVEL_FOLD:-auto' in entry
           and 'SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256' in entry)
@@ -258,21 +262,22 @@ def test_glm_release_integration():
           and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
           in entry)
     check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-k6-o21-v1"'
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-runtime-o27-v3"'
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
     check("the live-qualified GLM-5.3 overlay generation is cache-versioned",
           "apply_glm53_runtime_overlays.py" in dockerfile
           and "patches/glm53-runtime" in dockerfile
-          and "-turnkey-glm53-k6-o21-v1" in entry)
+          and "-turnkey-glm53-runtime-o27-v3" in entry)
     check("the local Podman runner does not bypass cache fingerprinting",
           "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
           and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
     check("the local Podman runner preserves the requested CUDA rank order",
           '-e CUDA_VISIBLE_DEVICES="$GPU_DEVICES"' in local_runner)
     check("the cold 3.42 profile gets its measured 90-minute health grace",
-          'exl3-tr3-3.42bpw) health_start_period=90m' in local_runner
+          'exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw) health_start_period=90m'
+          in local_runner
           and '--health-start-period "$health_start_period"' in local_runner)
     check("auto profile sentinels do not leak into the calibration helper",
           "env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" in entry
@@ -615,6 +620,52 @@ def test_r28_342_shared_h_profile():
           and eff["MTP_DRAFT_SAMPLE_METHOD"] == "probabilistic"
           and eff["PREFIX_CACHE_BACKEND"] == "lmcache"
           and eff["PREFIX_CACHE_DISK_GB"] == 0)
+
+def test_glm53_342_dsa_profile():
+    section("the qualified GLM-5.3 glm_moe_dsa 3.42bpw profile")
+    variant = "exl3-tr3-glm53-3.42bpw"
+    eff, _, _ = resolved(gpus=4, MODEL_VARIANT=variant)
+    derived = gc.derive(eff)
+    check("GLM-5.3 reuses the architecture-compatible GLM-5.2 runtime family",
+          eff["MODEL_FAMILY"] == "glm52"
+          and gc.VARIANTS[variant]["family"] == "glm52")
+    check("the profile pins davidsyoung's immutable checkpoint",
+          derived["MODEL_REPO"] ==
+          "davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw"
+          and derived["MODEL_REVISION"] ==
+          "8bef807a0fcdd180e984a26b50e731cdba9a8ff2")
+    check("the profile pins the live-qualified 393,216-token memory boundary",
+          eff["MAX_MODEL_LEN"] == 393216
+          and eff["GPU_MEMORY_UTILIZATION"] == 0.93
+          and eff["GPU_BLOCKS_OVERRIDE"] == 0
+          and eff["KV_CACHE_MEMORY_BYTES"] == 3415867392)
+    check("the profile retains mixed-K online K6 and native MTP3",
+          eff["ONLINE_QUANT"] == "exl3-b6"
+          and eff["MTP_TOKENS"] == 3
+          and eff["MTP_DRAFT_SAMPLE_METHOD"] == "probabilistic"
+          and eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla")
+    check("the profile serves under the GLM-5.3 model name",
+          eff["SERVED_MODEL_NAME"] == "GLM-5.3")
+    args = " ".join(gc.family_serve_args(eff))
+    check("the profile keeps the measured DCP4 sparse-MLA serve path",
+          "--decode-context-parallel-size 4" in args
+          and "--attention-backend B12X_MLA_SPARSE" in args
+          and "--moe-backend b12x" in args)
+    findings = gc.validate(eff)
+    check("the profile is live-qualified",
+          gc.VARIANTS[variant]["tested"]
+          and "variant-untested" not in ids(findings), str(findings))
+    entry = open(os.path.join(REPO, "entrypoint.sh")).read()
+    local_runner = open(
+        os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
+    check("the provider profile selects the compatible internal variant",
+          "glm53-3.42bpw)" in entry
+          and 'MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3-glm53-3.42bpw}"'
+          in entry)
+    check("the cold mixed checkpoint receives the 90-minute health grace",
+          "exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw)"
+          " health_start_period=90m" in local_runner)
+
 
 
 def test_glm53_k6_profile():
@@ -1080,6 +1131,7 @@ def main():
         run(test_higher_fidelity_exl3_candidate)
         run(test_r20_336_online_quant_candidate)
         run(test_r28_342_shared_h_profile)
+        run(test_glm53_342_dsa_profile)
         run(test_glm53_k6_profile)
         run(test_qwen_preset)
         run(test_custom_profile)

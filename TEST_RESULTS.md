@@ -1,7 +1,7 @@
 # Appliance test results
 
 Cost-controlled execution of [TEST_PLAN.md](TEST_PLAN.md) from 2026-07-26
-through 2026-08-04. Provider credentials and generated appliance tokens were
+through 2026-08-29. Provider credentials and generated appliance tokens were
 kept in process-local environment variables and are not included here.
 
 Per-release GLM-5.2 model qualification details (throughput tables, KLD
@@ -12,11 +12,12 @@ and the per-release `docs/glm52-rXX-*.md` files. This file records provider
 integration evidence, bug discoveries and fixes, cost tracking, and the
 decision history that explains why the codebase is the way it is.
 
-Current release: **GG v20-r26** (qualified 2026-08-04 on AIBeast).
+Current profile qualification: **GLM-5.3 full-model mixed 3.42bpw** (2026-08-29 on JarvisLabs).
 
 ## Contents
 
 - [Current qualification status](#current-qualification-status)
+- [GLM-5.3 full-model 3.42bpw qualification](#glm-53-full-model-342bpw-qualification-jarvislabs-2026-08-29)
 - [Provider integration](#provider-integration)
 - [Qwen3.6-27B NVFP4 qualification](#qwen36-27b-nvfp4-qualification-vast-rtx-5090)
 - [GLM-5.2 qualification history](#glm-52-qualification-history)
@@ -30,6 +31,7 @@ Current release: **GG v20-r26** (qualified 2026-08-04 on AIBeast).
 
 | profile | release | hardware | status | section |
 |---|---|---|---|---|
+| GLM-5.3 full-model EXL3 TR3 3.42bpw | 27-overlay r28 runtime | 4x RTX PRO 6000 (JarvisLabs) | Qualified | [GLM-5.3 full model](#glm-53-full-model-342bpw-qualification-jarvislabs-2026-08-29) |
 | GLM-5.2 EXL3 TR3 3.0bpw (default) | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
 | GLM-5.2 EXL3 TR3 3.36bpw | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
 | GLM-5.2 EXL3 TR3 3.25bpw mixed-K | GG v20-r17 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r17 gate](#gg-v20-r17-native-mixed-k-production-gate-2026-08-01) |
@@ -37,6 +39,102 @@ Current release: **GG v20-r26** (qualified 2026-08-04 on AIBeast).
 | JarvisLabs VM (NCCL fallback) | GG v20-r9 | 4x RTX PRO 6000 (IN1) | Qualified | [JarvisLabs](#jarvislabs-in1-flagship-qualification-2026-07-30) |
 | Runpod 590.48.01 / CUDA 13.2 | GG v20-r9 | 1x RTX 5090 (Secure) | Qualified | [Runpod compat](#runpod-5904801--cuda-132-compatibility-2026-07-29) |
 | GLM-5.2 vision (opt-in) | GG v20 | 4x RTX PRO 6000 (AIBeast) | Short-context only | [Vision section](#v20-vision-qualification-2026-07-27) |
+
+### GLM-5.3 full-model 3.42bpw qualification (JarvisLabs, 2026-08-29)
+
+The live gate used four RTX PRO 6000 Blackwell Server Edition GPUs
+(97,887 MiB each), NVIDIA driver 595.58.03, and CUDA 13.2. The checkpoint was
+`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@8bef807a0fcdd180e984a26b50e731cdba9a8ff2`:
+81 safetensors shards and about 330.86 GiB on disk. Every weight entry matched
+the upstream `MANIFEST.sha256`. Its `.gitattributes`, `README.md`, and
+`config.json` entries are stale, but each downloaded file's Git object id
+matched the pinned Hugging Face API record; no checkpoint object was silently
+substituted.
+
+The model is the full 755B `GlmMoeDsaForCausalLM`: 78 target layers plus native
+MTP layer 78, 256 routed experts with eight selected per token, 192-dimensional
+heads, and a 1,048,576-position architectural limit. The structural config
+matches GLM-5.2, but the quantized layout does not: layers 3–78 each carry
+148 K3 and 108 K4 per-expert rank-sliced Trellis payloads rather than the old
+shared-H payload. The selected profile therefore reused GLM-5.2's TP4/DCP4
+B12X sparse-MLA, online shared-expert K6, native probabilistic MTP3,
+dynamic-NVFP4 KV, 3,072-token scheduler, C8, GMU 0.93, and bounded LMCache
+contract while keeping every GLM-5.3-Flash environment flag unset.
+
+Boot qualification found real runtime skew between the immutable r28 image and
+the newer mixed-K payload. The repaired, fail-closed manifest has 27 overlays:
+GLM-5.2 import probes explicitly disable FP8 RoPE; Flash-only environment flags
+cannot leak into the full model; non-indexer attention layers skip only the
+inapplicable sparse-output assertion; mixed compiler routing is capability
+checked; mixed Trellis uses a coherent isolated kernel plus route pack; fused
+MoE admits that concrete mixed kernel; the GLM-5-Next warmup imports lazily
+after architecture applicability; and graph captures always allocate the
+required small-row Trellis scratch. Eleven focused overlay tests pin the exact
+sources and reject before-state, after-state, partial, duplicate, and tampered
+trees. The runtime/JIT cache namespace is `turnkey-glm53-runtime-o27-v3`.
+
+The inherited GLM-5.2 3.42bpw memory envelope was not safe for this larger
+per-expert checkpoint:
+
+| arm | request / KV envelope | observed result |
+|---|---:|---|
+| inherited | 520,192 tokens / 4,518,907,904 B per GPU | startup, strict output, and 32K 3/3 retrieval passed; the first temperature-1 1,024-input/512-output request OOMed in top-p sampling and hung the workers with only 3–169 MiB physically free per rank |
+| selected | 393,216 tokens / 3,415,867,392 B per GPU | exactly 393,216 logical KV tokens; first-use sampling, C8, API features, 389,959-token retrieval, and post-stress checks passed |
+
+The selected arm loaded 82.42 GiB of model tensors per rank in 366–367 seconds,
+reserved 3.18 GiB/rank for KV, and used 0.61 GiB/rank for CUDA graphs. A
+two-second `nvidia-smi` trace observed at least 665 MiB free after first-use
+sampling compilation and during the C8/API workload. The container remained
+healthy with zero restarts.
+
+Unique-prefix prefill used one output token and no cache reuse:
+
+| target | observed prompt tokens | prompt throughput |
+|---:|---:|---:|
+| 8,192 | 8,214 | 2,464.75 tok/s |
+| 32,768 | 32,786 | 2,444.42 tok/s |
+| 65,536 | 65,539 | 2,379.82 tok/s |
+| 131,072 | 131,083 | 2,281.87 tok/s |
+
+The temperature-1 decode matrix used a fixed seed, 1,024 input tokens,
+512 output tokens, and 24 unique-prefix requests per level:
+
+| concurrency | completed | aggregate output | mean TPOT | mean acceptance length | draft-token acceptance |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 24/24 | 60.40 tok/s | 15.72 ms | 3.41 | 80.45% |
+| 4 | 24/24 | 153.93 tok/s | 23.50 ms | 3.45 | 81.57% |
+| 8 | 24/24 | 227.55 tok/s | 31.28 ms | 3.51 | 83.63% |
+
+All 72 requests completed with zero failures, preemptions, GPU prefix hits, or
+external-cache prefix hits. This temperature-1 path is load-bearing evidence:
+the rejected arm's failure appeared only when the sampler first compiled and
+allocated, after its deterministic startup verifier had passed.
+
+Startup passed arithmetic, factual, instruction, reasoning plus strict JSON,
+and three-depth 32K retrieval. The independent feature suite passed every
+applicable engine contract: tokenize, thinking on/off, streaming with usage,
+reasoning-preserving multi-turn, strict JSON with thinking, tool choice,
+single tool-call emission, and tool-result continuation. Vision was
+intentionally disabled for this text checkpoint. The isolated candidate used
+loopback `AUTH=none`; authentication is re-enabled for the published-image
+service smoke rather than inferred from this run.
+
+The release matrix placed five facts at 1%, 25%, 50%, 75%, and 99% depth:
+
+| target | tokenizer-exact document | facts | duration |
+|---:|---:|---:|---:|
+| 131,072 | 131,407 | 5/5 | 59.474 s |
+| 262,144 | 261,192 | 5/5 | 149.378 s |
+| 389,120 | 389,959 | 5/5 | 242.304 s |
+
+A fresh post-stress arithmetic/factual/instruction and strict-structured-output
+gate passed. The 3,469-line server log contained a ready marker and the
+fail-closed audit reported zero post-ready compilation, structured-FSM,
+CUDA-runtime, distributed-runtime, process-failure, or error-level findings.
+The machine retains `sampling-smoke-384k.json`,
+`benchmark-primary-384k.json`, `feature-suite.json`,
+`needle-matrix-384k.json`, `post-stress-verify.json`, `log-audit.json`, and
+`server-current.log` under the persistent qualification workspace.
 
 ## Provider integration
 

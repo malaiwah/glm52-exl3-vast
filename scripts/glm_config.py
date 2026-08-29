@@ -83,11 +83,12 @@ def p_config_env() -> str:   return os.path.join(runtime_dir(), "config.env")
 #     Moving it here would have made a second source of truth for the one thing
 #     in this repo with the most expensive history behind it.
 #
-# `tested` means: someone booted it and measured the result. Only glm52 is.
+# `tested` means at least one family profile was booted and measured; each
+# variant carries its own qualification status and warning independently.
 
 FAMILIES = {
     "glm52": {
-        "label": "GLM-5.2 753B (MLA + EXL3/NVFP4) — the measured default",
+        "label": "Full GLM glm_moe_dsa (GLM-5.2/5.3 + EXL3/NVFP4) — measured runtime family",
         "tested": True,
         "env_block": "glm52",
         "default_variant": "exl3-tr3",
@@ -699,6 +700,35 @@ VARIANTS["exl3-tr3-3.42bpw"]["defaults"].update({
     # acceptance on the matched AIBeast workload. Pin the measured choice so
     # a future parent-profile edit cannot silently change production.
     "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
+})
+
+# GLM-5.3 keeps GLM-5.2's exact glm_moe_dsa structure and sparse-indexer
+# pattern. This checkpoint uses the existing per-expert mixed-K rank-sliced
+# schema (148 K3 + 108 K4 experts per layer), not r28's shared-H encoding.
+# Live qualification rejected the inherited 520,192-token/4.21-GiB KV
+# envelope: startup and the 32K gate passed, but the first temperature-1
+# sampling request OOMed with only 3 MiB free on one rank. The selected
+# 393,216-token/3.18-GiB envelope left at least 665 MiB free after first-use
+# compilation and passed C8 sampling plus tokenizer-exact boundary retrieval.
+VARIANTS["exl3-tr3-glm53-3.42bpw"] = {
+    "family": "glm52",
+    "label": "GLM-5.3 EXL3-TR3 mixed 3.42bpw + online K6 — TP4 qualified",
+    "repo": "davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw",
+    "revision": "8bef807a0fcdd180e984a26b50e731cdba9a8ff2",
+    "dirname": "GLM-5.3-EXL3-TR3-3.42bpw",
+    "quantization": "exl3",
+    "native_mtp_format": "exl3-tr3",
+    "default_draft": "native",
+    "defaults": dict(VARIANTS["exl3-tr3-3.42bpw"]["defaults"]),
+    "runtime_env": dict(VARIANTS["exl3-tr3-3.42bpw"]["runtime_env"]),
+    "kv_scales_calibrated": True,
+    "download_gib": 331,
+    "tested": True,
+}
+VARIANTS["exl3-tr3-glm53-3.42bpw"]["defaults"].update({
+    "SERVED_MODEL_NAME": "GLM-5.3",
+    "MAX_MODEL_LEN": 393216,
+    "KV_CACHE_MEMORY_BYTES": 3415867392,
 })
 
 # MTP draft types -> the three env knobs the serve path actually consumes.
@@ -2097,10 +2127,10 @@ def validate(cfg: dict, context=None):
             "engine cannot start. Lower it, or rent a host with more GPUs.")
     if is_glm and tp < 4:
         err("glm-needs-four-ranks", ["TENSOR_PARALLEL_SIZE", "MODEL_FAMILY"],
-            f"the GLM-5.2 753B checkpoint is ~308 GiB of weights (~77 GiB/rank at "
-            f"TP=4). At TP={tp} it cannot fit: even on 96 GB cards that is "
-            f"{308 // max(tp, 1)} GiB per rank before any KV cache. Use 4 or more "
-            "GPUs, or switch to a family sized for this host (MODEL_FAMILY=qwen36).")
+            "the full GLM-5.2/5.3 glm_moe_dsa checkpoints are ~308–331 GiB "
+            f"(at least ~77 GiB/rank at TP=4). At TP={tp} they cannot fit even "
+            "on 96 GB cards before KV and runtime memory. Use 4 or more GPUs, "
+            "or switch to a family sized for this host (MODEL_FAMILY=qwen36).")
     if is_glm and tp != 4:
         warn("tp-off-measured", ["TENSOR_PARALLEL_SIZE"],
              f"every measured GLM-5.2 number in this repo — the 835,584-token pool, "

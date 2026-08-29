@@ -23,6 +23,7 @@ import ctypes
 import dataclasses
 import gc
 import importlib
+import inspect
 import os
 import sys
 import zlib
@@ -938,10 +939,6 @@ def _b12x_trellis_c_tmp_elements(
     small_m_scratch = getattr(api, "k6_mcg_small_m_scratch_elements", None)
     if rows <= 16 and small_m_scratch is not None:
         return int(small_m_scratch(in_features, out_features))
-    if rows <= 128 and small_m_scratch is None:
-        # B12X packages without the explicit scratch query expose an unpaired
-        # cooperative K6 ABI that owns no caller-provided split-K scratch.
-        return 1
     padded_rows = max(
         ((rows + 47) // 48) * 48,
         ((rows + 63) // 64) * 64,
@@ -3761,24 +3758,46 @@ class Exl3MoEMethod(FusedMoEMethodBase):
                     for tier_id, (bits, _experts) in enumerate(tier_signature)
                 }
             )
-            launch = compile_mixed(
-                size_m=capacity,
-                hidden_size=int(layer.exl3_hidden_size),
-                intermediate_size=int(layer.exl3_intermediate_size_per_partition),
-                top_k=topk,
-                max_m_blocks=(route_slots + block_size_m - 1) // block_size_m,
-                moe_block_size=block_size_m,
-                sms=policy["sms"],
-                max_shared_mem=policy["max_shared_mem"],
-                force_tile_config=tile_config,
-                rotation_input_dtype=("bf16" if x.dtype == torch.bfloat16 else "fp16"),
-                route_ids_dtype=topk_ids.dtype,
-                broadcast_suh=broadcast_suh,
-                broadcast_svh=broadcast_svh,
-                trellis_codebook=mixed["trellis_codebook"],
-                route_num_experts=route_num_experts,
+            compile_kwargs = {
+                "size_m": capacity,
+                "hidden_size": int(layer.exl3_hidden_size),
+                "intermediate_size": int(
+                    layer.exl3_intermediate_size_per_partition
+                ),
+                "top_k": topk,
+                "max_m_blocks": (route_slots + block_size_m - 1) // block_size_m,
+                "moe_block_size": block_size_m,
+                "sms": policy["sms"],
+                "max_shared_mem": policy["max_shared_mem"],
+                "force_tile_config": tile_config,
+                "rotation_input_dtype": (
+                    "bf16" if x.dtype == torch.bfloat16 else "fp16"
+                ),
+                "route_ids_dtype": topk_ids.dtype,
+                "broadcast_suh": broadcast_suh,
+                "broadcast_svh": broadcast_svh,
+                "trellis_codebook": mixed["trellis_codebook"],
                 **tier_kwargs,
+            }
+            compile_parameters = inspect.signature(compile_mixed).parameters
+            accepts_route_namespace = (
+                "route_num_experts" in compile_parameters
+                or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in compile_parameters.values()
+                )
             )
+            if accepts_route_namespace:
+                compile_kwargs["route_num_experts"] = route_num_experts
+            elif route_num_experts != sum(
+                experts for _bits, experts in tier_signature
+            ):
+                raise RuntimeError(
+                    "the installed B12X mixed-Trellis compiler cannot represent "
+                    f"route namespace {route_num_experts} over "
+                    f"{sum(experts for _bits, experts in tier_signature)} weights"
+                )
+            launch = compile_mixed(**compile_kwargs)
             return {
                 "capacity": capacity,
                 "launch": launch,

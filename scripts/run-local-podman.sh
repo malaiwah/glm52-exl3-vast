@@ -242,7 +242,7 @@ fi
 health_start_period="${HEALTH_START_PERIOD:-}"
 if [ -z "$health_start_period" ]; then
   case "${MODEL_VARIANT:-exl3-tr3}" in
-    exl3-tr3-3.42bpw) health_start_period=90m ;;
+    exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw) health_start_period=90m ;;
     *) health_start_period=45m ;;
   esac
 fi

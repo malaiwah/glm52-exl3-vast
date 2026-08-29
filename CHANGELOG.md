@@ -3,6 +3,63 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
+## GLM-5.3 full-model 3.42bpw
+
+The appliance now live-qualifies `MODEL_PROFILE=glm53-3.42bpw` for
+`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@8bef807a0fcdd180e984a26b50e731cdba9a8ff2`
+on four RTX PRO 6000 Blackwell 96 GiB GPUs. The complete `glm_moe_dsa`
+structure matches GLM-5.2, so the profile retains its TP4/DCP4 sparse-MLA
+topology, online shared-expert K6, per-layer mixed K3/K4 routed experts,
+native probabilistic MTP3, dynamic-NVFP4 KV, 3,072-token scheduler, C8,
+GMU 0.93, and bounded LMCache tier. GLM-5.3-Flash settings remain isolated
+from this full-model family.
+
+The 81 weight shards matched the checkpoint's published hashes. The upstream
+`MANIFEST.sha256` has three stale non-weight entries (`.gitattributes`,
+`README.md`, and `config.json`); their actual Git object ids match the pinned
+Hugging Face revision, so this is upstream manifest drift rather than download
+corruption. Unlike willfalco's shared-H GLM-5.2 payload, this release stores
+per-expert rank-sliced transforms: every routed layer has 148 K3 and 108 K4
+experts, including native MTP layer 78.
+
+The immutable r28 base needed six additional overlays, bringing the
+fail-closed runtime manifest to 27 entries. Qualification exposed and fixed
+FP8-RoPE leakage into B12X import probes, GLM-5.3-Flash environment leakage,
+full-attention layers being forced through sparse-output validation, mixed
+compiler API drift, a non-coherent mixed-kernel/route-pack pair, overly narrow
+fused-kernel admission, early GLM-5-Next imports on the old architecture, and
+undersized graph-owned Trellis scratch. Mixed-K uses an isolated coherent
+kernel and route pack rather than changing the uniform-K6 path. The final
+`exl3_patched.py` payload SHA-256 is
+`ffef5aea103117a1bfb0023a43a59fba15b704566ad5acb0ddc47a18b9acede4`;
+persistent JIT paths use namespace `turnkey-glm53-runtime-o27-v3`.
+
+The inherited GLM-5.2 520,192-token/4.21-GiB KV envelope passed startup,
+short/structured checks, and 32K retrieval, but the first temperature-1
+1,024-input/512-output sampler request OOMed in top-p selection with only
+3 MiB physically free on one rank. The qualified profile instead pins
+3,415,867,392 KV bytes per GPU: exactly 393,216 logical KV tokens and one
+maximum-length request. Model loading used 82.42 GiB/rank, graph capture used
+0.61 GiB/rank, and two-second `nvidia-smi` sampling retained at least 665 MiB
+physical free memory after first-use compilation and C8 sampling.
+
+Unique-prefix prefill measured 2,465 / 2,444 / 2,380 / 2,282 tok/s at
+8K / 32K / 64K / 128K. Aggregate temperature-1 decode for
+1,024-input/512-output requests measured 60.40 / 153.93 / 227.55 tok/s at
+C1 / C4 / C8, with mean acceptance lengths 3.41 / 3.45 / 3.51 and draft-token
+acceptance of 80.45% / 81.57% / 83.63%. All 72 requests completed without
+failure, preemption, or GPU/LMCache prefix reuse.
+
+The startup arithmetic, factual, instruction, strict structured-output, and
+32K three-depth retrieval gate passed. The independent OpenAI feature suite
+passed tokenize, thinking on/off, streaming usage, preserved-thinking
+multi-turn, strict JSON with thinking, tool choice, tool calls, and tool-result
+continuation. A five-depth matrix retrieved all 15 facts from tokenizer-exact
+131,407-, 261,192-, and 389,959-token documents. The post-stress short and
+structured gate passed; a 3,469-line ready-state log audit found no post-ready
+compile, structured-FSM, CUDA, distributed, process-failure, or error-level
+findings.
+
 ## GLM-5.3-Flash K8 (quality-max)
 
 The appliance now live-qualifies `MODEL_PROFILE=glm53-k8` for

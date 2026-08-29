@@ -64,6 +64,7 @@ answers only to you.
 |---|---|---|---|---|---|
 | GLM-5.3-Flash K6 | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **450 GB** | 2–12 min once weights are local |
 | GLM-5.3-Flash K8 quality-max | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **525 GB** | 2–15 min once weights are local |
+| GLM-5.3 full 3.42bpw | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | up to 90 min cold; ~9 min with warm runtime cache |
 | GLM-5.2 flagship (3.42bpw) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | 60–90 min |
 | GLM-5.2 flagship (3.42bpw) | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | ~30 min (Secure) |
 | GLM-5.2 flagship (3.42bpw) | JarvisLabs | [▶ VM guide](#launch-on-jarvislabs) | 4x RTX-PRO6000 VM | **650 GB** | ~30 min |
@@ -98,7 +99,8 @@ sudo docker run -d --name glm53-turnkey \
 ```
 
 This is the same container shape used on JarvisLabs. Select
-`MODEL_PROFILE=glm52-exl3` for the legacy four-GPU profile or
+`MODEL_PROFILE=glm53-3.42bpw` for the qualified full 755B GLM-5.3 model,
+`MODEL_PROFILE=glm52-exl3` for the legacy four-GPU profile, or
 `MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU profile; add
 `-e HF_TOKEN=...` for authenticated downloads. Follow first boot with
 `sudo docker logs -f glm53-turnkey`. The endpoint is
@@ -146,6 +148,7 @@ services:
     environment:
       - MODEL_PROFILE=glm52-exl3
       # - MODEL_VARIANT=exl3-tr3-3.42bpw  # higher fidelity, ~328 GiB
+      # - MODEL_PROFILE=glm53-3.42bpw      # qualified full 755B glm_moe_dsa
       # - HF_TOKEN=hf_your_token_here     # faster authenticated downloads
       # - PREFIX_CACHE_DISK_GB=32         # LMCache L2 disk tier (GiB)
       # - PREFIX_CACHE_DISK_FRACTION=0.5  # ...or fraction of free disk
@@ -185,9 +188,36 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 |---|---|---|---|
 | `glm53-k6` | validated GLM-5.3-Flash TR3 EXL3 K6 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~237 GiB / 458,752 |
 | `glm53-k8` | validated GLM-5.3-Flash TR3 EXL3 K8 quality-max stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 458,752 |
+| `glm53-3.42bpw` | validated GLM-5.3 full-model mixed K3/K4 EXL3 stack | 4x RTX PRO 6000 Blackwell 96 GB | ~331 GiB / 393,216 |
 | `glm52-exl3` | validated GLM-5.2 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 512K |
 | `qwen36-27b-nvfp4` | vision-enabled, lower-cost production/development | 1x RTX 5090 32 GB | ~21 GiB / 192K |
 | `custom` | another conventional vLLM checkpoint | configurable | conservative 32K defaults |
+
+### GLM-5.3 full-model 3.42bpw
+
+`MODEL_PROFILE=glm53-3.42bpw` pins
+`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@8bef807a0fcdd180e984a26b50e731cdba9a8ff2`.
+This is the 755B `glm_moe_dsa` GLM-5.3 model, not GLM-5.3-Flash. Its complete
+structural configuration matches GLM-5.2, so it reuses the qualified GLM-5.2
+B12X sparse-MLA, DCP4, native MTP-3, mixed-K EXL3 and online-K6 runtime family.
+The payload itself is not the old shared-H encoding: every routed layer stores
+148 K3 and 108 K4 experts with per-expert transforms.
+
+Qualification rejected the inherited 520,192-token/4.21-GiB KV envelope. It
+passed startup and 32K retrieval, then OOMed in the first temperature-1 sampler
+request with only 3 MiB free on one rank. The profile therefore pins a
+3.18-GiB/GPU dynamic-NVFP4 pool and a 393,216-token request limit. The final
+arm loaded 82.42 GiB of tensors per rank, used 0.61 GiB/rank for CUDA graphs,
+and retained at least 665 MiB of observed physical free memory after first-use
+compilation and C8 sampling.
+
+Unique-prefix prefill measured 2,465 / 2,444 / 2,380 / 2,282 tok/s at
+8K / 32K / 64K / 128K. Aggregate 1,024-input/512-output temperature-1 decode
+measured 60.40 / 153.93 / 227.55 tok/s at C1 / C4 / C8; all 72 requests
+completed without failure, preemption, or prefix reuse. The complete OpenAI
+feature suite passed, as did 15/15 retrieval facts at five depths through
+131,407, 261,192, and 389,959 tokenizer-exact document tokens. A post-stress
+short/structured gate and a 3,469-line runtime-log audit were clean.
 
 ### GLM-5.3-Flash K6 and K8
 
@@ -273,6 +303,7 @@ speculation shape; it is not merely a different download URL:
 | `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals; one-grid decode plus serial K3/K4 block-64 prefill | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
 | `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; r26 exact query-split/full-CKV policy with two indexer shards and owner merge off | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | previous high-fidelity profile; dynamic-NVFP4 KLD 0.082507, 2,453--2,458 / 2,350--2,370 / 2,197--2,238 tok/s PP at 3K/32K/128K, 5/5 needles in an actual 522,359-token prompt |
 | **`exl3-tr3-3.42bpw`** | TP4/DCP4, shared-H checkpoint + online Trellis K6, native MTP-3 with probabilistic proposals; r28 lossless query-split/full-CKV policy | exactly 2,032 KV blocks / 520,192 logical tokens, GMU 0.95, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | selected high-fidelity profile; K6/dynamic-NVFP4 KLD 0.089888 (native weights 0.082039), PP 2,367 / 2,263 / 2,137 tok/s at 3K/32K/128K, complete 45/45 five-depth needles through a 516,096-token prompt plus 4,096-token reserve |
+| `exl3-tr3-glm53-3.42bpw` | GLM-5.3 TP4/DCP4 per-expert mixed K3/K4 + online Trellis K6, native probabilistic MTP-3 | candidate clone of the 520,192-token r28 memory and KV boundary | full 755B GLM-5.3 qualification; use `MODEL_PROFILE=glm53-3.42bpw` |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 

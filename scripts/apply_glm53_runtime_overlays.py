@@ -24,13 +24,31 @@ OVERLAYS = (
         "exl3_patched.py",
         "/opt/infernal-invocation/vllm/vllm/model_executor/layers/quantization/exl3.py",
         "ae92592ea8fcd249978134357ea3cd2510fe2aa9bdb1d1a3ab02afdbaeb39f45",
-        "5e94629db2111aced6e3407addda85af294a4343a5b7258e0ca568e34626182c",
+        "ffef5aea103117a1bfb0023a43a59fba15b704566ad5acb0ddc47a18b9acede4",
     ),
     (
         "w4a16_kernel_k6.py",
         "/opt/infernal-invocation/b12x/b12x/moe/_shared/kernels/w4a16/kernel.py",
         "28e6a2ca95934921718f75f8cf575be034c23da78776b40d478bef6bf8b0b3cd",
         "03be88e2044f54eb03d897ffa9782b5e5ce284ebf095a962bde149212dcbff7f",
+    ),
+    (
+        "b12x_mixed_kernel.py",
+        "/opt/infernal-invocation/b12x/b12x/moe/_shared/kernels/w4a16/mixed_kernel.py",
+        None,
+        "f181cec7cb4e7573aea55fafaede3ec8293d4afcd6707469f1e09bf79b78376f",
+    ),
+    (
+        "b12x_w4a16_host.py",
+        "/opt/infernal-invocation/b12x/b12x/moe/_shared/kernels/w4a16/host.py",
+        "69bc0b31df3da4063d650ed1bd44922d4933c5e54629fe84958d5368cc31c224",
+        "7c70320d150c590ee5a1c09a1194fccc79bb20ea69db02b8e98107ee7bd35089",
+    ),
+    (
+        "b12x_mixed_trellis.py",
+        "/opt/infernal-invocation/b12x/b12x/moe/_shared/kernels/w4a16/mixed_trellis.py",
+        "cbd3dac9d7608019f860999bdd256a42c7737cf2a00d33c986964c58f4147072",
+        "4f934a40dbf10804e759239a34205d85a6622b19007d8fae2af3c16b2191785a",
     ),
     (
         "b12x_fused_moe_impl_image.py",
@@ -61,6 +79,18 @@ OVERLAYS = (
         "/opt/infernal-invocation/vllm/vllm/envs.py",
         "e489510c9fb40bb6f0b8fd803a534edbb9c4fc430d20780b5ca91d1eded2b992",
         "37701b15f9401abeab90da44423d8af8a9aa315c25e89c5ff457b60b73040da2",
+    ),
+    (
+        "b12x_mla_smem.py",
+        "/opt/infernal-invocation/b12x/b12x/attention/_shared/mla/smem.py",
+        "20da45a335c09088a9b1200d646364d74115ea60b1e57d02b601ae06442dab83",
+        "49ba08ba98d92d14d836c484558141d7b03f3c6e4809ea1b8e17011e0eece40a",
+    ),
+    (
+        "b12x_mla_smem_mg.py",
+        "/opt/infernal-invocation/b12x/b12x/attention/_shared/mla/smem_mg.py",
+        "f3e61a8527ad7b0d84970058b3a7a125e0cba517ced54f74afba17368a4fe92f",
+        "32b73906b61a6cb8a648ef36fc41de9979bd920af6346a505d6b7f9fd7ada37f",
     ),
     (
         "kda_no_block_ptr.py",
@@ -129,6 +159,12 @@ OVERLAYS = (
         "0b77e7305ff7c28aac589a797b67efc445c356e06c21c13ea978f583cc9e7cb5",
     ),
     (
+        "b12x_mla_sparse.py",
+        "/opt/infernal-invocation/vllm/vllm/v1/attention/backends/mla/b12x_mla_sparse.py",
+        "0499c674b6890266b50fa0d5724dcfbb83cba3917714a6787e5dddc6feb65572",
+        "bd43a2865580884d43658c15c718f5f94fcbcb4de0985f5da0ca93d94818aa22",
+    ),
+    (
         "kpool_compress.py",
         "/opt/infernal-invocation/vllm/vllm/models/glm5next/nvidia/ops/kpool_compress.py",
         "01bfba91f667214760e1fe8af8c4151498ae9b0407493a4670e255945ae01a58",
@@ -138,7 +174,7 @@ OVERLAYS = (
         "glm5_kpool_warmup.py",
         "/opt/infernal-invocation/vllm/vllm/model_executor/warmup/glm5_kpool_warmup.py",
         None,
-        "61955a31d89b825e2b525b9eb1783908f0b0ceb91edb9c1c89e721ff7081a17f",
+        "1499c7650e44279b98a82fd1779e63f2c2a2a8619f46b07e5ae4b446c7e2c4fb",
     ),
     (
         "kernel_warmup_image_exact.py",

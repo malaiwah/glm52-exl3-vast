@@ -24,6 +24,12 @@ case "$MODEL_PROFILE" in
     export MODEL_FAMILY="${MODEL_FAMILY:-glm53}"
     export MODEL_VARIANT="${MODEL_VARIANT:-$MODEL_PROFILE}"
     ;;
+  glm53-3.42bpw)
+    # GLM-5.3 retains GLM-5.2's glm_moe_dsa architecture. Reuse that measured
+    # runtime family while selecting the independently pinned GLM-5.3 weights.
+    export MODEL_FAMILY="${MODEL_FAMILY:-glm52}"
+    export MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3-glm53-3.42bpw}"
+    ;;
   qwen36-27b-nvfp4)
     export MODEL_FAMILY="${MODEL_FAMILY:-qwen36}"
     export MODEL_VARIANT="${MODEL_VARIANT:-qwen36-nvfp4}"
@@ -34,7 +40,7 @@ case "$MODEL_PROFILE" in
     ;;
   *)
     echo "FATAL: unknown MODEL_PROFILE=$MODEL_PROFILE"
-    echo "FATAL: choose glm53-k6, glm53-k8, glm52-exl3, qwen36-27b-nvfp4, or custom"
+    echo "FATAL: choose glm53-k6, glm53-k8, glm53-3.42bpw, glm52-exl3, qwen36-27b-nvfp4, or custom"
     exit 1
     ;;
 esac
@@ -248,7 +254,12 @@ apply_config() {
     . "$CONFIG_ENV"
   fi
   case "${MODEL_FAMILY:-glm52}" in
-    glm52) MODEL_PROFILE=glm52-exl3 ;;
+    glm52)
+      case "${MODEL_VARIANT:-exl3-tr3}" in
+        exl3-tr3-glm53-3.42bpw) MODEL_PROFILE=glm53-3.42bpw ;;
+        *) MODEL_PROFILE=glm52-exl3 ;;
+      esac
+      ;;
     glm53)
       case "${MODEL_VARIANT:-glm53-k6}" in
         glm53-k8) MODEL_PROFILE=glm53-k8 ;;
@@ -1596,6 +1607,11 @@ if [ "${FAMILY_ENV_BLOCK:-glm52}" = "glm52" ]; then
 # conversion/cache contract in the same long-lived PID 1 environment.
 unset VLLM_EXL3_ONLINE_TRELLIS_BITS VLLM_EXL3_ENCODER_SOURCE
 unset VLLM_EXL3_ONLINE_CACHE_DIR VLLM_EXL3_ONLINE_CACHE_MODE
+# The parent image is GLM-5.3-Flash-first. Its NoPE cache and route flags are
+# mutually exclusive with the full GLM_NSA record selected below; leaving them
+# inherited makes KV_FP8_ROPE=1 fail before any weights load.
+unset VLLM_B12X_GLM_NOPE_NVFP4 B12X_GL53_ROUTE128_WIDE
+unset B12X_GL53_ROUTE128_HYBRID_TAIL VLLM_ALLREDUCE_USE_SYMM_MEM
 export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_SPARSE_INDEXER=1
 export VLLM_USE_B12X_MOE=1 VLLM_USE_V2_MODEL_RUNNER=1
 if [ "${B12X_PCIE_DMA:-1}" = "1" ]; then
@@ -1855,6 +1871,8 @@ else
   unset VLLM_PCIE_DMA_FP8 B12X_PCIE_DMA_FP8
   unset SPARKINFER_PCIE_DMA_FP8 VLLM_PCIE_DMA_MIN_BYTES
   unset VLLM_B12X_ABSORB_BMM VLLM_NF3_GRID188_DECODE
+  unset VLLM_B12X_GLM_NOPE_NVFP4 B12X_GL53_ROUTE128_WIDE
+  unset B12X_GL53_ROUTE128_HYBRID_TAIL VLLM_ALLREDUCE_USE_SYMM_MEM
   unset NCCL_LOCAL_INFERENCE_PATH NCCL_PR2127_PATH VLLM_NCCL_SO_PATH LD_PRELOAD
 fi
 }
@@ -2142,12 +2160,12 @@ fi
 # gilded-gnosis fork's cache bug); verify decode tok/s after enabling this.
 #
 # Do not share compiled objects across immutable runtime stacks. The parent
-# fingerprint covers its base repositories, while the appliance's 21 K6
+# fingerprint covers its base repositories, while the appliance's 27 runtime
 # overlays also change Python/Triton/AOT source consumed by Inductor and the
 # runtime JITs. Keep an explicit overlay-generation suffix: restarts of this
 # exact appliance remain warm, but old GG-v20 and unoverlaid GLM-5.3 artifacts
 # cannot be reused.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-k6-o21-v1"
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-runtime-o27-v3"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2

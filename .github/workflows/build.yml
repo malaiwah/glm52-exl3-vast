@@ -89,6 +89,8 @@ jobs:
           grep -q 'malaiwah/GLM-5.3-Flash-TR3-6bpw' <<<"$out"
           out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-k8 bash entrypoint.sh)
           grep -q 'malaiwah/GLM-5.3-Flash-TR3-8bpw' <<<"$out"
+          out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-3.42bpw bash entrypoint.sh)
+          grep -q 'davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw' <<<"$out"
           out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm52-exl3 bash entrypoint.sh)
           grep -q 'brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw' <<<"$out"
           out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=qwen36-27b-nvfp4 bash entrypoint.sh)

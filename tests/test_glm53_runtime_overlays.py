@@ -43,7 +43,7 @@ class Glm53RuntimeOverlayTests(unittest.TestCase):
     def test_manifest_pins_every_checked_in_payload(self):
         manifest_names = [item[0] for item in OVERLAY.OVERLAYS]
         payload_names = sorted(path.name for path in PAYLOADS.glob("*.py"))
-        self.assertEqual(len(manifest_names), 21)
+        self.assertEqual(len(manifest_names), 27)
         self.assertEqual(sorted(manifest_names), payload_names)
         self.assertEqual(len(set(manifest_names)), len(manifest_names))
         self.assertEqual(
@@ -52,6 +52,89 @@ class Glm53RuntimeOverlayTests(unittest.TestCase):
         )
         for source_name, _target, _before, after in OVERLAY.OVERLAYS:
             self.assertEqual(OVERLAY.file_sha256(PAYLOADS / source_name), after)
+        host_entry = next(
+            item for item in OVERLAY.OVERLAYS
+            if item[0] == "b12x_w4a16_host.py"
+        )
+        self.assertEqual(
+            host_entry[2],
+            "69bc0b31df3da4063d650ed1bd44922d4933c5e54629fe84958d5368cc31c224",
+        )
+
+    def test_nope_import_assertions_ignore_nsa_fp8_rope_mode(self):
+        smem = (PAYLOADS / "b12x_mla_smem.py").read_text()
+        smem_mg = (PAYLOADS / "b12x_mla_smem_mg.py").read_text()
+        self.assertEqual(smem.count("fp8_rope=False"), 2)
+        self.assertEqual(smem_mg.count("fp8_rope=False"), 1)
+
+    def test_full_glm_dcp_layers_without_indexers_skip_output_validation(self):
+        backend = (PAYLOADS / "b12x_mla_sparse.py").read_text()
+        self.assertIn(
+            "if indexer is not None:\n"
+            "            indexer_outputs_physical = "
+            "bool(indexer.output_physical_slots)",
+            backend,
+        )
+        self.assertNotIn(
+            "else:\n"
+            "            indexer_outputs_physical = "
+            "not self.indexer_outputs_logical",
+            backend,
+        )
+
+    def test_mixed_trellis_compiler_gets_exact_route_namespace(self):
+        exl3 = (PAYLOADS / "exl3_patched.py").read_text()
+        self.assertIn(
+            '"route_num_experts" in compile_parameters',
+            exl3,
+        )
+        self.assertIn(
+            "elif route_num_experts != sum(",
+            exl3,
+        )
+        self.assertIn(
+            "launch = compile_mixed(**compile_kwargs)",
+            exl3,
+        )
+
+    def test_dense_trellis_allocates_small_capture_scratch(self):
+        exl3 = (PAYLOADS / "exl3_patched.py").read_text()
+        self.assertNotIn(
+            "if rows <= 128 and small_m_scratch is None",
+            exl3,
+        )
+        self.assertIn(
+            "return min(out_features * padded_rows, _B12X_TRELLIS_C_TMP_CAP)",
+            exl3,
+        )
+
+
+    def test_projection_tight_mixed_trellis_separates_route_namespace(self):
+        mixed = (PAYLOADS / "b12x_mixed_trellis.py").read_text()
+        host = (PAYLOADS / "b12x_w4a16_host.py").read_text()
+        self.assertIn("route_num_experts: int | None = None", mixed)
+        self.assertIn(
+            "route_num_experts=int(launch.topk_sum.route_num_experts)",
+            mixed,
+        )
+        for symbol in (
+            "build_projection_tiered_maps",
+            "bind_mixed_trellis",
+            "run_bound_mixed_trellis",
+        ):
+            self.assertIn(f"def {symbol}(", mixed)
+        self.assertIn("def route_pack_warmup_token_counts(", host)
+        self.assertIn("from .mixed_kernel import (", mixed)
+        self.assertTrue((PAYLOADS / "b12x_mixed_kernel.py").is_file())
+
+    def test_kpool_warmup_rejects_inapplicable_architectures_before_import(self):
+        warmup = (PAYLOADS / "glm5_kpool_warmup.py").read_text()
+        applicability = warmup.index("if pool_size <= 1")
+        lazy_import = warmup.index(
+            "from vllm.model_executor.layers.sparse_attn_indexer_kpool import"
+        )
+        self.assertLess(applicability, lazy_import)
+
 
     def test_install_verifies_applies_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
