@@ -435,10 +435,13 @@ class NeedleTests(unittest.TestCase):
         self.assertEqual(calls["n"], 1)
 
     def test_probe_records_seed_duration_and_retrieval(self):
+        requested = {}
+
         def fake_count(_base, _key, _model, text):
             return len(text.split()), True
 
-        def fake_complete(_base, _key, _model, prompt, **_kwargs):
+        def fake_complete(_base, _key, _model, prompt, **kwargs):
+            requested.update(kwargs)
             codes = []
             for line in prompt.splitlines():
                 if line.startswith("IMPORTANT:"):
@@ -448,11 +451,13 @@ class NeedleTests(unittest.TestCase):
         with mock.patch.object(verify, "count_tokens", side_effect=fake_count), \
              mock.patch.object(verify, "complete", side_effect=fake_complete):
             result = verify.needle_probe(
-                "http://test", "", "model", 8192, [0.1, 0.9], seed=99)
+                "http://test", "", "model", 8192, [0.1, 0.9],
+                seed=99, max_tokens=1024)
         self.assertTrue(result["ok"])
         self.assertEqual(result["seed"], 99)
         self.assertEqual(result["found"], 2)
         self.assertGreaterEqual(result["duration_s"], 0)
+        self.assertEqual(requested["max_tokens"], 1024)
 
     def test_probe_calibrates_to_within_one_percent_of_requested_tokens(self):
         def fake_count(_base, _key, _model, text):

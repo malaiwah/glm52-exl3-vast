@@ -274,7 +274,7 @@ def build_haystack(target_tokens, depths, seed=20260726):
 
 
 def _needle_probe_once(base, key, model, target_tokens, depths, timeout,
-                       seed):
+                       seed, max_tokens):
     """Single needle-probe attempt; may raise on a transient failure."""
     started = time.perf_counter()
     build_target = target_tokens
@@ -296,7 +296,8 @@ def _needle_probe_once(base, key, model, target_tokens, depths, timeout,
     prompt = (text + "\n\n---\nThe document above contains access codes. "
               f"List the access code for each of these cities: {asked}. "
               "Answer with one 'City: CODE' pair per line and nothing else.")
-    answer = complete(base, key, model, prompt, max_tokens=256, timeout=timeout)
+    answer = complete(base, key, model, prompt, max_tokens=max_tokens,
+                      timeout=timeout)
     found = [code for _city, code in needles if code in answer]
     return {
         "attempted": True,
@@ -315,7 +316,7 @@ def _needle_probe_once(base, key, model, target_tokens, depths, timeout,
 
 
 def needle_probe(base, key, model, target_tokens, depths, timeout=600,
-                 seed=20260726):
+                 seed=20260726, max_tokens=256):
     """One prefill, all depths — the harness shape that found the 490K result.
 
     A single transient network failure is retried once so a dropped connection
@@ -327,7 +328,7 @@ def needle_probe(base, key, model, target_tokens, depths, timeout=600,
     for attempt in range(2):
         try:
             return _needle_probe_once(base, key, model, target_tokens, depths,
-                                      timeout, seed)
+                                      timeout, seed, max_tokens)
         except Exception as exc:
             last_error = exc
             if attempt == 0 and _is_transient(exc):
@@ -395,7 +396,12 @@ def main(argv):
     ap.add_argument("--skip-long-context", action="store_true")
     ap.add_argument("--needle-timeout", type=int, default=600,
                     help="per-request timeout for the needle probe, seconds")
+    ap.add_argument(
+        "--needle-max-tokens", type=int, default=256,
+        help="maximum completion tokens for the needle answer")
     args = ap.parse_args(argv)
+    if args.needle_max_tokens < 1:
+        ap.error("--needle-max-tokens must be positive")
     if args.api_key_env:
         args.api_key = os.environ.get(args.api_key_env, "")
 
@@ -444,7 +450,8 @@ def main(argv):
         )
         return _finish(verdict, args, started)
 
-    budget = min(args.needle_tokens, max(0, args.max_model_len - 4096))
+    reserve = max(4096, args.needle_max_tokens + 2048)
+    budget = min(args.needle_tokens, max(0, args.max_model_len - reserve))
     if args.skip_long_context or budget < 8192:
         verdict["long_context"] = {
             "attempted": False, "ok": False,
@@ -458,8 +465,9 @@ def main(argv):
 
     depths = [float(d) for d in args.depths.split(",") if d.strip()]
     try:
-        lc = needle_probe(base, args.api_key, args.model, budget, depths,
-                          timeout=args.needle_timeout)
+        lc = needle_probe(
+            base, args.api_key, args.model, budget, depths,
+            timeout=args.needle_timeout, max_tokens=args.needle_max_tokens)
     except Exception as e:
         lc = {"attempted": True, "ok": False, "detail": f"probe failed: {e}"}
     verdict["long_context"] = lc
