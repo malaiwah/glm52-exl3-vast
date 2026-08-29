@@ -58,13 +58,13 @@ class R28BaseGateTests(unittest.TestCase):
                 result = gate.verify()
             self.assertEqual(result["status"], "verified")
 
-    def test_r28_base_and_inherited_r26_ledger_are_explicit(self) -> None:
+    def test_r28_base_and_inherited_r26_ledger_are_retained(self) -> None:
         ledger = json.loads(
             (ROOT / "patches" / "field-review-r26" / "ledger.json").read_text())
-        dockerfile = (ROOT / "Dockerfile").read_text()
+        changelog = (ROOT / "CHANGELOG.md").read_text()
         self.assertIn(
             "sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0",
-            dockerfile,
+            changelog,
         )
         self.assertEqual(ledger["composed_sources"]["vllm"],
                          "f5981f14b4d39979bc0d799c020d42002b707257")
@@ -102,32 +102,31 @@ class R28BaseGateTests(unittest.TestCase):
         ):
             self.assertIn(digest, source)
 
-    def test_serial_mtp_warning_fix_is_built_and_ledgered(self) -> None:
+    def test_serial_mtp_warning_fix_is_retained_and_ledgered(self) -> None:
         ledger = json.loads(
             (ROOT / "patches" / "field-review-r26" / "ledger.json").read_text())
-        dockerfile = (ROOT / "Dockerfile").read_text()
         overlays = {item["name"]: item for item in ledger["turnkey_overlays"]}
         self.assertEqual(
             overlays["vllm-serial-spec-warning"]["status"],
             "field-fix-pending-upstream",
         )
         patcher = ROOT / "scripts" / "patch_vllm_serial_spec_warning.py"
-        self.assertIn(hashlib.sha256(patcher.read_bytes()).hexdigest(), dockerfile)
-        self.assertIn("python3 /opt/scripts/patch_vllm_serial_spec_warning.py",
-                      dockerfile)
+        self.assertEqual(
+            hashlib.sha256(patcher.read_bytes()).hexdigest(),
+            "a0b7bc8377a5e29a921da4971d63b5260dac34601598285fee6cce3cd94bc65c",
+        )
 
-    def test_exl3_source_patchers_are_hash_pinned(self) -> None:
-        # Every patcher that rewrites the immutable vLLM/EXL3 tree at build time
-        # must be sha256-pinned in the Dockerfile, so it cannot be edited without
-        # touching the Dockerfile and this gate (patch_exl3_parity_abi.py shipped
-        # without a pin — the one script in the RUN block that could drift).
-        dockerfile = (ROOT / "Dockerfile").read_text()
-        for name in ("patch_exl3_parity_abi.py", "patch_exl3_mixk.py"):
+    def test_legacy_exl3_source_patchers_are_retained_immutably(self) -> None:
+        expected = {
+            "patch_exl3_parity_abi.py":
+                "e5a442f9aac0493f7fefe8584acfee923f99f4c952382dc6e41670d8b7c8a638",
+            "patch_exl3_mixk.py":
+                "99f597b78c83fce4d7d568305ba147d17a8daf866e833eca42be79d8ec185544",
+        }
+        for name, digest in expected.items():
             patcher = ROOT / "scripts" / name
-            self.assertIn(
-                hashlib.sha256(patcher.read_bytes()).hexdigest(), dockerfile,
-                f"{name} must be sha256-pinned in the Dockerfile")
-            self.assertIn(f"python3 /opt/scripts/{name}", dockerfile)
+            self.assertEqual(hashlib.sha256(patcher.read_bytes()).hexdigest(),
+                             digest)
 
 
 if __name__ == "__main__":

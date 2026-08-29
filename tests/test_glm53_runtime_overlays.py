@@ -20,6 +20,26 @@ def digest(data: bytes) -> str:
 
 
 class Glm53RuntimeOverlayTests(unittest.TestCase):
+    def test_image_pins_and_applies_the_qualified_runtime(self):
+        dockerfile = (REPO / "Dockerfile").read_text()
+        self.assertIn(
+            "FROM docker.io/verdictai/glm53-flash-exl3-k4@sha256:"
+            "0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692",
+            dockerfile,
+        )
+        self.assertIn("COPY patches/glm53-runtime/ /opt/glm53-runtime/",
+                      dockerfile)
+        self.assertIn(
+            "python3 /opt/scripts/apply_glm53_runtime_overlays.py "
+            "/opt/glm53-runtime --verify-only",
+            dockerfile,
+        )
+        self.assertIn(
+            "python3 /opt/scripts/apply_glm53_runtime_overlays.py "
+            "/opt/glm53-runtime;",
+            dockerfile,
+        )
+
     def test_manifest_pins_every_checked_in_payload(self):
         manifest_names = [item[0] for item in OVERLAY.OVERLAYS]
         payload_names = sorted(path.name for path in PAYLOADS.glob("*.py"))
