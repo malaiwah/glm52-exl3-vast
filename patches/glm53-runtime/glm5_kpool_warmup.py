@@ -18,6 +18,11 @@ def warmup_glm5_kpool_prefill(worker: "Worker") -> int:
     """Compile K-pool cache-write and tail-seed variants for finalized caches."""
     if not current_platform.is_cuda():
         return 0
+    config = worker.model_config.hf_text_config
+    pool_size = int(getattr(config, "index_kpool", 1))
+    if pool_size <= 1 or not bool(getattr(config, "index_kpool_compress", False)):
+        return 0
+
     from vllm.model_executor.layers.sparse_attn_indexer_kpool import (
         SparseAttnIndexerKpool,
     )
@@ -26,10 +31,6 @@ def warmup_glm5_kpool_prefill(worker: "Worker") -> int:
         kpool_seed_tail_cache,
     )
 
-    config = worker.model_config.hf_text_config
-    pool_size = int(getattr(config, "index_kpool", 1))
-    if pool_size <= 1 or not bool(getattr(config, "index_kpool_compress", False)):
-        return 0
 
     max_tokens = max(int(worker.scheduler_config.max_num_batched_tokens), pool_size)
     warmed_variants = 0
