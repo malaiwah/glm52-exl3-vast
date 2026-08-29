@@ -52,6 +52,14 @@ class Glm53RuntimeOverlayTests(unittest.TestCase):
         )
         for source_name, _target, _before, after in OVERLAY.OVERLAYS:
             self.assertEqual(OVERLAY.file_sha256(PAYLOADS / source_name), after)
+        host_entry = next(
+            item for item in OVERLAY.OVERLAYS
+            if item[0] == "b12x_w4a16_host.py"
+        )
+        self.assertEqual(
+            host_entry[2],
+            "69bc0b31df3da4063d650ed1bd44922d4933c5e54629fe84958d5368cc31c224",
+        )
 
     def test_nope_import_assertions_ignore_nsa_fp8_rope_mode(self):
         smem = (PAYLOADS / "b12x_mla_smem.py").read_text()

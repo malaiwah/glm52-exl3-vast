@@ -41,7 +41,7 @@ OVERLAYS = (
     (
         "b12x_w4a16_host.py",
         "/opt/infernal-invocation/b12x/b12x/moe/_shared/kernels/w4a16/host.py",
-        "b0f7cc6e8e8c3e0dc35ae598af4a2410c953453bae24319085611afefb5446aa",
+        "69bc0b31df3da4063d650ed1bd44922d4933c5e54629fe84958d5368cc31c224",
         "7c70320d150c590ee5a1c09a1194fccc79bb20ea69db02b8e98107ee7bd35089",
     ),
     (
