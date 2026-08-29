@@ -1352,7 +1352,7 @@ prepare_checkpoint() {
     fi
   elif [ "${MODEL_FAMILY:-}" = "glm53" ]; then
     if ! MODEL_DIR="$MODEL_DIR" MODEL_VARIANT="${MODEL_VARIANT:-glm53-k6}" \
-         MAX_MODEL_LEN="${MAX_MODEL_LEN:-520192}" python3 - <<'PY'
+         MAX_MODEL_LEN="${MAX_MODEL_LEN:-458752}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path

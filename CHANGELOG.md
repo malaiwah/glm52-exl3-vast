@@ -13,16 +13,24 @@ and fail-closes on the before/after SHA-256 state of 21 runtime overlays copied
 from the live-qualified service. The profile is one contract: TP4/DCP4 A2A,
 EXL3 K6, B12X sparse MLA, Triton MoE, calibrated NVFP4-DS MLA KV, native
 prefix caching, no speculation, a 3,072-token scheduler, eight sequences,
-GMU 0.93, and a 520,192-token request limit.
+GMU 0.93, and a conservative 458,752-token request limit.
 
 On four RTX PRO 6000 Blackwell GPUs at JarvisLabs, the production boot exposed
-22,198,891 logical KV tokens (42.67x the advertised request limit), with
+22,198,891 logical KV tokens (48.39x the advertised request limit), with
 23.19 GiB of KV memory per GPU and zero preemptions during qualification.
 Measured unique-prefix prefill was 2,983 tok/s at 8K and 4,322 / 4,637 / 4,907
 client-observed tok/s at 32K / 64K / 128K; server accounting at those three
 lengths was 5,238 / 5,326 / 5,326 tok/s. Aggregate target-only decode at
 zero context measured 75.15 / 241.31 / 397.19 tok/s at C1 / C4 / C8; at
 128K it measured 64.72 / 223.01 / 323.64 tok/s.
+
+Context qualification rejected the provisional 520,192-token limit. Retrieval
+passed at 384,612 tokens and in two independent 448K trials measuring 449,461
+and 449,462 document tokens, with all three facts found each time. A 480K trial
+exhausted both 2,048- and 4,096-token answer budgets; a concurrent 505K stress
+trial caused persistent degenerate output until restart.
+The shipped 458,752-token request envelope leaves about 9K tokens beyond the
+longest passing document for template, query, and generated tokens.
 
 The parent does not ship the legacy GLM-5.2 static scale path. The appliance
 therefore downloads the immutable metadata-corrected public sidecar at build

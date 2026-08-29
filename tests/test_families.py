@@ -629,7 +629,7 @@ def test_glm53_k6_profile():
           and src["TENSOR_PARALLEL_SIZE"] == "variant"
           and src["DCP"] == "variant")
     check("K6 pins the qualified memory and scheduler shape",
-          eff["MAX_MODEL_LEN"] == 520192
+          eff["MAX_MODEL_LEN"] == 458752
           and eff["GPU_MEMORY_UTILIZATION"] == 0.93
           and eff["MAX_NUM_BATCHED_TOKENS"] == 3072
           and eff["MAX_NUM_SEQS"] == 8
@@ -660,7 +660,7 @@ def test_glm53_k6_profile():
             "--reasoning-parser glm45"):
         check(f"K6 serve args carry {flag}", flag in line, line)
     check("K6 clamps runtime metadata to the qualified request envelope",
-          '"max_position_embeddings":520192' in line, line)
+          '"max_position_embeddings":458752' in line, line)
     check("K6 captures the measured m=1 through m=32 widths",
           '"cudagraph_capture_sizes":[1,2,3,4,8,12,16,20,24,28,32]'
           in line, line)
@@ -946,7 +946,7 @@ def test_long_context_gate_is_family_independent():
     check("and the needle probe is the thing that sets it",
           "needle_probe" in src and "long_context_verified" in src)
     # the probe budget follows MAX_MODEL_LEN, which is a family default
-    for fam, expected in (("glm52", 524288), ("glm53", 520192),
+    for fam, expected in (("glm52", 524288), ("glm53", 458752),
                           ("qwen36", 196608)):
         eff, _, _ = resolved(fam)
         check(f"{fam} probes against its own context ceiling ({expected})",

@@ -9,7 +9,7 @@ supervision, and an opt-in embedded diagnostic [SOUL](docs/soul.md).
 The current `glm53-k6` production profile serves
 [`malaiwah/GLM-5.3-Flash-TR3-6bpw`](https://huggingface.co/malaiwah/GLM-5.3-Flash-TR3-6bpw)
 on four RTX PRO 6000 Blackwell cards: TP4/DCP4, EXL3 K6, B12X sparse MLA,
-Triton MoE, calibrated NVFP4 MLA KV, and a 520,192-token request limit. The
+Triton MoE, calibrated NVFP4 MLA KV, and a 458,752-token request limit. The
 ~237 GiB checkpoint downloads on first boot. The provider templates retain
 `glm52-exl3` as their default for compatibility; select `MODEL_PROFILE=glm53-k6`
 explicitly for GLM-5.3. Exact runtime and checkpoint pins are in the
@@ -180,7 +180,7 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 
 | `MODEL_PROFILE` | intended use | default hardware | download / context |
 |---|---|---|---|
-| `glm53-k6` | validated GLM-5.3-Flash TR3 EXL3 K6 stack | 4x RTX PRO 6000 Blackwell 96 GB | ~237 GiB / 520,192 |
+| `glm53-k6` | validated GLM-5.3-Flash TR3 EXL3 K6 stack | 4x RTX PRO 6000 Blackwell 96 GB | ~237 GiB / 458,752 |
 | `glm52-exl3` | validated GLM-5.2 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 512K |
 | `qwen36-27b-nvfp4` | vision-enabled, lower-cost production/development | 1x RTX 5090 32 GB | ~21 GiB / 192K |
 | `custom` | another conventional vLLM checkpoint | configurable | conservative 32K defaults |
@@ -195,6 +195,14 @@ NOPE/index-pool compression, calibrated KV scales, topology, and graph widths
 are one contract. The profile intentionally disables speculative decoding;
 the measured target-only throughput and memory envelope are recorded on the
 checkpoint's Hugging Face model card.
+
+The 458,752-token cap is deliberate. Two independent 448K trials built
+449,461- and 449,462-token documents and retrieved all three planted facts,
+leaving about 9K tokens for the chat template, query, and generation. A 480K
+retrieval did not finish within a 4,096-token answer budget, and a concurrent
+505K stress request caused degenerate follow-on output. The much larger
+auto-profiled KV pool is concurrency capacity, not
+evidence that a single 500K request is correct.
 
 The Qwen profile serves
 [`nvidia/Qwen3.6-27B-NVFP4`](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4)

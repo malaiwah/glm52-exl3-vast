@@ -151,7 +151,7 @@ FAMILIES = {
         "defaults": {
             "TENSOR_PARALLEL_SIZE": 4,
             "DCP": "4",
-            "MAX_MODEL_LEN": 520192,
+            "MAX_MODEL_LEN": 458752,
             "MODEL_OUTPUT_LIMIT": 131072,
             "MTP_TOKENS": 0,
             "MAX_NUM_SEQS": 8,
@@ -290,7 +290,7 @@ VARIANTS = {
         "defaults": {
             "TENSOR_PARALLEL_SIZE": 4,
             "DCP": "4",
-            "MAX_MODEL_LEN": 520192,
+            "MAX_MODEL_LEN": 458752,
             "MAX_NUM_BATCHED_TOKENS": 3072,
             "MAX_NUM_SEQS": 8,
             "MTP_TOKENS": 0,
@@ -316,7 +316,7 @@ VARIANTS = {
         "defaults": {
             "TENSOR_PARALLEL_SIZE": 4,
             "DCP": "4",
-            "MAX_MODEL_LEN": 520192,
+            "MAX_MODEL_LEN": 458752,
             "MAX_NUM_BATCHED_TOKENS": 3072,
             "MAX_NUM_SEQS": 8,
             "MTP_TOKENS": 0,
