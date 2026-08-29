@@ -10,10 +10,12 @@ The current `glm53-k6` production profile serves
 [`malaiwah/GLM-5.3-Flash-TR3-6bpw`](https://huggingface.co/malaiwah/GLM-5.3-Flash-TR3-6bpw)
 on four RTX PRO 6000 Blackwell cards: TP4/DCP4, EXL3 K6, B12X sparse MLA,
 Triton MoE, calibrated NVFP4 MLA KV, and a 458,752-token request limit. The
-~237 GiB checkpoint downloads on first boot. The provider templates retain
-`glm52-exl3` as their default for compatibility; select `MODEL_PROFILE=glm53-k6`
-explicitly for GLM-5.3. Exact runtime and checkpoint pins are in the
-[changelog](CHANGELOG.md).
+separately qualified `glm53-k8` profile serves the
+[`K8 sibling`](https://huggingface.co/malaiwah/GLM-5.3-Flash-TR3-8bpw) as a
+quality-max alternative; its 30% larger checkpoint and native eager MoE path
+make it substantially slower, so K6 remains the production default. Provider
+templates retain `glm52-exl3` for compatibility. Exact runtime and checkpoint
+pins are in the [changelog](CHANGELOG.md).
 
 ## Contents
 
@@ -61,6 +63,7 @@ answers only to you.
 | profile | provider | launch | hardware | disk | first-boot budget |
 |---|---|---|---|---|---|
 | GLM-5.3-Flash K6 | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **450 GB** | 2–12 min once weights are local |
+| GLM-5.3-Flash K8 quality-max | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **525 GB** | 2–15 min once weights are local |
 | GLM-5.2 flagship (3.42bpw) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | 60–90 min |
 | GLM-5.2 flagship (3.42bpw) | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | ~30 min (Secure) |
 | GLM-5.2 flagship (3.42bpw) | JarvisLabs | [▶ VM guide](#launch-on-jarvislabs) | 4x RTX-PRO6000 VM | **650 GB** | ~30 min |
@@ -180,28 +183,51 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 
 | `MODEL_PROFILE` | intended use | default hardware | download / context |
 |---|---|---|---|
-| `glm53-k6` | validated GLM-5.3-Flash TR3 EXL3 K6 stack | 4x RTX PRO 6000 Blackwell 96 GB | ~237 GiB / 458,752 |
+| `glm53-k6` | validated GLM-5.3-Flash TR3 EXL3 K6 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~237 GiB / 458,752 |
+| `glm53-k8` | validated GLM-5.3-Flash TR3 EXL3 K8 quality-max stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 458,752 |
 | `glm52-exl3` | validated GLM-5.2 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 512K |
 | `qwen36-27b-nvfp4` | vision-enabled, lower-cost production/development | 1x RTX 5090 32 GB | ~21 GiB / 192K |
 | `custom` | another conventional vLLM checkpoint | configurable | conservative 32K defaults |
 
-### GLM-5.3-Flash K6
+### GLM-5.3-Flash K6 and K8
 
-The K6 profile pins checkpoint revision
-`be51877455a8786ebdd5f96053aff6dc74a0996f` and the complete runtime shape used
-for live qualification. Do not transplant only its model directory into a
-GLM-5.2 launch: Glm5Next routing, EXL3 encoding, sparse MLA, Triton MoE,
-NOPE/index-pool compression, calibrated KV scales, topology, and graph widths
-are one contract. The profile intentionally disables speculative decoding;
-the measured target-only throughput and memory envelope are recorded on the
-checkpoint's Hugging Face model card.
+The profiles pin checkpoint revisions
+`be51877455a8786ebdd5f96053aff6dc74a0996f` (K6) and
+`b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae` (K8). Do not transplant only a
+model directory into a GLM-5.2 launch: Glm5Next routing, EXL3 encoding, sparse
+MLA, Triton MoE, NOPE/index-pool compression, calibrated KV scales, topology,
+and scheduler bounds are one contract. Both profiles intentionally disable
+speculative decoding.
 
-The 458,752-token cap is deliberate. Two independent 448K trials built
-449,461- and 449,462-token documents and retrieved all three planted facts,
-leaving about 9K tokens for the chat template, query, and generation. A 480K
-retrieval did not finish within a 4,096-token answer budget, and a concurrent
-505K stress request caused degenerate follow-on output. The much larger
-auto-profiled KV pool is concurrency capacity, not
+K6 uses the qualified B12X fused Trellis kernel and remains the production
+default. K8 cannot safely widen that decoder: eight overlapping 16-bit MCG
+windows span 72 bits, while its two-word path represents only 64. K8 therefore
+uses ExLlamaV3's native K8 routed-expert kernel in eager mode with a 512-token
+scheduler and parity arena.
+
+On the same four-GPU host, K8 used 78.94–78.97 GiB/GPU for weights plus
+non-torch allocations, 2.25 GiB for peak activations, no graph memory, and
+7.10–7.14 GiB/GPU for KV. It exposed 6,610,733 logical KV tokens, or 14.41
+maximum-length requests at the advertised cap. K6 used 63.74–63.78 GiB,
+3.02 GiB, 0.45–0.46 GiB, and 21.52–21.56 GiB respectively, exposing
+20,043,933 logical tokens. K8 therefore
+adds about 15.2 GiB of non-KV memory and gives up about 14.4 GiB of KV per GPU.
+
+K8 unique-prefix prefill measured 2,684 / 2,825 / 2,938 / 2,986 tok/s at
+8K / 32K / 64K / 128K. Aggregate target-only decode measured
+10.29 / 38.79 / 75.66 tok/s at C1 / C4 / C8 with a 256-token input,
+8.42 / 23.43 / 28.46 at 32K, and 5.42 / 12.05 / 13.25 at 128K. No request
+failed or preempted. K6 is 5.3–7.3× faster at short context and 8.3–24.4×
+faster when the measured 32K/128K prefill cost is included.
+K8's reason to exist is fidelity: its panel KLD is 0.012384 versus K6's
+0.013723, at about 77 GB / 30% more checkpoint bytes.
+
+The common 458,752-token cap is deliberate. K6 passed two independent 448K
+trials at 449,461 and 449,462 document tokens. K8 passed two more independent
+trials at 449,461 tokens, retrieving all three facts in 170.775 and 175.086
+seconds; short and structured-output checks still passed afterwards. K6's
+480K answer-budget failures and concurrent 505K corruption remain the family
+boundary: the larger auto-profiled KV pools are concurrency capacity, not
 evidence that a single 500K request is correct.
 
 The Qwen profile serves

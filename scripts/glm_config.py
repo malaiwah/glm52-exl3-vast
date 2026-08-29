@@ -142,7 +142,7 @@ FAMILIES = {
                   "default here has a measurement behind it; see README.md."),
     },
     "glm53": {
-        "label": "GLM-5.3-Flash TR3/MCG — K6 on 4x RTX PRO 6000",
+        "label": "GLM-5.3-Flash TR3/MCG — qualified K6/K8 on 4x RTX PRO 6000",
         "tested": True,
         "env_block": "glm53",
         "default_variant": "glm53-k6",
@@ -308,7 +308,7 @@ VARIANTS = {
     },
     "glm53-k8": {
         "family": "glm53",
-        "label": "GLM-5.3-Flash TR3/MCG K8 — TP4 qualification candidate",
+        "label": "GLM-5.3-Flash TR3/MCG K8 — quality-max eager TP4/DCP4",
         "repo": "malaiwah/GLM-5.3-Flash-TR3-8bpw",
         "revision": "b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae",
         "dirname": "GLM-5.3-Flash-TR3-8bpw",
@@ -317,7 +317,11 @@ VARIANTS = {
             "TENSOR_PARALLEL_SIZE": 4,
             "DCP": "4",
             "MAX_MODEL_LEN": 458752,
-            "MAX_NUM_BATCHED_TOKENS": 3072,
+            # K8 executes through ExLlamaV3's native eager MoE path. Bounding
+            # the scheduler limits its per-layer parity arenas while retaining
+            # enough prefill width for a usable quality-max deployment.
+            "MAX_NUM_BATCHED_TOKENS": 512,
+            "VLLM_EXL3_PREFILL_CAPACITY": 512,
             "MAX_NUM_SEQS": 8,
             "MTP_TOKENS": 0,
             "GPU_MEMORY_UTILIZATION": 0.93,
@@ -328,9 +332,10 @@ VARIANTS = {
             "MAX_CUDAGRAPH_CAPTURE_SIZE": 32,
             "CUDAGRAPH_CAPTURE_SIZES": "1,2,3,4,8,12,16,20,24,28,32",
         },
+        "enforce_eager": True,
         "kv_scales_calibrated": True,
         "download_gib": 309,
-        "tested": False,
+        "tested": True,
     },
     "exl3-tr3": {
         "family": "glm52",
@@ -983,7 +988,7 @@ KNOBS = [
              "chunk waits for it). 3072 is the shipped balance for a 512K-context "
              "single-stream workload.")),
 
-    dict(key="VLLM_EXL3_PREFILL_CAPACITY", families=("glm52",), type="int",
+    dict(key="VLLM_EXL3_PREFILL_CAPACITY", families=("glm52", "glm53"), type="int",
          default=3072, min=1, max=65536,
          group="Memory", scope="engine", label="EXL3 prefill arena rows",
          rationale=(
@@ -1889,6 +1894,8 @@ def family_serve_args(cfg: dict):
         args = ["--quantization", variant["quantization"]] + args
     if variant.get("quantization_config"):
         args += ["--quantization-config", variant["quantization_config"]]
+    if variant.get("enforce_eager"):
+        args += ["--enforce-eager"]
     online_quant = cfg.get("ONLINE_QUANT", "none")
     if cfg.get("MODEL_FAMILY") == "glm52" and online_quant != "none":
         if online_quant == "mxfp8":
@@ -1943,7 +1950,7 @@ def family_serve_args(cfg: dict):
             args += ["--enable-auto-tool-choice", "--tool-call-parser",
                      cfg["TOOL_CALL_PARSER"]]
     comp = fam.get("compilation_config")
-    if comp:
+    if comp and not variant.get("enforce_eager"):
         args += ["--compilation-config", comp % subs]
     return args
 

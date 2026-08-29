@@ -24,7 +24,7 @@ OVERLAYS = (
         "exl3_patched.py",
         "/opt/infernal-invocation/vllm/vllm/model_executor/layers/quantization/exl3.py",
         "ae92592ea8fcd249978134357ea3cd2510fe2aa9bdb1d1a3ab02afdbaeb39f45",
-        "b37f64f8fa1ad584555c26241aacdf2022d0865a4e2601198556a62c8387b5bc",
+        "5e94629db2111aced6e3407addda85af294a4343a5b7258e0ca568e34626182c",
     ),
     (
         "w4a16_kernel_k6.py",

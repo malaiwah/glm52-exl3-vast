@@ -142,7 +142,7 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GLM-5.3 K6 runtime and retained GLM-5.2 contracts")
+    section("the GLM-5.3 K6/K8 runtime and retained GLM-5.2 contracts")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
@@ -151,7 +151,7 @@ def test_glm_release_integration():
     kld_runner = open(
         os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image and all live K6 overlays are pinned fail-closed",
+    check("the base image and all live GLM-5.3 overlays are pinned fail-closed",
           "sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692"
           in dockerfile
           and "COPY patches/glm53-runtime/ /opt/glm53-runtime/" in dockerfile
@@ -262,7 +262,7 @@ def test_glm_release_integration():
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
-    check("the live-qualified K6 overlay generation is cache-versioned",
+    check("the live-qualified GLM-5.3 overlay generation is cache-versioned",
           "apply_glm53_runtime_overlays.py" in dockerfile
           and "patches/glm53-runtime" in dockerfile
           and "-turnkey-glm53-k6-o21-v1" in entry)
@@ -677,13 +677,27 @@ def test_glm53_k6_profile():
     check("GLM-5.3 rejects the inapplicable GLM-5.2 block formula",
           "glm53-pool-must-auto" in errs(gc.validate(pinned_pool)))
 
-    k8, _, _ = resolved(
+    k8, k8_src, _ = resolved(
         "glm53", gpus=4, MODEL_VARIANT="glm53-k8")
     k8_derived = gc.derive(k8)
-    check("the K8 sibling is selectable but not prematurely qualified",
+    check("the K8 sibling selects its immutable checkpoint and bounded scheduler",
           k8_derived["MODEL_REPO"] == "malaiwah/GLM-5.3-Flash-TR3-8bpw"
+          and k8_derived["MODEL_REVISION"] ==
+          "b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae"
           and k8["SERVED_MODEL_NAME"] == "GLM-5.3-Flash-K8"
-          and "variant-untested" in ids(gc.validate(k8)))
+          and k8["MAX_NUM_BATCHED_TOKENS"] == 512
+          and k8["VLLM_EXL3_PREFILL_CAPACITY"] == 512)
+    k8_line = " ".join(k8_derived["FAMILY_SERVE_ARGS"])
+    check("K8 uses the native eager EXL3 path instead of the K6 fused decoder",
+          "--enforce-eager" in k8_line
+          and "--compilation-config" not in k8_line, k8_line)
+    check("K8 bounds the EXL3 parity arena through normal config precedence",
+          k8["VLLM_EXL3_PREFILL_CAPACITY"] == 512
+          and k8_src["VLLM_EXL3_PREFILL_CAPACITY"] == "variant")
+    k8_findings = gc.validate(k8, {"gpu_count": 4})
+    check("K8 is live-qualified on its pinned four-GPU topology",
+          not errs(k8_findings)
+          and "variant-untested" not in ids(k8_findings), str(k8_findings))
 
 
 def test_qwen_preset():

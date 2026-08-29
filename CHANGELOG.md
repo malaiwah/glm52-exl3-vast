@@ -3,7 +3,50 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
-## GLM-5.3-Flash K6 (current)
+## GLM-5.3-Flash K8 (quality-max)
+
+The appliance now live-qualifies `MODEL_PROFILE=glm53-k8` for
+`malaiwah/GLM-5.3-Flash-TR3-8bpw@b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae`
+on four RTX PRO 6000 Blackwell 96 GiB GPUs. It retains the K6 topology and
+correctness envelope—TP4/DCP4 A2A, B12X sparse MLA, Triton MoE, calibrated
+NVFP4-DS MLA KV, MTP off, C8, GMU 0.93, and a 458,752-token request limit—but
+bounds the scheduler and EXL3 parity arena at 512 tokens and enforces eager
+execution.
+
+The first K8 launch correctly failed closed because B12X's fused Trellis path
+admits only integral K3/K4/K5/K6. Widening that admission would be wrong: eight
+overlapping 16-bit MCG windows span 72 bits, beyond its two-word decoder. The
+fallback initially produced repetitive corrupt output because its extension
+calls still passed the old hard-coded K3 bitrate. The qualified overlay passes
+the checkpoint's actual K8 bitrate to ExLlamaV3's compiled K8 MoE kernel and
+does not load the fused-MoE preparation APIs for K8. The fail-closed overlay
+payload SHA-256 is
+`5e94629db2111aced6e3407addda85af294a4343a5b7258e0ca568e34626182c`.
+
+The packaged candidate passed arithmetic, factual, instruction, strict
+structured-output, and 32K tokenizer-exact retrieval startup gates. It loaded
+76.31 GiB of model tensors per rank. Per-GPU profiling reported
+78.94–78.97 GiB for weights plus non-torch allocations, 2.25 GiB peak
+activations, zero graph memory, and 7.10–7.14 GiB KV. The engine exposed
+6,610,733 logical KV tokens, or 14.41 maximum-length requests.
+
+Unique-prefix K8 prefill measured 2,684 / 2,825 / 2,938 / 2,986 tok/s at
+8K / 32K / 64K / 128K. Aggregate target-only decode at C1 / C4 / C8 measured
+10.29 / 38.79 / 75.66 tok/s with a 256-token input,
+8.42 / 23.43 / 28.46 tok/s at 32K, and
+5.42 / 12.05 / 13.25 tok/s at 128K. All 72 measured decode requests completed
+without failure, preemption, or prefix reuse.
+
+Two independent 448K trials each built a tokenizer-exact 449,461-token
+document and retrieved all three facts in 170.775 and 175.086 seconds. A
+post-stress short and structured-output gate also passed. K8's panel KLD is
+0.012384 versus K6's 0.013723, but it adds about 77 GB / 30% checkpoint bytes,
+uses about 15.2 GiB more non-KV memory per GPU, gives up about 14.4 GiB KV per
+GPU. K6 is 5.3–7.3× faster at short context and 8.3–24.4× faster when the
+measured 32K/128K prefill cost is included. K8 is a qualified quality-max
+alternative; K6 remains the production default.
+
+## GLM-5.3-Flash K6 (production default)
 
 The appliance now provides `MODEL_PROFILE=glm53-k6` for
 `malaiwah/GLM-5.3-Flash-TR3-6bpw@be51877455a8786ebdd5f96053aff6dc74a0996f`.

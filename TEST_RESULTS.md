@@ -1628,3 +1628,82 @@ showed that provider bandwidth does not predict the host-to-Hugging-Face CAS
 route. Reuse the 0.8B profile and execute only the still-uncovered
 restart-persistence, vision, MTP, and full-profile qualification rows from
 `TEST_PLAN.md`.
+
+## GLM-5.3-Flash K6/K8 SM120 qualification (2026-08-29)
+
+Hardware: one JarvisLabs VM with four RTX PRO 6000 Blackwell 96 GiB GPUs.
+Scope: text-only TP4/DCP4 serving, calibrated NVFP4-DS MLA KV, MTP disabled,
+and the appliance's arithmetic, factual, instruction, strict structured-output,
+and tokenizer-exact retrieval gates. These results do not qualify another GPU
+generation, topology, driver, KV format, scheduler, or speculative mode.
+
+### K6 production profile
+
+The packaged `glm53-k6` profile passed startup verification and two independent
+448K retrieval trials. It exposed 20,043,933 logical KV tokens with
+21.52–21.56 GiB KV/GPU. Weights plus non-torch allocations consumed
+63.74–63.78 GiB/GPU, peak activations 3.02 GiB, and CUDA graphs
+0.45–0.46 GiB.
+
+Unique-prefix prefill measured 2,983 / 4,322 / 4,637 / 4,907 client-observed
+tok/s at 8K / 32K / 64K / 128K. Aggregate target-only decode at C1 / C4 / C8
+measured 75.15 / 241.31 / 397.19 tok/s at short context,
+69.51 / 234.64 / 349.38 at 32K, and
+64.72 / 223.01 / 323.64 at 128K.
+
+K6 retrieved 3/3 facts from tokenizer-exact 449,461- and 449,462-token
+documents. A 480K request exhausted both 2,048- and 4,096-token answer budgets.
+A concurrent 505K stress request caused persistent degenerate follow-on output
+until restart. The profile therefore ships a 458,752-token request limit and
+does not claim usable 500K requests.
+
+### K8 quality-max profile
+
+Checkpoint:
+`malaiwah/GLM-5.3-Flash-TR3-8bpw@b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae`.
+The live candidate used the previously published appliance
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:ae717cf3c3cc848a344662eef2c2178f5e7b81a8ac5f4c884168a7e496d5e074`
+with the candidate `glm_config.py` and final functional EXL3 payload mounted
+read-only. The checked-in overlay adds only comments and defers unused B12X
+imports beyond that live payload; its final SHA-256 is
+`5e94629db2111aced6e3407addda85af294a4343a5b7258e0ca568e34626182c`.
+
+The initial fused-path launch failed closed because B12X admits K3–K6. The
+first native fallback then failed the profile gate with repetitive corrupt
+output. Complete vLLM logs showed the fallback still passed hard-coded K3
+bitrate arguments into ExLlamaV3. Passing the checkpoint's actual K8 bitrate
+selected the extension's compiled K8 MoE kernel; startup then passed every
+short, structured, and 32K retrieval gate.
+
+K8 loaded 76.31 GiB of model tensors per rank. Weights plus non-torch
+allocations consumed 78.94–78.97 GiB/GPU, peak activations 2.25 GiB, graph
+memory zero under eager mode, and KV 7.10–7.14 GiB/GPU. The engine exposed
+6,610,733 logical KV tokens, or 14.41 maximum-length requests at the
+458,752-token cap.
+
+| prompt | unique-prefix PP tok/s |
+|---:|---:|
+| 8K | 2,684 |
+| 32K | 2,825 |
+| 64K | 2,938 |
+| 128K | 2,986 |
+
+Aggregate target-only decode (`MTP_TOKENS=0`, eight requests per level):
+
+| input context | C1 tok/s | C4 tok/s | C8 tok/s |
+|---:|---:|---:|---:|
+| 256 | 10.29 | 38.79 | 75.66 |
+| 32K | 8.42 | 23.43 | 28.46 |
+| 128K | 5.42 | 12.05 | 13.25 |
+
+All 72 decode requests completed with no failure, preemption, or prefix-cache
+reuse. Two independent long-context seeds each built a tokenizer-exact
+449,461-token document and retrieved 3/3 facts in 170.775 and 175.086 seconds.
+The post-stress short and structured-output checks passed.
+
+K8 lowers the sealed-panel KLD from K6's 0.013723 to 0.012384, but adds about
+77 GB / 30% checkpoint bytes, consumes about 15.2 GiB more non-KV memory per
+GPU and yields about 14.4 GiB less KV/GPU. K6 is 5.3–7.3× faster at short
+context and 8.3–24.4× faster when the measured 32K/128K prefill cost is
+included. K8 is qualified as a fidelity-first alternative. K6 remains the
+production default.

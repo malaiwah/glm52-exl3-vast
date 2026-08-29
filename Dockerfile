@@ -1,12 +1,12 @@
-# GLM-5.3-Flash K6 production runtime. The immutable parent supplies the
-# Glm5Next/vLLM/B12X/TR3/EXL3 stack validated on four RTX PRO 6000 Blackwell
+# GLM-5.3-Flash K6/K8 runtime. The immutable parent supplies the
+# Glm5Next/vLLM/B12X/TR3/EXL3 stack qualified on four RTX PRO 6000 Blackwell
 # GPUs. The fail-closed overlay installer adds the exact live-qualified fixes;
 # both the parent state and every resulting file are SHA-256 pinned.
 FROM docker.io/verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692
 USER root
 LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai, Runpod, and JarvisLabs" \
-      org.opencontainers.image.description="Profile-driven OpenAI endpoint with a live-qualified GLM-5.3-Flash TR3 EXL3 K6 profile for four RTX PRO 6000 Blackwell GPUs." \
-      ai.malaiwah.evidence="GLM-5.3-Flash-TR3-K6 TP4-DCP4 B12X-sparse-MLA Triton-MoE NVFP4-DS-MLA-KV" \
+      org.opencontainers.image.description="Profile-driven OpenAI endpoint with live-qualified GLM-5.3-Flash TR3 EXL3 K6 production and K8 quality-max profiles for four RTX PRO 6000 Blackwell GPUs." \
+      ai.malaiwah.evidence="GLM-5.3-Flash-TR3-K6-K8 TP4-DCP4 B12X-sparse-MLA Triton-MoE NVFP4-DS-MLA-KV" \
       ai.malaiwah.base="verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692"
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1
