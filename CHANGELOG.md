@@ -14,6 +14,14 @@ native probabilistic MTP3, dynamic-NVFP4 KV, 3,072-token scheduler, C8,
 GMU 0.93, and bounded LMCache tier. GLM-5.3-Flash settings remain isolated
 from this full-model family.
 
+Release merge `3ff9c7207c3c1754cb9665f0099316ec09056b8c` published
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:aec4075e02241b71321b5601763eba35e86ea02b13c3c3c43ac34fae30161160`;
+`latest` resolves to that digest. An exact-image boot with the reconciled
+checkpoint mounted read-only and no source-code bind mounts reached the
+verified serving phase with zero restarts. Default API authentication rejected
+an unauthenticated request with 401, accepted authenticated models and chat
+requests with 200, and the dashboard enforced its persisted token gate.
+
 The 81 weight shards matched the checkpoint's published hashes. The upstream
 `MANIFEST.sha256` has three stale non-weight entries (`.gitattributes`,
 `README.md`, and `config.json`); their actual Git object ids match the pinned
