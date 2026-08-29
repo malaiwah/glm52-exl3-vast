@@ -115,9 +115,22 @@ and three-depth 32K retrieval. The independent feature suite passed every
 applicable engine contract: tokenize, thinking on/off, streaming with usage,
 reasoning-preserving multi-turn, strict JSON with thinking, tool choice,
 single tool-call emission, and tool-result continuation. Vision was
-intentionally disabled for this text checkpoint. The isolated candidate used
-loopback `AUTH=none`; authentication is re-enabled for the published-image
-service smoke rather than inferred from this run.
+intentionally disabled for this text checkpoint.
+
+The isolated qualification candidate used loopback `AUTH=none`. Release merge
+`3ff9c7207c3c1754cb9665f0099316ec09056b8c` published
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:aec4075e02241b71321b5601763eba35e86ea02b13c3c3c43ac34fae30161160`;
+`latest` resolved to the same digest. After the exact image reconciled the
+upstream checkpoint metadata once, a second boot mounted the checkpoint
+read-only with `MODEL_READ_ONLY=1`, used no source-code bind mounts, enabled
+the default API authentication and dashboard token gate, and reached
+`phase=serving` with zero container restarts under `restart=unless-stopped`.
+The API returned 401 without a key and 200 with the persisted key; authenticated
+chat returned the requested exact marker. The dashboard returned a redacted
+read-only page without a token, 403 for a bad token, and 200 for the persisted
+token. The exact-image service remains running for interactive evaluation.
+The same evidence was proposed upstream in
+[model-card PR 1](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/discussions/1).
 
 The release matrix placed five facts at 1%, 25%, 50%, 75%, and 99% depth:
 
