@@ -119,13 +119,17 @@ def _alive(pid):
         return False
 
 
-def complete(base, key, model, prompt, max_tokens=64, timeout=300):
+def complete(base, key, model, prompt, max_tokens=64, timeout=300,
+             enable_thinking=False):
     payload = {"model": model,
                "messages": [{"role": "user", "content": prompt}],
                "max_tokens": max_tokens, "temperature": 0.0,
-               "chat_template_kwargs": {"enable_thinking": False}}
+               "chat_template_kwargs": {"enable_thinking": enable_thinking}}
     doc = _req(base + "/v1/chat/completions", payload, key=key, timeout=timeout)
     choice = (doc.get("choices") or [{}])[0]
+    if choice.get("finish_reason") == "length":
+        raise RuntimeError(
+            f"completion exhausted its {max_tokens}-token output budget")
     msg = choice.get("message") or {}
     return (msg.get("content") or "").strip()
 
@@ -351,8 +355,9 @@ def short_probe(base, key, model, timeout=180):
         error = None
         for attempt in range(TRANSIENT_RETRIES + 1):
             try:
-                answer = complete(base, key, model, prompt, max_tokens=32,
-                                   timeout=timeout)
+                answer = complete(
+                    base, key, model, prompt, max_tokens=256,
+                    timeout=timeout, enable_thinking=True)
                 error = None
                 break
             except Exception as e:

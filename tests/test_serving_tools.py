@@ -313,6 +313,33 @@ class NeedleTests(unittest.TestCase):
             self.assertEqual(
                 verify.discover_model("http://test", ""), "GLM-5.2")
 
+    def test_short_probe_enables_thinking_with_sufficient_output_budget(self):
+        answers = iter(("391", "Paris", "BANANA"))
+
+        with mock.patch.object(
+                verify, "complete",
+                side_effect=lambda *_args, **_kwargs: next(answers)) as complete:
+            result = verify.short_probe("http://test", "", "model")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(complete.call_count, 3)
+        for call in complete.call_args_list:
+            self.assertEqual(call.kwargs["max_tokens"], 256)
+            self.assertTrue(call.kwargs["enable_thinking"])
+
+    def test_complete_rejects_truncated_reasoning_as_an_answer(self):
+        response = {
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": "The answer is Paris"},
+            }],
+        }
+        with mock.patch.object(verify, "_req", return_value=response):
+            with self.assertRaisesRegex(RuntimeError, "exhausted"):
+                verify.complete(
+                    "http://test", "", "model", "prompt",
+                    max_tokens=32, enable_thinking=True)
+
     def test_haystack_is_seeded_unique_and_contains_every_needle(self):
         text_a, needles_a = verify.build_haystack(8192, [0.01, 0.5, 0.99], 7)
         text_b, needles_b = verify.build_haystack(8192, [0.01, 0.5, 0.99], 8)
