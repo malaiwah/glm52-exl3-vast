@@ -390,6 +390,9 @@ def main(argv):
     ap.add_argument("--out", default="")
     ap.add_argument("--max-model-len", type=int, default=524288)
     ap.add_argument("--needle-tokens", type=int, default=32768)
+    ap.add_argument(
+        "--needle-seed", type=int, default=20260726,
+        help="deterministic seed; change it to force a fresh prefix-cache key")
     ap.add_argument("--depths", default="0.15,0.55,0.9")
     ap.add_argument("--timeout", type=int, default=2400, help="seconds to wait for /health")
     ap.add_argument("--pid", default="")
@@ -467,7 +470,8 @@ def main(argv):
     try:
         lc = needle_probe(
             base, args.api_key, args.model, budget, depths,
-            timeout=args.needle_timeout, max_tokens=args.needle_max_tokens)
+            timeout=args.needle_timeout, seed=args.needle_seed,
+            max_tokens=args.needle_max_tokens)
     except Exception as e:
         lc = {"attempted": True, "ok": False, "detail": f"probe failed: {e}"}
     verdict["long_context"] = lc
