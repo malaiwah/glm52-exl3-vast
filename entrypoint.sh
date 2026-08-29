@@ -20,6 +20,10 @@ case "$MODEL_PROFILE" in
     export MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3}"
     MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}"
     ;;
+  glm53-k6|glm53-k8)
+    export MODEL_FAMILY="${MODEL_FAMILY:-glm53}"
+    export MODEL_VARIANT="${MODEL_VARIANT:-$MODEL_PROFILE}"
+    ;;
   qwen36-27b-nvfp4)
     export MODEL_FAMILY="${MODEL_FAMILY:-qwen36}"
     export MODEL_VARIANT="${MODEL_VARIANT:-qwen36-nvfp4}"
@@ -30,7 +34,7 @@ case "$MODEL_PROFILE" in
     ;;
   *)
     echo "FATAL: unknown MODEL_PROFILE=$MODEL_PROFILE"
-    echo "FATAL: choose glm52-exl3, qwen36-27b-nvfp4, or custom"
+    echo "FATAL: choose glm53-k6, glm53-k8, glm52-exl3, qwen36-27b-nvfp4, or custom"
     exit 1
     ;;
 esac
@@ -245,6 +249,12 @@ apply_config() {
   fi
   case "${MODEL_FAMILY:-glm52}" in
     glm52) MODEL_PROFILE=glm52-exl3 ;;
+    glm53)
+      case "${MODEL_VARIANT:-glm53-k6}" in
+        glm53-k8) MODEL_PROFILE=glm53-k8 ;;
+        *) MODEL_PROFILE=glm53-k6 ;;
+      esac
+      ;;
     qwen36) MODEL_PROFILE=qwen36-27b-nvfp4 ;;
     custom) MODEL_PROFILE=custom ;;
   esac
@@ -272,7 +282,8 @@ apply_config() {
   # calibrator cannot merely choose a conservative crossover: every custom
   # channel fails cudaIpcOpenMemHandle. Detect that hard capability boundary
   # before calibration and retain vLLM's NCCL/SHM fallbacks.
-  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] &&
+  if { [ "${MODEL_FAMILY:-glm52}" = "glm52" ] ||
+       [ "${MODEL_FAMILY:-glm52}" = "glm53" ]; } &&
      [ "${B12X_PCIE_DMA:-1}" = "1" ] &&
      command -v nvidia-smi >/dev/null 2>&1; then
     _p2p_matrix="$(nvidia-smi topo -p2p r 2>/dev/null || true)"
@@ -317,7 +328,7 @@ apply_config
 # of GB they did not ask for, onto a disk that may not hold it, at rental rates,
 # with the UI reporting progress as though everything were fine.
 case "${FAMILY_ENV_BLOCK:-}" in
-  glm52|generic) ;;
+  glm52|glm53|generic) ;;
   *)
     echo "FATAL: MODEL_FAMILY='${MODEL_FAMILY:-?}' resolved to an engine environment"
     echo "       block ('${FAMILY_ENV_BLOCK:-}') that this entrypoint does not implement."
@@ -1339,6 +1350,60 @@ prepare_checkpoint() {
       python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-0}" || \
         echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
     fi
+  elif [ "${MODEL_FAMILY:-}" = "glm53" ]; then
+    if ! MODEL_DIR="$MODEL_DIR" MODEL_VARIANT="${MODEL_VARIANT:-glm53-k6}" \
+         MAX_MODEL_LEN="${MAX_MODEL_LEN:-520192}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+model_dir = Path(os.environ["MODEL_DIR"])
+config = json.loads((model_dir / "config.json").read_text())
+variant = os.environ["MODEL_VARIANT"]
+expected_bits = {"glm53-k6": 6, "glm53-k8": 8}.get(variant)
+if expected_bits is None:
+    raise SystemExit(f"FATAL: unsupported GLM-5.3 variant {variant!r}")
+architectures = config.get("architectures") or []
+if architectures != ["Glm5NextForConditionalGeneration"]:
+    raise SystemExit(
+        "FATAL: GLM-5.3 profile requires Glm5NextForConditionalGeneration; "
+        f"checkpoint declares {architectures!r}"
+    )
+quant = config.get("quantization_config") or {}
+if (
+    str(quant.get("quant_method", "")).lower() != "exl3"
+    or str(quant.get("codebook", "")).lower() != "mcg"
+    or int(quant.get("bits", 0)) != expected_bits
+):
+    raise SystemExit(
+        f"FATAL: {variant} requires EXL3/MCG K{expected_bits}; "
+        f"checkpoint declares {quant!r}"
+    )
+text = config.get("text_config") or {}
+native_context = int(text.get("max_position_embeddings", 0))
+requested_context = int(os.environ["MAX_MODEL_LEN"])
+if native_context < requested_context:
+    raise SystemExit(
+        f"FATAL: requested context {requested_context} exceeds checkpoint native "
+        f"limit {native_context}"
+    )
+if not (
+    text.get("mla_use_nope") is True
+    and int(text.get("index_kpool", 0)) == 4
+    and text.get("index_kpool_compress") is True
+):
+    raise SystemExit(
+        "FATAL: GLM-5.3 sparse-MLA NOPE/K-pool contract is missing from config.json"
+    )
+print(
+    f">>> GLM-5.3 checkpoint verified: {architectures[0]}, "
+    f"EXL3/MCG K{expected_bits}, native context {native_context}"
+)
+PY
+    then
+      echo "!!! checkpoint verification failed; supervisor will retry"
+      return 1
+    fi
   elif [ "${MODEL_FAMILY:-}" = "qwen36" ]; then
     if ! MODEL_DIR="$MODEL_DIR" MTP_TOKENS="${MTP_TOKENS:-0}" python3 - <<'PY'
 import json
@@ -1607,12 +1672,12 @@ unset VLLM_B12X_MLA_EXTEND_MAX_CHUNKS
 # GG v20-r9 has two mutually exclusive NVFP4 MLA record contracts. Our
 # entrypoint bypasses the upstream family helper, so it must select the
 # contract explicitly rather than assuming the parent image exported it.
-# The calibrated file is shipped by the immutable vLLM composition; verify its
-# exact reviewed payload before using it. Dynamic-token mode owns bytes
+# The appliance downloads the immutable, metadata-corrected public sidecar;
+# verify its exact reviewed payload before using it. Dynamic-token mode owns
 # [292,296) in the 368-byte FP8-RoPE record and therefore must not see a static
 # scales file.
 _GLM_NVFP4_SCALE_FILE=/opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json
-_GLM_NVFP4_SCALE_SHA256=efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2
+_GLM_NVFP4_SCALE_SHA256=ac68fe6af3056ec35299361293c9ae568769d21696756548493f67ff17881ece
 if [ "${KV_CACHE_DTYPE:-nvfp4_ds_mla}" = "nvfp4_ds_mla" ]; then
   case "${KV_SCALE_MODE:-static-calibrated}" in
     dynamic-token)
@@ -1701,6 +1766,77 @@ unset _GLM_NVFP4_SCALE_FILE _GLM_NVFP4_SCALE_SHA256
   if [ "${PCIE_DMA_MIN_BYTES:--1}" != "-1" ]; then
     export VLLM_PCIE_DMA_MIN_BYTES="$PCIE_DMA_MIN_BYTES"
   fi
+elif [ "${FAMILY_ENV_BLOCK:-}" = "glm53" ]; then
+  # Exact environment used by the four-card K6 qualification. The pinned parent
+  # carries the Glm5Next/B12X stack; these exports make its load-bearing OCI
+  # defaults explicit and make a runtime switch back from another family safe.
+  export PYTHONPATH=/opt/infernal-invocation/vllm:/opt/infernal-invocation/b12x:/opt/exllamav3
+  export OMP_NUM_THREADS=1 LLM_WORKER_MULTIPROC_METHOD=spawn
+  export VLLM_EXL3_EXT_PATH=/opt/exllamav3
+  export VLLM_EXL3_ENCODER_SOURCE=/opt/exllamav3-python/exllamav3
+  export VLLM_EXL3_ENCODER_REVISION=704aefd743b390af4bd0fb429d1906f9b964c7d8
+  export VLLM_EXL3_ONLINE_CACHE_DIR="$MODEL_ROOT/.exl3-online"
+  export VLLM_EXL3_ONLINE_CACHE_MODE=readwrite
+  export VLLM_EXL3_PREFILL_BLOCK_M=128 VLLM_EXL3_PREFILL_TRELLIS=1
+  export B12X_GL53_ROUTE128_WIDE=1 B12X_GL53_ROUTE128_HYBRID_TAIL=1
+  export VLLM_B12X_GLM_NOPE_NVFP4=1
+  export VLLM_USE_AOT_COMPILE=0 VLLM_USE_MEGA_AOT_ARTIFACT=1
+  export VLLM_USE_BREAKABLE_CUDAGRAPH=1
+  export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_MOE=0
+  export VLLM_USE_B12X_SPARSE_INDEXER=1 VLLM_USE_V2_MODEL_RUNNER=1
+  export VLLM_ALLREDUCE_USE_SYMM_MEM=0
+  export VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE=64KB
+  export VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
+  export VLLM_DISABLED_KERNELS=MarlinFP8ScaledMMLinearKernel
+  export VLLM_B12X_ABSORB_BMM=0 B12X_MOE_FORCE_A16=1
+  if [ "${B12X_PCIE_DMA:-1}" = "1" ]; then
+    export VLLM_ENABLE_PCIE_ALLREDUCE=1 VLLM_PCIE_ALLREDUCE_BACKEND=b12x
+    export VLLM_USE_B12X_DCP_A2A=1
+  else
+    export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0
+    unset VLLM_PCIE_ALLREDUCE_BACKEND
+  fi
+  _glm53_nccl=/opt/local-inference/nccl/lib/libnccl.so.2.31.2
+  if [ -f "$_glm53_nccl" ]; then
+    export NCCL_LOCAL_INFERENCE_PATH="$_glm53_nccl"
+    export NCCL_PR2127_PATH="$_glm53_nccl"
+    export VLLM_NCCL_SO_PATH="$_glm53_nccl"
+    export LD_PRELOAD="$_glm53_nccl"
+  elif [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+    unset NCCL_LOCAL_INFERENCE_PATH NCCL_PR2127_PATH VLLM_NCCL_SO_PATH LD_PRELOAD
+  else
+    echo "FATAL: pinned local-inference NCCL library is missing: $_glm53_nccl" >&2
+    return 1
+  fi
+  unset _glm53_nccl
+  export VLLM_NVFP4_MLA_SCALES_FILE=/opt/glm53/calibration/glm53_nvfp4_mla_outer_scales_mtp_power2_v2.json
+  export VLLM_NVFP4_MLA_DYNAMIC_SCALE=0 KV_FP8_ROPE=0
+  if [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+    _glm53_scale_sha="$(
+      sha256sum "$VLLM_NVFP4_MLA_SCALES_FILE" 2>/dev/null | awk '{print $1}'
+    )"
+    if [ "$_glm53_scale_sha" != "f10b6ee1116d71c4b61c4603d38cb257b3f0dcfde9bcc0847839e48ac9baeb1d" ]; then
+      echo "FATAL: the pinned GLM-5.3 NVFP4 MLA scale artifact is missing or changed." >&2
+      return 1
+    fi
+    unset _glm53_scale_sha
+  fi
+  unset VLLM_EXL3_ONLINE_TRELLIS_BITS VLLM_EXL3_ABI_SHIM
+  unset VLLM_USE_FUSED_MOE_GROUPED_TOPK VLLM_USE_B12X_MHC B12X_MHC_MAX_TOKENS
+  unset VLLM_USE_B12X_WO_PROJECTION B12X_MLA_SM120_UNIFIED B12X_DENSE_SPLITK_TURBO
+  unset B12X_W4A16_TC_DECODE B12X_W4A8_TINY_DECODE
+  unset VLLM_DISABLE_SHARED_EXPERTS_STREAM VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE
+  unset VLLM_B12X_MLA_SPEC_DECODE_MAX_Q VLLM_DCP_A2A_MAX_TOKENS
+  unset VLLM_DCP_A2A_LARGE_BACKEND VLLM_DCP_GLOBAL_TOPK VLLM_DCP_SHARD_DRAFT
+  unset VLLM_DCP_QUERY_SPLIT VLLM_DCP_TOPK_OWNER_MERGE VLLM_DCP_INDEXER_SHARDS
+  unset VLLM_B12X_MLA_CKV_GATHER VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS
+  unset VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS VLLM_B12X_MLA_CKV_PREFETCH_DEPTH
+  unset VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB
+  unset VLLM_DCP_PROJECT_BEFORE_MERGE VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE
+  unset VLLM_DCP_PROJECT_BEFORE_MERGE_MIN_PREFILL_TOKENS
+  unset VLLM_PCIE_DMA_FP8 B12X_PCIE_DMA_FP8 SPARKINFER_PCIE_DMA_FP8
+  unset SPARKINFER_INDEXER_TWO_LEVEL_FOLD SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB
+  echo ">>> GLM-5.3 runtime: TP4/DCP4 B12X sparse MLA, Triton MoE, EXL3, NVFP4 MLA KV"
 else
   echo ">>> ${MODEL_FAMILY:-?}: skipping the GLM-5.2 engine environment (b12x kernels,"
   echo ">>> MLA/DCP path, EXL3 trellis). Only the common block above is exported."
@@ -2005,19 +2141,13 @@ fi
 # artifacts. VLLM_DISABLE_COMPILE_CACHE is NOT set here (that guard belongs to the
 # gilded-gnosis fork's cache bug); verify decode tok/s after enabling this.
 #
-# Do not share compiled objects across GG source stacks. The base image changes
-# LOCAL_INFERENCE_CACHE_FINGERPRINT whenever its composed vLLM/SparkInfer
-# sources change (r9 -> r11 is one such boundary). Keeping the fingerprint in
-# the persistent path gives warm restarts for the same immutable stack without
-# exposing a new stack to stale kernels that can cause corruption or abnormally
-# low throughput.
-# r26's native mixed-K dispatcher, complete PCIe package, and online-K6 path
-# LMCache lifecycle composition change source consumed by Dynamo/Inductor and
-# runtime JITs. The parent fingerprint still reflects its base repositories,
-# not every composed release head, so keep an explicit r26 suffix and never
-# reuse older release AOT artifacts. Restarts of this exact appliance should
-# remain warm.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r28-native1"
+# Do not share compiled objects across immutable runtime stacks. The parent
+# fingerprint covers its base repositories, while the appliance's 21 K6
+# overlays also change Python/Triton/AOT source consumed by Inductor and the
+# runtime JITs. Keep an explicit overlay-generation suffix: restarts of this
+# exact appliance remain warm, but old GG-v20 and unoverlaid GLM-5.3 artifacts
+# cannot be reused.
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-k6-o21-v1"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2
@@ -2211,7 +2341,12 @@ fi
 # FAMILY_SERVE_ARGS, which the config layer built for the selected MODEL_FAMILY.
 # That is what makes a second model family possible without a second serve line,
 # and what removed `--tensor-parallel-size 4` as a literal.
-_SERVE_CMD=(vllm serve "$MODEL_DIR" \
+if command -v vllm >/dev/null 2>&1; then
+  _VLLM_LAUNCH=(vllm)
+else
+  _VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)
+fi
+_SERVE_CMD=("${_VLLM_LAUNCH[@]}" serve "$MODEL_DIR" \
   --served-model-name "${SERVED_NAMES[@]}" \
   --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
   --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-4}" \

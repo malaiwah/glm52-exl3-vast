@@ -3,7 +3,36 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
-## GG v20-r28 (current)
+## GLM-5.3-Flash K6 (current)
+
+The appliance now provides `MODEL_PROFILE=glm53-k6` for
+`malaiwah/GLM-5.3-Flash-TR3-6bpw@be51877455a8786ebdd5f96053aff6dc74a0996f`.
+It pins the immutable parent
+`verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692`
+and fail-closes on the before/after SHA-256 state of 21 runtime overlays copied
+from the live-qualified service. The profile is one contract: TP4/DCP4 A2A,
+EXL3 K6, B12X sparse MLA, Triton MoE, calibrated NVFP4-DS MLA KV, native
+prefix caching, no speculation, a 3,072-token scheduler, eight sequences,
+GMU 0.93, and a 520,192-token request limit.
+
+On four RTX PRO 6000 Blackwell GPUs at JarvisLabs, the production boot exposed
+22,198,891 logical KV tokens (42.67x the advertised request limit), with
+23.19 GiB of KV memory per GPU and zero preemptions during qualification.
+Measured unique-prefix prefill was 2,983 tok/s at 8K and 4,322 / 4,637 / 4,907
+client-observed tok/s at 32K / 64K / 128K; server accounting at those three
+lengths was 5,238 / 5,326 / 5,326 tok/s. Aggregate target-only decode at
+zero context measured 75.15 / 241.31 / 397.19 tok/s at C1 / C4 / C8; at
+128K it measured 64.72 / 223.01 / 323.64 tok/s.
+
+The parent does not ship the legacy GLM-5.2 static scale path. The appliance
+therefore downloads the immutable metadata-corrected public sidecar at build
+time and verifies SHA-256
+`ac68fe6af3056ec35299361293c9ae568769d21696756548493f67ff17881ece`;
+its numeric calibration payload is unchanged. Persistent JIT paths have a new
+`turnkey-glm53-k6-o21-v1` namespace so older GG-v20 artifacts cannot leak into
+the new runtime.
+
+## GG v20-r28 (previous)
 
 The appliance pins immutable GG v20-r28 manifest
 `sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0`.

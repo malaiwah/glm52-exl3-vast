@@ -8,7 +8,6 @@ family-scoped validation matrix, and the exact argv the serve line would be
 given. These tests prove profile plumbing and preserve the measured GLM path;
 full-checkpoint runtime qualification remains a separate live test.
 """
-import hashlib
 import json
 import os
 import shutil
@@ -143,7 +142,7 @@ def test_glm_release_defaults():
 
 
 def test_glm_release_integration():
-    section("the GG v20-r28 runtime integration matches the measured launch contract")
+    section("the GLM-5.3 K6 runtime and retained GLM-5.2 contracts")
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
     acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
@@ -152,16 +151,18 @@ def test_glm_release_integration():
     kld_runner = open(
         os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
     runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image is the pinned GG v20-r28 manifest",
-          "sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0"
+    check("the base image and all live K6 overlays are pinned fail-closed",
+          "sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692"
           in dockerfile
-          and "verify_r28_base.py" in dockerfile
-          and "apply_field_review_patches.py" not in dockerfile
-          and "field-review-r14" not in dockerfile)
+          and "COPY patches/glm53-runtime/ /opt/glm53-runtime/" in dockerfile
+          and "apply_glm53_runtime_overlays.py" in dockerfile
+          and "--verify-only" in dockerfile
+          and "verify_r28_base.py" not in dockerfile
+          and "apply_field_review_patches.py" not in dockerfile)
     check("static NVFP4 scaling selects and verifies the reviewed artifact",
           "KV_SCALE_MODE:-static-calibrated" in entry
           and "VLLM_NVFP4_MLA_SCALES_FILE" in entry
-          and "efd7e23ac1ace6da9dcd9046c46bca5cca68ed5e89cd648b5f8bc1d51eafebb2"
+          and "ac68fe6af3056ec35299361293c9ae568769d21696756548493f67ff17881ece"
           in entry and
           "/opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json"
           in dockerfile)
@@ -186,7 +187,7 @@ def test_glm_release_integration():
           and 'rrsets/${challenge}/TXT/' in acme_retry
           and 'challenge="_acme-challenge.${sub}"' in acme_retry
           and 'timeout --signal=TERM --kill-after=10' in acme_retry
-          and "dnspython==2.8.0" in dockerfile
+          and 'dns.__version__ == "2.8.0"' in dockerfile
           and "lego_v4.35.2_linux_amd64.tar.gz" in dockerfile
           and "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3"
           in dockerfile
@@ -254,23 +255,14 @@ def test_glm_release_integration():
           and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
           in entry)
     check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-r28-native1"'
+          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-k6-o21-v1"'
           in entry
           and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
           and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
-    check("the r28 native EXL3 gate and compatibility fallback are cache-versioned",
-          "verify_r28_base.py" in dockerfile
-          and "patch_exl3_parity_abi.py" in dockerfile
-          and "patch_exl3_mixk.py" in dockerfile
-          # Computed from the file, not a literal, so a legitimate patcher edit
-          # updates the pin here and in the Dockerfile together instead of
-          # silently drifting (test_r28_base_gate pins parity_abi the same way).
-          and hashlib.sha256(open(os.path.join(
-              REPO, "scripts", "patch_exl3_mixk.py"), "rb").read()).hexdigest()
-          in dockerfile
-          and dockerfile.index("patch_exl3_parity_abi.py")
-          < dockerfile.rindex("patch_exl3_mixk.py")
-          and "-turnkey-r28-native1" in entry)
+    check("the live-qualified K6 overlay generation is cache-versioned",
+          "apply_glm53_runtime_overlays.py" in dockerfile
+          and "patches/glm53-runtime" in dockerfile
+          and "-turnkey-glm53-k6-o21-v1" in entry)
     check("the local Podman runner does not bypass cache fingerprinting",
           "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
           and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
@@ -622,6 +614,75 @@ def test_r28_342_shared_h_profile():
           and eff["PREFIX_CACHE_DISK_GB"] == 0)
 
 
+def test_glm53_k6_profile():
+    section("the GLM-5.3 Flash K6 production profile")
+    eff, src, _ = resolved("glm53", gpus=4)
+    check("GLM-5.3 selects the K6 checkpoint",
+          eff["MODEL_VARIANT"] == "glm53-k6"
+          and src["MODEL_VARIANT"] == "family")
+    check("K6 pins the live-qualified TP4/DCP4 topology",
+          eff["TENSOR_PARALLEL_SIZE"] == 4
+          and eff["DCP"] == "4"
+          and src["TENSOR_PARALLEL_SIZE"] == "variant"
+          and src["DCP"] == "variant")
+    check("K6 pins the qualified memory and scheduler shape",
+          eff["MAX_MODEL_LEN"] == 520192
+          and eff["GPU_MEMORY_UTILIZATION"] == 0.93
+          and eff["MAX_NUM_BATCHED_TOKENS"] == 3072
+          and eff["MAX_NUM_SEQS"] == 8
+          and eff["GPU_BLOCKS_OVERRIDE"] == 0)
+    check("K6 uses calibrated NVFP4 MLA KV without speculative decode",
+          eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"
+          and eff["MTP_TOKENS"] == 0)
+
+    derived = gc.derive(eff)
+    check("K6 repository and revision are immutable",
+          derived["MODEL_REPO"] == "malaiwah/GLM-5.3-Flash-TR3-6bpw"
+          and derived["MODEL_REVISION"] ==
+          "be51877455a8786ebdd5f96053aff6dc74a0996f")
+    check("K6 uses its dedicated runtime block",
+          derived["FAMILY_ENV_BLOCK"] == "glm53"
+          and derived["MTP78_MODE"] == "off")
+    line = " ".join(derived["FAMILY_SERVE_ARGS"])
+    for flag in (
+            "--quantization exl3",
+            "--generation-config vllm",
+            "--decode-context-parallel-size 4",
+            "--dcp-comm-backend a2a",
+            "--attention-backend B12X_MLA_SPARSE",
+            "--moe-backend triton",
+            "--load-format safetensors",
+            "--long-prefill-token-threshold 2048",
+            "--tool-call-parser glm47",
+            "--reasoning-parser glm45"):
+        check(f"K6 serve args carry {flag}", flag in line, line)
+    check("K6 clamps runtime metadata to the qualified request envelope",
+          '"max_position_embeddings":520192' in line, line)
+    check("K6 captures the measured m=1 through m=32 widths",
+          '"cudagraph_capture_sizes":[1,2,3,4,8,12,16,20,24,28,32]'
+          in line, line)
+    check("K6 resolves with zero error-level findings",
+          not errs(gc.validate(eff, {"gpu_count": 4})),
+          str(errs(gc.validate(eff, {"gpu_count": 4}))))
+
+    off_topology, _, _ = resolved(
+        "glm53", gpus=8, TENSOR_PARALLEL_SIZE=8)
+    check("an unqualified GLM-5.3 rank count is refused",
+          "glm53-needs-tp4" in errs(gc.validate(off_topology, {"gpu_count": 8})))
+    pinned_pool, _, _ = resolved(
+        "glm53", gpus=4, GPU_BLOCKS_OVERRIDE=2048)
+    check("GLM-5.3 rejects the inapplicable GLM-5.2 block formula",
+          "glm53-pool-must-auto" in errs(gc.validate(pinned_pool)))
+
+    k8, _, _ = resolved(
+        "glm53", gpus=4, MODEL_VARIANT="glm53-k8")
+    k8_derived = gc.derive(k8)
+    check("the K8 sibling is selectable but not prematurely qualified",
+          k8_derived["MODEL_REPO"] == "malaiwah/GLM-5.3-Flash-TR3-8bpw"
+          and k8["SERVED_MODEL_NAME"] == "GLM-5.3-Flash-K8"
+          and "variant-untested" in ids(gc.validate(k8)))
+
+
 def test_qwen_preset():
     section("the Qwen preset")
     eff, src, _ = resolved("qwen36", gpus=1)
@@ -882,7 +943,8 @@ def test_long_context_gate_is_family_independent():
     check("and the needle probe is the thing that sets it",
           "needle_probe" in src and "long_context_verified" in src)
     # the probe budget follows MAX_MODEL_LEN, which is a family default
-    for fam, expected in (("glm52", 524288), ("qwen36", 196608)):
+    for fam, expected in (("glm52", 524288), ("glm53", 520192),
+                          ("qwen36", 196608)):
         eff, _, _ = resolved(fam)
         check(f"{fam} probes against its own context ceiling ({expected})",
               eff["MAX_MODEL_LEN"] == expected)
@@ -1001,6 +1063,7 @@ def main():
         run(test_higher_fidelity_exl3_candidate)
         run(test_r20_336_online_quant_candidate)
         run(test_r28_342_shared_h_profile)
+        run(test_glm53_k6_profile)
         run(test_qwen_preset)
         run(test_custom_profile)
         run(test_inapplicable_knobs)

@@ -1,0 +1,336 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+"""Warm up mHC kernels before serving requests.
+
+Gating is intrinsic: models outside the supported mHC families and layers
+without the required hc_* attributes return early.
+"""
+
+import time
+from collections.abc import Iterable
+
+import torch
+
+from vllm.logger import init_logger
+from vllm.tracing import instrument
+from vllm.utils.math_utils import cdiv
+
+logger = init_logger(__name__)
+
+_AUTO_WARMUP_MAX_TOKENS = 16_384
+_DEFAULT_TOKEN_SIZE_CANDIDATES = (
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024,
+    2048,
+    4096,
+    8192,
+    16_384,
+)
+
+_MHC_MODEL_TYPES = frozenset(("deepseek_v4", "glm5_next", "glm5_next_text"))
+_MHC_LAYER_CLASS_NAMES = frozenset(
+    ("DeepseekV4DecoderLayer", "Glm5NextDecoderLayer")
+)
+
+
+def _compute_mhc_pre_num_split(
+    *,
+    num_tokens: int,
+    hidden_size: int,
+    hc_mult: int,
+    num_sms: int,
+) -> int:
+    block_k = 64
+    block_m = 64
+    k = hc_mult * hidden_size
+    grid_size = cdiv(num_tokens, block_m)
+    split_k = num_sms // grid_size
+    num_block_k = cdiv(k, block_k)
+    split_k = min(split_k, num_block_k // 4)
+    return max(split_k, 1)
+
+
+def _normalize_token_sizes(
+    token_sizes: Iterable[int],
+    *,
+    max_tokens: int,
+) -> list[int]:
+    return sorted({size for size in token_sizes if 1 <= size <= max_tokens})
+
+
+def _select_mhc_warmup_token_sizes(
+    *,
+    max_tokens: int,
+    cudagraph_capture_sizes: list[int],
+    hidden_size: int,
+    hc_mult: int,
+    num_sms: int,
+) -> list[int]:
+    if max_tokens <= 0:
+        return []
+
+    max_auto_tokens = min(max_tokens, _AUTO_WARMUP_MAX_TOKENS)
+    candidates = list(_DEFAULT_TOKEN_SIZE_CANDIDATES)
+    candidates.extend(cudagraph_capture_sizes)
+    candidates.append(max_auto_tokens)
+    last_split = None
+    for grid_size in range(1, cdiv(max_auto_tokens, 64) + 1):
+        size = (grid_size - 1) * 64 + 1
+        split = _compute_mhc_pre_num_split(
+            num_tokens=size,
+            hidden_size=hidden_size,
+            hc_mult=hc_mult,
+            num_sms=num_sms,
+        )
+        if split != last_split:
+            candidates.append(size)
+            last_split = split
+    return _normalize_token_sizes(candidates, max_tokens=max_auto_tokens)
+
+
+def _find_first_mhc_layer(model: torch.nn.Module) -> torch.nn.Module | None:
+    for module in model.modules():
+        if module.__class__.__name__ not in _MHC_LAYER_CLASS_NAMES:
+            continue
+        if all(
+            hasattr(module, attr)
+            for attr in (
+                "hc_pre",
+                "hc_attn_fn",
+                "hc_attn_scale",
+                "hc_attn_base",
+                "hc_ffn_fn",
+                "hc_ffn_scale",
+                "hc_ffn_base",
+            )
+        ):
+            return module
+    return None
+
+
+def _find_deepseek_v4_model(model: torch.nn.Module) -> torch.nn.Module | None:
+    for module in model.modules():
+        if module.__class__.__name__ != "DeepseekV4Model":
+            continue
+        if all(
+            hasattr(module, attr)
+            for attr in ("hc_head_fn", "hc_head_scale", "hc_head_base")
+        ):
+            return module
+    return None
+
+
+def _warmup_layer_mhc(
+    layer: torch.nn.Module,
+    token_sizes: list[int],
+) -> None:
+    max_tokens = max(token_sizes)
+    hidden_size = int(layer.hidden_size)
+    hc_mult = int(layer.hc_mult)
+    device = layer.hc_attn_fn.device
+    use_b12x_mhc = bool(getattr(layer, "_use_b12x_mhc", False))
+    if use_b12x_mhc:
+        pre_fn = getattr(layer, "hc_attn_fn_broadcast", None)
+        if pre_fn is None:
+            raise RuntimeError(
+                "DeepSeek V4 b12x mHC warmup requires broadcast weights."
+            )
+        pre_input = torch.zeros(
+            max_tokens,
+            hidden_size,
+            dtype=torch.bfloat16,
+            device=device,
+        )
+    else:
+        pre_fn = layer.hc_attn_fn
+        pre_input = torch.zeros(
+            max_tokens,
+            hc_mult,
+            hidden_size,
+            dtype=torch.bfloat16,
+            device=device,
+        )
+
+    for size in token_sizes:
+        residual_work = pre_input[:size]
+        pre_outputs = layer.hc_pre(
+            residual_work,
+            pre_fn,
+            layer.hc_attn_scale,
+            layer.hc_attn_base,
+            norm_weight=layer.attn_norm.weight.data,
+            norm_eps=layer.attn_norm.variance_epsilon,
+        )
+        if use_b12x_mhc:
+            residual_work, post_mix, comb_mix, layer_input = pre_outputs
+        else:
+            layer_input, post_mix, comb_mix = pre_outputs
+        for fn, scale, base, norm in (
+            (
+                layer.hc_ffn_fn,
+                layer.hc_ffn_scale,
+                layer.hc_ffn_base,
+                layer.ffn_norm,
+            ),
+            (
+                layer.hc_attn_fn,
+                layer.hc_attn_scale,
+                layer.hc_attn_base,
+                layer.attn_norm,
+            ),
+        ):
+            residual_work, post_mix, comb_mix, layer_input = layer.hc_post_pre(
+                layer_input,
+                residual_work,
+                post_mix,
+                comb_mix,
+                fn,
+                scale,
+                base,
+                norm_weight=norm.weight.data,
+                norm_eps=norm.variance_epsilon,
+            )
+
+
+def _warmup_glm5next_layer_mhc(
+    layer: torch.nn.Module,
+    token_sizes: list[int],
+) -> None:
+    max_tokens = max(token_sizes)
+    hidden_size = int(layer.hidden_size)
+    hc_mult = int(layer.mhc_num_residual_streams)
+    device = layer.hc_attn_fn.device
+    residual = torch.zeros(
+        max_tokens,
+        hc_mult,
+        hidden_size,
+        dtype=torch.bfloat16,
+        device=device,
+    )
+
+    for size in token_sizes:
+        residual_work = residual[:size]
+        post_mix, comb_mix, layer_input = layer.hc_pre(
+            residual_work,
+            layer.hc_attn_fn,
+            layer.hc_attn_scale,
+            layer.hc_attn_base,
+            norm_weight=layer.input_layernorm.weight.data,
+            norm_eps=layer.input_layernorm.variance_epsilon,
+        )
+        layer.hc_post(layer_input, residual_work, post_mix, comb_mix)
+        layer.hc_fused_post_pre(
+            layer_input,
+            residual_work,
+            post_mix,
+            comb_mix,
+            layer.hc_ffn_fn,
+            layer.hc_ffn_scale,
+            layer.hc_ffn_base,
+            norm_weight=layer.post_attention_layernorm.weight.data,
+            norm_eps=layer.post_attention_layernorm.variance_epsilon,
+        )
+
+def _warmup_hc_head(
+    model: torch.nn.Module,
+    token_sizes: list[int],
+) -> None:
+    # Upstream a8887c208 ("[DSV4] aiter mhc support (ROCm)") refactored
+    # ``hc_head`` from a free function into the ``HCHeadOp`` CustomOp
+    # instance attached to the model as ``hc_head_op``. We call through
+    # that instance so the warmup exercises the same dispatched
+    # implementation as the inference path.
+    hc_head_op = getattr(model, "hc_head_op", None)
+    if hc_head_op is None:
+        return
+
+    max_tokens = max(token_sizes)
+    hidden_size = int(model.config.hidden_size)
+    hc_mult = int(model.hc_mult)
+    device = model.hc_head_fn.device
+    hidden_states = torch.zeros(
+        max_tokens,
+        hc_mult,
+        hidden_size,
+        dtype=torch.bfloat16,
+        device=device,
+    )
+
+    for size in token_sizes:
+        hc_head_op(
+            hidden_states[:size],
+            model.hc_head_fn,
+            model.hc_head_scale,
+            model.hc_head_base,
+            model.rms_norm_eps,
+            model.hc_eps,
+        )
+
+
+@instrument(span_name="mHC warmup")
+def deepseek_v4_mhc_warmup(
+    model: torch.nn.Module,
+    *,
+    max_tokens: int,
+    cudagraph_capture_sizes: list[int] | None = None,
+) -> None:
+    # Cheap model-type gate before walking ``model.modules()``. The class
+    # walk below is O(num_layers) and shows up in startup time on very
+    # large checkpoints; bail out for models outside the supported families.
+    config = getattr(model, "config", None)
+    model_type = getattr(config, "model_type", None) if config is not None else None
+    if model_type is not None and model_type not in _MHC_MODEL_TYPES:
+        return
+
+    layer = _find_first_mhc_layer(model)
+    if layer is None:
+        return
+
+    device = layer.hc_attn_fn.device
+    if device.type != "cuda":
+        return
+
+    hidden_size = int(layer.hidden_size)
+    if layer.__class__.__name__ == "Glm5NextDecoderLayer":
+        hc_mult = int(layer.mhc_num_residual_streams)
+        deepseek_model = None
+        warmup_layer = _warmup_glm5next_layer_mhc
+        model_name = "GLM5"
+    else:
+        hc_mult = int(layer.hc_mult)
+        deepseek_model = _find_deepseek_v4_model(model)
+        warmup_layer = _warmup_layer_mhc
+        model_name = "DeepSeek V4"
+
+    num_sms = torch.cuda.get_device_properties(device).multi_processor_count
+    token_sizes = _select_mhc_warmup_token_sizes(
+        max_tokens=max_tokens,
+        cudagraph_capture_sizes=cudagraph_capture_sizes or [],
+        hidden_size=hidden_size,
+        hc_mult=hc_mult,
+        num_sms=num_sms,
+    )
+    if not token_sizes:
+        return
+
+    started = time.perf_counter()
+    logger.info("Warming up %s mHC kernels for token sizes: %s", model_name, token_sizes)
+    with torch.inference_mode():
+        warmup_layer(layer, token_sizes)
+        if deepseek_model is not None:
+            _warmup_hc_head(deepseek_model, token_sizes)
+        torch.accelerator.synchronize()
+    logger.info(
+        "%s mHC warmup finished in %.2f seconds.",
+        model_name,
+        time.perf_counter() - started,
+    )

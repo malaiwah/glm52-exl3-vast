@@ -1,18 +1,19 @@
 # Model turnkey for Vast.ai, Runpod, and JarvisLabs
 
-One image, coherent profiles for **GLM-5.2**, **Qwen3.6-27B**, and compatible
-vLLM checkpoints. It supplies an authenticated OpenAI-compatible endpoint,
-persistent model downloads and compile caches, a live dashboard, key-only SSH,
-provider-aware URLs, optional TLS, crash supervision, and an opt-in embedded
-diagnostic [SOUL](docs/soul.md).
+One image, coherent profiles for **GLM-5.3-Flash**, **GLM-5.2**,
+**Qwen3.6-27B**, and compatible vLLM checkpoints. It supplies an authenticated
+OpenAI-compatible endpoint, persistent model downloads and compile caches, a
+live dashboard, key-only SSH, provider-aware URLs, optional TLS, crash
+supervision, and an opt-in embedded diagnostic [SOUL](docs/soul.md).
 
-The default `glm52-exl3` profile is the flagship production stack:
-BrandonMusic's 3.0-bpw EXL3/TR3 GLM-5.2 checkpoint on four RTX PRO 6000
-Blackwell cards, native TR3 MTP-5 speculation, dynamic-token NVFP4 KV, and a
-full 524,288-token request limit. Weights (~309 GiB) auto-download on first
-boot, so network speed dominates rental startup. The release pins **GG
-v20-r28**; the exact runtime trees, checkpoint revisions, and lineage are in
-the [changelog](CHANGELOG.md).
+The current `glm53-k6` production profile serves
+[`malaiwah/GLM-5.3-Flash-TR3-6bpw`](https://huggingface.co/malaiwah/GLM-5.3-Flash-TR3-6bpw)
+on four RTX PRO 6000 Blackwell cards: TP4/DCP4, EXL3 K6, B12X sparse MLA,
+Triton MoE, calibrated NVFP4 MLA KV, and a 520,192-token request limit. The
+~237 GiB checkpoint downloads on first boot. The provider templates retain
+`glm52-exl3` as their default for compatibility; select `MODEL_PROFILE=glm53-k6`
+explicitly for GLM-5.3. Exact runtime and checkpoint pins are in the
+[changelog](CHANGELOG.md).
 
 ## Contents
 
@@ -59,6 +60,7 @@ answers only to you.
 
 | profile | provider | launch | hardware | disk | first-boot budget |
 |---|---|---|---|---|---|
+| GLM-5.3-Flash K6 | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **450 GB** | 2–12 min once weights are local |
 | GLM-5.2 flagship (3.42bpw) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | 60–90 min |
 | GLM-5.2 flagship (3.42bpw) | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | ~30 min (Secure) |
 | GLM-5.2 flagship (3.42bpw) | JarvisLabs | [▶ VM guide](#launch-on-jarvislabs) | 4x RTX-PRO6000 VM | **650 GB** | ~30 min |
@@ -83,19 +85,20 @@ container toolkit, this downloads the selected profile's weights into
 the container logs:
 
 ```bash
-sudo docker run -d --name glm52-turnkey \
+sudo docker run -d --name glm53-turnkey \
   --restart unless-stopped \
   --gpus all --ipc=host --network host \
   --ulimit memlock=-1:-1 \
-  -e MODEL_PROFILE=glm52-exl3 \
+  -e MODEL_PROFILE=glm53-k6 \
   -v /srv/turnkey:/workspace \
   ghcr.io/malaiwah/glm52-exl3-vast:latest
 ```
 
-This is the same shape the JarvisLabs VM launcher uses. Select
-`MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU profile, add
-`-e HF_TOKEN=...` for authenticated downloads, and follow first boot with
-`sudo docker logs -f glm52-turnkey`. The endpoint is
+This is the same container shape used on JarvisLabs. Select
+`MODEL_PROFILE=glm52-exl3` for the legacy four-GPU profile or
+`MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU profile; add
+`-e HF_TOKEN=...` for authenticated downloads. Follow first boot with
+`sudo docker logs -f glm53-turnkey`. The endpoint is
 `http://localhost:8000/v1` and the tokenized dashboard is on `:1111`; keep
 both behind your LAN or an SSH tunnel, or configure TLS as described in
 [Security](#security).
@@ -177,9 +180,21 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 
 | `MODEL_PROFILE` | intended use | default hardware | download / context |
 |---|---|---|---|
+| `glm53-k6` | validated GLM-5.3-Flash TR3 EXL3 K6 stack | 4x RTX PRO 6000 Blackwell 96 GB | ~237 GiB / 520,192 |
 | `glm52-exl3` | validated GLM-5.2 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 512K |
 | `qwen36-27b-nvfp4` | vision-enabled, lower-cost production/development | 1x RTX 5090 32 GB | ~21 GiB / 192K |
 | `custom` | another conventional vLLM checkpoint | configurable | conservative 32K defaults |
+
+### GLM-5.3-Flash K6
+
+The K6 profile pins checkpoint revision
+`be51877455a8786ebdd5f96053aff6dc74a0996f` and the complete runtime shape used
+for live qualification. Do not transplant only its model directory into a
+GLM-5.2 launch: Glm5Next routing, EXL3 encoding, sparse MLA, Triton MoE,
+NOPE/index-pool compression, calibrated KV scales, topology, and graph widths
+are one contract. The profile intentionally disables speculative decoding;
+the measured target-only throughput and memory envelope are recorded on the
+checkpoint's Hugging Face model card.
 
 The Qwen profile serves
 [`nvidia/Qwen3.6-27B-NVFP4`](https://huggingface.co/nvidia/Qwen3.6-27B-NVFP4)

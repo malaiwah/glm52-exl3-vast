@@ -141,6 +141,54 @@ FAMILIES = {
                   "DCP-sharded KV, and the MTP78 speculative-draft apparatus. Every "
                   "default here has a measurement behind it; see README.md."),
     },
+    "glm53": {
+        "label": "GLM-5.3-Flash TR3/MCG — K6 on 4x RTX PRO 6000",
+        "tested": True,
+        "env_block": "glm53",
+        "default_variant": "glm53-k6",
+        "kv_dtypes": ["nvfp4_ds_mla"],
+        "spec_method": "mtp",
+        "defaults": {
+            "TENSOR_PARALLEL_SIZE": 4,
+            "DCP": "4",
+            "MAX_MODEL_LEN": 520192,
+            "MODEL_OUTPUT_LIMIT": 131072,
+            "MTP_TOKENS": 0,
+            "MAX_NUM_SEQS": 8,
+            "MAX_NUM_BATCHED_TOKENS": 3072,
+            "GPU_MEMORY_UTILIZATION": 0.93,
+            "GPU_BLOCKS_OVERRIDE": 0,
+            "OFFLOAD_FRACTION": 0,
+            "KV_CACHE_DTYPE": "nvfp4_ds_mla",
+            "LOAD_FORMAT": "safetensors",
+            "SERVED_MODEL_NAME": "GLM-5.3-Flash-K6",
+            "MAX_CUDAGRAPH_CAPTURE_SIZE": 32,
+            "CUDAGRAPH_CAPTURE_SIZES": "1,2,3,4,8,12,16,20,24,28,32",
+            "B12X_PCIE_DMA": True,
+            "PREFIX_CACHE_BACKEND": "native",
+        },
+        "serve_args": [
+            "--generation-config", "vllm",
+            "--decode-context-parallel-size", "%(DCP)s",
+            "--dcp-comm-backend", "a2a",
+            "--attention-backend", "B12X_MLA_SPARSE",
+            "--moe-backend", "triton",
+            "--load-format", "%(LOAD_FORMAT)s",
+            "--long-prefill-token-threshold", "2048",
+            "--enable-auto-tool-choice",
+            "--tool-call-parser", "glm47",
+            "--reasoning-parser", "glm45",
+            "--hf-overrides",
+            '{"max_position_embeddings":%(MAX_MODEL_LEN)s}',
+        ],
+        "compilation_config": (
+            '{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"],'
+            '"cudagraph_capture_sizes":[%(CUDAGRAPH_CAPTURE_SIZES)s]}'),
+        "notes": (
+            "Live-qualified on four 96 GiB RTX PRO 6000 Blackwell GPUs with "
+            "TP4/DCP4, the B12X sparse-MLA path, Triton MoE, NVFP4 MLA KV, "
+            "prefix caching, and the image's fail-closed GLM-5.3 runtime overlays."),
+    },
     "qwen36": {
         "label": "Qwen3.6 27B NVFP4 Vision — 1x RTX 5090 production profile",
         "tested": True,
@@ -232,6 +280,58 @@ def family(name=None) -> dict:
 # degenerates at long context without them (see VALIDATIONS/kv-nvfp4).
 
 VARIANTS = {
+    "glm53-k6": {
+        "family": "glm53",
+        "label": "GLM-5.3-Flash TR3/MCG K6 — production TP4/DCP4",
+        "repo": "malaiwah/GLM-5.3-Flash-TR3-6bpw",
+        "revision": "be51877455a8786ebdd5f96053aff6dc74a0996f",
+        "dirname": "GLM-5.3-Flash-TR3-6bpw",
+        "quantization": "exl3",
+        "defaults": {
+            "TENSOR_PARALLEL_SIZE": 4,
+            "DCP": "4",
+            "MAX_MODEL_LEN": 520192,
+            "MAX_NUM_BATCHED_TOKENS": 3072,
+            "MAX_NUM_SEQS": 8,
+            "MTP_TOKENS": 0,
+            "GPU_MEMORY_UTILIZATION": 0.93,
+            "GPU_BLOCKS_OVERRIDE": 0,
+            "LOAD_FORMAT": "safetensors",
+            "KV_CACHE_DTYPE": "nvfp4_ds_mla",
+            "SERVED_MODEL_NAME": "GLM-5.3-Flash-K6",
+            "MAX_CUDAGRAPH_CAPTURE_SIZE": 32,
+            "CUDAGRAPH_CAPTURE_SIZES": "1,2,3,4,8,12,16,20,24,28,32",
+        },
+        "kv_scales_calibrated": True,
+        "download_gib": 237,
+        "tested": True,
+    },
+    "glm53-k8": {
+        "family": "glm53",
+        "label": "GLM-5.3-Flash TR3/MCG K8 — TP4 qualification candidate",
+        "repo": "malaiwah/GLM-5.3-Flash-TR3-8bpw",
+        "revision": "b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae",
+        "dirname": "GLM-5.3-Flash-TR3-8bpw",
+        "quantization": "exl3",
+        "defaults": {
+            "TENSOR_PARALLEL_SIZE": 4,
+            "DCP": "4",
+            "MAX_MODEL_LEN": 520192,
+            "MAX_NUM_BATCHED_TOKENS": 3072,
+            "MAX_NUM_SEQS": 8,
+            "MTP_TOKENS": 0,
+            "GPU_MEMORY_UTILIZATION": 0.93,
+            "GPU_BLOCKS_OVERRIDE": 0,
+            "LOAD_FORMAT": "safetensors",
+            "KV_CACHE_DTYPE": "nvfp4_ds_mla",
+            "SERVED_MODEL_NAME": "GLM-5.3-Flash-K8",
+            "MAX_CUDAGRAPH_CAPTURE_SIZE": 32,
+            "CUDAGRAPH_CAPTURE_SIZES": "1,2,3,4,8,12,16,20,24,28,32",
+        },
+        "kv_scales_calibrated": True,
+        "download_gib": 309,
+        "tested": False,
+    },
     "exl3-tr3": {
         "family": "glm52",
         "label": "EXL3-TR3 3.0bpw — balanced DCP2/MTP5 (default, measured)",
@@ -632,8 +732,9 @@ KNOBS = [
              "Which model architecture this instance serves. The family decides the "
              "engine flags, which knobs exist, and which of the measured failure rules "
              "apply — MLA-only features like DCP and the EXL3 trellis are refused "
-             "outside GLM rather than silently ignored. 'glm52' is the family every "
-             "production number in this README was measured on. 'qwen36' is the "
+             "outside an applicable GLM family rather than silently ignored. "
+             "'glm53' is the four-GPU GLM-5.3-Flash K6 production profile; "
+             "'glm52' retains the measured 753B profiles; 'qwen36' is the "
              "one-GPU NVFP4 development profile; 'custom' accepts another Hugging "
              "Face checkpoint without guessing architecture-specific flags. Changing "
              "family triggers a fresh download.")),
@@ -654,15 +755,13 @@ KNOBS = [
          choices=list(VARIANTS), group="Model", scope="download",
          label="Model variant",
          rationale=(
-             "Which checkpoint is served. EXL3-TR3 3.0bpw is what this template "
-             "measures and ships: ~77 GiB/rank, which is what buys the 512K pool on "
-             "96 GB cards, at AIME/HMMT/GPQA parity with BF16. Every shipped GLM "
-             "variant carries checkpoint-calibrated MLA outer scales, so nvfp4 KV is "
-             "safe on all of them (the default itself serves nvfp4_ds_mla KV). The "
-             "NVFP4 hybrid is ~6% faster to decode but is BIGGER on "
-             "disk, gives up ~30% of the KV pool, and this template's serve args for "
-             "it are derived, not measured. Switching variants triggers a fresh "
-             "multi-hundred-GB download.")),
+             "Which checkpoint is served. The family default is a coherent measured "
+             "profile, not a model-name alias: it carries the quantizer, topology, "
+             "memory shape, parsers, and runtime environment qualified together. "
+             "GLM-5.3 K6 is about 237 GiB and is pinned to TP4/DCP4; K8 is about "
+             "309 GiB and remains marked unqualified until its four-GPU serving pass "
+             "completes. Switching variants triggers a fresh multi-hundred-GB "
+             "download.")),
 
     dict(key="MODEL_ID", families=("custom",), type="str", default="",
          group="Model", scope="download", label="Hugging Face model ID",
@@ -853,7 +952,7 @@ KNOBS = [
              "cause. This is a config trap, not a bug. vLLM's name for the NVFP4 "
              "modelopt draft is 'modelopt_fp4'. Left empty, the draft type sets it.")),
 
-    dict(key="DCP", families=("glm52",), type="choice", default="4",
+    dict(key="DCP", families=("glm52", "glm53"), type="choice", default="4",
          choices=["1", "2", "4", "8"],
          group="Parallelism", scope="engine", label="Decode context parallel",
          rationale=(
@@ -952,7 +1051,7 @@ KNOBS = [
              "MadeBy561 profile uses 8,192: shorter prompts avoid split overhead while "
              "long prefills use the DCP query-split path.")),
 
-    dict(key="B12X_PCIE_DMA", families=("glm52",), type="bool", default=True,
+    dict(key="B12X_PCIE_DMA", families=("glm52", "glm53"), type="bool", default=True,
          group="Performance", scope="engine", label="B12X PCIe DMA transport",
          rationale=(
              "Enables SparkInfer/B12X's PCIe DMA path for collective payloads. "
@@ -1930,6 +2029,8 @@ def validate(cfg: dict, context=None):
     fam_name = cfg.get("MODEL_FAMILY", "glm52")
     fam = family(fam_name)
     is_glm = fam_name == "glm52"
+    is_glm53 = fam_name == "glm53"
+    is_mla_glm = is_glm or is_glm53
 
     if fam_name == "qwen36" and toks > 0:
         warn(
@@ -2008,6 +2109,16 @@ def validate(cfg: dict, context=None):
              "chosen to give exactly 512K tokens at TP=4/DCP=4. At a different rank "
              "count that pin no longer means 512K; set GPU_BLOCKS_OVERRIDE=0 to let "
              "vLLM size the pool for the hardware it actually has.")
+    if is_glm53 and tp != 4:
+        err("glm53-needs-tp4", ["TENSOR_PARALLEL_SIZE", "MODEL_FAMILY"],
+            "the qualified GLM-5.3 K6 topology is TP4/DCP4 on four 96 GiB cards. "
+            f"TP={tp} changes the EXL3 route layout, DCP ownership, and memory shape; "
+            "use exactly four visible GPUs for this profile.")
+    if is_glm53 and cfg["GPU_BLOCKS_OVERRIDE"]:
+        err("glm53-pool-must-auto", ["GPU_BLOCKS_OVERRIDE"],
+            "GLM-5.3's hybrid KDA/MLA cache reports a model-specific logical-token "
+            "capacity that is not the GLM-5.2 blocks x 64 x DCP formula. Keep "
+            "GPU_BLOCKS_OVERRIDE=0 and use the measured auto-profiled pool.")
 
     # 1. concurrency vs the capture + trellis windows -----------------------
     # GLM/EXL3-SCOPED. The trellis window belongs to the EXL3 kernel; applying
@@ -2023,7 +2134,7 @@ def validate(cfg: dict, context=None):
         window = min(cap_max, trellis_max)
     else:
         window = cap_max
-    if is_glm and m > window:
+    if is_mla_glm and m > window:
         err("concurrency-window", ["MAX_NUM_SEQS", "MTP_TOKENS",
                                    "MAX_CUDAGRAPH_CAPTURE_SIZE", "VLLM_EXL3_TRELLIS_MAX_M"],
             f"MAX_NUM_SEQS x (1 + MTP_TOKENS) = {seqs} x {1 + toks} = {m} query tokens per "
@@ -2089,7 +2200,7 @@ def validate(cfg: dict, context=None):
              "then only used to decide what happens to the target checkpoint.")
 
     # 5. nvfp4 KV needs calibrated MLA outer scales --------------------------
-    if is_glm and cfg["KV_CACHE_DTYPE"] not in ("fp8", "auto") \
+    if is_mla_glm and cfg["KV_CACHE_DTYPE"] not in ("fp8", "auto") \
             and not variant["kv_scales_calibrated"]:
         err("kv-nvfp4-uncalibrated", ["KV_CACHE_DTYPE", "MODEL_VARIANT"],
             f"KV dtype {cfg['KV_CACHE_DTYPE']} requires per-checkpoint calibrated MLA "
@@ -2324,11 +2435,11 @@ def validate(cfg: dict, context=None):
              "five-depth 521K gate on the final v20 turnkey image.")
 
     # 8. parallelism (DCP is an MLA-path feature: GLM only) -------------------
-    if is_glm and int(cfg["TENSOR_PARALLEL_SIZE"]) % int(cfg["DCP"]) != 0:
+    if is_mla_glm and int(cfg["TENSOR_PARALLEL_SIZE"]) % int(cfg["DCP"]) != 0:
         err("dcp-divides-tp", ["DCP", "TENSOR_PARALLEL_SIZE"],
             f"decode context parallel size {cfg['DCP']} must divide the tensor-parallel "
             f"size ({cfg['TENSOR_PARALLEL_SIZE']}).")
-    if is_glm and int(cfg["DCP"]) == 1 and cfg["MAX_MODEL_LEN"] > 262144:
+    if is_mla_glm and int(cfg["DCP"]) == 1 and cfg["MAX_MODEL_LEN"] > 262144:
         warn("dcp-reduces-pool", ["DCP", "MAX_MODEL_LEN"],
              f"DCP={cfg['DCP']} replicates KV instead of sharding it across ranks, "
              "cutting the usable pool by about 4x on TP4. "
