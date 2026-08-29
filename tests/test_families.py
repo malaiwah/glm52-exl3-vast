@@ -612,7 +612,8 @@ def test_r28_342_shared_h_profile():
     check("the profile pins the workload-safe 520,192-token context",
           eff["GPU_BLOCKS_OVERRIDE"] == 0
           and eff["GPU_MEMORY_UTILIZATION"] == 0.93
-          and eff["MAX_MODEL_LEN"] == 520192)
+          and eff["MAX_MODEL_LEN"] == 520192
+          and eff["KV_CACHE_MEMORY_BYTES"] == 4518907904)
     check("the profile retains K6, dynamic NVFP4 and production LMCache",
           eff["ONLINE_QUANT"] == "exl3-b6"
           and eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"

@@ -584,6 +584,12 @@ VARIANTS["exl3-tr3-3.42bpw"]["defaults"].update({
     # uses the same auto approach with a fixed KV_CACHE_MEMORY_BYTES.
     "GPU_MEMORY_UTILIZATION": 0.93,
     "GPU_BLOCKS_OVERRIDE": 0,
+    # Fix KV cache reservation to 4.2 GiB/GPU (AIBeast production value).
+    # Without this, vLLM's profiler underestimates KV needs after K6 online
+    # encoding consumes extra VRAM, yielding only ~2.4 GiB — not enough for
+    # one 520K request (needs ~4.2 GiB). The fixed value guarantees the
+    # 520,192-token context regardless of profiling variance.
+    "KV_CACHE_MEMORY_BYTES": 4518907904,
     # Greedy drafting raised C1 but reduced aggregate C4/C8 throughput and
     # acceptance on the matched AIBeast workload. Pin the measured choice so
     # a future parent-profile edit cannot silently change production.
