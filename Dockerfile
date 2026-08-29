@@ -21,10 +21,10 @@ RUN set -eux; \
     apt-get install -y -qq nvtop htop curl openssh-server socat python3-venv util-linux patch; \
     rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*; \
     mkdir -p /opt/vllm/kv-scales; \
-    curl -fsSL -o /opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json \
+    curl --fail --show-error --location --retry 4 --retry-all-errors --connect-timeout 15 --max-time 180 -o /opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json \
       "https://huggingface.co/madeby561/GLM-5.2-MXFP8-NVFP4-NF3-Hybrid/resolve/2eb778b8ac3203f31a7dbe6d9f1bc9ba8fb00c25/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json?download=true"; \
     echo "ac68fe6af3056ec35299361293c9ae568769d21696756548493f67ff17881ece  /opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json" | sha256sum -c -; \
-    curl -fsSL -o /tmp/lego.tgz https://github.com/go-acme/lego/releases/download/v4.35.2/lego_v4.35.2_linux_amd64.tar.gz; \
+    curl --fail --show-error --location --retry 4 --retry-all-errors --connect-timeout 15 --max-time 180 -o /tmp/lego.tgz https://github.com/go-acme/lego/releases/download/v4.35.2/lego_v4.35.2_linux_amd64.tar.gz; \
     echo "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3  /tmp/lego.tgz" | sha256sum -c -; \
     tar xzf /tmp/lego.tgz -C /usr/local/bin lego; \
     rm /tmp/lego.tgz; \
