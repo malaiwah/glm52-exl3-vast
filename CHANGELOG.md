@@ -15,9 +15,12 @@ EXL3 K6, B12X sparse MLA, Triton MoE, calibrated NVFP4-DS MLA KV, native
 prefix caching, no speculation, a 3,072-token scheduler, eight sequences,
 GMU 0.93, and a conservative 458,752-token request limit.
 
-On four RTX PRO 6000 Blackwell GPUs at JarvisLabs, the production boot exposed
-22,198,891 logical KV tokens (48.39x the advertised request limit), with
-23.19 GiB of KV memory per GPU and zero preemptions during qualification.
+On four RTX PRO 6000 Blackwell GPUs at JarvisLabs, the final packaged-image
+boot exposed 20,043,933 logical KV tokens (43.69x the advertised request
+limit), with 21.52--21.56 GiB of KV memory per GPU. Per-rank memory profiling
+reported 63.74--63.78 GiB for weights plus non-torch allocations, 3.02 GiB
+peak activations, and 0.45--0.46 GiB of CUDA graphs. The appliance's short,
+structured-output, and 32K retrieval startup gates passed.
 Measured unique-prefix prefill was 2,983 tok/s at 8K and 4,322 / 4,637 / 4,907
 client-observed tok/s at 32K / 64K / 128K; server accounting at those three
 lengths was 5,238 / 5,326 / 5,326 tok/s. Aggregate target-only decode at
