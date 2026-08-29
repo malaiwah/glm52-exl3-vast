@@ -32,8 +32,8 @@ RUN set -eux; \
     python3 -c 'import dns, hf_xet, huggingface_hub; assert dns.__version__ == "2.8.0"'; \
     python3 -c 'import importlib.metadata as m; print(*sorted((d.metadata["Name"] or "") + "==" + d.version for d in m.distributions()), sep="\n")' > /tmp/vllm-packages.before; \
     python3 -m venv /opt/nanobot-venv; \
-    /opt/nanobot-venv/bin/pip install --no-cache-dir --require-hashes -r /opt/requirements-soul.lock; \
-    /opt/nanobot-venv/bin/python -c "from nanobot import Nanobot; import importlib.metadata as m; assert m.version('nanobot-ai') == '0.3.0'"; \
+    env -u PYTHONPATH /opt/nanobot-venv/bin/pip install --no-cache-dir --require-hashes -r /opt/requirements-soul.lock; \
+    env -u PYTHONPATH /opt/nanobot-venv/bin/python -c "from nanobot import Nanobot; import importlib.metadata as m; assert m.version('nanobot-ai') == '0.3.0'"; \
     python3 -c 'import importlib.metadata as m; print(*sorted((d.metadata["Name"] or "") + "==" + d.version for d in m.distributions()), sep="\n")' > /tmp/vllm-packages.after; \
     diff -u /tmp/vllm-packages.before /tmp/vllm-packages.after; \
     rm /tmp/vllm-packages.before /tmp/vllm-packages.after; \

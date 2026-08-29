@@ -2341,7 +2341,12 @@ fi
 # FAMILY_SERVE_ARGS, which the config layer built for the selected MODEL_FAMILY.
 # That is what makes a second model family possible without a second serve line,
 # and what removed `--tensor-parallel-size 4` as a literal.
-if command -v vllm >/dev/null 2>&1; then
+# GLM-5.3 qualification used the parent image's system Python plus the pinned
+# source-tree PYTHONPATH. Its /opt/venv console script has a different Python
+# environment, so do not silently cross that runtime boundary.
+if [ "${FAMILY_ENV_BLOCK:-}" = "glm53" ]; then
+  _VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)
+elif command -v vllm >/dev/null 2>&1; then
   _VLLM_LAUNCH=(vllm)
 else
   _VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)

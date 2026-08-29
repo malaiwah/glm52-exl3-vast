@@ -159,6 +159,9 @@ def test_glm_release_integration():
           and "--verify-only" in dockerfile
           and "verify_r28_base.py" not in dockerfile
           and "apply_field_review_patches.py" not in dockerfile)
+    check("GLM-5.3 uses the exact system-Python launcher qualified live",
+          '[ "${FAMILY_ENV_BLOCK:-}" = "glm53" ]' in entry
+          and "_VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)" in entry)
     check("static NVFP4 scaling selects and verifies the reviewed artifact",
           "KV_SCALE_MODE:-static-calibrated" in entry
           and "VLLM_NVFP4_MLA_SCALES_FILE" in entry
