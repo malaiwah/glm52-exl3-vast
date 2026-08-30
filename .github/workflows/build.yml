@@ -22,7 +22,7 @@ jobs:
       - name: shellcheck boot scripts
         run: shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh scripts/field_review_full_gate.sh
       - name: validate Python
-        run: python3 -m py_compile landing.py scripts/*.py
+        run: python3 -m py_compile landing.py scripts/*.py patches/glm53-runtime/*.py
       - name: fail-closed field-review patch applicator
         run: python3 tests/test_field_review_patches.py
       # Guards the destructive path: provider detection, the terminate
@@ -56,6 +56,10 @@ jobs:
         run: python3 tests/test_extension_lock_recovery.py
       - name: bounded LMCache process and tier contract
         run: bash tests/test_lmcache_wrapper.sh
+      - name: LMCache administration boundary
+        run: python3 tests/test_lmcache_admin_patch.py
+      - name: local Podman profile forwarding
+        run: bash tests/test_run_local_podman.sh
       - name: bounded ACME retry contract
         run: bash tests/test_acme_retry.sh
       # Keeps the live qualification instruments trustworthy before they are
@@ -89,8 +93,15 @@ jobs:
           grep -q 'malaiwah/GLM-5.3-Flash-TR3-6bpw' <<<"$out"
           out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-k8 bash entrypoint.sh)
           grep -q 'malaiwah/GLM-5.3-Flash-TR3-8bpw' <<<"$out"
-          out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-3.42bpw bash entrypoint.sh)
+          out=$(VLLM_B12X_GLM_NOPE_NVFP4=1 B12X_GL53_ROUTE128_WIDE=1 \
+            B12X_GL53_ROUTE128_HYBRID_TAIL=1 VLLM_ALLREDUCE_USE_SYMM_MEM=0 \
+            CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-3.42bpw bash entrypoint.sh)
           grep -q 'davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw' <<<"$out"
+          if CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-3.42bpw \
+              TUNE_VLLM_B12X_GLM_NOPE_NVFP4=1 bash entrypoint.sh >/dev/null 2>&1; then
+            echo 'GLM-5.3 full profile accepted a Flash-only tuning override' >&2
+            exit 1
+          fi
           out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm52-exl3 bash entrypoint.sh)
           grep -q 'brandonmusic/GLM-5.2-EXL3-TR3-3.0bpw' <<<"$out"
           out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=qwen36-27b-nvfp4 bash entrypoint.sh)

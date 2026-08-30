@@ -719,6 +719,7 @@ VARIANTS["exl3-tr3-glm53-3.42bpw"] = {
     "quantization": "exl3",
     "native_mtp_format": "exl3-tr3",
     "default_draft": "native",
+    "mtp_graft_compatible": False,
     "defaults": dict(VARIANTS["exl3-tr3-3.42bpw"]["defaults"]),
     "runtime_env": dict(VARIANTS["exl3-tr3-3.42bpw"]["runtime_env"]),
     "kv_scales_calibrated": True,
@@ -2004,6 +2005,9 @@ def derive(cfg: dict) -> dict:
         out["MODEL_DIRNAME"] = variant["dirname"]
         out["QUANTIZATION"] = variant["quantization"]
         out["NATIVE_MTP_FORMAT"] = variant.get("native_mtp_format", "")
+        out["MTP_GRAFT_COMPATIBLE"] = (
+            "1" if variant.get("mtp_graft_compatible", True) else "0"
+        )
     out["FAMILY_ENV_BLOCK"] = fam.get("env_block", "generic")
     out["SPEC_METHOD"] = fam.get("spec_method", "mtp")
     out["FAMILY_SERVE_ARGS"] = family_serve_args(cfg)
@@ -2030,6 +2034,10 @@ def derive(cfg: dict) -> dict:
         out["VISION"] = False
         return out
     out["MTP78_MODE"] = draft["mtp78_mode"]
+    if cfg.get("DRAFT_MODEL"):
+        # A complete external draft wins before checkpoint preparation. Do not
+        # carry a stale graft/overlay mode into entrypoint.sh.
+        out["MTP78_MODE"] = "off"
     # rule draft-inherits-quant: a non-EXL3 draft against an EXL3 target must
     # declare its own quantization or it is loaded through the EXL3 path.
     if not cfg.get("DRAFT_QUANTIZATION") and draft.get("draft_quantization"):
@@ -2211,6 +2219,12 @@ def validate(cfg: dict, context=None):
             "the TR3 trellis drafts are layer-78 overlays built for the EXL3-TR3 "
             f"checkpoint; they have no meaning on the {variant['label']} target. Use the "
             "native in-checkpoint draft or an external nvfp4 draft dir.")
+    if (is_glm and draft == "tr3-graft" and not cfg.get("DRAFT_MODEL")
+            and not variant.get("mtp_graft_compatible", True)):
+        err("mtp-graft-incompatible", ["MTP_DRAFT", "MODEL_VARIANT"],
+            "this checkpoint is not compatible with the GLM-5.2 layer-78 graft. "
+            "Use its native in-checkpoint draft; grafting a draft from another "
+            "model generation would mutate the checkpoint into an invalid hybrid.")
 
     # 3. a draft inherits the target's quantization --------------------------
     # derive() fills DRAFT_QUANTIZATION from the draft registry when the knob
@@ -2233,8 +2247,8 @@ def validate(cfg: dict, context=None):
     if is_glm and cfg.get("DRAFT_MODEL") and draft in (
             "tr3-graft", "native", "bf16", "off"):
         warn("draft-model-overrides", ["DRAFT_MODEL", "MTP_DRAFT"],
-             "an explicit DRAFT_MODEL takes over draft selection; the MTP draft type is "
-             "then only used to decide what happens to the target checkpoint.")
+             "an explicit DRAFT_MODEL takes over draft selection and disables "
+             "target graft/overlay preparation; MTP_DRAFT is ignored.")
 
     # 5. nvfp4 KV needs calibrated MLA outer scales --------------------------
     if is_mla_glm and cfg["KV_CACHE_DTYPE"] not in ("fp8", "auto") \
@@ -2321,6 +2335,17 @@ def validate(cfg: dict, context=None):
             "Choose one reproducible KV-pool control. --kv-cache-memory-bytes "
             "already fixes the per-GPU pool; combining it with a block-count "
             "override is ambiguous and has not been qualified.")
+    if (cfg["MODEL_VARIANT"] == "exl3-tr3-glm53-3.42bpw"
+            and (cfg["MAX_MODEL_LEN"] > 393216
+                 or not fixed_kv
+                 or fixed_kv > 3415867392)):
+        err("glm53-qualified-envelope",
+            ["MAX_MODEL_LEN", "KV_CACHE_MEMORY_BYTES", "MODEL_VARIANT"],
+            "the qualified GLM-5.3 3.42bpw profile is bounded to "
+            "MAX_MODEL_LEN<=393216 with 0<KV_CACHE_MEMORY_BYTES<=3415867392. "
+            "The inherited larger envelope passed startup but OOMed on its first "
+            "temperature-1 sample. Use TUNE_* only for an explicitly monitored "
+            "runtime experiment.")
     elif fixed_kv:
         warn("fixed-kv-cache",
              ["KV_CACHE_MEMORY_BYTES", "GPU_MEMORY_UTILIZATION"],

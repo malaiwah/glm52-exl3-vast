@@ -19,6 +19,13 @@ command -v lmcache >/dev/null || {
 service_port="${PORT:-8000}"
 offset=$((service_port >= 8000 ? service_port - 8000 : 0))
 host="${LMCACHE_HOST:-127.0.0.1}"
+case "$host" in
+  127.0.0.1|localhost) ;;
+  *)
+    echo "FATAL: the appliance LMCache service must remain loopback-only: $host" >&2
+    exit 2
+    ;;
+esac
 port="${LMCACHE_PORT:-$((5555 + offset))}"
 http_port="${LMCACHE_HTTP_PORT:-$((8089 + offset))}"
 metrics_port="${LMCACHE_PROMETHEUS_PORT:-$((9090 + offset))}"
@@ -55,7 +62,8 @@ args=(server --host "$host" --port "$port" --chunk-size "$chunk"
   --l1-read-ttl-seconds "${LMCACHE_L1_READ_TTL:-300}"
   --eviction-policy LRU --eviction-trigger-watermark 0.90
   --eviction-ratio 0.10 --l2-store-policy default --l2-prefetch-policy retain
-  --http-port "$http_port" --prometheus-port "$metrics_port")
+  --http-host "$host" --http-port "$http_port"
+  --prometheus-port "$metrics_port")
 
 l2=disabled
 if [[ "$mode" == disk ]]; then
@@ -96,7 +104,17 @@ fi
 export PYTORCH_CUDA_ALLOC_CONF="$allocator"
 export LMCACHE_DISABLE_BANNER="${LMCACHE_DISABLE_BANNER:-1}"
 rm -f "$log"
-lmcache "${args[@]}" >"$log" 2>&1 &
+secret_unsets=()
+while IFS='=' read -r name _value; do
+  case "$name" in
+    *_TOKEN|*_API_KEY|*_SECRET|*_PASSWORD|*_PRIVATE_KEY|\
+    AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)
+      secret_unsets+=(-u "$name")
+      ;;
+  esac
+done < <(env)
+env "${secret_unsets[@]}" lmcache "${args[@]}" >"$log" 2>&1 &
+unset secret_unsets name _value
 cache_pid=$!
 model_pid=""
 stop_children() {
@@ -122,7 +140,7 @@ if [[ "$ready" != 1 ]]; then
   stop_children
   exit 1
 fi
-echo ">>> LMCache ready: mode=$mode L1=${l1_gb}GiB (initial ${l1_init_gb}GiB, lazy growth) chunk=$chunk GPU-workers=$gpu_workers L2=$l2 metrics=http://127.0.0.1:${http_port}/metrics"
+echo ">>> LMCache ready: mode=$mode L1=${l1_gb}GiB (initial ${l1_init_gb}GiB, lazy growth) chunk=$chunk GPU-workers=$gpu_workers L2=$l2 status=http://127.0.0.1:${http_port}/status"
 
 "$@" --kv-transfer-config "$transfer" &
 model_pid=$!

@@ -48,10 +48,14 @@ COPY soul/ /opt/soul/
 COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # The public Vast template may still call glm52-entry.sh from its onstart field.
 RUN set -eux; \
+    python3 /opt/scripts/patch_lmcache_admin_api.py; \
+    python3 /opt/scripts/patch_lmcache_admin_api.py --verify-only; \
+    python3 -m py_compile /opt/glm53-runtime/*.py; \
     python3 /opt/scripts/apply_glm53_runtime_overlays.py /opt/glm53-runtime --verify-only; \
     python3 /opt/scripts/apply_glm53_runtime_overlays.py /opt/glm53-runtime; \
     python3 /opt/scripts/apply_glm53_runtime_overlays.py /opt/glm53-runtime --verify-only; \
-    chmod +x /usr/local/bin/model-turnkey-entry.sh /opt/scripts/soul_controller.py /opt/scripts/soul_config.py \
+    chmod +x /usr/local/bin/model-turnkey-entry.sh /opt/scripts/soul_launcher.py \
+      /opt/scripts/soul_controller.py /opt/scripts/soul_config.py \
       /opt/scripts/glm52_lmcache_wrapper.sh /opt/scripts/acme_retry.sh; \
     chmod -R a-w /opt/soul /opt/glm53-runtime; \
     ln -sf model-turnkey-entry.sh /usr/local/bin/glm52-entry.sh

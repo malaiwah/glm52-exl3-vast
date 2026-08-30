@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Is the engine actually serving CORRECTLY? — health + short prompt + a
-long-context needle probe.
+"""Is the engine actually serving CORRECTLY? — health, deterministic checks,
+a bounded stochastic decode, and a long-context needle probe.
 
 THE DESIGN LESSON THIS FILE EXISTS FOR: a short-prompt health check is NOT
 evidence of correctness. Measured on 2026-07-26, several configurations passed
@@ -272,6 +272,111 @@ def build_haystack(target_tokens, depths, seed=20260726):
     body = "\n".join(lines)
     return body, [(c, k) for c, k, _ in needles]
 
+def _sampling_prompt(base, key, model, target_tokens, nonce):
+    """Build a cache-unique prompt calibrated against the served tokenizer."""
+    build_target = target_tokens
+    prompt = ""
+    actual = 0
+    exact = False
+    for _attempt in range(3):
+        body, _needles = build_haystack(build_target, [], nonce)
+        prompt = (
+            body
+            + "\n\nWrite a detailed but coherent operational summary of this "
+              "maintenance record. Continue until the output limit; do not use "
+              "lists, headings, or repeated filler."
+        )
+        actual, exact = count_tokens(base, key, model, prompt)
+        if not actual or abs(actual - target_tokens) / target_tokens <= 0.01:
+            break
+        build_target = max(64, int(build_target * target_tokens / actual))
+    return prompt, actual, exact
+
+
+def stochastic_sampling_probe(base, key, model, timeout=900,
+                              prompt_tokens=1024, max_tokens=512, seed=42):
+    """Require a full temperature-1 decode and a healthy engine afterward.
+
+    The rejected GLM-5.3 memory arm passed every temperature-0 and long-prefill
+    check, then hung/OOMed on its first stochastic sample. This bounded probe is
+    therefore an authoritative startup gate, not a throughput benchmark.
+    """
+    started = time.perf_counter()
+    nonce = time.time_ns() ^ os.getpid()
+    prompt, actual, exact = _sampling_prompt(
+        base, key, model, prompt_tokens, nonce)
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 1.0,
+        "seed": seed,
+        "ignore_eos": True,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    request_error = ""
+    doc = {}
+    try:
+        doc = _req(
+            base + "/v1/chat/completions", payload, key=key, timeout=timeout)
+    except Exception as exc:
+        request_error = str(exc)
+
+    health_after = False
+    health_detail = "healthy"
+    try:
+        _req(base + "/health", key=key, timeout=30)
+        health_after = True
+    except Exception as exc:
+        health_detail = str(exc)
+
+    choice = (doc.get("choices") or [{}])[0] if isinstance(doc, dict) else {}
+    message = choice.get("message") or {}
+    output = (message.get("content") or "").strip()
+    usage = doc.get("usage") or {} if isinstance(doc, dict) else {}
+    completion_tokens = usage.get("completion_tokens")
+    output_problem = degenerate(output) if output else "empty answer"
+    ok = (
+        not request_error
+        and completion_tokens == max_tokens
+        and choice.get("finish_reason") == "length"
+        and not output_problem
+        and health_after
+    )
+    if request_error:
+        detail = f"sampling request failed: {request_error}"
+    elif completion_tokens != max_tokens:
+        detail = (
+            f"sampling produced {completion_tokens!r}/{max_tokens} output tokens"
+        )
+    elif choice.get("finish_reason") != "length":
+        detail = f"unexpected finish reason {choice.get('finish_reason')!r}"
+    elif output_problem:
+        detail = output_problem
+    elif not health_after:
+        detail = f"engine unhealthy after sampling: {health_detail}"
+    else:
+        detail = (
+            f"temperature-1 sampling produced {max_tokens} tokens and "
+            "the engine remained healthy"
+        )
+    return {
+        "attempted": True,
+        "ok": ok,
+        "detail": detail,
+        "prompt_target_tokens": prompt_tokens,
+        "prompt_tokens": actual,
+        "prompt_tokens_exact": exact,
+        "max_tokens": max_tokens,
+        "completion_tokens": completion_tokens,
+        "temperature": 1.0,
+        "seed": seed,
+        "ignore_eos": True,
+        "health_after": health_after,
+        "duration_s": round(time.perf_counter() - started, 3),
+    }
+
+
 
 def _needle_probe_once(base, key, model, target_tokens, depths, timeout,
                        seed, max_tokens):
@@ -416,6 +521,8 @@ def main(argv):
         "health": False,
         "short_prompt": {"ok": False, "checks": []},
         "structured_output": {"ok": False, "detail": "not attempted"},
+        "stochastic_sampling": {"attempted": False, "ok": False,
+                                "detail": "not attempted"},
         "long_context": {"attempted": False, "ok": False,
                          "detail": "not attempted"},
         "long_context_verified": False,
@@ -453,6 +560,16 @@ def main(argv):
         )
         return _finish(verdict, args, started)
 
+    verdict["stochastic_sampling"] = stochastic_sampling_probe(
+        base, args.api_key, args.model
+    )
+    if not verdict["stochastic_sampling"]["ok"]:
+        verdict["reason"] = (
+            "temperature-1 sampling check failed: "
+            + verdict["stochastic_sampling"]["detail"]
+        )
+        return _finish(verdict, args, started)
+
     reserve = max(4096, args.needle_max_tokens + 2048)
     budget = min(args.needle_tokens, max(0, args.max_model_len - reserve))
     if args.skip_long_context or budget < 8192:
@@ -462,8 +579,10 @@ def main(argv):
                        if args.skip_long_context else
                        f"context budget {budget} is too small for a meaningful probe")}
         verdict["ok"] = True
-        verdict["reason"] = ("serving; SHORT PROMPTS ONLY — long-context correctness is "
-                             "NOT verified")
+        verdict["reason"] = (
+            "serving; deterministic and stochastic short-context checks passed; "
+            "LONG-CONTEXT correctness is NOT verified"
+        )
         return _finish(verdict, args, started)
 
     depths = [float(d) for d in args.depths.split(",") if d.strip()]

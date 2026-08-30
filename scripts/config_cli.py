@@ -112,7 +112,7 @@ def cmd_env(_args):
     # wiring audit exists to catch.
     for key in ("MODEL_REPO", "MODEL_REVISION", "MODEL_DIRNAME", "MTP78_MODE",
                 "DRAFT_MODEL", "DRAFT_QUANTIZATION", "FAMILY_ENV_BLOCK", "SPEC_METHOD",
-                "NATIVE_MTP_FORMAT"):
+                "NATIVE_MTP_FORMAT", "MTP_GRAFT_COMPATIBLE"):
         lines.append("export %s=%s" % (key, shlex.quote(str(derived.get(key, "")))))
     # A bash ARRAY, not a string: these values are JSON with spaces and braces,
     # and word-splitting them would corrupt the serve line. Arrays cannot be
@@ -208,6 +208,61 @@ def cmd_rollback(args):
         return _cmd_rollback_locked(args)
 
 
+def _known_good_replay(good):
+    """Return state values that reproduce a stored effective config now.
+
+    Known-good snapshots may have been recorded entirely from the old startup
+    environment, leaving their historical ``values`` diff empty. Re-minimizing
+    the full effective snapshot against the current startup environment makes
+    rollback portable across container replacements. Refuse rather than claim
+    success if a non-editable or detected layer prevents an exact replay.
+    """
+    target = good.get("effective") if isinstance(good, dict) else None
+    if not isinstance(target, dict):
+        return None, "known-good record has no effective configuration"
+    current_env = gc.load_startup_env()
+    replay = gc.minimize(target)
+    restored, _sources, _notes = gc.resolve(
+        state_values=replay, env_values=current_env)
+    family_name = str(target.get("MODEL_FAMILY") or "glm52")
+    comparable_keys = {"MODEL_FAMILY", "MODEL_VARIANT"}
+    comparable_keys.update(
+        knob["key"] for knob in gc.KNOBS
+        if gc.applies_to(knob, family_name)
+    )
+    target_contract = {
+        key: value for key, value in target.items()
+        if key in comparable_keys
+    }
+    restored_contract = {
+        key: value for key, value in restored.items()
+        if key in comparable_keys
+    }
+    differences = gc.diff(target_contract, restored_contract)
+    if differences:
+        keys = ", ".join(key for key, _old, _new in differences)
+        return None, (
+            "known-good configuration is not replayable under this startup "
+            f"environment ({keys})"
+        )
+
+    context = _context()
+    context["state_keys"] = list(replay)
+    try:
+        context["gpu_count"] = int(
+            str(current_env.get("GLM_GPU_COUNT", "")).strip())
+    except (TypeError, ValueError):
+        pass
+    replay_errors = gc.errors(gc.validate(restored, context))
+    if replay_errors:
+        finding_ids = ", ".join(finding["id"] for finding in replay_errors)
+        return None, (
+            "known-good configuration is invalid on the current host "
+            f"({finding_ids})"
+        )
+    return replay, ""
+
+
 def _cmd_rollback_locked(args):
     effective, _sources, _notes = _resolved()
     failed_values = _state_values()
@@ -222,7 +277,7 @@ def _cmd_rollback_locked(args):
     with open(os.path.join(fdir, "error.log"), "w") as f:
         f.write(log_text)
     with open(os.path.join(fdir, "diff.txt"), "w") as f:
-        f.write(gc.diff_text(good.get("effective", {}), effective))
+        f.write(gc.diff_text(good.get("effective", {}) if good else {}, effective))
     gc.write_json_atomic(os.path.join(fdir, "meta.json"), {
         "ts": ts,
         "reason": args.reason,
@@ -250,13 +305,30 @@ def _cmd_rollback_locked(args):
             return 0
         gc.set_apply_state("failed", since=ts, failure=ts, detail=args.reason,
                            restored="")
-        print("!!! no known-good config and nothing to drop — the failure is in the "
-              "template env or the built-in defaults; not restarting in a loop")
+        _prune_failures()
+        print("!!! rollback: no known-good config and no state override to drop",
+              file=sys.stderr)
+        return 3
+
+    replay, error = _known_good_replay(good)
+    if error:
+        print(f"!!! rollback refused: {error}", file=sys.stderr)
+        gc.set_apply_state("failed", since=ts, failure=ts, detail=args.reason,
+                           restored="")
+        _prune_failures()
+        return 3
+    if not gc.diff(effective, good["effective"]):
+        print("!!! rollback: known-good is identical to failed config; "
+              "not restarting into the same failure", file=sys.stderr)
+        gc.set_apply_state("failed", since=ts, failure=ts, detail=args.reason,
+                           restored="")
         _prune_failures()
         return 3
 
-    gc.write_json_atomic(gc.p_state(), {"values": good.get("values", {}),
-                                        "restored_from": good.get("ts")}, mode=0o600)
+    gc.write_json_atomic(gc.p_state(), {
+        "values": replay,
+        "written_at": gc.utcnow_iso(),
+    }, mode=0o600)
     gc.set_apply_state("rolled-back", since=ts, failure=ts, detail=args.reason,
                        restored=good.get("ts"))
     open(gc.p_restart_flag(), "w").write("rollback\n")
@@ -267,18 +339,15 @@ def _cmd_rollback_locked(args):
 
 
 def cmd_should_rollback(_args):
-    """Exit 0 when rolling back would actually change something.
-
-    Rollback is only meaningful when the running configuration DIFFERS from the
-    last known-good one. Restarting the same config in a loop is a crash loop,
-    not a rollback, and the supervisor's restart budget is the right tool for
-    that. With no known-good config at all, dropping a non-empty state file is
-    still a real move (it returns the instance to template env + defaults)."""
+    """Exit 0 when an exact rollback would change the effective config."""
     effective, _sources, _notes = _resolved()
     good = gc.read_json(gc.p_known_good())
     if not good:
         return 0 if _state_values() else 1
-    return 0 if gc.diff(good.get("effective", {}), effective) else 1
+    _replay, error = _known_good_replay(good)
+    if error:
+        return 1
+    return 0 if gc.diff(effective, good["effective"]) else 1
 
 
 def cmd_switches(_args):

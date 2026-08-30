@@ -200,6 +200,7 @@ done < <(env)
 # explicit operator overrides.
 config_env=()
 for config_name in \
+  MODEL_ID QUANTIZATION REASONING_PARSER TOOL_CALL_PARSER MULTIMODAL MM_MAX_PIXELS \
   TENSOR_PARALLEL_SIZE DCP MAX_MODEL_LEN MAX_NUM_SEQS \
   MAX_NUM_BATCHED_TOKENS VLLM_EXL3_PREFILL_CAPACITY DCP_PREFILL_WORKSPACE_MIB \
   GPU_MEMORY_UTILIZATION GPU_BLOCKS_OVERRIDE KV_CACHE_MEMORY_BYTES \
@@ -239,10 +240,22 @@ fi
 # preserve the caller's list as CUDA's logical-rank ordering.  Export the same
 # list so GPU_DEVICES can provide deterministic TP-rank placement (for example
 # cold-to-hot on an owned host) instead of silently reverting to PCI order.
+profile_env=(-e MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}")
+if [ -n "${MODEL_VARIANT:-}" ]; then
+  profile_env+=(-e MODEL_VARIANT="$MODEL_VARIANT")
+fi
+served_name_env=()
+if [ -n "${SERVED_MODEL_NAME:-}" ]; then
+  served_name_env=(-e SERVED_MODEL_NAME="$SERVED_MODEL_NAME")
+fi
+profile_identity="${MODEL_VARIANT:-${MODEL_PROFILE:-glm52-exl3}}"
+
 health_start_period="${HEALTH_START_PERIOD:-}"
 if [ -z "$health_start_period" ]; then
-  case "${MODEL_VARIANT:-exl3-tr3}" in
-    exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw) health_start_period=90m ;;
+  case "$profile_identity" in
+    exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw|glm53-3.42bpw)
+      health_start_period=90m
+      ;;
     *) health_start_period=45m ;;
   esac
 fi
@@ -253,14 +266,13 @@ podman run -d --replace --restart="$restart_policy" \
   --health-start-period "$health_start_period" \
   ${gpu_args[@]+"${gpu_args[@]}"} --ipc=host --network host \
   -e CUDA_VISIBLE_DEVICES="$GPU_DEVICES" \
-  -e MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}" \
-  -e MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3}" \
+  "${profile_env[@]}" \
   -e MODEL_DIR="$MODEL_DIR_CONTAINER" \
   -e MODEL_READ_ONLY=1 \
   -e HF_HUB_OFFLINE=1 \
   -e GLM_STATE_DIR=/state/.glm-config \
   -e AUTH="${AUTH:-none}" \
-  -e SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-GLM-5.2 local-primary}" \
+  "${served_name_env[@]}" \
   -e PORT="$PORT" -e LANDING_PAGE="${LANDING_PAGE:-0}" \
   -e SUPERVISOR="${SUPERVISOR:-1}" \
   -e SOUL_AUTONOMY_LEVEL="${SOUL_AUTONOMY_LEVEL:-0}" \

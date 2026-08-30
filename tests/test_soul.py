@@ -23,6 +23,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import soul_config as sc  # noqa: E402
 import soul_controller as controller  # noqa: E402
+import soul_launcher as launcher  # noqa: E402
 import secure_erase  # noqa: E402
 import config_cli  # noqa: E402
 import landing  # noqa: E402
@@ -217,30 +218,128 @@ class SoulControllerTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["response"], "")
 
-    def test_nanobot_config_disables_dream_and_level_one_shell(self):
+    def test_nanobot_document_disables_dream_and_level_one_shell(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            path = root / "config.json"
-            controller._nanobot_config(path, root / "workspace", "local-model",
-                                       8000, 1, "UTC", api_key="sk-in-memory")
-            doc = json.loads(path.read_text())
+            doc = controller._nanobot_document(
+                root / "workspace", "local-model", 8000, 1, "UTC",
+                api_key="sk-in-memory",
+            )
             self.assertFalse(doc["agents"]["defaults"]["dream"]["enabled"])
             self.assertFalse(doc["tools"]["exec"]["enable"])
-            # The literal in-memory key, never an env reference: the
-            # controller strips VLLM_API_KEY from its environment so exec
-            # children cannot inherit it, which would leave "${VLLM_API_KEY}"
-            # expanding to nothing.
             self.assertEqual(doc["providers"]["custom"]["apiKey"], "sk-in-memory")
-            self.assertNotIn("${VLLM_API_KEY}", path.read_text())
             self.assertEqual(
                 doc["providers"]["custom"]["apiBase"],
                 "http://127.0.0.1:8000/v1")
             self.assertEqual(
                 doc["modelPresets"]["soul-local"]["maxTokens"], 2400)
-            self.assertNotIn("actual-secret", path.read_text())
-            controller._nanobot_config(path, root / "workspace", "local-model",
-                                       8000, 2, "UTC")
-            self.assertTrue(json.loads(path.read_text())["tools"]["exec"]["enable"])
+            self.assertFalse((root / "nanobot-config.json").exists())
+            level_two = controller._nanobot_document(
+                root / "workspace", "local-model", 8000, 2, "UTC")
+            self.assertTrue(level_two["tools"]["exec"]["enable"])
+
+    def test_api_key_handoff_waits_for_hardening_then_closes_descriptors(self):
+        key_read, key_write = os.pipe()
+        ready_read, ready_write = os.pipe()
+        result = []
+        errors = []
+
+        def consume():
+            try:
+                result.append(controller._read_api_key_fd())
+            except Exception as exc:  # surfaced below in the test process
+                errors.append(exc)
+
+        env = {
+            "SOUL_API_KEY_FD": str(key_read),
+            "SOUL_KEY_READY_FD": str(ready_write),
+        }
+        with mock.patch.dict(os.environ, env, clear=False):
+            thread = __import__("threading").Thread(target=consume)
+            thread.start()
+            self.assertEqual(os.read(ready_read, 1), b"R")
+            self.assertTrue(thread.is_alive())
+            payload = b"k" * controller.MAX_API_KEY_BYTES
+            launcher._write_all(key_write, len(payload).to_bytes(4, "big"))
+            launcher._write_all(key_write, payload)
+            os.close(key_write)
+            os.close(ready_read)
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+            self.assertFalse(errors)
+            self.assertEqual(result, [payload.decode()])
+            self.assertNotIn("SOUL_API_KEY_FD", os.environ)
+            self.assertNotIn("SOUL_KEY_READY_FD", os.environ)
+        for fd in (key_read, ready_write):
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+
+    def test_api_key_handoff_rejects_truncated_length_frame(self):
+        key_read, key_write = os.pipe()
+        ready_read, ready_write = os.pipe()
+        errors = []
+
+        def consume():
+            try:
+                controller._read_api_key_fd()
+            except Exception as exc:  # surfaced below in the test process
+                errors.append(exc)
+
+        env = {
+            "SOUL_API_KEY_FD": str(key_read),
+            "SOUL_KEY_READY_FD": str(ready_write),
+        }
+        with mock.patch.dict(os.environ, env, clear=False):
+            thread = __import__("threading").Thread(target=consume)
+            thread.start()
+            self.assertEqual(os.read(ready_read, 1), b"R")
+            os.write(key_write, (10).to_bytes(4, "big") + b"partial")
+            os.close(key_write)
+            os.close(ready_read)
+            thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], ValueError)
+        self.assertIn("incomplete", str(errors[0]))
+
+    def test_controller_never_persists_nanobot_provider_key(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            boot = root / "boot.json"
+            boot.write_text(json.dumps({
+                "phase": "serving", "served_model": "local-model",
+                "endpoint": "",
+            }))
+            env = {
+                "GLM_STATE_DIR": str(root / "state"),
+                "GLM_RUNTIME_DIR": str(root / "runtime"),
+                "SOUL_AUTONOMY_LEVEL": "2",
+                "SOUL_AUTONOMY_MAX_LEVEL": "2",
+            }
+            fake_bot = SimpleNamespace()
+            with mock.patch.dict(os.environ, env, clear=False), \
+                 mock.patch.object(controller, "_disable_process_dumping"), \
+                 mock.patch.object(
+                     controller, "_nanobot_from_document",
+                     return_value=fake_bot) as build, \
+                 mock.patch.object(controller, "_restrict_nanobot_tools"), \
+                 mock.patch.object(controller, "_redact_shell_tool_results"), \
+                 mock.patch.object(controller, "_pin_soul_prompt"):
+                instance = controller.SoulController(
+                    boot, 8000, api_key="controller-only-secret",
+                    start_probe_worker=False)
+                result = asyncio.run(instance.get_bot(
+                    "local-model", {"autonomyLevel": 2, "timezone": "UTC"}))
+            self.assertIs(result, fake_bot)
+            document = build.call_args.args[0]
+            self.assertEqual(
+                document["providers"]["custom"]["apiKey"],
+                "controller-only-secret")
+            self.assertFalse(
+                (instance.paths["runtime"] / "nanobot-config.json").exists())
+            self.assertNotIn("controller-only-secret",
+                             json.dumps(sc.read_json(
+                                 instance.paths["status"], {})))
 
     def test_direct_tls_uses_the_certificate_hostname_on_the_local_port(self):
         status = {
@@ -270,11 +369,9 @@ class SoulControllerTests(unittest.TestCase):
             ("model-123.example.test", 8000, "model-123.example.test"),
         )
         with tempfile.TemporaryDirectory() as raw:
-            path = Path(raw) / "config.json"
-            controller._nanobot_config(
-                path, Path(raw) / "workspace", "local-model", 8000, 1,
+            doc = controller._nanobot_document(
+                Path(raw) / "workspace", "local-model", 8000, 1,
                 "UTC", "https://model-123.example.test:8000")
-            doc = json.loads(path.read_text())
             self.assertEqual(
                 doc["providers"]["custom"]["apiBase"],
                 "https://model-123.example.test:8000/v1")
@@ -294,34 +391,155 @@ class SoulControllerTests(unittest.TestCase):
         controller._restrict_nanobot_tools(bot, 1)
         self.assertEqual(bot._loop.tools.tool_names, [])
 
-    def test_deep_probe_keeps_api_key_out_of_process_arguments(self):
-        observed = {}
-
-        class FakeProcess:
-            returncode = 0
-
-            def communicate(self, timeout=None):
-                observed["timeout"] = timeout
-                return "", None
-
-            def kill(self):
-                pass
-
-        def fake_popen(command, **kwargs):
-            observed["command"] = command
-            observed["env"] = kwargs["env"]
-            return FakeProcess()
-
-        with mock.patch("subprocess.Popen", side_effect=fake_popen), \
+    def test_deep_probe_keeps_api_key_inside_nondumpable_controller(self):
+        with mock.patch("verify_serving.main", return_value=0) as run, \
+                mock.patch("subprocess.Popen") as spawn, \
                 mock.patch.object(controller, "_read_json",
                                   return_value={"ok": True}):
             result = controller._long_context_probe(
-                8000, "deep-secret", "model", 524288, 32768, Path("/tmp/result"))
+                8000, "deep-secret", "model", 524288, 32768,
+                Path("/tmp/result"))
         self.assertTrue(result["ok"])
-        self.assertNotIn("deep-secret", observed["command"])
-        self.assertEqual(observed["env"]["SOUL_PROBE_API_KEY"], "deep-secret")
-        self.assertEqual(observed["timeout"], 600)
+        arguments = run.call_args.args[0]
+        self.assertEqual(
+            arguments[arguments.index("--api-key") + 1], "deep-secret")
+        spawn.assert_not_called()
+        self.assertNotIn("SOUL_PROBE_API_KEY", os.environ)
         self.assertEqual(controller.LONG_PROBE_COOLDOWN_S, 6 * 3600)
+
+    def test_deep_probe_worker_hardens_before_receiving_key_free_requests(self):
+        class Connection:
+            def __init__(self):
+                self.requests = iter([
+                    (8000, "model", 524288, 32768, "/tmp/result", ""),
+                    None,
+                ])
+                self.sent = []
+                self.closed = False
+
+            def recv(self):
+                return next(self.requests)
+
+            def send(self, value):
+                self.sent.append(value)
+
+            def close(self):
+                self.closed = True
+
+        connection = Connection()
+        with mock.patch.object(controller, "_disable_process_dumping") as harden, \
+                mock.patch.object(controller, "_long_context_probe",
+                                  return_value={"ok": True}) as probe:
+            controller._deep_probe_worker(connection, "worker-only-secret")
+        harden.assert_called_once_with()
+        probe.assert_called_once_with(
+            8000, "worker-only-secret", "model", 524288, 32768,
+            Path("/tmp/result"), "")
+        self.assertEqual(connection.sent, [{"ok": True}])
+        self.assertTrue(connection.closed)
+
+    def test_deep_probe_worker_timeout_is_hard_and_key_free(self):
+        class Connection:
+            def __init__(self):
+                self.sent = []
+                self.closed = False
+
+            def send(self, value):
+                self.sent.append(value)
+
+            def poll(self, _timeout):
+                return False
+
+            def close(self):
+                self.closed = True
+
+        class Process:
+            def __init__(self):
+                self.alive = True
+                self.terminated = False
+
+            def is_alive(self):
+                return self.alive
+
+            def join(self, timeout=None):
+                del timeout
+
+            def terminate(self):
+                self.terminated = True
+                self.alive = False
+
+            def kill(self):
+                self.alive = False
+
+        instance = object.__new__(controller.SoulController)
+        instance.port = 8000
+        instance.api_key = "worker-only-secret"
+        connection = Connection()
+        process = Process()
+        instance.deep_probe_connection = connection
+        instance.deep_probe_process = process
+        result = instance.run_deep_probe(
+            "model", 524288, 32768, Path("/tmp/result"),
+            "http://127.0.0.1:8000")
+        self.assertIsNone(instance.deep_probe_connection)
+        self.assertIsNone(instance.deep_probe_process)
+        self.assertEqual(connection.sent[0], (
+            8000, "model", 524288, 32768, "/tmp/result",
+            "http://127.0.0.1:8000",
+        ))
+        self.assertNotIn("worker-only-secret", repr(connection.sent))
+        self.assertTrue(connection.closed)
+        self.assertTrue(process.terminated)
+        self.assertFalse(result["ok"])
+        self.assertIn(str(controller.RUN_TIMEOUT_S), result["error"])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "requires Linux fork")
+    def test_real_deep_probe_worker_round_trip_and_shutdown(self):
+        instance = object.__new__(controller.SoulController)
+        instance.port = 8000
+        instance.api_key = "worker-only-secret"
+        instance.deep_probe_connection = None
+        instance.deep_probe_process = None
+        try:
+            with mock.patch.object(
+                    controller, "_long_context_probe",
+                    return_value={"ok": True, "returncode": 0}):
+                instance._start_deep_probe_worker()
+                result = instance.run_deep_probe(
+                    "model", 524288, 32768, Path("/tmp/result"),
+                    "http://127.0.0.1:8000")
+            self.assertEqual(result, {"ok": True, "returncode": 0})
+            self.assertTrue(instance.deep_probe_process.is_alive())
+        finally:
+            instance._stop_deep_probe_worker()
+        self.assertIsNone(instance.deep_probe_process)
+        self.assertIsNone(instance.deep_probe_connection)
+
+    def test_controller_requests_supervisor_restart_after_worker_loss(self):
+        class DeadProcess:
+            @staticmethod
+            def is_alive():
+                return False
+
+            @staticmethod
+            def join(timeout=None):
+                del timeout
+
+        instance = object.__new__(controller.SoulController)
+        instance.stop = False
+        instance.bot = None
+        instance.bot_key = None
+        instance.deep_probe_connection = None
+        instance.deep_probe_process = DeadProcess()
+        with mock.patch.object(
+                controller.sc, "resolve", return_value=({}, {}, [])), \
+             mock.patch.object(controller.sc, "audit"), \
+             mock.patch.object(controller, "_atomic_status") as status, \
+             mock.patch.object(controller.signal, "signal"):
+            returncode = asyncio.run(instance.run())
+        self.assertEqual(returncode, controller.CONTROLLER_RESTART_EXIT)
+        self.assertEqual(status.call_args.kwargs["state"], "Error")
+        self.assertIn("restart requested", status.call_args.kwargs["lastError"])
 
     def test_soul_marker_suppresses_duplicate_direct_analysis(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -456,17 +674,149 @@ class SoulWiringTests(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text()
         entrypoint = (ROOT / "entrypoint.sh").read_text()
         landing = (ROOT / "landing.py").read_text()
+        controller_source = (SCRIPTS / "soul_controller.py").read_text()
+        launcher_source = (SCRIPTS / "soul_launcher.py").read_text()
+        start_soul = entrypoint.split("start_soul() {", 1)[1].split(
+            "stop_soul() {", 1)[0]
         self.assertIn("/opt/nanobot-venv/bin/pip", dockerfile)
         self.assertIn("--require-hashes", dockerfile)
         self.assertIn("diff -u /tmp/vllm-packages.before", dockerfile)
         self.assertIn("EXPOSE 22 8000 8443 1111\n", dockerfile)
-        self.assertIn("runuser -u soul -- env -i", entrypoint)
+        self.assertIn("soul_launcher.py", start_soul)
+        self.assertIn("SOUL_ROOT_API_KEY=", start_soul)
+        self.assertNotIn("SOUL_API_KEY_FD=", start_soul)
+        self.assertNotIn('VLLM_API_KEY="${VLLM_API_KEY:-}"', start_soul)
+        self.assertIn("SOUL_KEY_READY_FD", launcher_source)
+        self.assertIn("select.select(", launcher_source)
+        self.assertIn("_kill_uid(uid, signal.SIGKILL)", launcher_source)
+        self.assertIn("pass_fds=(key_read, ready_write)", launcher_source)
+        self.assertIn("start_new_session=True", launcher_source)
+        self.assertNotIn("nanobot-config.json", controller_source)
+        self.assertIn("_disable_process_dumping()", controller_source)
         self.assertIn("if [ \"$(soul_level)\" -gt 0 ]", entrypoint)
         self.assertIn("stop_soul_supervisor\n      kill_server_tree", entrypoint)
         self.assertIn("SOUL: queued rollback evidence", entrypoint)
         self.assertIn("analyze_failure.py", entrypoint)
         self.assertIn("TCPServer.server_bind(self)", landing)
 
+    def test_root_launcher_waits_for_hardening_and_accepts_max_key(self):
+        created = []
+        secret = "k" * launcher.MAX_API_KEY_BYTES
+
+        class FakeProcess:
+            def __init__(self, command, **kwargs):
+                self.command = command
+                self.env = kwargs["env"]
+                self.pid = 424242
+                self.returncode = None
+                self.received = b""
+                key_fd = os.dup(kwargs["pass_fds"][0])
+                ready_fd = os.dup(kwargs["pass_fds"][1])
+
+                def controller_child():
+                    os.write(ready_fd, b"R")
+                    os.close(ready_fd)
+                    chunks = []
+                    while True:
+                        chunk = os.read(key_fd, 4096)
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                    os.close(key_fd)
+                    self.received = b"".join(chunks)
+                    self.returncode = 0
+
+                self.thread = __import__("threading").Thread(
+                    target=controller_child)
+                self.thread.start()
+                created.append(self)
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                self.thread.join(timeout)
+                if self.thread.is_alive():
+                    raise subprocess.TimeoutExpired(self.command, timeout)
+                return self.returncode
+
+        with mock.patch.dict(
+                os.environ,
+                {"SOUL_ROOT_API_KEY": secret,
+                 "HOME": "/state/soul/workspace",
+                 "PATH": "/usr/bin:/bin"}, clear=True), \
+             mock.patch.object(launcher.os, "geteuid", return_value=0), \
+             mock.patch.object(
+                 launcher.pwd, "getpwnam",
+                 return_value=SimpleNamespace(pw_uid=45678)), \
+             mock.patch.object(launcher, "_kill_uid") as kill_uid, \
+             mock.patch.object(
+                 launcher.subprocess, "Popen", side_effect=FakeProcess), \
+             mock.patch.object(launcher.signal, "signal"):
+            rc = launcher.main([
+                "--user", "soul", "--", "python", "controller.py"])
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            created[0].received,
+            len(secret.encode()).to_bytes(4, "big") + secret.encode())
+        self.assertNotIn("SOUL_ROOT_API_KEY", created[0].env)
+        self.assertNotIn(secret, repr(created[0].env))
+        self.assertIn("SOUL_API_KEY_FD", created[0].env)
+        self.assertIn("SOUL_KEY_READY_FD", created[0].env)
+        self.assertEqual(created[0].command[:11], [
+            "nice", "-n", "10", "ionice", "-c", "3", "runuser",
+            "-u", "soul", "--preserve-environment", "--",
+        ])
+        self.assertEqual(created[0].env["HOME"], "/state/soul/workspace")
+        self.assertGreaterEqual(kill_uid.call_count, 2)
+
+    def test_root_launcher_cancels_post_spawn_signal_before_key_handoff(self):
+        created = []
+
+        class InterruptedProcess:
+            def __init__(self, _command, **kwargs):
+                self.env = kwargs["env"]
+                self.pid = 424242
+                self.returncode = None
+                created.append(self)
+                launcher._STOP_SIGNAL = launcher.signal.SIGTERM
+
+            def poll(self):
+                return self.returncode
+
+        with mock.patch.dict(
+                os.environ,
+                {"SOUL_ROOT_API_KEY": "must-not-be-written",
+                 "PATH": "/usr/bin:/bin"}, clear=True), \
+             mock.patch.object(launcher.os, "geteuid", return_value=0), \
+             mock.patch.object(
+                 launcher.pwd, "getpwnam",
+                 return_value=SimpleNamespace(pw_uid=45678)), \
+             mock.patch.object(launcher, "_kill_uid"), \
+             mock.patch.object(launcher, "_signal_child") as stop_child, \
+             mock.patch.object(launcher, "_write_all") as write_key, \
+             mock.patch.object(
+                 launcher.subprocess, "Popen",
+                 side_effect=InterruptedProcess), \
+             mock.patch.object(launcher.signal, "signal"):
+            rc = launcher.main([
+                "--user", "soul", "--", "python", "controller.py"])
+
+        self.assertEqual(rc, 128 + launcher.signal.SIGTERM)
+        write_key.assert_not_called()
+        stop_child.assert_any_call(launcher.signal.SIGTERM)
+        self.assertNotIn("SOUL_ROOT_API_KEY", created[0].env)
+
+
+    def test_uid_reap_fails_closed_while_any_active_process_remains(self):
+        with mock.patch.object(
+                launcher, "_uid_pids",
+                side_effect=[[101], [102], [103], [104]]), \
+             mock.patch.object(launcher.os, "kill"), \
+             mock.patch.object(launcher.time, "sleep"):
+            with self.assertRaisesRegex(RuntimeError, "could not reap"):
+                launcher._kill_uid(45678, launcher.signal.SIGKILL)
 
 class SoulLandingTests(unittest.TestCase):
     def start_landing(self, root, token=""):
@@ -555,6 +905,89 @@ class SoulLandingTests(unittest.TestCase):
         self.assertFalse(doc["controllerHealthy"])
         self.assertEqual(doc["level"], 0)
         self.assertIn("could not be resolved", doc["configNotes"][0])
+
+    def test_profile_form_switch_drops_untouched_old_variant_defaults(self):
+        old, _sources, _notes = landing.gc.resolve(
+            state_values={"MODEL_VARIANT": "exl3-tr3-3.42bpw"},
+            env_values={"GLM_GPU_COUNT": "4"},
+        )
+        submitted = {
+            knob["key"]: old[knob["key"]]
+            for knob in landing.gc.KNOBS
+            if knob.get("editable", True)
+        }
+        submitted["MODEL_VARIANT"] = "exl3-tr3-glm53-3.42bpw"
+        submitted["MAX_NUM_SEQS"] = 4
+        filtered = landing._profile_switch_form_values(submitted, old)
+        with mock.patch.object(
+                landing.gc, "load_startup_env",
+                return_value={"GLM_GPU_COUNT": "4"}):
+            minimal = landing.gc.minimize(filtered)
+        switched, _sources, _notes = landing.gc.resolve(
+            state_values=minimal, env_values={"GLM_GPU_COUNT": "4"})
+        self.assertNotIn("MAX_MODEL_LEN", minimal)
+        self.assertNotIn("KV_CACHE_MEMORY_BYTES", minimal)
+        self.assertNotIn("SERVED_MODEL_NAME", minimal)
+        self.assertEqual(minimal["MAX_NUM_SEQS"], 4)
+        self.assertEqual(switched["MAX_MODEL_LEN"], 393216)
+        self.assertEqual(switched["KV_CACHE_MEMORY_BYTES"], 3415867392)
+        self.assertEqual(switched["SERVED_MODEL_NAME"], "GLM-5.3")
+
+    def test_profile_apply_rejects_a_stale_rendered_baseline(self):
+        rendered, _sources, _notes = landing.gc.resolve(
+            state_values={"MODEL_VARIANT": "exl3-tr3-3.42bpw"},
+            env_values={"GLM_GPU_COUNT": "4"},
+        )
+        changed = dict(rendered)
+        changed["MAX_NUM_SEQS"] = 4
+        revision = landing._config_revision(rendered)
+        with mock.patch.object(
+                landing.gc, "resolve", return_value=(changed, {}, [])), \
+             mock.patch.object(
+                 landing.gc, "state_lock", return_value=mock.MagicMock()), \
+             mock.patch.object(landing.gc, "write_json_atomic") as write_state:
+            ok, findings, message = landing.apply_values(
+                {"MODEL_VARIANT": "exl3-tr3-glm53-3.42bpw"},
+                form_submission=True,
+                form_revision=revision,
+            )
+        self.assertFalse(ok)
+        self.assertEqual(findings[0]["id"], "stale-form")
+        self.assertIn("stale", message)
+        write_state.assert_not_called()
+
+
+    def test_correctness_reports_structured_output_failure_before_long_context(self):
+        verdict = {
+            "health": True,
+            "short_prompt": {"ok": True},
+            "structured_output": {"ok": False, "detail": "grammar rejected"},
+            "stochastic_sampling": {"attempted": False, "ok": False},
+            "long_context": {"attempted": True, "ok": True},
+        }
+        with mock.patch.object(landing, "verify_last", return_value=verdict):
+            headline, ok, detail = landing.correctness()
+        self.assertFalse(ok)
+        self.assertEqual(headline, "STRUCTURED-OUTPUT PROBE FAILED")
+        self.assertEqual(detail, "grammar rejected")
+
+    def test_correctness_reports_stochastic_failure_before_long_context(self):
+        verdict = {
+            "health": True,
+            "short_prompt": {"ok": True},
+            "structured_output": {"ok": True},
+            "stochastic_sampling": {
+                "attempted": True,
+                "ok": False,
+                "detail": "decode stopped at 19 tokens",
+            },
+            "long_context": {"attempted": True, "ok": True},
+        }
+        with mock.patch.object(landing, "verify_last", return_value=verdict):
+            headline, ok, detail = landing.correctness()
+        self.assertFalse(ok)
+        self.assertEqual(headline, "TEMPERATURE-1 SAMPLING PROBE FAILED")
+        self.assertEqual(detail, "decode stopped at 19 tokens")
 
     def test_omp_reasoning_capability_follows_effective_serve_argv(self):
         qwen, _sources, _notes = landing.gc.resolve(
@@ -882,16 +1315,25 @@ class SoulSdkIntegrationTests(unittest.TestCase):
                 "SOUL_AUTONOMY_LEVEL": "1", "SOUL_AUTONOMY_MAX_LEVEL": "1",
                 "SOUL_HEARTBEAT_INTERVAL_S": "30",
                 "SOUL_JOURNAL_INTERVAL_S": "300", "SOUL_TIMEZONE": "UTC",
-                "VLLM_API_KEY": "fake-key",
                 "SOUL_PROMPT": str(ROOT / "soul" / "SOUL.md"),
             }
             with mock.patch.dict(os.environ, env, clear=False):
-                instance = controller.SoulController(boot, server.server_port)
+                instance = controller.SoulController(
+                    boot, server.server_port, api_key="fake-key",
+                    start_probe_worker=False)
                 (instance.paths["workspace"] / "AGENTS.md").write_text(
                     "INJECTED-WORKSPACE-INSTRUCTION")
                 asyncio.run(instance.one_cycle())
                 asyncio.run(instance.close_bot())
                 entries = sc.read_journal(env=env)
+            persisted = "\n".join(
+                path.read_text(encoding="utf-8", errors="replace")
+                for path in instance.paths["root"].rglob("*")
+                if path.is_file()
+            )
+            self.assertNotIn("fake-key", persisted)
+            self.assertFalse(
+                (instance.paths["runtime"] / "nanobot-config.json").exists())
             self.assertEqual(entries[0]["headline"], "All checks nominal")
             self.assertEqual(entries[0]["toolsUsed"], [])
             self.assertTrue(FakeOpenAI.calls)

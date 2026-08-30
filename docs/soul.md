@@ -26,13 +26,26 @@ engine logs it reads are labelled untrusted data for exactly this reason.
 Levels 0/1 remain the hard boundary: there the shell tool is not registered at
 all, and `SOUL_AUTONOMY_MAX_LEVEL` is startup-environment only, so nothing
 inside the container can raise the ceiling — that is the real bound on
-autonomy. Two mitigations narrow the blast radius within a level, without
-pretending to be barriers: the autonomy override file is root-owned (which
-stops an in-place edit, though `soul` owns the directory and could still
-unlink and replace it), and the controller strips `VLLM_API_KEY` from its
-process environment so spawned shells do not inherit the credential from
-`env` — the provider config file still holds it, readable by the same
-identity.
+autonomy. The autonomy override file is root-owned (which stops an in-place
+edit, though `soul` owns the directory and could still unlink and replace it).
+The model API bearer key is a separate hard credential boundary. Before each
+start, a root launcher removes every process for the dedicated `soul` uid and
+passes the new controller an **empty** key pipe plus a readiness pipe—not the
+key or a key-bearing environment variable. The controller makes itself
+non-dumpable, signals readiness, and only then does the root launcher write the
+bounded, length-framed key. Both descriptors are closed after that one handoff.
+Before starting the async runtime, the non-dumpable controller pre-forks a
+worker; it inherits the key only in memory, receives key-free probe requests
+over an anonymous pipe, and is terminated when a deep probe reaches its
+600-second outer bound. The probe cooldown is stored before dispatch so a
+timeout cannot create a restart loop; loss of the worker makes the controller
+exit temporarily, and PID 1 starts a fresh controller/worker pair. Nanobot
+parses its provider configuration from an anonymous non-inheritable file
+descriptor, so no credential-bearing provider file exists in the SOUL-owned
+tree. The launcher and PID 1 reap the complete uid on stop, including shell
+processes that detached from the controller's process group. These controls
+protect the API key; they do not turn the general shell or outbound network
+access into a sandbox.
 
 ## Isolation and lifecycle
 
