@@ -57,13 +57,29 @@ native probabilistic MTP3, dynamic-NVFP4 KV, 3,072-token scheduler, C8,
 GMU 0.93, and bounded LMCache tier. GLM-5.3-Flash settings remain isolated
 from this full-model family.
 
-Release merge `3ff9c7207c3c1754cb9665f0099316ec09056b8c` published
-`ghcr.io/malaiwah/glm52-exl3-vast@sha256:aec4075e02241b71321b5601763eba35e86ea02b13c3c3c43ac34fae30161160`;
-`latest` resolves to that digest. An exact-image boot with the reconciled
-checkpoint mounted read-only and no source-code bind mounts reached the
-verified serving phase with zero restarts. Default API authentication rejected
-an unauthenticated request with 401, accepted authenticated models and chat
-requests with 200, and the dashboard enforced its persisted token gate.
+Initial qualification merge `3ff9c7207c3c1754cb9665f0099316ec09056b8c`
+published
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:aec4075e02241b71321b5601763eba35e86ea02b13c3c3c43ac34fae30161160`.
+Post-review release merge `55194ff329271ada376b691b2733ab35012cbd68`
+published
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:6e2475d0568fd110eeaa1193157c7662747e096b476b05ed71ab247e081e9b82`;
+`latest` resolves to the latter digest. Its exact-image boot mounted the
+reconciled checkpoint read-only, used no source-code bind mounts, and reached
+verified serving with zero restarts. Startup passed short and strict-structured
+checks, a complete 512-token temperature-1 sample plus post-sample health, and
+3/3 retrieval facts at 32,853 tokenizer-exact tokens. The independent OpenAI
+feature suite passed. Public API authentication returned 401 without a key and
+200 for authenticated models and chat, and the deployed dashboard rendered its
+read-only surface while rejecting a stale configuration form without changing
+state.
+
+The exact hardening image bound LMCache HTTP to `127.0.0.1:8089`; its OpenAPI
+surface contained only `/`, `/healthcheck`, `/status`, `/version`,
+`/lmc_version`, and `/commit_id`. `/env` and `/run_script` returned 404 from
+the unprivileged `soul` identity, the process had no credential-like
+environment names, and the port timed out externally. A synthetic SOUL launch
+completed the length-framed post-hardening key handshake and the root launcher
+left zero active `soul` processes after reaping a detached child.
 
 The 81 weight shards matched the checkpoint's published hashes. The upstream
 `MANIFEST.sha256` has three stale non-weight entries (`.gitattributes`,

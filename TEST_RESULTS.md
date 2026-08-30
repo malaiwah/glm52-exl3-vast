@@ -123,20 +123,52 @@ reasoning-preserving multi-turn, strict JSON with thinking, tool choice,
 single tool-call emission, and tool-result continuation. Vision was
 intentionally disabled for this text checkpoint.
 
-The isolated qualification candidate used loopback `AUTH=none`. Release merge
-`3ff9c7207c3c1754cb9665f0099316ec09056b8c` published
-`ghcr.io/malaiwah/glm52-exl3-vast@sha256:aec4075e02241b71321b5601763eba35e86ea02b13c3c3c43ac34fae30161160`;
-`latest` resolved to the same digest. After the exact image reconciled the
-upstream checkpoint metadata once, a second boot mounted the checkpoint
-read-only with `MODEL_READ_ONLY=1`, used no source-code bind mounts, enabled
-the default API authentication and dashboard token gate, and reached
-`phase=serving` with zero container restarts under `restart=unless-stopped`.
-The API returned 401 without a key and 200 with the persisted key; authenticated
-chat returned the requested exact marker. The dashboard returned a redacted
-read-only page without a token, 403 for a bad token, and 200 for the persisted
-token. The exact-image service remains running for interactive evaluation.
-The same evidence was proposed upstream in
+The isolated qualification candidate used loopback `AUTH=none`. Initial release
+merge `3ff9c7207c3c1754cb9665f0099316ec09056b8c` published
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:aec4075e02241b71321b5601763eba35e86ea02b13c3c3c43ac34fae30161160`.
+After that exact image reconciled the upstream checkpoint metadata once, a
+second boot mounted the checkpoint read-only with `MODEL_READ_ONLY=1`, used no
+source-code bind mounts, enabled the default API authentication and dashboard
+token gate, and reached `phase=serving` with zero container restarts under
+`restart=unless-stopped`. The API returned 401 without a key and 200 with the
+persisted key; authenticated chat returned 200 and contained the requested
+marker. The dashboard returned a credential-free read-only page without a
+token, 403 for a bad token, and 200 for the persisted token. That container is
+now stopped and retained as the exact rollback. The same evidence was merged
+upstream in
 [model-card PR 1](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/discussions/1).
+
+An adversarial workflow review then sent 21 deduplicated candidate findings
+through independent verification. Three were refuted; every confirmed defect
+was repaired, and separate post-fix security and correctness reviews reported
+no remaining concrete defect. The canonical local matrix passed all 25
+lint/test commands, all six public profile smokes passed, the full-model
+profile rejected a Flash-only `TUNE_` override, and pull request
+[54](https://github.com/malaiwah/glm52-exl3-vast/pull/54) passed both CI jobs.
+Review release merge `55194ff329271ada376b691b2733ab35012cbd68`
+published
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:6e2475d0568fd110eeaa1193157c7662747e096b476b05ed71ab247e081e9b82`;
+`latest` resolved to the same digest.
+
+That exact hardening image used the same read-only checkpoint and writable
+state/cache mounts, no source mounts, the public authenticated `0.0.0.0:8000`
+listener, and `restart=unless-stopped`. It reached `phase=serving` with zero
+restarts. The new authoritative gate passed arithmetic, factual, instruction,
+strict JSON, a complete 512-token temperature-1 sample with health afterward,
+and 3/3 facts in a 32,853-token prompt. The independent feature suite passed
+every applicable check. External models returned 401 without a key and 200
+with the key; authenticated external chat returned 200. The token-free
+dashboard rendered the live read-only status, and a deliberately stale
+authenticated form was rejected without changing `config.json`.
+
+LMCache listened only on `127.0.0.1:8089` and timed out externally. Its exact
+OpenAPI paths were `/`, `/commit_id`, `/healthcheck`, `/lmc_version`, `/status`,
+and `/version`; `/env` and `/run_script` returned 404 even for uid `soul`, and
+the LMCache process had no credential-like environment names. A synthetic
+exact-image SOUL launch completed the length-framed post-hardening key handoff,
+spawned a session-detached uid-`soul` child, and exited with zero active
+processes for that uid. Evidence is retained under
+`qualification/review-55194ff/` on the rental.
 
 The release matrix placed five facts at 1%, 25%, 50%, 75%, and 99% depth:
 
@@ -158,6 +190,20 @@ were present. The machine retains `sampling-smoke-384k.json`,
 workspace.
 A corrected audit of the warmed line 3,030–3,469 window found zero findings in
 all categories; `log-audit-warm-review.json` retains that bounded result.
+
+The post-review image produced the same explicit cold/warm distinction. Its
+3,899-line captured log had 17 expected first-use B12X CuTeDSL records at
+lines 2,989–3,008 after readiness. The bounded warmed audit from line 3,009
+through 3,899 found zero post-ready compile, structured-FSM, CUDA,
+distributed-runtime, process-failure, or error-level findings. Two additional
+eight-request, 512-output-token temperature-1 clients completed 16/16 requests
+without failure or preemption. They overlapped a separate sustained
+eight-request authenticated workload on the public API, so their queued client
+throughput is intentionally not reported as an isolated performance result.
+During that workload all GPUs were at 100% utilization with at least 943 MiB
+free in the sampled snapshot. To avoid disrupting live use, the 389,959-token
+matrix was not rerun against the hardening-only image; the exact runtime/profile
+matrix above remains the long-context qualification evidence.
 
 ## Provider integration
 

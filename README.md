@@ -197,8 +197,8 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 
 `MODEL_PROFILE=glm53-3.42bpw` pins
 `davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@8bef807a0fcdd180e984a26b50e731cdba9a8ff2`.
-The live-qualified appliance pin is
-`ghcr.io/malaiwah/glm52-exl3-vast@sha256:aec4075e02241b71321b5601763eba35e86ea02b13c3c3c43ac34fae30161160`.
+The current live-qualified appliance pin is
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:6e2475d0568fd110eeaa1193157c7662747e096b476b05ed71ab247e081e9b82`.
 This is the 755B `glm_moe_dsa` GLM-5.3 model, not GLM-5.3-Flash. Its complete
 structural configuration matches GLM-5.2, so it reuses the qualified GLM-5.2
 B12X sparse-MLA, DCP4, native MTP-3, mixed-K EXL3 and online-K6 runtime family.
@@ -225,6 +225,18 @@ CuTeDSL/Triton JIT after readiness; its remaining structured-FSM, CUDA,
 distributed, process-failure, and error-level audit categories were clean.
 A corrected audit of the warmed line 3,030–3,469 window found zero findings in
 all categories.
+
+Post-qualification workflow review release
+`55194ff329271ada376b691b2733ab35012cbd68` repeated the read-only,
+no-source-mount boot on the same four-GPU rental with zero restarts. The
+image-owned startup gate passed the three short checks, strict structured
+output, a complete 512-token temperature-1 sample with a post-sample health
+check, and 3/3 retrieval facts in a tokenizer-exact 32,853-token prompt. The
+independent OpenAI feature suite also passed. Public port 8000 remained
+available with the API key (401 without it, 200 with it). LMCache bound only
+to `127.0.0.1:8089`, exposed only its six read-only information/version paths,
+and had no credential-like variables; a synthetic SOUL launch completed the
+post-hardening key handshake and reaped a detached child for the `soul` uid.
 
 ### GLM-5.3-Flash K6 and K8
 
