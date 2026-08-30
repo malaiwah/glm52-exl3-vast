@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+from pathlib import Path
 import unittest
 from unittest import mock
 
@@ -433,6 +434,89 @@ class NeedleTests(unittest.TestCase):
             )
         self.assertFalse(result["ok"])
         self.assertEqual(calls["n"], 1)
+
+    def test_stochastic_probe_uses_qualified_sampling_payload(self):
+        response = {
+            "choices": [{
+                "finish_reason": "length",
+                "message": {
+                    "content": " ".join(f"word{i}" for i in range(512)),
+                },
+            }],
+            "usage": {"completion_tokens": 512},
+        }
+
+        def fake_req(url, payload=None, **_kwargs):
+            return "healthy" if url.endswith("/health") else response
+
+        with mock.patch.object(
+                verify, "count_tokens", return_value=(1024, True)), \
+             mock.patch.object(verify, "_req", side_effect=fake_req) as request:
+            result = verify.stochastic_sampling_probe(
+                "http://test", "key", "model")
+
+        self.assertTrue(result["ok"])
+        payload = request.call_args_list[0].args[1]
+        self.assertEqual(payload["max_tokens"], 512)
+        self.assertEqual(payload["temperature"], 1.0)
+        self.assertEqual(payload["seed"], 42)
+        self.assertTrue(payload["ignore_eos"])
+        self.assertFalse(
+            payload["chat_template_kwargs"]["enable_thinking"])
+        self.assertEqual(result["prompt_tokens"], 1024)
+        self.assertTrue(result["health_after"])
+
+    def test_stochastic_probe_requires_full_output_budget(self):
+        response = {
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": "coherent output"},
+            }],
+            "usage": {"completion_tokens": 511},
+        }
+
+        def fake_req(url, payload=None, **_kwargs):
+            return "healthy" if url.endswith("/health") else response
+
+        with mock.patch.object(
+                verify, "count_tokens", return_value=(1024, True)), \
+             mock.patch.object(verify, "_req", side_effect=fake_req):
+            result = verify.stochastic_sampling_probe(
+                "http://test", "", "model")
+        self.assertFalse(result["ok"])
+        self.assertIn("511/512", result["detail"])
+
+    def test_main_fails_before_long_probe_when_stochastic_sampling_fails(self):
+        failure = {
+            "attempted": True,
+            "ok": False,
+            "detail": "sampling request failed: timeout",
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            out = os.path.join(raw, "verdict.json")
+            with mock.patch.object(
+                    verify, "wait_health", return_value=(True, "healthy")), \
+                 mock.patch.object(
+                    verify, "short_probe",
+                    return_value={"ok": True, "checks": []}), \
+                 mock.patch.object(
+                    verify, "structured_output_probe",
+                    return_value={"ok": True, "detail": "passed"}), \
+                 mock.patch.object(
+                    verify, "stochastic_sampling_probe",
+                    return_value=failure), \
+                 mock.patch.object(verify, "needle_probe") as needle:
+                rc = verify.main([
+                    "--base-url", "http://test",
+                    "--model", "model",
+                    "--out", out,
+                ])
+            verdict = json.loads(Path(out).read_text())
+        self.assertEqual(rc, 1)
+        self.assertFalse(verdict["ok"])
+        self.assertEqual(verdict["stochastic_sampling"], failure)
+        self.assertIn("temperature-1", verdict["reason"])
+        needle.assert_not_called()
 
     def test_probe_records_seed_duration_and_retrieval(self):
         requested = {}

@@ -735,13 +735,17 @@ start_soul() {
   }
   soul_prepare_permissions
   echo ">>> SOUL: starting embedded controller at autonomy level $(soul_level)"
-  nice -n 10 ionice -c 3 runuser -u soul -- env -i \
+  # The root launcher keeps the key pipe empty until the controller has made
+  # itself non-dumpable, and reaps every process for the dedicated soul uid on
+  # both sides of the run. SOUL never receives the key in its environment.
+  env -i \
+    SOUL_ROOT_API_KEY="${VLLM_API_KEY:-}" \
     HOME="$SOUL_STATE_DIR/workspace" \
     PATH="/opt/nanobot-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     LANG="C.UTF-8" TERM="dumb" USER="soul" PYTHONUNBUFFERED="1" \
     GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
     STATUS_FILE="$STATUS_FILE.soul" PORT="${PORT:-8000}" \
-    VLLM_API_KEY="${VLLM_API_KEY:-}" SOUL_PROMPT="/opt/soul/SOUL.md" \
+    SOUL_PROMPT="/opt/soul/SOUL.md" \
     SOUL_AUTONOMY_LEVEL="${SOUL_AUTONOMY_LEVEL:-0}" \
     SOUL_AUTONOMY_MAX_LEVEL="${SOUL_AUTONOMY_MAX_LEVEL:-3}" \
     SOUL_HEARTBEAT_INTERVAL_S="${SOUL_HEARTBEAT_INTERVAL_S:-300}" \
@@ -753,7 +757,8 @@ start_soul() {
     VERIFY_NEEDLE_TOKENS="${VERIFY_NEEDLE_TOKENS:-32768}" \
     NVIDIA_VISIBLE_DEVICES="${NVIDIA_VISIBLE_DEVICES:-all}" \
     CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}" \
-    /opt/nanobot-venv/bin/python "$SCRIPTS_DIR/soul_controller.py" \
+    /usr/bin/python3 "$SCRIPTS_DIR/soul_launcher.py" --user soul -- \
+      /opt/nanobot-venv/bin/python "$SCRIPTS_DIR/soul_controller.py" \
       --status-file "$STATUS_FILE.soul" --port "${PORT:-8000}" \
       >> "$SOUL_LOG" 2>&1 &
   SOUL_PID=$!
@@ -772,6 +777,10 @@ stop_soul() {
     kill -9 "$SOUL_PID" 2>/dev/null || true
     wait "$SOUL_PID" 2>/dev/null || true
   fi
+  # The launcher normally performs this reap. Repeat it after a hard-killed
+  # launcher so a shell that called setsid(2) cannot survive level zero,
+  # secure erase, container shutdown, or the next credential handoff.
+  pkill -KILL -u soul 2>/dev/null || true
   SOUL_PID=""
 }
 
@@ -1092,6 +1101,31 @@ snapshot_download(
 
 prepare_mtp78() {
   MTP78_DRAFT_DIR="$MODEL_DIR/.mtp78-draft"
+  # An explicit external draft always selects that separate checkpoint. Normalize
+  # before the compatibility and stale-graft checks so a leftover in-place graft
+  # is restored instead of being mistaken for the requested draft mode.
+  if [ -n "${DRAFT_MODEL:-}" ]; then
+    MTP78_MODE=off
+  fi
+  if [ "$MTP78_MODE" = "graft" ] &&
+     [ "${MTP_GRAFT_COMPATIBLE:-1}" != "1" ]; then
+    echo "FATAL: MTP78 grafting is incompatible with MODEL_VARIANT=${MODEL_VARIANT:-unknown}." >&2
+    echo "FATAL: select the native in-checkpoint draft instead." >&2
+    exit 1
+  fi
+  # The marker records observable checkpoint state, regardless of what format
+  # the newly selected variant normally carries. Revert before building or
+  # selecting any non-graft draft so stale GLM-5.2 layer-78 weights cannot leak
+  # across a model-generation switch.
+  if [ "$MTP78_MODE" != "graft" ] &&
+     [ -f "$MODEL_DIR/.mtp78-grafted" ]; then
+    echo ">>> Reverting a previous in-place graft (MTP78_MODE=$MTP78_MODE)"
+    if ! python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert; then
+      echo "FATAL: failed to restore the native checkpoint after an earlier MTP78 graft." >&2
+      exit 1
+    fi
+  fi
+
   # DRAFT_MODEL may be supplied from the environment (or the state file) to point
   # --speculative-config at an EXTERNAL draft checkpoint, independently of
   # MTP78_MODE. This is how a non-EXL3 draft (e.g. the NVFP4 MTP draft from
@@ -1105,8 +1139,7 @@ prepare_mtp78() {
       echo "FATAL: external draft is incomplete: $DRAFT_MODEL"
       exit 1
     fi
-    echo ">>> Draft: external checkpoint $DRAFT_MODEL (MTP78_MODE=$MTP78_MODE ignored for draft selection)"
-    MTP78_MODE=off
+    echo ">>> Draft: external checkpoint $DRAFT_MODEL (target grafting disabled)"
   fi
 
   if [ "$MTP78_MODE" = "override" ]; then
@@ -1131,7 +1164,10 @@ prepare_mtp78() {
           echo ">>> MTP78: trellis draft active (grafted in place)"
         else
           echo "!!! MTP78 graft failed — reverting to the native draft"
-          python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert || true
+          if ! python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert; then
+            echo "FATAL: failed to restore the native draft after a partial MTP78 graft." >&2
+            exit 1
+          fi
         fi
       else
         echo "!!! MTP78: vLLM patch anchor missing in this image — keeping the native draft"
@@ -1142,16 +1178,6 @@ prepare_mtp78() {
     fi
   else
     echo ">>> MTP78 modification disabled — native in-checkpoint draft (${NATIVE_MTP_FORMAT:-checkpoint format})"
-  fi
-  # A checkpoint grafted by an earlier boot must be reverted before override mode
-  # can work, otherwise the target still carries the trellis layer 78.
-  if [ "$MTP78_MODE" != "graft" ] && [ -f "$MODEL_DIR/.mtp78-grafted" ] &&
-     [ "${NATIVE_MTP_FORMAT:-}" != "exl3-tr3" ]; then
-    echo ">>> Reverting a previous in-place graft (MTP78_MODE=$MTP78_MODE)"
-    python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert || true
-  elif [ "$MTP78_MODE" != "graft" ] &&
-       [ "${NATIVE_MTP_FORMAT:-}" = "exl3-tr3" ]; then
-    echo ">>> Native checkpoint already carries EXL3-TR3 layer-78 experts; no graft/revert required"
   fi
   return 0
 }
@@ -1297,12 +1323,49 @@ snapshot_download(os.environ["VISION_REPO"], local_dir=os.environ["MODEL_DIR"] +
 # patterns, the architectures/wrapper and the weight index from the TENSORS ON
 # DISK, so a transition cannot leave the config describing weights that are not
 # there. It is idempotent and cheap (safetensors headers only).
+revert_mtp78_before_fetch() {
+  [ -f "$MODEL_DIR/.mtp78-grafted" ] || return 0
+
+  _mtp_wanted="${MODEL_REPO:-}"
+  if [ -n "${MODEL_REVISION:-}" ]; then
+    _mtp_wanted="${MODEL_REPO:-}@${MODEL_REVISION}"
+  fi
+  _mtp_have=""
+  if [ -f "$MODEL_DIR/.download-complete" ]; then
+    _mtp_have="$(cat "$MODEL_DIR/.download-complete" 2>/dev/null || true)"
+  fi
+
+  # Keep a same-revision graft only when it remains the selected, compatible
+  # draft. Every other transition must restore the native files BEFORE
+  # snapshot_download can refresh them; otherwise stale .orig backups from the
+  # old revision could be copied over a newly downloaded checkpoint.
+  if [ -z "${DRAFT_MODEL:-}" ] &&
+     [ "${MTP78_MODE:-off}" = "graft" ] &&
+     [ "${MTP_GRAFT_COMPATIBLE:-1}" = "1" ] &&
+     [ "$_mtp_have" = "$_mtp_wanted" ]; then
+    return 0
+  fi
+  if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then
+    echo "FATAL: a stale MTP78 graft must be reverted, but MODEL_DIR is read-only." >&2
+    return 1
+  fi
+  echo ">>> Restoring native checkpoint files before checkpoint refresh"
+  if ! python3 "$SCRIPTS_DIR/graft_mtp78.py" "$MODEL_DIR" --revert; then
+    echo "FATAL: failed to restore the native checkpoint before refresh." >&2
+    return 1
+  fi
+}
+
 prepare_checkpoint() {
   # Fix 4: a termination request during checkpoint prep (tens of minutes on
   # first boot) would otherwise be invisible — the supervisor only checks
   # TERMINATE_FLAG inside the post-serve monitoring loop. Abort prep early so
   # the supervisor loop can handle the termination cleanly.
   if [ -f "$TERMINATE_FLAG" ]; then return 0; fi
+  if ! revert_mtp78_before_fetch; then
+    echo "!!! checkpoint graft transition failed; refusing to refresh mixed files"
+    return 1
+  fi
   # Fix 3: fetch_weights runs under `set -e`; a download failure (network
   # blip, bad HF_TOKEN, invalid MODEL_ID) would kill PID 1 immediately,
   # bypassing the supervisor's restart/rollback loop. Catch it here instead.
@@ -1910,6 +1973,20 @@ done < <(env)
 unset _k _v _n
 }
 
+validate_glm53_full_runtime_isolation() {
+  [ "${MODEL_VARIANT:-}" = "exl3-tr3-glm53-3.42bpw" ] || return 0
+  local _name
+  for _name in VLLM_B12X_GLM_NOPE_NVFP4 \
+      B12X_GL53_ROUTE128_WIDE B12X_GL53_ROUTE128_HYBRID_TAIL \
+      VLLM_ALLREDUCE_USE_SYMM_MEM; do
+    if [ "${!_name+x}" = "x" ]; then
+      echo "FATAL: GLM-5.3 full profile retained Flash-only runtime variable $_name." >&2
+      echo "FATAL: remove the inherited value or its TUNE_ override; the full checkpoint uses the GLM_NSA route." >&2
+      return 1
+    fi
+  done
+}
+
 # A measured model variant may carry a coherent engine-route bundle that is
 # too low-level to expose as twenty independent first-time-user controls.
 # Apply it after the family defaults; explicit TUNE_<NAME> values remain the
@@ -2403,6 +2480,7 @@ if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   refresh_family_runtime_env
   apply_profile_runtime_env
   apply_tuning_overrides
+  validate_glm53_full_runtime_isolation
   compute_offload
   compute_vision_args
   warn_capture_window
@@ -2436,6 +2514,7 @@ if [ "${SUPERVISOR:-1}" = "0" ]; then
   refresh_family_runtime_env
   apply_profile_runtime_env
   apply_tuning_overrides
+  validate_glm53_full_runtime_isolation
   if ! prepare_checkpoint; then
     echo "!!! checkpoint preparation failed (SUPERVISOR=0: no retry loop here)" >&2
     exit 1
@@ -2609,6 +2688,7 @@ while :; do
   refresh_family_runtime_env
   apply_profile_runtime_env
   apply_tuning_overrides
+  validate_glm53_full_runtime_isolation
   if ! prepare_checkpoint; then
     attempt=$((attempt + 1))
     # A checkpoint that fails preparation on a config that DIFFERS from the last

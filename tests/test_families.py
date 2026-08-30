@@ -13,12 +13,14 @@ import os
 import shutil
 import sys
 import tempfile
+from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 
 import glm_config as gc  # noqa: E402
+import config_cli  # noqa: E402
 
 FAILURES, PASSED = [], []
 
@@ -276,8 +278,9 @@ def test_glm_release_integration():
     check("the local Podman runner preserves the requested CUDA rank order",
           '-e CUDA_VISIBLE_DEVICES="$GPU_DEVICES"' in local_runner)
     check("the cold 3.42 profile gets its measured 90-minute health grace",
-          'exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw) health_start_period=90m'
+          'exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw|glm53-3.42bpw)'
           in local_runner
+          and 'health_start_period=90m' in local_runner
           and '--health-start-period "$health_start_period"' in local_runner)
     check("auto profile sentinels do not leak into the calibration helper",
           "env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" in entry
@@ -639,11 +642,16 @@ def test_glm53_342_dsa_profile():
           and eff["GPU_MEMORY_UTILIZATION"] == 0.93
           and eff["GPU_BLOCKS_OVERRIDE"] == 0
           and eff["KV_CACHE_MEMORY_BYTES"] == 3415867392)
-    check("the profile retains mixed-K online K6 and native MTP3",
+    check("the profile retains mixed-K online K6, native MTP3, and dynamic KV",
           eff["ONLINE_QUANT"] == "exl3-b6"
+          and eff["MTP_DRAFT"] == "native"
           and eff["MTP_TOKENS"] == 3
           and eff["MTP_DRAFT_SAMPLE_METHOD"] == "probabilistic"
-          and eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla")
+          and eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"
+          and eff["KV_SCALE_MODE"] == "dynamic-token")
+    check("the profile retains the measured C8 scheduler shape",
+          eff["MAX_NUM_SEQS"] == 8
+          and eff["MAX_NUM_BATCHED_TOKENS"] == 3072)
     check("the profile serves under the GLM-5.3 model name",
           eff["SERVED_MODEL_NAME"] == "GLM-5.3")
     args = " ".join(gc.family_serve_args(eff))
@@ -655,6 +663,25 @@ def test_glm53_342_dsa_profile():
     check("the profile is live-qualified",
           gc.VARIANTS[variant]["tested"]
           and "variant-untested" not in ids(findings), str(findings))
+    check("the profile refuses unsafe inherited memory and GLM-5.2 grafts",
+          derived["MTP_GRAFT_COMPATIBLE"] == "0"
+          and "mtp-graft-incompatible" in errs(gc.validate(
+              {**eff, "MTP_DRAFT": "tr3-graft"}))
+          and "glm53-qualified-envelope" in errs(gc.validate(
+              {**eff, "MAX_MODEL_LEN": 520192}))
+          and "glm53-qualified-envelope" in errs(gc.validate(
+              {**eff, "KV_CACHE_MEMORY_BYTES": 0})))
+    external_draft = {
+        **eff,
+        "MTP_DRAFT": "tr3-graft",
+        "DRAFT_MODEL": "/models/complete-external-draft",
+    }
+    external_findings = gc.validate(external_draft)
+    check("a complete external draft overrides incompatible graft preparation",
+          "mtp-graft-incompatible" not in errs(external_findings)
+          and "draft-model-overrides" in ids(external_findings)
+          and gc.derive(external_draft)["MTP78_MODE"] == "off",
+          str(external_findings))
     entry = open(os.path.join(REPO, "entrypoint.sh")).read()
     local_runner = open(
         os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
@@ -663,14 +690,148 @@ def test_glm53_342_dsa_profile():
           and 'MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3-glm53-3.42bpw}"'
           in entry)
     check("the cold mixed checkpoint receives the 90-minute health grace",
-          "exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw)"
-          " health_start_period=90m" in local_runner)
+          "exl3-tr3-glm53-3.42bpw|glm53-3.42bpw)"
+          in local_runner)
+    checkpoint_prep = entry.split("prepare_checkpoint() {", 1)[1]
+    mtp_prep = entry.split("prepare_mtp78() {", 1)[1].split(
+        "prepare_vision() {", 1)[0]
+    check("stale grafts are restored before any checkpoint refresh",
+          checkpoint_prep.index("if ! revert_mtp78_before_fetch") <
+          checkpoint_prep.index("if ! fetch_weights"))
+    check("external drafts disable graft mode before compatibility checks",
+          mtp_prep.index('if [ -n "${DRAFT_MODEL:-}" ]') <
+          mtp_prep.index('if [ "$MTP78_MODE" = "graft" ]'))
 
+
+
+def test_known_good_replays_across_profile_env_change():
+    section("known-good rollback replay across container profile changes")
+    old_env = {
+        "GLM_GPU_COUNT": "4",
+        "MODEL_FAMILY": "glm52",
+        "MODEL_VARIANT": "exl3-tr3",
+    }
+    new_env = {
+        "GLM_GPU_COUNT": "4",
+        "MODEL_FAMILY": "glm52",
+        "MODEL_VARIANT": "exl3-tr3-glm53-3.42bpw",
+    }
+    old_effective, _sources, _notes = gc.resolve(
+        state_values={}, env_values=old_env)
+    original = gc.load_startup_env
+    gc.load_startup_env = lambda: dict(new_env)
+    try:
+        replay, error = config_cli._known_good_replay({
+            "values": {},
+            "effective": old_effective,
+        })
+    finally:
+        gc.load_startup_env = original
+    restored, _sources, _notes = gc.resolve(
+        state_values=replay or {}, env_values=new_env)
+    check("an env-only known-good becomes a replayable state diff",
+          not error
+          and replay.get("MODEL_VARIANT") == "exl3-tr3"
+          and not gc.diff(old_effective, restored),
+          error or gc.diff_text(old_effective, restored))
+
+    qwen_old_env = {
+        "GLM_GPU_COUNT": "1",
+        "MODEL_FAMILY": "qwen36",
+        "MODEL_VARIANT": "qwen36-27b-nvfp4",
+    }
+    qwen_new_env = {**qwen_old_env, "GLM_GPU_COUNT": "4"}
+    qwen_effective, _sources, _notes = gc.resolve(
+        state_values={}, env_values=qwen_old_env)
+    gc.load_startup_env = lambda: dict(qwen_new_env)
+    try:
+        qwen_replay, qwen_error = config_cli._known_good_replay({
+            "values": {},
+            "effective": qwen_effective,
+        })
+    finally:
+        gc.load_startup_env = original
+    qwen_restored, _sources, _notes = gc.resolve(
+        state_values=qwen_replay or {}, env_values=qwen_new_env)
+    check("known-good exact replay ignores target-family inapplicable knobs",
+          not qwen_error
+          and qwen_effective["DCP"] == "1"
+          and qwen_restored["DCP"] == "4"
+          and not gc.applies_to(gc.KNOB_BY_KEY["DCP"], "qwen36"),
+          qwen_error)
+
+    gc.write_json_atomic(gc.p_state(), {
+        "values": {},
+        "written_at": gc.utcnow_iso(),
+    }, mode=0o600)
+    gc.write_json_atomic(gc.p_known_good(), {
+        "ts": "old-profile",
+        "values": {},
+        "effective": old_effective,
+    }, mode=0o600)
+    for path in (gc.p_restart_flag(),):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    gc.load_startup_env = lambda: dict(new_env)
+    original_now = config_cli._now
+    config_cli._now = lambda: "rollback-replay-test"
+    try:
+        rc = config_cli._cmd_rollback_locked(
+            SimpleNamespace(log="", reason="profile changed"))
+        persisted = gc.load_state_file()
+    finally:
+        gc.load_startup_env = original
+        config_cli._now = original_now
+    restored, _sources, _notes = gc.resolve(
+        state_values=persisted, env_values=new_env)
+    check("rollback persists the replay diff and requests one restart",
+          rc == 0
+          and persisted.get("MODEL_VARIANT") == "exl3-tr3"
+          and not gc.diff(old_effective, restored)
+          and os.path.exists(gc.p_restart_flag()),
+          f"rc={rc}; {gc.diff_text(old_effective, restored)}")
+
+    one_gpu_env = dict(new_env)
+    one_gpu_env["GLM_GPU_COUNT"] = "1"
+    try:
+        os.remove(gc.p_restart_flag())
+    except OSError:
+        pass
+    state_before_refusal = gc.load_state_file()
+    gc.load_startup_env = lambda: dict(one_gpu_env)
+    config_cli._now = lambda: "rollback-hardware-refusal"
+    try:
+        refused_replay, refusal = config_cli._known_good_replay({
+            "values": {},
+            "effective": old_effective,
+        })
+        refused_rc = config_cli._cmd_rollback_locked(
+            SimpleNamespace(log="", reason="host topology changed"))
+        state_after_refusal = gc.load_state_file()
+    finally:
+        gc.load_startup_env = original
+        config_cli._now = original_now
+    check("rollback refuses a known-good topology that exceeds current GPUs",
+          refused_replay is None
+          and "tp-exceeds-gpus" in refusal
+          and refused_rc == 3
+          and state_after_refusal == state_before_refusal
+          and not os.path.exists(gc.p_restart_flag()),
+          f"error={refusal!r}; rc={refused_rc}; state={state_after_refusal!r}")
+    for path in (gc.p_state(), gc.p_known_good(), gc.p_restart_flag()):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def test_glm53_k6_profile():
     section("the GLM-5.3 Flash K6 production profile")
     eff, src, _ = resolved("glm53", gpus=4)
+
+
     check("GLM-5.3 selects the K6 checkpoint",
           eff["MODEL_VARIANT"] == "glm53-k6"
           and src["MODEL_VARIANT"] == "family")
@@ -1132,6 +1293,7 @@ def main():
         run(test_r20_336_online_quant_candidate)
         run(test_r28_342_shared_h_profile)
         run(test_glm53_342_dsa_profile)
+        run(test_known_good_replays_across_profile_env_change)
         run(test_glm53_k6_profile)
         run(test_qwen_preset)
         run(test_custom_profile)

@@ -8,7 +8,18 @@ mkdir -p "$tmp/bin"
 
 cat >"$tmp/bin/lmcache" <<'SH'
 #!/usr/bin/env bash
+for secret_name in VLLM_API_KEY OPEN_BUTTON_TOKEN HF_TOKEN \
+    CLOUDFLARE_DNS_API_TOKEN AWS_SECRET_ACCESS_KEY; do
+  if [[ "${!secret_name+x}" == x ]]; then
+    echo "secret leaked into LMCache: $secret_name" >&2
+    exit 96
+  fi
+done
 printf '%q ' "$@" >"$LMCACHE_TEST_SERVER_ARGS"
+if [[ -n "${LMCACHE_TEST_CACHE_API_RESULT:-}" ]]; then
+  printf '%s\n' "${VLLM_API_KEY-<unset>}" >"$LMCACHE_TEST_CACHE_API_RESULT"
+  printf '%s\n' "${OPEN_BUTTON_TOKEN-<unset>}" >"$LMCACHE_TEST_CACHE_TOKEN_RESULT"
+fi
 printf '\n' >>"$LMCACHE_TEST_SERVER_ARGS"
 echo 'LMCache ZMQ cache server is running'
 if [[ "${LMCACHE_TEST_EXIT_AFTER_READY:-0}" == 1 ]]; then
@@ -26,19 +37,37 @@ cat >"$tmp/model-server" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$@" >"$LMCACHE_TEST_MODEL_ARGS"
 printf '%s\n' "${PYTORCH_CUDA_ALLOC_CONF-<unset>}" >"$LMCACHE_TEST_MODEL_ENV"
+if [[ -n "${LMCACHE_TEST_MODEL_KEY:-}" ]]; then
+  printf '%s\n' "${VLLM_API_KEY-<unset>}" >"$LMCACHE_TEST_MODEL_KEY"
+fi
 sleep "${LMCACHE_TEST_MODEL_SLEEP:-0}"
 SH
 chmod +x "$tmp/bin/lmcache" "$tmp/bin/curl" "$tmp/model-server"
 
+for rejected_host in 0.0.0.0 ::1; do
+  if PATH="$tmp/bin:$PATH" LMCACHE_MODE=ram LMCACHE_HOST="$rejected_host" \
+      "$BASH" "$repo/scripts/glm52_lmcache_wrapper.sh" \
+        "$tmp/model-server" >/dev/null 2>&1; then
+    echo "LMCache accepted unsupported listener host $rejected_host" >&2
+    exit 1
+  fi
+done
 run_mode() {
+
   local mode="$1" port="$2" l1="${3:-2}"
   PATH="$tmp/bin:$PATH" \
+  VLLM_API_KEY=server-secret OPEN_BUTTON_TOKEN=dashboard-secret \
+  HF_TOKEN=hub-secret CLOUDFLARE_DNS_API_TOKEN=dns-secret \
+  AWS_SECRET_ACCESS_KEY=cloud-secret \
   LMCACHE_MODE="$mode" PORT="$port" GLM_GPU_COUNT=4 DCP=2 \
   LMCACHE_L1_GB="$l1" LMCACHE_L2_GB=7 LMCACHE_L2_PATH="$tmp/l2" \
   LMCACHE_LOG="$tmp/$mode.log" \
   LMCACHE_TEST_SERVER_ARGS="$tmp/$mode-server.args" \
   LMCACHE_TEST_MODEL_ARGS="$tmp/$mode-model.args" \
   LMCACHE_TEST_MODEL_ENV="$tmp/$mode-model.env" \
+  LMCACHE_TEST_MODEL_KEY="$tmp/$mode-model.key" \
+  LMCACHE_TEST_CACHE_API_RESULT="$tmp/$mode-cache-api-key.env" \
+  LMCACHE_TEST_CACHE_TOKEN_RESULT="$tmp/$mode-cache-token.env" \
   "$BASH" "$repo/scripts/glm52_lmcache_wrapper.sh" \
     "$tmp/model-server" --model-arg value
 }
@@ -46,6 +75,7 @@ run_mode() {
 run_mode ram 8002
 grep -Fq -- '--port 5557' "$tmp/ram-server.args"
 grep -Fq -- '--http-port 8091' "$tmp/ram-server.args"
+grep -Fq -- '--http-host 127.0.0.1' "$tmp/ram-server.args"
 grep -Fq -- '--prometheus-port 9092' "$tmp/ram-server.args"
 grep -Fq -- '--l1-size-gb 2' "$tmp/ram-server.args"
 grep -Fq -- '--l1-init-size-gb 2' "$tmp/ram-server.args"
@@ -59,6 +89,9 @@ grep -Fq -- '--kv-transfer-config' "$tmp/ram-model.args"
 grep -Fq -- '"lmcache.mp.port":5557' "$tmp/ram-model.args"
 grep -Fq -- 'retrieve_timeout' "$tmp/ram-model.args"
 grep -Fxq 'expandable_segments:False' "$tmp/ram-model.env"
+grep -Fxq '<unset>' "$tmp/ram-cache-api-key.env"
+grep -Fxq '<unset>' "$tmp/ram-cache-token.env"
+grep -Fxq 'server-secret' "$tmp/ram-model.key"
 
 run_mode disk 8003
 grep -Fq -- '--l2-adapter' "$tmp/disk-server.args"

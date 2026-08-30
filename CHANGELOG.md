@@ -5,6 +5,49 @@ lineage and exact pins that used to open the README.
 
 ## GLM-5.3 full-model 3.42bpw
 
+### Post-qualification review hardening
+
+An adversarial workflow review found that LMCache's ZMQ `--host` did not also
+bind its separate HTTP administration server. The appliance now requires every
+LMCache listener to remain on IPv4 loopback, passes `--http-host` explicitly,
+and removes token, API-key, password, private-key, and cloud-access credential
+variables from the LMCache subprocess while leaving the authenticated model
+server's environment intact. A fail-closed image patch registers only
+LMCache's read-only information router: `/env`, `/run_script`, and every cache,
+quota, configuration, and backend mutation router are absent. Loopback access
+from the unprivileged SOUL identity therefore cannot become root code execution.
+
+The same review closed a bearer-key boundary in optional SOUL autonomy levels
+2/3. A root launcher now removes stale processes for the dedicated `soul` uid,
+passes the controller empty key/readiness pipes, and writes the key only after
+the controller confirms `PR_SET_DUMPABLE=0`; the key never enters the SOUL
+process environment. The launcher and PID 1 reap the whole uid on stop,
+including detached shell sessions. The pinned Nanobot SDK parses provider
+configuration through an anonymous non-inheritable descriptor, so no literal
+provider key remains in the SOUL-owned runtime tree, process environment, or
+argv. A pre-forked non-dumpable verifier worker inherits the key only in memory;
+the controller terminates it at the deep probe's 600-second outer bound, then
+exits so PID 1 can replace the controller/worker pair without a retry loop.
+
+The authoritative startup verifier now includes a tokenizer-calibrated,
+cache-unique 1,024-token temperature-1 request, requires all 512 output tokens,
+and rechecks engine health afterward. A profile-form switch now discards
+untouched values displayed from the old variant instead of persisting them
+above the new variant's defaults, and rejects a stale rendered revision rather
+than treating it as user intent. Known-good rollback re-minimizes the full
+stored effective configuration against the current container's startup
+environment, verifies exact reproduction of the family, variant, and every
+applicable knob without comparing target-family-inapplicable defaults, and
+refuses a topology that is invalid for the GPUs on the replacement host.
+
+The GLM-5.3 full profile rejects the unsafe inherited KV/context envelope,
+GLM-5.2 layer-78 grafts, and Flash-only runtime variables, including attempts
+to reintroduce them through `TUNE_*`. The rootless Podman launcher no longer
+injects a GLM-5.2 variant or served name into other public profiles. CI now
+compiles all 27 runtime-overlay payloads and executes the launcher regression;
+the runtime-log audit recognizes both SparkInfer and B12X compile records plus
+explicit inference-JIT warnings.
+
 The appliance now live-qualifies `MODEL_PROFILE=glm53-3.42bpw` for
 `davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@8bef807a0fcdd180e984a26b50e731cdba9a8ff2`
 on four RTX PRO 6000 Blackwell 96 GiB GPUs. The complete `glm_moe_dsa`
@@ -43,17 +86,22 @@ kernel and route pack rather than changing the uniform-K6 path. The final
 persistent JIT paths use namespace `turnkey-glm53-runtime-o27-v3`.
 
 The inherited GLM-5.2 520,192-token/4.21-GiB KV envelope passed startup,
-short/structured checks, and 32K retrieval, but the first temperature-1
-1,024-input/512-output sampler request OOMed in top-p selection with only
+short/structured checks, and 32K retrieval. Its first sampler request used
+a 1,024-token raw-prompt target (1,027 API prompt tokens after chat templating)
+and 512 temperature-1 output tokens, then OOMed in top-p selection with only
 3 MiB physically free on one rank. The qualified profile instead pins
 3,415,867,392 KV bytes per GPU: exactly 393,216 logical KV tokens and one
 maximum-length request. Model loading used 82.42 GiB/rank, graph capture used
 0.61 GiB/rank, and two-second `nvidia-smi` sampling retained at least 665 MiB
 physical free memory after first-use compilation and C8 sampling.
+The rejected-arm minima were transcribed during live diagnosis; its raw server
+and `nvidia-smi` traces were not retained. Selected-arm benchmark, feature,
+retrieval, post-stress, and server-log artifacts remain on the qualification host.
 
 Unique-prefix prefill measured 2,465 / 2,444 / 2,380 / 2,282 tok/s at
 8K / 32K / 64K / 128K. Aggregate temperature-1 decode for
-1,024-input/512-output requests measured 60.40 / 153.93 / 227.55 tok/s at
+a 1,024-token raw-prompt target (1,027 API prompt tokens after chat templating)
+and 512 output tokens measured 60.40 / 153.93 / 227.55 tok/s at
 C1 / C4 / C8, with mean acceptance lengths 3.41 / 3.45 / 3.51 and draft-token
 acceptance of 80.45% / 81.57% / 83.63%. All 72 requests completed without
 failure, preemption, or GPU/LMCache prefix reuse.
@@ -64,9 +112,12 @@ passed tokenize, thinking on/off, streaming usage, preserved-thinking
 multi-turn, strict JSON with thinking, tool choice, tool calls, and tool-result
 continuation. A five-depth matrix retrieved all 15 facts from tokenizer-exact
 131,407-, 261,192-, and 389,959-token documents. The post-stress short and
-structured gate passed; a 3,469-line ready-state log audit found no post-ready
-compile, structured-FSM, CUDA, distributed, process-failure, or error-level
-findings.
+structured gate passed. Review of the 3,469-line ready-state log found
+first-use CuTeDSL/Triton JIT after readiness, invalidating the earlier
+zero-post-ready-compile audit result; the structured-FSM, CUDA, distributed,
+process-failure, and error-level categories remained clean.
+A corrected audit of the warmed line 3,030–3,469 window found zero findings in
+all categories.
 
 ## GLM-5.3-Flash K8 (quality-max)
 

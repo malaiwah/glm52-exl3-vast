@@ -44,7 +44,7 @@ as `defaults < family < variant < startup env < state file`; see
 | `SOUL_AUTONOMY_MAX_LEVEL` | `3` | startup-only ceiling for landing-page overrides; invalid values fail closed to `0` |
 | `SOUL_HEARTBEAT_INTERVAL_S` / `SOUL_JOURNAL_INTERVAL_S` | `300` / `3600` | deterministic snapshot and blog-style journal cadence; changing these does not restart vLLM |
 | `VERIFY` | `1` | `0` disables the post-start correctness probe entirely (the page then reports "unverified" and nothing rolls back) |
-| `VERIFY_LONG_CONTEXT` | `1` | `0` keeps the short-prompt checks only — read the warning above before using it |
+| `VERIFY_LONG_CONTEXT` | `1` | `0` keeps deterministic short prompts, strict structured output, and the bounded temperature-1 512-token sampling gate, but skips long-context retrieval |
 | `VERIFY_NEEDLE_TOKENS` | `32768` | size of the long-context retrieval probe |
 | `VERIFY_HEALTH_TIMEOUT_S` | `3600` | health wait after vLLM launch; accommodates first local NFS/cachefilesd page-in. Model download occurs before this timer. |
 | `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures and logs live |

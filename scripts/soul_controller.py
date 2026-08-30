@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ctypes
 import datetime as dt
 import hashlib
 import json
+import multiprocessing
 import os
 import re
 import shutil
@@ -20,6 +22,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -40,7 +43,9 @@ LONG_PROBE_COOLDOWN_S = 6 * 3600
 JOURNAL_CONTEXT_LIMIT = 8
 JOURNAL_CONTEXT_SUMMARY_CHARS = 800
 RUNPOD_DIRECT_TLS_PORT = 8443
-_ACTIVE_PROBE_PROCESS: Optional[subprocess.Popen] = None
+PR_SET_DUMPABLE = 4
+MAX_API_KEY_BYTES = 16 * 1024
+CONTROLLER_RESTART_EXIT = 75
 JOURNAL_FIELDS = {
     "headline": str,
     "summary": str,
@@ -66,6 +71,68 @@ def _safe_id(prefix: str = "") -> str:
 
 def _read_json(path: Path, default: Any = None) -> Any:
     return sc.read_json(path, default)
+
+def _disable_process_dumping() -> None:
+    """Deny same-uid shell tools access to controller memory and descriptors."""
+    if not sys.platform.startswith("linux"):
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    prctl = libc.prctl
+    prctl.argtypes = [
+        ctypes.c_int,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+    ]
+    prctl.restype = ctypes.c_int
+    if prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
+def _read_api_key_fd() -> str:
+    """Signal post-prctl readiness, then consume the supervisor's key pipe."""
+    key_descriptor = os.environ.pop("SOUL_API_KEY_FD", "")
+    ready_descriptor = os.environ.pop("SOUL_KEY_READY_FD", "")
+    if not key_descriptor and not ready_descriptor:
+        return ""
+    if not key_descriptor or not ready_descriptor:
+        raise ValueError("SOUL credential handoff requires both descriptors")
+    try:
+        key_fd = int(key_descriptor)
+        ready_fd = int(ready_descriptor)
+    except ValueError as exc:
+        raise ValueError("SOUL credential descriptors must be integers") from exc
+    if key_fd < 3 or ready_fd < 3 or key_fd == ready_fd:
+        raise ValueError("SOUL credential descriptors are invalid")
+
+    def read_exact(fd: int, size: int) -> bytes:
+        data = bytearray()
+        while len(data) < size:
+            chunk = os.read(fd, min(4096, size - len(data)))
+            if not chunk:
+                raise ValueError("SOUL credential handoff was incomplete")
+            data.extend(chunk)
+        return bytes(data)
+
+    try:
+        # SoulController.__init__ calls _disable_process_dumping() before this
+        # function. PID 1's root launcher leaves the key pipe empty until this
+        # byte proves that the dumpable interpreter-startup window has closed.
+        try:
+            os.write(ready_fd, b"R")
+        finally:
+            os.close(ready_fd)
+        size = int.from_bytes(read_exact(key_fd, 4), "big")
+        if size > MAX_API_KEY_BYTES:
+            raise ValueError("SOUL API key exceeds the bounded handoff size")
+        data = read_exact(key_fd, size)
+        if os.read(key_fd, 1):
+            raise ValueError("SOUL credential handoff has trailing data")
+    finally:
+        os.close(key_fd)
+    return data.decode("utf-8")
 
 
 def _atomic_status(config: Mapping[str, Any], **updates: Any) -> None:
@@ -557,18 +624,13 @@ class IncidentBook:
                    if item.get("state") == "open")
 
 
-def _nanobot_config(path: Path, workspace: Path, model: str, port: int,
-                    level: int, timezone: str, api_base: str = "",
-                    api_key: str = "") -> None:
+def _nanobot_document(workspace: Path, model: str, port: int, level: int,
+                      timezone: str, api_base: str = "",
+                      api_key: str = "") -> Dict[str, Any]:
     api_base = api_base or f"http://127.0.0.1:{port}"
-    document = {
+    return {
         "providers": {
             "custom": {
-                # The literal key, not an env reference: the controller strips
-                # VLLM_API_KEY from its own environment so L2/L3 exec shells
-                # do not inherit it. The config file itself is 0640 and the
-                # exec tool's results pass through the redactor, but the env
-                # of every spawned child was the widest copy.
                 "apiKey": api_key,
                 "apiBase": api_base.rstrip("/") + "/v1",
             }
@@ -605,7 +667,35 @@ def _nanobot_config(path: Path, workspace: Path, model: str, port: int,
             "restrictToWorkspace": True,
         },
     }
-    sc.atomic_json(path, document, mode=0o640)
+
+
+def _nanobot_from_document(document: Mapping[str, Any], workspace: Path) -> Any:
+    """Construct the pinned Nanobot SDK without a same-uid credential file."""
+    from nanobot import Nanobot
+    from nanobot.agent.hooks import create_file_edit_activity_hook
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.config.loader import load_config
+    from nanobot.providers.image_generation import image_gen_provider_configs
+
+    # load_config performs Nanobot's migrations, Pydantic validation, tool
+    # schema resolution, and SSRF allowlist setup. Feed it an anonymous,
+    # non-inheritable file descriptor so the literal provider key never exists
+    # in the SOUL-owned runtime tree.
+    with tempfile.TemporaryFile(mode="w+b") as config_file:
+        config_file.write(json.dumps(document).encode("utf-8"))
+        config_file.flush()
+        config_file.seek(0)
+        descriptor_root = Path("/proc/self/fd")
+        if not descriptor_root.is_dir():
+            descriptor_root = Path("/dev/fd")
+        config = load_config(descriptor_root / str(config_file.fileno()))
+    config.agents.defaults.workspace = str(workspace.resolve())
+    loop = AgentLoop.from_config(
+        config,
+        image_generation_provider_configs=image_gen_provider_configs(config),
+        hook_factories=[create_file_edit_activity_hook],
+    )
+    return Nanobot(loop, config=config)
 
 
 def _restrict_nanobot_tools(bot: Any, level: int) -> None:
@@ -886,34 +976,48 @@ def _long_context_probe(port: int, api_key: str, model: str,
     The output path is never one of PID 1's verifier verdict paths, so this
     probe cannot promote, roll back, restart, or otherwise change engine state.
     """
-    script = Path(__file__).with_name("verify_serving.py")
     api_base = (api_base or f"http://127.0.0.1:{port}").rstrip("/")
-    command = [
-        sys.executable, str(script),
+    arguments = [
         "--base-url", api_base,
-        "--api-key-env", "SOUL_PROBE_API_KEY", "--model", model,
+        # This is an in-process Python argument, never an OS process argv or
+        # child environment. The controller is non-dumpable before it reads
+        # the key from PID 1's one-shot descriptor.
+        "--api-key", api_key, "--model", model,
         "--out", str(output), "--max-model-len", str(max_model_len),
         "--needle-tokens", str(needle_tokens), "--timeout", "30",
     ]
-    global _ACTIVE_PROBE_PROCESS
     try:
-        proc = subprocess.Popen(
-            command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-                 "LANG": "C.UTF-8", "SOUL_PROBE_API_KEY": api_key})
-        _ACTIVE_PROBE_PROCESS = proc
-        stdout, _unused = proc.communicate(timeout=RUN_TIMEOUT_S)
+        import verify_serving
+        returncode = verify_serving.main(arguments)
         verdict = _read_json(output, {}) or {}
-        return {"ok": bool(verdict.get("ok")), "returncode": proc.returncode,
-                "verdict": sc.redact(verdict), "output": sc.redact(stdout[-8000:])}
-    except subprocess.TimeoutExpired as exc:
-        proc.kill()
-        proc.communicate()
+        return {
+            "ok": bool(verdict.get("ok")),
+            "returncode": returncode,
+            "verdict": sc.redact(verdict),
+            "output": "",
+        }
+    except (ImportError, OSError, ValueError) as exc:
         return {"ok": False, "error": sc.redact(str(exc))}
-    except OSError as exc:
-        return {"ok": False, "error": sc.redact(str(exc))}
+
+def _deep_probe_worker(connection: Any, api_key: str) -> None:
+    """Run bounded deep probes in a pre-forked, non-dumpable worker."""
+    _disable_process_dumping()
+    try:
+        while True:
+            try:
+                request = connection.recv()
+            except (EOFError, OSError):
+                return
+            if request is None:
+                return
+            port, model, max_model_len, needle_tokens, output, api_base = request
+            result = _long_context_probe(
+                int(port), api_key, str(model), int(max_model_len),
+                int(needle_tokens), Path(output), str(api_base),
+            )
+            connection.send(result)
     finally:
-        _ACTIVE_PROBE_PROCESS = None
+        connection.close()
 
 
 def _correctness_suspected(snapshot: Mapping[str, Any]) -> bool:
@@ -1165,16 +1269,16 @@ def enforce_retention(config: Mapping[str, Any],
 
 
 class SoulController:
-    def __init__(self, boot_status: Path, port: int):
+    def __init__(self, boot_status: Path, port: int,
+                 api_key: Optional[str] = None,
+                 start_probe_worker: bool = True):
+        # L2/L3 shell tools share uid=soul with this controller. Make the
+        # process non-dumpable before consuming the one-shot key so those
+        # children cannot inspect /proc memory or descriptors.
+        _disable_process_dumping()
         self.boot_status = boot_status
         self.port = port
-        self.api_key = os.environ.get("VLLM_API_KEY", "")
-        # Keep the key out of the process environment from here on: the L2/L3
-        # exec tool spawns shells that inherit os.environ, and the sandboxed
-        # soul account must not find credentials with a bare `env`. The
-        # in-memory copy serves the canary/metrics probes and the nanobot
-        # provider config.
-        os.environ.pop("VLLM_API_KEY", None)
+        self.api_key = _read_api_key_fd() if api_key is None else api_key
         self.paths = sc.ensure_tree()
         self.book = IncidentBook(self.paths["incidents"] / "index.json")
         self.bot = None
@@ -1198,16 +1302,92 @@ class SoulController:
         self.last_deep_probe = float(probe_state.get("lastDeepProbeEpoch", 0) or 0)
         self.active_agent_task: Optional[asyncio.Task] = None
         self.stop = False
+        self.deep_probe_process = None
+        self.deep_probe_connection = None
+        if start_probe_worker:
+            self._start_deep_probe_worker()
+
+    def _start_deep_probe_worker(self) -> None:
+        context = multiprocessing.get_context("fork")
+        parent_connection, child_connection = context.Pipe(duplex=True)
+        process = context.Process(
+            target=_deep_probe_worker,
+            args=(child_connection, self.api_key),
+            name="soul-deep-probe",
+            daemon=True,
+        )
+        try:
+            process.start()
+        except Exception:
+            parent_connection.close()
+            child_connection.close()
+            raise
+        child_connection.close()
+        self.deep_probe_connection = parent_connection
+        self.deep_probe_process = process
+
+    def _deep_probe_worker_alive(self) -> bool:
+        process = self.deep_probe_process
+        return process is not None and process.is_alive()
+
+    def _stop_deep_probe_worker(self) -> None:
+        connection = self.deep_probe_connection
+        process = self.deep_probe_process
+        self.deep_probe_connection = None
+        self.deep_probe_process = None
+        if connection is not None:
+            if process is not None and process.is_alive():
+                try:
+                    connection.send(None)
+                except (BrokenPipeError, EOFError, OSError):
+                    pass
+            connection.close()
+        if process is None:
+            return
+        process.join(timeout=1)
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=2)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=2)
+
+    def run_deep_probe(self, model: str, max_model_len: int,
+                       needle_tokens: int, output: Path,
+                       api_base: str) -> Dict[str, Any]:
+        connection = self.deep_probe_connection
+        process = self.deep_probe_process
+        if connection is None or process is None or not process.is_alive():
+            self._stop_deep_probe_worker()
+            return {"ok": False, "error": "deep-probe worker is unavailable"}
+        request = (
+            self.port, model, max_model_len, needle_tokens,
+            str(output), api_base,
+        )
+        try:
+            connection.send(request)
+            if not connection.poll(RUN_TIMEOUT_S):
+                self._stop_deep_probe_worker()
+                return {
+                    "ok": False,
+                    "error": f"deep-probe worker exceeded {RUN_TIMEOUT_S}s",
+                }
+            result = connection.recv()
+        except (BrokenPipeError, EOFError, OSError) as exc:
+            self._stop_deep_probe_worker()
+            return {"ok": False, "error": sc.redact(str(exc))}
+        if not isinstance(result, dict):
+            self._stop_deep_probe_worker()
+            return {"ok": False, "error": "deep-probe worker returned invalid data"}
+        return result
 
     def signal_stop(self, *_args: Any) -> None:
         self.stop = True
         if self.active_agent_task is not None:
             self.active_agent_task.cancel()
-        if _ACTIVE_PROBE_PROCESS is not None:
-            try:
-                _ACTIVE_PROBE_PROCESS.terminate()
-            except OSError:
-                pass
+        process = self.deep_probe_process
+        if process is not None and process.is_alive():
+            process.terminate()
 
     async def close_bot(self) -> None:
         if self.bot is not None:
@@ -1225,18 +1405,17 @@ class SoulController:
         if self.bot is not None and self.bot_key == key:
             return self.bot
         await self.close_bot()
-        config_path = self.paths["runtime"] / "nanobot-config.json"
-        _nanobot_config(config_path, self.paths["workspace"], model, self.port,
-                        int(config["autonomyLevel"]), str(config["timezone"]),
-                        api_base, api_key=self.api_key)
+        document = _nanobot_document(
+            self.paths["workspace"], model, self.port,
+            int(config["autonomyLevel"]), str(config["timezone"]),
+            api_base, api_key=self.api_key,
+        )
         soul_source = Path(os.environ.get("SOUL_PROMPT", "/opt/soul/SOUL.md"))
         try:
             shutil.copyfile(soul_source, self.paths["workspace"] / "SOUL.md")
         except OSError:
             pass
-        from nanobot import Nanobot
-        self.bot = Nanobot.from_config(config_path=config_path,
-                                       workspace=self.paths["workspace"])
+        self.bot = _nanobot_from_document(document, self.paths["workspace"])
         _restrict_nanobot_tools(self.bot, int(config["autonomyLevel"]))
         _redact_shell_tool_results(self.bot)
         _pin_soul_prompt(self.bot, soul_source)
@@ -1328,15 +1507,17 @@ class SoulController:
                     needle_tokens = int(os.environ.get("VERIFY_NEEDLE_TOKENS", "32768"))
                 except ValueError:
                     needle_tokens = 32768
-                snapshot["longContextProbe"] = await asyncio.to_thread(
-                    _long_context_probe, self.port, self.api_key, model,
-                    max_model_len, needle_tokens, deep_path, api_base)
-                snapshot["longContextProbeEvidence"] = (
-                    "evidence/" + deep_path.name)
+                # Persist the cooldown before dispatch. A hard timeout can
+                # terminate the worker, and must not create a restart loop.
                 self.last_deep_probe = now
                 sc.atomic_json(self.paths["incidents"] / "probe-state.json", {
                     "lastDeepProbeEpoch": now, "lastDeepProbeAt": sc.utcnow(),
                 })
+                snapshot["longContextProbe"] = await asyncio.to_thread(
+                    self.run_deep_probe, model, max_model_len, needle_tokens,
+                    deep_path, api_base)
+                snapshot["longContextProbeEvidence"] = (
+                    "evidence/" + deep_path.name)
         snapshot_ref = _write_snapshot(snapshot)
         self.last_snapshot = now
         findings = _severity(snapshot)
@@ -1454,7 +1635,11 @@ class SoulController:
         sc.audit("SOUL controller started", "Embedded controller is running.", config)
         for sig in (signal.SIGTERM, signal.SIGINT):
             signal.signal(sig, self.signal_stop)
+        restart_required = False
         while not self.stop:
+            if not self._deep_probe_worker_alive():
+                restart_required = True
+                break
             try:
                 await self.one_cycle()
             except asyncio.CancelledError:
@@ -1465,12 +1650,23 @@ class SoulController:
                                controllerHealthy=False)
                 self.last_snapshot = 0.0
                 await self.close_bot()
+            if not self.stop and not self._deep_probe_worker_alive():
+                restart_required = True
+                break
             for _ in range(5):
                 if self.stop:
                     break
                 await asyncio.sleep(1)
         await self.close_bot()
+        self._stop_deep_probe_worker()
         config = sc.resolve()[0]
+        if restart_required:
+            _atomic_status(
+                config, state="Error", controllerHealthy=False,
+                lastError="deep-probe worker stopped; controller restart requested",
+                stoppedAt=sc.utcnow(),
+            )
+            return CONTROLLER_RESTART_EXIT
         _atomic_status(config, state="Disabled", controllerHealthy=False,
                        stoppedAt=sc.utcnow())
         return 0

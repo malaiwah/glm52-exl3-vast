@@ -64,6 +64,25 @@ class FieldReviewLogAuditTests(unittest.TestCase):
         self.assertFalse(report["ok"])
         self.assertEqual(report["counts"]["post_ready_compile"], 1)
 
+    def test_post_ready_b12x_cache_miss_fails(self):
+        report = log_audit.audit(
+            "INFO:     Application startup complete.\n"
+            "[b12x cute.compile] miss reason=post-engine-start "
+            "status=disk-cache-miss cache_key=abc\n"
+        )
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["counts"]["post_ready_compile"], 1)
+
+    def test_explicit_inference_jit_warnings_fail(self):
+        for backend in ("CuTeDSL", "Triton"):
+            with self.subTest(backend=backend):
+                report = log_audit.audit(
+                    "INFO:     Application startup complete.\n"
+                    f"WARNING: {backend} JIT compilation during inference: kernel\n"
+                )
+                self.assertFalse(report["ok"])
+                self.assertEqual(report["counts"]["post_ready_compile"], 1)
+
     def test_cuda_ipc_warning_is_a_failure(self):
         report = log_audit.audit(
             "INFO:     Application startup complete.\n"

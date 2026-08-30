@@ -214,12 +214,17 @@ and retained at least 665 MiB of observed physical free memory after first-use
 compilation and C8 sampling.
 
 Unique-prefix prefill measured 2,465 / 2,444 / 2,380 / 2,282 tok/s at
-8K / 32K / 64K / 128K. Aggregate 1,024-input/512-output temperature-1 decode
-measured 60.40 / 153.93 / 227.55 tok/s at C1 / C4 / C8; all 72 requests
+8K / 32K / 64K / 128K. Aggregate decode from a 1,024-token raw-prompt target
+(1,027 API prompt tokens after chat templating) to 512 temperature-1 output
+tokens measured 60.40 / 153.93 / 227.55 tok/s at C1 / C4 / C8; all 72 requests
 completed without failure, preemption, or prefix reuse. The complete OpenAI
 feature suite passed, as did 15/15 retrieval facts at five depths through
 131,407, 261,192, and 389,959 tokenizer-exact document tokens. A post-stress
-short/structured gate and a 3,469-line runtime-log audit were clean.
+short/structured gate was clean. The cold log did record expected first-use
+CuTeDSL/Triton JIT after readiness; its remaining structured-FSM, CUDA,
+distributed, process-failure, and error-level audit categories were clean.
+A corrected audit of the warmed line 3,030–3,469 window found zero findings in
+all categories.
 
 ### GLM-5.3-Flash K6 and K8
 
@@ -284,10 +289,10 @@ The custom profile deliberately omits GLM backends, grafts and fixed KV block
 counts. Compatibility still depends on the vLLM build in the base image; add a
 named profile when a model needs more than conventional vLLM flags.
 
-### GLM-5.2 flagship model card (beta)
+### GLM flagship variant matrix (beta)
 
-There are six measured GLM variants. `exl3-tr3` is the balanced
-provider-template default. `exl3-tr3-max-context` trades ordinary-workload
+There are seven measured GLM-5.2/GLM-5.3 variants. `exl3-tr3` is the balanced
+GLM-5.2 provider-template default. `exl3-tr3-max-context` trades ordinary-workload
 speed for the largest DCP4 envelope. `madeby561-hybrid` remains the immutable
 v20 production control:
 
@@ -305,7 +310,7 @@ speculation shape; it is not merely a different download URL:
 | `exl3-tr3-3.25bpw` | TP4/DCP4, native mixed-K TR3 MTP-3, probabilistic proposals; one-grid decode plus serial K3/K4 block-64 prefill | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 2,048-token scheduler with a reusable 1,024-row EXL3 arena, 64 MiB exact-fold budget, LMCache over 50% host DRAM | higher fidelity; ~22 GiB larger download and slower than the default |
 | `exl3-tr3-3.36bpw` | TP4/DCP4, mixed checkpoint + online Trellis K6, native MTP-3; r26 exact query-split/full-CKV policy with two indexer shards and owner merge off | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.957, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | previous high-fidelity profile; dynamic-NVFP4 KLD 0.082507, 2,453--2,458 / 2,350--2,370 / 2,197--2,238 tok/s PP at 3K/32K/128K, 5/5 needles in an actual 522,359-token prompt |
 | **`exl3-tr3-3.42bpw`** | TP4/DCP4, shared-H checkpoint + online Trellis K6, native MTP-3 with probabilistic proposals; r28 lossless query-split/full-CKV policy | exactly 2,032 KV blocks / 520,192 logical tokens, GMU 0.95, 3,072-token scheduler/arena, 125 GiB LMCache DRAM + bounded 512 GiB NVMe | selected high-fidelity profile; K6/dynamic-NVFP4 KLD 0.089888 (native weights 0.082039), PP 2,367 / 2,263 / 2,137 tok/s at 3K/32K/128K, complete 45/45 five-depth needles through a 516,096-token prompt plus 4,096-token reserve |
-| `exl3-tr3-glm53-3.42bpw` | GLM-5.3 TP4/DCP4 per-expert mixed K3/K4 + online Trellis K6, native probabilistic MTP-3 | candidate clone of the 520,192-token r28 memory and KV boundary | full 755B GLM-5.3 qualification; use `MODEL_PROFILE=glm53-3.42bpw` |
+| **`exl3-tr3-glm53-3.42bpw`** | GLM-5.3 TP4/DCP4 per-expert mixed K3/K4 + online Trellis K6, native probabilistic MTP-3 | exactly 393,216 logical KV tokens, fixed 3.18 GiB/GPU dynamic-NVFP4 pool, GMU 0.93, 3,072-token scheduler, C8 | selected full 755B GLM-5.3 profile; use `MODEL_PROFILE=glm53-3.42bpw` |
 | `exl3-tr3-max-context` | TP4/DCP4, native TR3 MTP-5 | 524,288 configured request limit, auto NVFP4 KV, GMU 0.98 | maximum-context experiments; slower for ordinary loads |
 | `madeby561-hybrid` | TP4/DCP4, native serialized NVFP4 MTP-3 | exactly 2,048 KV blocks / 524,288 logical tokens, GMU 0.98, 2,048-token batch | immutable v20 control and alternate quant |
 
@@ -759,6 +764,13 @@ cached KV may contain session material, and secure termination only provides a
 best-effort erase on flash storage. The 512 GiB setting needs at least that much
 free local space plus operational margin; AIBeast had 748 GiB free before the
 qualification. The tier does not preallocate its limit.
+
+LMCache's internal HTTP listener is fixed to `127.0.0.1`; the production image
+registers only its read-only information router. Administrative `/env`,
+`/run_script`, cache mutation, quota, configuration, and backend-reconfiguration
+routes are not present, and credential-like environment variables are removed
+from the LMCache process. This boundary is independent of authentication on the
+public model API at port 8000.
 
 </details>
 

@@ -19,9 +19,12 @@ PATTERNS = (
     (
         "post_ready_compile",
         re.compile(
-            r"\[sparkinfer cute\.compile\]"
+            r"(?:"
+            r"\[(?:sparkinfer|b12x) cute\.compile\]"
             r"(?![^\n]*\bstatus=disk-cache-hit\b)"
             r"[^\n]*\breason=post-engine-start\b"
+            r"|(?:CuTeDSL|Triton) JIT compilation during inference"
+            r")"
         ),
     ),
     ("structured_fsm", re.compile(r"Failed to advance FSM")),

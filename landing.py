@@ -13,6 +13,7 @@ validated OPEN_BUTTON_TOKEN — or over plain HTTP if LANDING_ALLOW_INSECURE=1
 /metrics from the browser (vLLM CORS is open) — no server-side proxying.
 Requires OPEN_BUTTON_PORT=1111 env + '-p 1111:1111' in the template.
 """
+import hashlib
 import hmac
 import html
 import json
@@ -1014,6 +1015,21 @@ def correctness() -> tuple:
         return ("engine did not come up", False, v.get("reason", ""))
     if not (v.get("short_prompt") or {}).get("ok"):
         return ("short-prompt checks FAILED", False, v.get("reason", ""))
+    structured = v.get("structured_output")
+    if not isinstance(structured, dict):
+        return ("structured output UNVERIFIED", False,
+                "the structured-output probe did not run")
+    if not structured.get("ok"):
+        return ("STRUCTURED-OUTPUT PROBE FAILED", False,
+                structured.get("detail") or v.get("reason", ""))
+    sampling = v.get("stochastic_sampling")
+    if not isinstance(sampling, dict) or not sampling.get("attempted"):
+        return ("temperature-1 sampling UNVERIFIED", False,
+                (sampling or {}).get(
+                    "detail", "the stochastic sampling probe did not run"))
+    if not sampling.get("ok"):
+        return ("TEMPERATURE-1 SAMPLING PROBE FAILED", False,
+                sampling.get("detail") or v.get("reason", ""))
     lc = v.get("long_context") or {}
     if not lc.get("attempted"):
         return ("short prompts only — long context UNVERIFIED", False,
@@ -1184,7 +1200,9 @@ def render_config(tok: str, secure: bool, banner=None, banner_cls="",
     # POSTs carry the token in the hidden body field only: a query-string copy
     # lands in reverse-proxy access logs, which outlive the page.
     parts.append(f"<form method=post action='/config/apply'>"
-                 f"<input type=hidden name=token value='{tok_q}'>")
+                 f"<input type=hidden name=token value='{tok_q}'>"
+                 f"<input type=hidden name=config_revision "
+                 f"value='{_config_revision(effective)}'>")
     group = None
     parts.append("<table class=cfg>")
     for knob in gc.KNOBS:
@@ -1251,6 +1269,37 @@ def _form_values(form: dict):
                          "message": str(e)})
     return values, errs
 
+def _config_revision(effective: dict) -> str:
+    payload = json.dumps(
+        effective, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+_PROFILE_IDENTITY_FIELDS = frozenset({
+    "MODEL_FAMILY", "MODEL_VARIANT", "MODEL_ID",
+})
+
+
+def _profile_switch_form_values(values: dict, current: dict) -> dict:
+    """Discard untouched dependent controls when a web form changes profile.
+
+    HTML forms submit every visible control. Without this cutover, selecting a
+    new variant pins all of the old variant's displayed defaults into the state
+    file, where they outrank the new profile. Imports intentionally bypass this
+    behavior because an imported document is an explicit complete state diff.
+    """
+    switched = any(
+        key in values and values[key] != current.get(key)
+        for key in ("MODEL_FAMILY", "MODEL_VARIANT")
+    )
+    if not switched:
+        return dict(values)
+    return {
+        key: value for key, value in values.items()
+        if key in _PROFILE_IDENTITY_FIELDS or value != current.get(key)
+    }
+
+
 
 def _coerce_imported_values(values: dict):
     """Coerce imported JSON knob values through gc.coerce, collecting per-field
@@ -1270,7 +1319,7 @@ def _coerce_imported_values(values: dict):
     return coerced, errs
 
 
-def apply_values(values: dict):
+def apply_values(values: dict, *, form_submission=False, form_revision=""):
     """Validate a candidate, persist it, and ask the supervisor for a restart.
 
     -> (ok, findings, message). Nothing is written when validation finds an
@@ -1288,6 +1337,22 @@ def apply_values(values: dict):
     # that serialization ACROSS processes, so a self-service apply cannot be
     # clobbered by the PID-1 supervisor's concurrent rollback (and vice versa).
     with _config_lock, gc.state_lock():
+        current, _s, _n = gc.resolve()
+        if form_submission and not hmac.compare_digest(
+                form_revision, _config_revision(current)):
+            finding = {
+                "id": "stale-form",
+                "level": "error",
+                "keys": ["MODEL_FAMILY", "MODEL_VARIANT"],
+                "message": (
+                    "The running configuration changed after this page was "
+                    "rendered. Reload the editor before applying; no values "
+                    "were saved."
+                ),
+            }
+            return False, [finding], "Nothing was applied — the form is stale."
+        if form_submission:
+            values = _profile_switch_form_values(values, current)
         dropped = []
         minimal = gc.minimize(values, dropped)
         effective, _sources, notes = gc.resolve(state_values=minimal)
@@ -1304,7 +1369,7 @@ def apply_values(values: dict):
             drop_msg = ("<p><b>Not applicable to this model family, so not saved:</b> "
                         + html.escape(", ".join(sorted(set(dropped)))) + "</p>")
         good = gc.read_json(gc.p_known_good())
-        current, _s, _n = gc.resolve()
+        # `current` was captured under the same lock before minimization.
         if not gc.diff(current, effective):
             return True, findings, ("No change: the submitted configuration is the one "
                                     "running." + drop_msg)
@@ -1901,7 +1966,11 @@ class Handler(BaseHTTPRequestHandler):
                 if errs:
                     body = render_config(tok, secure, "Nothing was applied.", "bad", errs)
                 else:
-                    ok, findings, msg = apply_values(values)
+                    ok, findings, msg = apply_values(
+                        values,
+                        form_submission=True,
+                        form_revision=form.get("config_revision", [""])[0],
+                    )
                     body = render_config(tok, secure, msg, "good" if ok else "bad",
                                          [] if ok else findings)
             elif url.path == "/config/import":

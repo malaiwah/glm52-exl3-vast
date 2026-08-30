@@ -23,9 +23,9 @@ Current profile qualification: **GLM-5.3 full-model mixed 3.42bpw** (2026-08-29 
 - [GLM-5.2 qualification history](#glm-52-qualification-history)
 - [GLM-5.2 design decisions](#glm-52-design-decisions)
 - [Local and browser checks](#local-and-browser-checks)
-- [Artifacts](#artifacts)
-- [Coverage summary](#coverage-summary)
-- [Next economical live pass](#next-economical-live-pass)
+- [2026-07-26 baseline artifacts](#2026-07-26-baseline-artifacts)
+- [2026-07-26 baseline coverage](#2026-07-26-baseline-coverage)
+- [Historical next-pass plan (2026-07-26)](#historical-next-pass-plan-2026-07-26)
 
 ## Current qualification status
 
@@ -78,7 +78,7 @@ per-expert checkpoint:
 
 | arm | request / KV envelope | observed result |
 |---|---:|---|
-| inherited | 520,192 tokens / 4,518,907,904 B per GPU | startup, strict output, and 32K 3/3 retrieval passed; the first temperature-1 1,024-input/512-output request OOMed in top-p sampling and hung the workers with only 3–169 MiB physically free per rank |
+| inherited | 520,192 tokens / 4,518,907,904 B per GPU | startup, strict output, and 32K 3/3 retrieval passed; the first temperature-1 request used a 1,024-token raw-prompt target (1,027 API prompt tokens after chat templating) and 512 output tokens, then OOMed in top-p sampling and hung the workers with only 3–169 MiB physically free per rank |
 | selected | 393,216 tokens / 3,415,867,392 B per GPU | exactly 393,216 logical KV tokens; first-use sampling, C8, API features, 389,959-token retrieval, and post-stress checks passed |
 
 The selected arm loaded 82.42 GiB of model tensors per rank in 366–367 seconds,
@@ -86,6 +86,11 @@ reserved 3.18 GiB/rank for KV, and used 0.61 GiB/rank for CUDA graphs. A
 two-second `nvidia-smi` trace observed at least 665 MiB free after first-use
 sampling compilation and during the C8/API workload. The container remained
 healthy with zero restarts.
+
+The rejected-arm free-memory minima were transcribed during live diagnosis;
+its raw server and `nvidia-smi` traces were not retained. The selected-arm
+benchmark, feature, retrieval, post-stress, and server-log artifacts listed
+below remain on the qualification host.
 
 Unique-prefix prefill used one output token and no cache reuse:
 
@@ -96,8 +101,9 @@ Unique-prefix prefill used one output token and no cache reuse:
 | 65,536 | 65,539 | 2,379.82 tok/s |
 | 131,072 | 131,083 | 2,281.87 tok/s |
 
-The temperature-1 decode matrix used a fixed seed, 1,024 input tokens,
-512 output tokens, and 24 unique-prefix requests per level:
+The temperature-1 decode matrix used a fixed seed, a 1,024-token raw-prompt
+target (1,027 API prompt tokens after chat templating), 512 output tokens, and
+24 unique-prefix requests per level:
 
 | concurrency | completed | aggregate output | mean TPOT | mean acceptance length | draft-token acceptance |
 |---:|---:|---:|---:|---:|---:|
@@ -141,13 +147,17 @@ The release matrix placed five facts at 1%, 25%, 50%, 75%, and 99% depth:
 | 389,120 | 389,959 | 5/5 | 242.304 s |
 
 A fresh post-stress arithmetic/factual/instruction and strict-structured-output
-gate passed. The 3,469-line server log contained a ready marker and the
-fail-closed audit reported zero post-ready compilation, structured-FSM,
-CUDA-runtime, distributed-runtime, process-failure, or error-level findings.
-The machine retains `sampling-smoke-384k.json`,
+gate passed. Review of the 3,469-line server log found post-ready first-use
+CuTeDSL/Triton JIT that the original audit regex missed; therefore the cold
+candidate does not establish zero post-ready compilation. No structured-FSM,
+CUDA-runtime, distributed-runtime, process-failure, or error-level findings
+were present. The machine retains `sampling-smoke-384k.json`,
 `benchmark-primary-384k.json`, `feature-suite.json`,
-`needle-matrix-384k.json`, `post-stress-verify.json`, `log-audit.json`, and
-`server-current.log` under the persistent qualification workspace.
+`needle-matrix-384k.json`, `post-stress-verify.json`, the superseded
+`log-audit.json`, and `server-current.log` under the persistent qualification
+workspace.
+A corrected audit of the warmed line 3,030–3,469 window found zero findings in
+all categories; `log-audit-warm-review.json` retains that bounded result.
 
 ## Provider integration
 
@@ -1695,7 +1705,7 @@ Passed:
   reasoning-only response in later context.
 - Clear resets both the visible conversation and request history.
 
-## Artifacts
+## 2026-07-26 baseline artifacts
 
 - Branch: `codex/appliance-live-test`
 - Final runtime-image commit:
@@ -1714,7 +1724,7 @@ actions, least-privilege permissions, per-ref concurrency, timeouts, maximum
 provenance, and an SBOM. Manual dispatch published the immutable SHA tag and
 did not replace `latest`.
 
-## Coverage summary
+## 2026-07-26 baseline coverage
 
 | Area | Result |
 |---|---|
@@ -1727,18 +1737,18 @@ did not replace `latest`.
 | Runpod hybrid proxy/direct-TLS runtime compatibility | Passed on Secure RTX 5090 |
 | Authenticated HF Xet cold download (Qwen 27B) | Passed; 20.435 GiB in 18m14s |
 | Small-model native vision and MTP | Passed on Vast RTX 5090 |
-| GLM TP4/DCP4, EXL3/MTP78, 512K, production vision/offload | Explicit release qualification gap |
-| Final provider resources | Vast: 0; Runpod: 0 |
+| GLM TP4/DCP4, EXL3/MTP78, 512K, production vision/offload | Gap at this 2026-07-26 baseline; qualified in later sections |
+| Final provider resources at this baseline | Vast: 0; Runpod: 0 |
 
-## Next economical live pass
+## Historical next-pass plan (2026-07-26)
 
-Prefer a Runpod Secure Blackwell machine known to cache the pinned image; the
-validated host took roughly nine minutes merely to expose mappings despite
-advertising multi-gigabit networking. The authenticated Qwen download also
-showed that provider bandwidth does not predict the host-to-Hugging-Face CAS
-route. Reuse the 0.8B profile and execute only the still-uncovered
-restart-persistence, vision, MTP, and full-profile qualification rows from
-`TEST_PLAN.md`.
+At that point, the economical next pass was a Runpod Secure Blackwell machine
+known to cache the pinned image; the validated host had taken roughly nine
+minutes merely to expose mappings despite advertising multi-gigabit networking.
+The authenticated Qwen download also showed that provider bandwidth did not
+predict the host-to-Hugging-Face CAS route. The then-uncovered
+restart-persistence, vision, MTP, and full-profile rows were subsequently
+executed and are recorded in the later qualification sections.
 
 ## GLM-5.3-Flash K6/K8 SM120 qualification (2026-08-29)
 
