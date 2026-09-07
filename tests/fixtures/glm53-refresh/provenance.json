@@ -1,0 +1,17 @@
+{
+  "integration_tree": "174c789e09984049d0d53b261024460ca5e9c449",
+  "files": [
+    {
+      "source_path": "vllm/parser/engine/events.py",
+      "fixture": "events.py",
+      "integration_blob": "f138fb248f45bc49f7700686a33e7b557a7bf33b",
+      "sha256": "493543e5832b721c67640c09a6ad664823423a98afe0bb53ba78518608047f0a"
+    },
+    {
+      "source_path": "vllm/parser/engine/incremental_lexer.py",
+      "fixture": "incremental_lexer.py",
+      "integration_blob": "31e9bd4a3b2cc2338ddf3212cea88dd6e4ffd108",
+      "sha256": "c58797ba16d60a6a4db365dc678b38b756df83eea566c6e34dac2785f55c4cce"
+    }
+  ]
+}

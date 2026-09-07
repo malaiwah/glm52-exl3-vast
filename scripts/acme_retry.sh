@@ -17,6 +17,20 @@ attempt_timeout="${ACME_ATTEMPT_TIMEOUT_S:-150}"
 retry_delay="${ACME_BACKGROUND_RETRY_S:-300}"
 crt="$lego_path/certificates/${ACME_DOMAIN}.crt"
 key="$lego_path/certificates/${ACME_DOMAIN}.key"
+max_delay="${ACME_BACKGROUND_RETRY_MAX_S:-3600}"
+max_attempts="${ACME_BACKGROUND_MAX_ATTEMPTS:-0}"
+for setting in attempt_timeout retry_delay max_delay max_attempts; do
+  if [[ ! "${!setting}" =~ ^[0-9]{1,9}$ ]]; then
+    echo "FATAL: ACME timing and attempt limits must be nonnegative integers of at most nine digits" >&2
+    exit 2
+  fi
+  printf -v "$setting" '%d' "$((10#${!setting}))"
+done
+if (( attempt_timeout == 0 || max_delay == 0 )); then
+  echo "FATAL: ACME attempt timeout and retry ceiling must be positive" >&2
+  exit 2
+fi
+(( retry_delay <= max_delay )) || retry_delay="$max_delay"
 
 cert_valid() {
   [[ -f "$crt" && -f "$key" ]] &&
@@ -139,14 +153,12 @@ fi
 # per-hour limit — the same rate-limit hazard the entrypoint guards elsewhere by
 # persisting the DNS suffix and reusing valid certs. An optional attempt cap
 # stops entirely after N consecutive failures.
-max_delay="${ACME_BACKGROUND_RETRY_MAX_S:-3600}"
-max_attempts="${ACME_BACKGROUND_MAX_ATTEMPTS:-0}"   # 0 = unlimited
 delay="$retry_delay"
 attempts=0
 while ! cert_valid; do
   if attempt; then
     echo ">>> ACME background retry succeeded for $ACME_DOMAIN."
-    echo ">>> Certificate is persisted; restart/apply once to enable endpoint TLS."
+    echo ">>> Certificate is persisted; the supervisor will restart the engine to enable TLS."
     touch "$lego_path/restart-required"
     exit 0
   fi

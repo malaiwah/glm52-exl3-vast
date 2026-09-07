@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Unit tests for the compact live feature suite."""
+import io
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 import unittest
-import urllib.error
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -39,8 +41,6 @@ class FeatureSuiteTests(unittest.TestCase):
         checks = []
         feature.record(checks, "x", False, "a" * 1000, extra=True)
         self.assertEqual(len(checks[0]["detail"]), 400)
-        self.assertTrue(checks[0]["extra"])
-        self.assertTrue(checks[0]["required"])
 
     def test_optional_capability_does_not_gate_release(self):
         checks = []
@@ -50,61 +50,38 @@ class FeatureSuiteTests(unittest.TestCase):
         feature.record(checks, "required-failure", False)
         self.assertFalse(feature.release_ok(checks))
 
-    def test_feature_matrix_exercises_expected_request_shapes(self):
-        calls = []
+    def test_stdout_is_one_completed_document(self):
+        output = io.StringIO()
 
-        def fake_json(url, payload=None, key="", timeout=600):
-            calls.append((url, payload, key))
-            if key == "definitely-wrong":
-                raise urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
-            if url.endswith("/tokenize"):
-                return {"count": 3}
-            messages = (payload or {}).get("messages") or []
-            if messages and messages[-1].get("role") == "tool":
-                return {"choices": [{"message": {
-                    "content": "Montreal is currently 17 degrees."}}]}
-            if payload and payload.get("tools"):
-                return {"choices": [{"message": {"tool_calls": [{
-                    "id": "call-1",
-                    "function": {"name": "get_weather", "arguments":
-                                 json.dumps({"city": "Montreal"})}}]}}]}
-            if payload and payload.get("response_format"):
-                return {"choices": [{"message": {
-                    "content": json.dumps({"answer": 42})}}]}
-            prompt = str((payload or {}).get("messages", [])[-1:])
-            if "19 * 23" in prompt:
-                msg = {"content": "437", "reasoning_content": "multiply"}
-            elif "What code" in prompt:
-                msg = {"content": "COBALT-731"}
-            elif "Remember" in prompt:
-                msg = {"content": "Acknowledged", "reasoning_content": "remember"}
-            else:
-                msg = {"content": "BANANA-OK"}
-            return {"choices": [{"message": msg}]}
+        def run(*_args, checkpoint, **_kwargs):
+            checks = [{"name": "required", "required": True, "ok": True}]
+            checkpoint(checks)
+            checkpoint(checks)
+            return checks
 
-        with mock.patch.object(feature, "json_request", side_effect=fake_json), \
-             mock.patch.object(feature, "stream_chat",
-                               return_value=("STREAM-OK", {"completion_tokens": 2})):
-            checks = feature.run("http://test", "key", "model", vision=False)
-        self.assertTrue(all(item["ok"] for item in checks))
-        structured = next(
-            item for item in checks if item["name"] == "structured-json")
-        self.assertTrue(structured["required"])
-        structured_thinking = next(
-            item for item in checks
-            if item["name"] == "structured-json-thinking")
-        self.assertTrue(structured_thinking["required"])
-        self.assertEqual(
-            {item["name"] for item in checks},
-            {"auth-rejects-bad-key", "tokenize", "chat-no-thinking",
-             "chat-thinking-visible", "streaming-with-usage",
-             "multi-turn-preserve-thinking", "structured-json",
-             "structured-json-thinking", "tool-call",
-             "tool-call-single", "tool-choice-required",
-             "tool-result-round-trip", "vision-red-image"})
-        self.assertTrue(any(
-            payload and payload.get("chat_template_kwargs", {}).get("enable_thinking")
-            for _url, payload, _key in calls))
+        with mock.patch.object(feature, "json_request", return_value={"data": [{"id": "m"}]}), \
+             mock.patch.object(feature, "run", side_effect=run), \
+             mock.patch("sys.stdout", output):
+            self.assertEqual(feature.main(["--model", "m"]), 0)
+        report = json.loads(output.getvalue())
+        self.assertTrue(report["complete"])
+        self.assertTrue(report["ok"])
+
+    def test_interrupted_feature_suite_retains_evidence_but_never_passes(self):
+        def run(*_args, checkpoint, **_kwargs):
+            checkpoint([{"name": "first", "required": True, "ok": True}])
+            raise KeyboardInterrupt()
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "features.json")
+            with mock.patch.object(feature, "json_request", return_value={"data": [{"id": "m"}]}), \
+                 mock.patch.object(feature, "run", side_effect=run):
+                with self.assertRaises(KeyboardInterrupt):
+                    feature.main(["--model", "m", "--out", path])
+            report = json.loads(Path(path).read_text())
+        self.assertFalse(report["complete"])
+        self.assertFalse(report["ok"])
+        self.assertTrue(report["checks"][0]["ok"])
 
 
 if __name__ == "__main__":

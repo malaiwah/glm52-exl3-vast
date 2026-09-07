@@ -24,6 +24,7 @@ import os
 import statistics
 import ssl
 import sys
+import re
 import time
 import urllib.error
 import urllib.request
@@ -69,12 +70,14 @@ def parse_metrics(text):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        fields = line.split()
-        if len(fields) < 2:
+        sample = re.fullmatch(
+            r'([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(?:[^"\\}]|"(?:\\.|[^"\\])*")*\})?'
+            r'\s+(\S+)(?:\s+\S+)?', line)
+        if sample is None:
             continue
-        name = fields[0].split("{", 1)[0]
+        name = sample[1]
         try:
-            value = float(fields[-1])
+            value = float(sample[2])
         except ValueError:
             continue
         # A Prometheus `NaN`/`+Inf` sample parses as a float but would poison
@@ -83,7 +86,10 @@ def parse_metrics(text):
         # into result JSON downstream. Drop non-finite samples entirely.
         if not math.isfinite(value):
             continue
-        out[name] = out.get(name, 0.0) + value
+        total = out.get(name, 0.0) + value
+        if not math.isfinite(total):
+            raise ValueError(f"metric sum overflow for {name}")
+        out[name] = total
     return out
 
 
@@ -128,7 +134,7 @@ def count_tokens(base, key, model, text, insecure=False):
     doc = json_request(
         base + "/tokenize", {"model": model, "prompt": text}, key=key,
         timeout=180, insecure=insecure)
-    if not isinstance(doc, dict) or not isinstance(doc.get("count"), int):
+    if not isinstance(doc, dict) or type(doc.get("count")) is not int or doc["count"] < 1:
         raise RuntimeError("/tokenize did not return an exact count")
     return doc["count"]
 
@@ -165,7 +171,8 @@ def make_prompt(base, key, model, target_tokens, nonce, insecure=False):
 
 
 def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
-                      timeout=1800, insecure=False, temperature=0.0, seed=None):
+                      timeout=1800, insecure=False, temperature=0.0, seed=None,
+                      *, on_first_text=None, trace=False):
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -183,6 +190,7 @@ def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
     token_events = []
     usage = {}
     pieces = []
+    stream_done = False
     pieces_len = 0
     try:
         with request(base + "/v1/chat/completions", payload, key, timeout,
@@ -193,6 +201,7 @@ def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
                     continue
                 data = line[6:]
                 if data == "[DONE]":
+                    stream_done = True
                     break
                 try:
                     packet = json.loads(data)
@@ -211,6 +220,8 @@ def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
                     now = time.perf_counter()
                     if first is None:
                         first = now
+                        if on_first_text is not None:
+                            on_first_text()
                     token_events.append(now)
                     if pieces_len < 120:
                         pieces.append(str(piece))
@@ -221,23 +232,31 @@ def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
     except Exception as error:
         return {"ok": False, "error": f"{type(error).__name__}: {error}"}
     ended = time.perf_counter()
+    if not stream_done:
+        return {"ok": False, "error": "stream ended without a completion sentinel"}
     if first is None:
         return {"ok": False, "error": "stream returned no text-bearing deltas"}
     observed_output = usage.get("completion_tokens")
-    if not isinstance(observed_output, int):
-        observed_output = len(token_events)
+    if type(observed_output) is not int or observed_output < 1:
+        return {"ok": False, "error": "stream missing valid completion_tokens usage"}
     observed_prompt = usage.get("prompt_tokens")
-    if not isinstance(observed_prompt, int):
-        observed_prompt = prompt_tokens
+    if type(observed_prompt) is not int or observed_prompt < 1:
+        return {"ok": False, "error": "stream missing valid prompt_tokens usage"}
+    if observed_output != output_tokens:
+        return {"ok": False, "error": (
+            f"stream generated {observed_output}/{output_tokens} requested tokens")}
     itls = [b - a for a, b in zip(token_events, token_events[1:])]
     elapsed = ended - started
     ttft = first - started
     tpot = ((elapsed - ttft) / (observed_output - 1)
             if observed_output > 1 else 0.0)
-    return {
+    result = {
         "ok": True,
         "prompt_tokens": observed_prompt,
         "output_tokens": observed_output,
+        "token_count_source": "server_usage",
+        "calibrated_prompt_tokens": prompt_tokens,
+        "text_chunks": len(token_events),
         "elapsed_s": round(elapsed, 6),
         "ttft_ms": round(ttft * 1000, 3),
         "tpot_ms": round(tpot * 1000, 3),
@@ -249,6 +268,12 @@ def stream_completion(base, key, model, prompt, prompt_tokens, output_tokens,
             round(statistics.mean(itls) * 1000, 3) if itls else 0.0,
         "output_head": "".join(pieces)[:120],
     }
+    if trace:
+        result["timeline"] = {
+            "clock": "perf_counter", "started_at": started, "first_text_at": first,
+            "ended_at": ended, "text_chunk_times": token_events,
+        }
+    return result
 
 
 def percentile(values, p):
@@ -313,6 +338,14 @@ def summarize_requests(results, wall_s, before, after, concurrency):
         "gpu_prefix_cache_hit_tokens": round(prefix_hits),
         "external_prefix_cache_query_tokens": round(external_prefix_queries),
         "external_prefix_cache_hit_tokens": round(external_prefix_hits),
+        "metrics_scope": "server-wide; isolate other traffic during measurement",
+        "cache_metrics_available": all(
+            name in before and name in after for name in (
+                "vllm:prefix_cache_queries_total", "vllm:prefix_cache_hits_total")),
+        "cache_regime": (
+            "reuse-observed" if prefix_hits or external_prefix_hits else
+            "no-hits-observed" if "vllm:prefix_cache_hits_total" in before
+            and "vllm:prefix_cache_hits_total" in after else "unknown"),
         "speculative": spec_summary(before, after),
         "errors": [item.get("error", "") for item in failed][:10],
         "requests_detail": good,
@@ -339,21 +372,23 @@ def run_level(base, key, model, input_tokens, output_tokens, concurrency,
         results = [future.result() for future in futures]
     wall_s = time.perf_counter() - started
     after = get_metrics(base, key, insecure)
-    return summarize_requests(results, wall_s, before, after, concurrency)
+    result = summarize_requests(results, wall_s, before, after, concurrency)
+    result["prompt_identity"] = run_id
+    result["prompt_identity_policy"] = "caller-supplied" if nonce_prefix else "fresh-uuid"
+    return result
 
 
 def write_result(path, doc):
+    blob = json.dumps(doc, indent=1, allow_nan=False) + "\n"
     if not path:
-        json.dump(doc, sys.stdout, indent=1)
-        sys.stdout.write("\n")
+        sys.stdout.write(blob)
         return
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as handle:
-        json.dump(doc, handle, indent=1)
-        handle.write("\n")
+        handle.write(blob)
     os.replace(tmp, path)
 
 
@@ -390,6 +425,8 @@ def main(argv):
     parser.add_argument("--insecure", action="store_true")
     parser.add_argument("--out", default="")
     args = parser.parse_args(argv)
+    if not math.isfinite(args.temperature) or args.temperature < 0:
+        parser.error("--temperature must be finite and nonnegative")
 
     base = args.base_url.rstrip("/")
     key = read_key(args.api_key_file)
@@ -457,8 +494,8 @@ def main(argv):
         checkpoint()
         raise
     doc["complete"] = True
-    doc["ok"] = all(row["failed"] == 0 for row in
-                    doc["prefill"] + doc["concurrency"])
+    rows = doc["prefill"] + doc["concurrency"]
+    doc["ok"] = bool(rows) and all(row["failed"] == 0 for row in rows)
     write_result(args.out, doc)
     return 0 if doc["ok"] else 1
 

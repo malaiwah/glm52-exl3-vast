@@ -31,6 +31,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -695,10 +696,6 @@ def test_worker_happy_path(tmp):
     check("progress is written for the page to poll",
           os.path.isfile(terminate_worker.p_progress()))
 
-    check("the terminate flag is set so the supervisor stands down",
-          os.path.isfile(terminate_worker.p_request_stop()) is False,
-          "default_stopper was stubbed, so no flag is expected here")
-
 
 def test_worker_dry_run(tmp):
     section("dry run")
@@ -720,6 +717,43 @@ def test_worker_dry_run(tmp):
     check("dry run does not leave a request-stop flag",
           not os.path.isfile(terminate_worker.p_request_stop()),
           "the request-stop flag should not exist in a dry run")
+
+
+def test_default_stopper_sets_flag_before_waiting(tmp):
+    section("real stopper requests supervisor stop before waiting")
+    with mock.patch.dict(os.environ, {
+            "GLM_RUNTIME_DIR": os.path.join(tmp, "stopper-runtime")}):
+        def supervisor_ack(_seconds):
+            check("supervisor observes the request-stop flag",
+                  os.path.isfile(terminate_worker.p_request_stop()))
+            with open(terminate_worker.p_engine_stopped(), "w"):
+                pass
+
+        with mock.patch.object(terminate_worker.time, "sleep", side_effect=supervisor_ack):
+            stopped, _detail = terminate_worker.default_stopper(None, timeout=10)
+        check("stopper observes supervisor acknowledgment", stopped is True)
+
+
+def test_erase_ram_sync_timeout_is_reported():
+    section("RAM erase contains sync timeout without touching system caches")
+    opened = []
+
+    def meminfo_only(path, *args, **kwargs):
+        opened.append(path)
+        if path != "/proc/meminfo":
+            raise AssertionError("unexpected system file access: " + path)
+        return io.StringIO("MemAvailable: 0 kB\n")
+
+    with mock.patch.object(
+            secure_erase.subprocess, "run",
+            side_effect=subprocess.TimeoutExpired(["sync"], 60)), \
+            mock.patch("builtins.open", side_effect=meminfo_only), \
+            mock.patch.object(secure_erase.os, "urandom") as allocate:
+        result = secure_erase.erase_ram()
+    check("cache drop is reported as unsuccessful", result["drop_caches"] != "ok")
+    check("no memory overwrite claimed", result["overwritten_bytes"] == 0)
+    check("only read meminfo after the timeout", opened == ["/proc/meminfo"])
+    check("no RAM allocation without a budget", not allocate.called)
 
 
 def test_worker_erase_failure_does_not_wedge(tmp):
@@ -1183,6 +1217,8 @@ def main():
         _run(test_worker_gates, tmp)
         _run(test_worker_happy_path, tmp)
         _run(test_worker_dry_run, tmp)
+        _run(test_default_stopper_sets_flag_before_waiting, tmp)
+        _run(test_erase_ram_sync_timeout_is_reported)
         _run(test_worker_erase_failure_does_not_wedge, tmp)
         _run(test_erase_plan, tmp)
         _run(test_erase_without_manifest, tmp)

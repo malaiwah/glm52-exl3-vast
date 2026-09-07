@@ -78,14 +78,16 @@ def republish(zone: str, subname: str, values: set[str], token: str) -> None:
 
 
 def guard(zone: str, fqdn: str, token: str, timeout: int) -> int:
-    rel = fqdn.removesuffix("." + zone)
-    if rel == zone:
+    zone, fqdn = zone.rstrip(".").lower(), fqdn.rstrip(".").lower()
+    if fqdn == zone:
         # Apex issuance: the challenge is _acme-challenge.<zone> itself, with
         # an empty relative part — the naive f-string doubled the zone and
         # made the guard poll a name that never exists.
         subname = "_acme-challenge"
+    elif fqdn.endswith("." + zone):
+        subname = f"_acme-challenge.{fqdn[:-(len(zone) + 1)]}"
     else:
-        subname = f"_acme-challenge.{rel}"
+        raise ValueError("ACME domain is outside the deSEC zone")
     challenge = f"{subname}.{zone}"
     deadline = time.monotonic() + timeout
     repaired = False

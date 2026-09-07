@@ -319,6 +319,7 @@ def _gpu(xid_state: Optional[Path] = None) -> Dict[str, Any]:
         # The buffer is unreadable: flag it as an explicit observation rather
         # than an empty (implicitly clean) xid string. Never fabricate an XID.
         result["xidUnavailable"] = True
+        result["xidProbe"] = sc.redact(dmesg)
         return result
     xid_lines = [line for line in str(dmesg.get("output", "")).splitlines()
                  if "NVRM: Xid" in line][-20:]
@@ -535,6 +536,14 @@ def _severity(snapshot: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
             "requires": 1,
         }
     gpu = snapshot.get("gpu", {})
+    if gpu.get("ok") is False:
+        checks["gpu:unavailable"] = {
+            "failed": True, "severity": "warning", "requires": 1,
+            "summary": "GPU telemetry is unavailable; hardware health is unknown"}
+    if gpu.get("xidUnavailable"):
+        checks["gpu:xid-unavailable"] = {
+            "failed": True, "severity": "warning", "requires": 1,
+            "summary": "NVIDIA XID monitoring is unavailable; kernel errors cannot be checked"}
     if gpu.get("xid"):
         checks["gpu:xid"] = {"failed": True, "severity": "critical",
                              "summary": "a new NVIDIA XID was reported", "requires": 1}
@@ -1103,7 +1112,7 @@ def _open_incident_files(book: Optional[IncidentBook], journal: Path,
                 item = json.loads(line)
             except ValueError:
                 continue
-            if item.get("incidentId") in open_ids:
+            if isinstance(item, dict) and item.get("incidentId") in open_ids:
                 for ref in item.get("evidenceRefs", []) or []:
                     if isinstance(ref, str) and ref and not ref.startswith("/"):
                         protected.add(root / ref)
@@ -1114,6 +1123,30 @@ def _open_incident_files(book: Optional[IncidentBook], journal: Path,
 
 def enforce_retention(config: Mapping[str, Any],
                       book: Optional[IncidentBook] = None) -> None:
+    with sc.journal_lock(sc.paths()["journal"]):
+        _enforce_retention(config, book)
+
+
+def _replace_journal(path: Path, lines: list[bytes]) -> None:
+    """Replace under journal_lock, preserving shared root/soul write access."""
+    fd, tmp = tempfile.mkstemp(prefix=".journal.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            os.fchown(stream.fileno(), -1, path.parent.stat().st_gid)
+            os.fchmod(stream.fileno(), 0o660)
+            stream.writelines(lines)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+    finally:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+
+
+def _enforce_retention(config: Mapping[str, Any],
+                       book: Optional[IncidentBook] = None) -> None:
     p = sc.ensure_tree()
     now = time.time()
     cap = int(config["maxStateMB"]) * 1024 * 1024
@@ -1141,61 +1174,22 @@ def enforce_retention(config: Mapping[str, Any],
     journal_cutoff = now - int(config["journalRetentionDays"]) * 86400
     journal = p["journal"]
 
-    def _retained_key(line: str):
-        """Return (within_retention, dedup_key) for a raw journal line, or
-        (False, None) when it is unparseable or lacks a usable timestamp."""
-        try:
-            item = json.loads(line)
-            stamp = dt.datetime.fromisoformat(
-                item["timestamp"].replace("Z", "+00:00")).timestamp()
-        except (ValueError, KeyError, TypeError, AttributeError):
-            return False, None
-        if stamp < journal_cutoff:
-            return False, None
-        key = item["id"] if isinstance(item, dict) and "id" in item else line
-        return True, key
-
     try:
-        original_lines = journal.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        original_lines = None
-    if original_lines is not None:
-        kept_lines, kept_keys, dropped = [], set(), False
+        original_lines = journal.read_bytes().splitlines(keepends=True)
+        kept_lines = []
         for line in original_lines:
-            keep, key = _retained_key(line)
-            if not keep:
-                dropped = True
-                continue
-            kept_lines.append(line)
-            kept_keys.add(key)
-        # Skip the rewrite entirely when nothing expired: a no-op os.replace()
-        # every cycle (>=30s) would needlessly race a concurrent append by the
-        # root landing page and silently drop it.
-        if dropped:
             try:
-                # Close the race: re-read immediately before replacing and carry
-                # forward any still-retained line that appeared after our initial
-                # snapshot (notably the "SOUL configuration changed" audit record
-                # the landing page appends as root between our read and replace).
-                try:
-                    current_lines = journal.read_text(encoding="utf-8").splitlines()
-                except OSError:
-                    current_lines = original_lines
-                for line in current_lines:
-                    keep, key = _retained_key(line)
-                    if not keep or key in kept_keys:
-                        continue
-                    kept_lines.append(line)
-                    kept_keys.add(key)
-                tmp = journal.with_name(".journal.retained")
-                with tmp.open("w", encoding="utf-8") as stream:
-                    for line in kept_lines:
-                        stream.write(line + "\n")
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(tmp, journal)
-            except OSError:
-                pass
+                item = json.loads(line)
+                stamp = dt.datetime.fromisoformat(
+                    item["timestamp"].replace("Z", "+00:00")).timestamp()
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+            if stamp >= journal_cutoff:
+                kept_lines.append(line)
+        if len(kept_lines) != len(original_lines):
+            _replace_journal(journal, kept_lines)
+    except OSError:
+        pass
     incident_index = p["incidents"] / "index.json"
     _compact_incident_state(incident_index, book)
     files = [path for path in p["root"].glob("**/*") if path.is_file()]
@@ -1204,6 +1198,7 @@ def enforce_retention(config: Mapping[str, Any],
         return
     protected = {
         p["config"], p["status"], active_controller_log, incident_index,
+        p["journalLock"],
         p["incidents"] / "pending-events.json",
     }
     evidence_roots = (p["evidence"], p["snapshots"], p["logs"])
@@ -1224,29 +1219,25 @@ def enforce_retention(config: Mapping[str, Any],
     # If evidence was insufficient, remove oldest journal entries next.
     if total > cap and p["journal"].exists():
         try:
-            entries = [json.loads(line) for line in
-                       p["journal"].read_text(encoding="utf-8").splitlines()]
-        except (OSError, ValueError):
-            entries = []
-        while len(entries) > 1 and total > cap:
-            entries.pop(0)
-            encoded = "".join(
-                json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n"
-                for item in entries)
-            old_size = p["journal"].stat().st_size
-            tmp = p["journal"].with_name(".journal.capped")
-            with tmp.open("w", encoding="utf-8") as stream:
-                stream.write(encoded)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(tmp, p["journal"])
-            total -= max(0, old_size - len(encoded.encode()))
+            lines = p["journal"].read_bytes().splitlines(keepends=True)
+            remove_count, removed_bytes = 0, 0
+            for line in lines:
+                if total - removed_bytes <= cap:
+                    break
+                removed_bytes += len(line)
+                remove_count += 1
+            if remove_count:
+                _replace_journal(p["journal"], lines[remove_count:])
+                total -= removed_bytes
+        except OSError:
+            pass
     # Session history and auxiliary incident cursors count toward the hard cap
     # too, but are sacrificed only after evidence and journal history.
     if total > cap:
         remainder = sorted(
             (path for path in files
              if path.exists() and path not in protected and path != p["journal"]
+             and path not in protected_refs
              and path not in evidence),
             key=lambda item: item.stat().st_mtime)
         for path in remainder:

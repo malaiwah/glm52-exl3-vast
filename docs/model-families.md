@@ -10,6 +10,14 @@ A **family** owns everything true about an architecture rather than about this
 deployment: which checkpoints exist, which engine flags are needed, which knobs
 mean anything, and which of the measured failure rules apply.
 
+The next-release public default is **full non-Flash `glm53-3.42bpw-500k`**,
+variant `exl3-tr3-glm53-3.42bpw-500k`, in the `glm52` architecture family shared
+by full GLM-5.2 and GLM-5.3. It preserves 3.42bpw and the 520,192-token budget
+with reduced workspace; it is a candidate, not completed GPU qualification.
+The older full `glm53-3.42bpw` profile retains its separately
+qualified 393,216-token envelope. Flash `glm53-k6` / `glm53-k8` use family
+`glm53`; both Flash and `glm52-exl3` remain explicit alternatives.
+
 | | |
 |---|---|
 | `scripts/glm_config.py` | `FAMILIES` registry, family-aware resolver, family-scoped validation |
@@ -17,7 +25,7 @@ mean anything, and which of the measured failure rules apply.
 | `scripts/gpu_detect.py` | what the container can actually use, from nvidia-smi ∩ the visibility variables |
 | `tests/test_families.py` | release defaults, Qwen/custom coherence, and rule scoping |
 | `tests/test_gpu_detect.py` | injected visibility/device-list behavior |
-| `tests/test_knob_wiring.py` | every knob has a consumer; the UI hardcodes nothing |
+| CPU configuration smoke + built-image verification | resolved public profile commands and actual installed runtime provenance; source-text wiring checks are not behavioral proof |
 
 ---
 
@@ -83,9 +91,9 @@ file so the landing page can. `/config` shows the source of every value;
 `family` and `variant` are both possible sources.
 
 `minimize()` — the function that decides what actually gets written — compares
-each knob against **the selected family's** baseline, so a value left at that
-family's own default is not pinned into the file and the family stays free to
-change it later. The family key itself is compared against the *no-file*
+each knob against the selected family/variant and startup-environment
+baseline, so unchanged values are not pinned into the state file.
+The family key itself is compared against the *no-file*
 resolution instead; comparing it against a baseline built from itself is
 circular, and an earlier revision did exactly that: the chosen family always
 equalled its own baseline, was never written, and every apply silently reverted
@@ -306,5 +314,7 @@ The generic one-GPU provider path remains cheaply smoke-tested with a small
 Qwen3.5 checkpoint. The exact Qwen3.6-27B NVFP4 checkpoint is now qualified on
 one RTX 5090 at the 192K vision-enabled profile. A Runpod repetition of the
 full 27B performance rows remains useful for provider comparison, but is not a
-model-profile blocker. GLM-5.2 remains the four-GPU flagship; custom
-checkpoints remain compatibility-by-vLLM rather than a blanket support claim.
+model-profile blocker. Full GLM-5.3 3.25bpw is the next-release four-GPU
+candidate and still needs its own >=500K maintenance gate; GLM-5.2 remains an
+explicit measured alternative. Custom checkpoints remain compatibility-by-vLLM
+rather than a blanket support claim.

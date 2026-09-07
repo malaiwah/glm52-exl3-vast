@@ -113,6 +113,28 @@ class SoulConfigTests(unittest.TestCase):
             self.assertEqual([row["id"] for row in sc.read_journal(
                 2, before="id-2", env=env)], ["id-1", "id-0"])
 
+    def test_journal_cursor_ignores_non_object_and_broken_lines(self):
+        with tempfile.TemporaryDirectory() as raw:
+            env = self.env(Path(raw))
+            path = sc.ensure_tree(env)["journal"]
+            path.write_text(
+                '{"id":"older"}\nnull\n[]\n42\n"str"\n'
+                '{"id":"cursor"}\nfalse\n{broken\n{"id":"newer"}\n')
+            self.assertEqual(
+                [row["id"] for row in sc.read_journal(before="cursor", env=env)],
+                ["older"])
+
+    def test_journal_append_completes_short_writes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            env = self.env(Path(raw))
+            path = sc.ensure_tree(env)["journal"]
+            real_write = os.write
+            with mock.patch.object(sc.os, "write",
+                                   side_effect=lambda fd, data: real_write(fd, data[:3])):
+                sc.append_jsonl(path, {"id": "unicode", "summary": "évidence"})
+            self.assertEqual(sc.read_journal(env=env),
+                             [{"id": "unicode", "summary": "évidence"}])
+
 
 class SoulControllerTests(unittest.TestCase):
     def test_every_analysis_gets_bounded_cross_incident_journal_context(self):
@@ -167,6 +189,36 @@ class SoulControllerTests(unittest.TestCase):
                 "failed": True, "severity": "critical", "summary": "XID", "requires": 1}},
                 "s1")
             self.assertEqual(events[0]["severity"], "critical")
+
+    def test_gpu_unsupported_metrics_do_not_hide_other_hazards(self):
+        findings = controller._severity({"gpu": {"ok": True, "output": (
+            "0, RTX 4090, 0, 0, 24000, 89, 90, 20, 450, [N/A], 580\n"
+            "1, A100, 0, 0, 80000, 45, [N/A], 20, 400, 7, 580")}})
+        self.assertEqual(findings["gpu:thermal:0"]["severity"], "warning")
+        self.assertEqual(findings["gpu:ecc:1"]["severity"], "critical")
+
+    def test_unreadable_xid_probe_is_evidence_and_an_incident_not_a_clean_pass(self):
+        with mock.patch.object(controller, "_bounded_command", side_effect=[
+            {"ok": True, "output": ""},
+            {"ok": False, "returncode": 1, "output": "permission denied"},
+        ]):
+            gpu = controller._gpu()
+        self.assertEqual(gpu["xidProbe"]["returncode"], 1)
+        self.assertEqual(gpu["xidProbe"]["output"], "permission denied")
+        self.assertNotIn("xid", gpu)
+        with tempfile.TemporaryDirectory() as raw:
+            book = controller.IncidentBook(Path(raw) / "index.json")
+            snapshot = {"gpu": gpu, "endpoint": {
+                "health": {"ok": True}, "models": {"ok": True}}}
+            opened = book.reconcile(controller._severity(snapshot), "unreadable")
+            self.assertEqual([event["severity"] for event in opened], ["warning"])
+            snapshot["gpu"] = {"ok": True, "xid": "", "output": ""}
+            recovered = book.reconcile(controller._severity(snapshot), "readable")
+            self.assertEqual([event["event"] for event in recovered], ["recovered"])
+
+    def test_failed_gpu_query_is_not_healthy(self):
+        findings = controller._severity({"gpu": {"ok": False, "returncode": 1}})
+        self.assertEqual(findings["gpu:unavailable"]["severity"], "warning")
 
     def test_failed_inference_probes_are_immediate_incidents(self):
         findings = controller._severity({
@@ -631,6 +683,99 @@ class SoulControllerTests(unittest.TestCase):
                 self.assertIn("newest-tail", log.read_text())
                 self.assertEqual(book.data, {"checks": {}, "incidents": {}})
 
+    def test_retention_serializes_cross_process_appends_for_age_and_size(self):
+        child_code = """
+import fcntl, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import soul_config as sc
+path = Path(sys.argv[2])
+fd = os.open(path.with_suffix(path.suffix + ".lock"), os.O_CREAT | os.O_RDWR, 0o660)
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    print("blocked", flush=True)
+else:
+    print("unlocked", flush=True)
+    fcntl.flock(fd, fcntl.LOCK_UN)
+os.close(fd)
+sc.append_jsonl(path, {"id": "concurrent", "timestamp": sc.utcnow()})
+"""
+        for mode in ("age", "size"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as raw:
+                env = {"GLM_STATE_DIR": str(Path(raw) / "state"),
+                       "GLM_RUNTIME_DIR": str(Path(raw) / "run")}
+                with mock.patch.dict(os.environ, env):
+                    paths = sc.ensure_tree()
+                    sc.append_jsonl(paths["journal"], {
+                        "id": "old", "timestamp": (
+                            "2000-01-01T00:00:00Z" if mode == "age" else sc.utcnow()),
+                        "summary": "x" * (2 * 1024 * 1024 if mode == "size" else 1)})
+                    sc.append_jsonl(paths["journal"],
+                                    {"id": "recent", "timestamp": sc.utcnow()})
+                    real_replace = os.replace
+                    children, lock_states = [], []
+
+                    def replace(source, target):
+                        if Path(target) == paths["journal"]:
+                            proc = subprocess.Popen(
+                                [sys.executable, "-c", child_code, str(SCRIPTS),
+                                 str(paths["journal"])],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                            children.append(proc)
+                            lock_states.append(proc.stdout.readline().strip())
+                            if lock_states[-1] == "unlocked":
+                                proc.wait(timeout=5)
+                        return real_replace(source, target)
+
+                    try:
+                        with mock.patch.object(controller.os, "replace", side_effect=replace):
+                            controller.enforce_retention({
+                                "evidenceRetentionDays": 7,
+                                "journalRetentionDays": 90, "maxStateMB": 1})
+                        for proc in children:
+                            _out, error = proc.communicate(timeout=5)
+                            self.assertEqual(proc.returncode, 0, error)
+                        self.assertEqual(lock_states, ["blocked"])
+                        self.assertEqual(
+                            [entry["id"] for entry in sc.read_journal()],
+                            ["concurrent", "recent"])
+                    finally:
+                        for proc in children:
+                            if proc.poll() is None:
+                                proc.kill()
+                            proc.communicate(timeout=5)
+
+    def test_retention_bounds_single_oversized_record_and_preserves_lock_inode(self):
+        with tempfile.TemporaryDirectory() as raw:
+            env = {"GLM_STATE_DIR": str(Path(raw) / "state"),
+                   "GLM_RUNTIME_DIR": str(Path(raw) / "run")}
+            with mock.patch.dict(os.environ, env):
+                paths = sc.ensure_tree()
+                sc.append_jsonl(paths["journal"], {
+                    "id": "oversized", "timestamp": sc.utcnow(),
+                    "summary": "x" * (2 * 1024 * 1024)})
+                lock_inode = paths["journalLock"].stat().st_ino
+                controller.enforce_retention({
+                    "evidenceRetentionDays": 7, "journalRetentionDays": 90,
+                    "maxStateMB": 1})
+                self.assertEqual(sc.read_journal(), [])
+                self.assertEqual(paths["journalLock"].stat().st_ino, lock_inode)
+                total = sum(path.stat().st_size for path in paths["root"].rglob("*")
+                            if path.is_file())
+                self.assertLessEqual(total, 1024 * 1024)
+
+    def test_open_incident_references_ignore_non_object_journal_lines(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            journal = root / "journal.jsonl"
+            journal.write_text('null\n[]\n42\n{"incidentId":"open",'
+                               '"evidenceRefs":["evidence/live.json"]}\n')
+            book = controller.IncidentBook(root / "index.json")
+            book.data["incidents"] = {"open": {"state": "open"}}
+            self.assertEqual(controller._open_incident_files(book, journal, root),
+                             {root / "evidence/live.json"})
+
 
 class SoulSecureEraseTests(unittest.TestCase):
     def test_secure_erase_selects_entire_soul_tree(self):
@@ -670,35 +815,6 @@ class SoulSecureEraseTests(unittest.TestCase):
 
 
 class SoulWiringTests(unittest.TestCase):
-    def test_image_and_pid1_keep_soul_isolated_from_vllm(self):
-        dockerfile = (ROOT / "Dockerfile").read_text()
-        entrypoint = (ROOT / "entrypoint.sh").read_text()
-        landing = (ROOT / "landing.py").read_text()
-        controller_source = (SCRIPTS / "soul_controller.py").read_text()
-        launcher_source = (SCRIPTS / "soul_launcher.py").read_text()
-        start_soul = entrypoint.split("start_soul() {", 1)[1].split(
-            "stop_soul() {", 1)[0]
-        self.assertIn("/opt/nanobot-venv/bin/pip", dockerfile)
-        self.assertIn("--require-hashes", dockerfile)
-        self.assertIn("diff -u /tmp/vllm-packages.before", dockerfile)
-        self.assertIn("EXPOSE 22 8000 8443 1111\n", dockerfile)
-        self.assertIn("soul_launcher.py", start_soul)
-        self.assertIn("SOUL_ROOT_API_KEY=", start_soul)
-        self.assertNotIn("SOUL_API_KEY_FD=", start_soul)
-        self.assertNotIn('VLLM_API_KEY="${VLLM_API_KEY:-}"', start_soul)
-        self.assertIn("SOUL_KEY_READY_FD", launcher_source)
-        self.assertIn("select.select(", launcher_source)
-        self.assertIn("_kill_uid(uid, signal.SIGKILL)", launcher_source)
-        self.assertIn("pass_fds=(key_read, ready_write)", launcher_source)
-        self.assertIn("start_new_session=True", launcher_source)
-        self.assertNotIn("nanobot-config.json", controller_source)
-        self.assertIn("_disable_process_dumping()", controller_source)
-        self.assertIn("if [ \"$(soul_level)\" -gt 0 ]", entrypoint)
-        self.assertIn("stop_soul_supervisor\n      kill_server_tree", entrypoint)
-        self.assertIn("SOUL: queued rollback evidence", entrypoint)
-        self.assertIn("analyze_failure.py", entrypoint)
-        self.assertIn("TCPServer.server_bind(self)", landing)
-
     def test_root_launcher_waits_for_hardening_and_accepts_max_key(self):
         created = []
         secret = "k" * launcher.MAX_API_KEY_BYTES

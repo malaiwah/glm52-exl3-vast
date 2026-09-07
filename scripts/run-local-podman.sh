@@ -7,11 +7,11 @@
 #   DOWNLOAD_MARKER_HOST=/path/to/.download-complete
 #
 # The checkpoint directory and completion marker are separate read-only bind
-# mounts. All mutable state and compilation caches live in Podman volumes.
+# mounts. Mutable state and compilation caches use caller-selected volumes/binds.
 set -euo pipefail
 
 IMAGE="${IMAGE:-ghcr.io/malaiwah/glm52-exl3-vast:latest}"
-NAME="${NAME:-glm52-turnkey}"
+NAME="${NAME:-glm53-candidate}"
 PORT="${PORT:-8000}"
 MODEL_DIR_HOST="${MODEL_DIR_HOST:?set MODEL_DIR_HOST to the prepared checkpoint}"
 MODEL_MOUNT_HOST="${MODEL_MOUNT_HOST:-$MODEL_DIR_HOST}"
@@ -26,11 +26,12 @@ VISION_MARKER_HOST="${VISION_MARKER_HOST:-}"
 TOKENIZER_JSON_HOST="${TOKENIZER_JSON_HOST:-}"
 SHARED_MODEL_STORE_HOST="${SHARED_MODEL_STORE_HOST:-}"
 SHARED_MODEL_STORE_CONTAINER="${SHARED_MODEL_STORE_CONTAINER:-$SHARED_MODEL_STORE_HOST}"
-GPU_DEVICES="${GPU_DEVICES:-0,1,2,3}"
-CACHE_VOLUME="${CACHE_VOLUME:-glm52-turnkey-cache}"
-STATE_VOLUME="${STATE_VOLUME:-glm52-turnkey-state}"
+GPU_DEVICES="${GPU_DEVICES:-2,1,0,3}"
+GPU_DEVICE_MODE="${GPU_DEVICE_MODE:-auto}"
+CACHE_VOLUME="${CACHE_VOLUME:-$NAME-cache}"
+STATE_VOLUME="${STATE_VOLUME:-$NAME-state}"
 LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"
-restart_policy="${RESTART_POLICY:-unless-stopped}"
+restart_policy="${RESTART_POLICY:-no}"
 if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   restart_policy=no
 fi
@@ -201,12 +202,17 @@ done < <(env)
 config_env=()
 for config_name in \
   MODEL_ID QUANTIZATION REASONING_PARSER TOOL_CALL_PARSER MULTIMODAL MM_MAX_PIXELS \
+  REASONING_EFFORT_DEFAULT PREFILL_SCHEDULE_INTERVAL TRUST_REMOTE_CODE VERIFY \
   TENSOR_PARALLEL_SIZE DCP MAX_MODEL_LEN MAX_NUM_SEQS \
   MAX_NUM_BATCHED_TOKENS VLLM_EXL3_PREFILL_CAPACITY DCP_PREFILL_WORKSPACE_MIB \
   GPU_MEMORY_UTILIZATION GPU_BLOCKS_OVERRIDE KV_CACHE_MEMORY_BYTES \
   OFFLOAD_FRACTION \
   OFFLOAD_IGNORE_MEMLOCK PREFIX_CACHE_BACKEND PREFIX_CACHE_DISK_GB \
-  LMCACHE_L1_INIT_GB \
+  LMCACHE_L1_INIT_GB LMCACHE_L1_READ_TTL \
+  LMCACHE_L1_MAX_GB \
+  LMCACHE_RETRIEVE_TIMEOUT_SECONDS LMCACHE_L2_EVICTION_POLICY \
+  LMCACHE_L2_EVICTION_TRIGGER_WATERMARK LMCACHE_L2_EVICTION_RATIO \
+  SUPERVISOR_MAX_RESTARTS \
   MTP_DRAFT DRAFT_QUANTIZATION MTP_TOKENS \
   MTP_DRAFT_SAMPLE_METHOD MTP_REJECTION_SAMPLE_METHOD CUDAGRAPH_CAPTURE_SIZES \
   MAX_CUDAGRAPH_CAPTURE_SIZE VLLM_EXL3_TRELLIS_MAX_M \
@@ -221,26 +227,70 @@ do
 done
 unset config_name
 
-# LMCache and vLLM both need time to drain background stores and release CUDA
-# workers. Podman's default force-removal grace is only ten seconds, which is
-# too short for a four-GPU GLM process and can leave extension locks or partial
-# L2 records behind. Stop an existing appliance cleanly before replacing it.
-if podman container exists "$NAME"; then
-  podman stop -t "${STOP_TIMEOUT:-120}" "$NAME" >/dev/null 2>&1 || true
-  podman rm -f "$NAME" >/dev/null 2>&1 || true
+# Podman 4.9 supports CDI and explicit host devices, not Docker's --gpus.
+# CONFIG_SMOKE must not even discover GPU devices or invoke the NVIDIA hook.
+gpu_args=()
+if [ "${CONFIG_SMOKE:-0}" != "1" ]; then
+  [[ "$GPU_DEVICES" =~ ^[0-9]+(,[0-9]+)*$ ]] || {
+    echo "FATAL: GPU_DEVICES must be comma-separated physical GPU indices" >&2
+    exit 4
+  }
+  IFS=',' read -r -a gpu_indices <<<"$GPU_DEVICES"
+  cdi_devices=""
+  case "$GPU_DEVICE_MODE" in
+    auto|cdi)
+      if command -v nvidia-ctk >/dev/null 2>&1; then
+        cdi_devices="$(nvidia-ctk cdi list 2>/dev/null || true)"
+      fi
+      cdi_complete=1
+      for gpu in "${gpu_indices[@]}"; do
+        if ! grep -Fxq "nvidia.com/gpu=$gpu" <<<"$cdi_devices"; then
+          cdi_complete=0
+        fi
+      done
+      if [ "$cdi_complete" = 1 ]; then
+        GPU_DEVICE_MODE=cdi
+      elif [ "$GPU_DEVICE_MODE" = cdi ]; then
+        echo "FATAL: requested NVIDIA CDI GPU devices are not registered" >&2
+        exit 4
+      else
+        GPU_DEVICE_MODE=manual
+      fi
+      ;;
+    manual) ;;
+    *) echo "FATAL: GPU_DEVICE_MODE must be auto, cdi, or manual" >&2; exit 4 ;;
+  esac
+  if [ "$GPU_DEVICE_MODE" = cdi ]; then
+    for gpu in "${gpu_indices[@]}"; do
+      gpu_args+=(--device "nvidia.com/gpu=$gpu")
+    done
+  else
+    host_devices=(/dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset)
+    for gpu in "${gpu_indices[@]}"; do
+      host_devices+=("/dev/nvidia$gpu")
+    done
+    # DRM numbering is host-specific; only expose the explicitly inventoried
+    # nodes, never an entire /dev directory or a privileged container.
+    if [ -n "${GPU_DRM_DEVICES:-}" ]; then
+      IFS=',' read -r -a drm_devices <<<"$GPU_DRM_DEVICES"
+      for device in "${drm_devices[@]}"; do
+        [[ "$device" =~ ^/dev/dri/(card[0-9]+|renderD[0-9]+)$ ]] || {
+          echo "FATAL: invalid GPU_DRM_DEVICES entry: $device" >&2; exit 4;
+        }
+        host_devices+=("$device")
+      done
+    fi
+    for device in "${host_devices[@]}"; do
+      [ -c "$device" ] || {
+        echo "FATAL: NVIDIA host device is missing: $device (or configure CDI)" >&2
+        exit 4
+      }
+      gpu_args+=(--device "$device")
+    done
+  fi
 fi
-# The smoke contract is "no GPU touched": requesting devices would fail at
-# container create on any host without the NVIDIA container stack, before the
-# resolved config ever printed.
-gpu_args=(--gpus "\"device=${GPU_DEVICES}\"")
-if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
-  gpu_args=()
-fi
-# CDI/--gpus controls which devices the container may access, but it does not
-# preserve the caller's list as CUDA's logical-rank ordering.  Export the same
-# list so GPU_DEVICES can provide deterministic TP-rank placement (for example
-# cold-to-hot on an owned host) instead of silently reverting to PCI order.
-profile_env=(-e MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}")
+# Preserve the physical list as CUDA's logical TP-rank order.
+profile_env=(-e MODEL_PROFILE="${MODEL_PROFILE:-glm53-3.42bpw-500k}")
 if [ -n "${MODEL_VARIANT:-}" ]; then
   profile_env+=(-e MODEL_VARIANT="$MODEL_VARIANT")
 fi
@@ -248,24 +298,75 @@ served_name_env=()
 if [ -n "${SERVED_MODEL_NAME:-}" ]; then
   served_name_env=(-e SERVED_MODEL_NAME="$SERVED_MODEL_NAME")
 fi
-profile_identity="${MODEL_VARIANT:-${MODEL_PROFILE:-glm52-exl3}}"
+profile_identity="${MODEL_VARIANT:-${MODEL_PROFILE:-glm53-3.42bpw-500k}}"
 
 health_start_period="${HEALTH_START_PERIOD:-}"
 if [ -z "$health_start_period" ]; then
   case "$profile_identity" in
-    exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw|glm53-3.42bpw)
+    exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw|glm53-3.42bpw|exl3-tr3-glm53-3.42bpw-500k|glm53-3.42bpw-500k|exl3-tr3-glm53-3.25bpw|glm53-3.25bpw)
       health_start_period=90m
       ;;
     *) health_start_period=45m ;;
   esac
 fi
-podman run -d --replace --restart="$restart_policy" \
+# Refuse collisions before any destructive action, including config smoke.
+# An explicit replacement retains the stopped original under a required name.
+existing=0
+if podman container exists "$NAME"; then
+  existing=1
+  if [ "${CONFIG_SMOKE:-0}" = 1 ] || [ "${REPLACE_EXISTING:-0}" != 1 ]; then
+    echo "FATAL: container already exists: $NAME; choose a fresh NAME" >&2
+    exit 4
+  fi
+  : "${ROLLBACK_NAME:?explicit replacement requires a fresh ROLLBACK_NAME}"
+  if [ "$ROLLBACK_NAME" = "$NAME" ]; then
+    echo "FATAL: ROLLBACK_NAME must differ from NAME" >&2
+    exit 4
+  fi
+  if podman container exists "$ROLLBACK_NAME"; then
+    echo "FATAL: ROLLBACK_NAME must name an unused container" >&2
+    exit 4
+  else
+    rollback_status=$?
+    [ "$rollback_status" = 1 ] || {
+      echo "FATAL: Podman could not check rollback name (status $rollback_status)" >&2
+      exit 4
+    }
+  fi
+else
+  exists_status=$?
+  [ "$exists_status" = 1 ] || {
+    echo "FATAL: Podman could not check container existence (status $exists_status)" >&2
+    exit 4
+  }
+fi
+podman image exists "$IMAGE" || {
+  echo "FATAL: image is not present locally: $IMAGE; prepare it separately" >&2
+  exit 4
+}
+if [ "${LAUNCH_PREFLIGHT:-0}" = 1 ]; then
+  echo "Preflight passed; no container started or modified."
+  exit 0
+fi
+if [ "$existing" = 1 ]; then
+  podman stop -t "${STOP_TIMEOUT:-120}" "$NAME"
+  podman rename "$NAME" "$ROLLBACK_NAME"
+  echo "Preserved rollback container: $ROLLBACK_NAME" >&2
+fi
+# An empty real directory disables legacy NVIDIA OCI hooks, including for
+# config smoke. /dev/null is not a directory and Podman rejects it.
+hooks_dir="$(mktemp -d)"
+trap 'rmdir "$hooks_dir"' EXIT
+gpu_args+=(--hooks-dir="$hooks_dir")
+podman run -d --pull=never --restart="$restart_policy" \
   --name "$NAME" \
   --health-cmd "curl -sf http://localhost:${PORT}/health || exit 1" \
   --health-interval 30s --health-timeout 10s --health-retries 3 \
   --health-start-period "$health_start_period" \
   ${gpu_args[@]+"${gpu_args[@]}"} --ipc=host --network host \
-  -e CUDA_VISIBLE_DEVICES="$GPU_DEVICES" \
+  --init --ulimit memlock=-1 --ulimit stack=67108864 \
+  --ulimit nofile=1048576:1048576 \
+  -e CUDA_VISIBLE_DEVICES="$GPU_DEVICES" -e NVIDIA_VISIBLE_DEVICES=void \
   "${profile_env[@]}" \
   -e MODEL_DIR="$MODEL_DIR_CONTAINER" \
   -e MODEL_READ_ONLY=1 \

@@ -2,14 +2,95 @@
 
 Reusable qualification protocol for every release. Results are recorded in
 [TEST_RESULTS.md](TEST_RESULTS.md); per-release GLM model qualification
-details are in the `docs/glm52-rXX-*.md` files. Current release: **GG
-v20-r28**.
+details are in the `docs/glm52-rXX-*.md` files. Next release: **full non-Flash
+GLM-5.3 3.42bpw 520K candidate**, not yet GPU-qualified. Earlier r26/r28
+results retain their historical model and image scope.
 
 This plan has two cost tiers. A sub-1B Qwen representative validates provider,
-UI and OpenAI-API plumbing on one GPU. A single four-GPU flagship pass per
-provider then validates the immutable GLM image, loader, 520K envelope,
-performance and power without repeating every failure experiment. Rentals are
-sequential and are deleted as soon as their evidence is copied.
+UI and OpenAI-API plumbing on one GPU. A separate authorized four-GPU full-model
+pass validates the immutable candidate image, loader, preserved 520,192-token
+total envelope, performance and power. Do not substitute Flash or GLM-5.2
+evidence for the full GLM-5.3 gate. Rentals are sequential and deleted only
+after their evidence is copied; existing owned-host production is not a rental
+to stop or destroy.
+
+## Full GLM-5.3 candidate maintenance gate
+
+The release intent is `MODEL_PROFILE=glm53-3.42bpw-500k`, variant
+`exl3-tr3-glm53-3.42bpw-500k`, family `glm52`, checkpoint
+`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`.
+Its 81 weight LFS identities match evaluated `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`;
+the changed template still needs the parser/continuation gate.
+
+Use [maintenance/glm53-aibeast-500k](maintenance/glm53-aibeast-500k/) to stage
+an immutable candidate independently. Podman 4.9 uses inventoried manual
+devices, GPU order 2,1,0,3, separate port/name/state/cache, and restart disabled.
+Staging and CPU inspection do not authorize a GPU window or production stop.
+The runner must refuse to start while production occupies the GPUs. Preserve
+the old image digest, launch environment, state and cache; rollback starts
+that preserved service rather than rewriting it to the new defaults.
+
+The runnable sequence is `candidate.py stage`, `verify-model`, `preflight`
+and `config-smoke`; `start` is permitted only after an operator has deliberately
+stopped production in the authorized window. Then run:
+
+```bash
+RUN_GPU_QUALIFICATION=1 uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py run-qualification
+```
+
+The runner produces receipts and invokes the evidence gate; do not fabricate
+or manually fill success JSON. Its real-GPU matrix includes features,
+C1/C4/C8, >=500K retrieval, cache transfer/restart/miss and 384-GiB L2 pressure,
+and deliberate LMCache/engine-group failure recovery. L2 eviction pressure is
+expensive and bounded at 512 requests of roughly 131K tokens; absence of
+observed eviction fails rather than silently skipping that gate.
+
+1. After image build, run the provenance generator with the serving interpreter
+   and final installed overlay/cache files. Extract `/opt/runtime-provenance.json`,
+   compare critical hashes with the files actually inside the image, and record
+   the separately obtained pushed digest. Missing required critical source,
+   NCCL or ExLlama native files fail admission. No source bind mounts in the gate.
+2. Confirm TP4/DCP4, native MTP3, online K6, dynamic NVFP4/FP8 RoPE,
+   4,518,907,904 KV bytes/GPU, scheduler 2048, prefill arena 1024, C8 and GMU 0.93.
+   Confirm fraction-derived LMCache RAM is capped at 125 GiB with 20 GiB lazy
+   initialization. DRAM/NVMe cache sizes do not count as active-context capacity.
+3. Record cold-boot and first-use physical memory/allocator data, including
+   top-p temperature-1 sampling, all 512 requested output tokens, strict JSON
+   and tool paths. Require healthy API and zero engine restarts.
+   The isolated stage sets `VERIFY=0`; the runner must own the first API sample,
+   require zero previous/in-flight requests, unchanged engine generation and
+   cold logs free of startup failures/retries. A later warmed success cannot
+   certify a failed cold attempt.
+   The AIBeast profile deliberately uses `AUTH=none` and `LANDING_PAGE=0` on a
+   trusted host network; record that exposure and verify its firewall/tunnel
+   boundary. Test authenticated API/dashboard behavior in the separate
+   provider/authenticated profile, not as a false claim about this stage.
+4. Exercise streaming and nonstreaming literal tool delimiters, stripped stop
+   text, null content, multi-tool continuation and reordered result IDs using
+   the new template and installed parser, not a standalone regex surrogate.
+5. Run tokenizer-exact unique-prefix multi-depth retrieval at increasing
+   lengths, ending with **at least 500,000 actual input tokens plus useful
+   output** within 520,192 total tokens. Record actual API usage, output facts,
+   health and error/preemption evidence over multiple seeds. A configured
+   context value, logical pool count or available-memory estimate cannot pass.
+6. Exercise C1/C4/C8, long cache-miss prefill concurrent with active decodes,
+   cancellation, sampler paths and multi-turn tool workloads. Record longest
+   output gap and prefill progress; do not infer eight full-length concurrent
+   requests from C8 short-prompt throughput.
+7. Validate cold/warm DRAM and L2 prefix retrieval, miss/recompute, observed
+   L2 eviction, and deliberate cache/engine-group failure recovery. Confirm
+   external-hit tokens and actual transfers, then restart the same image with
+   persistent candidate caches and repeat the boundary gate. The runner's
+   deadline-ownership proof uses CPU-controlled futures with the actual
+   installed adapter; it is not a 180-second live GPU DMA-hang injection.
+   Keep that scoped proof distinct from real cache-transfer/recovery receipts.
+8. Re-run core correctness and log audit after stress and a second boot of the
+   **published digest**. Only complete exact-stage receipts permit official
+   release/`latest` promotion. Reboot enablement and production cutover remain
+   explicit later operator actions. Keep rollback usable throughout.
+
+No 750K capacity promise is part of this candidate. Additional context or
+different KV formats require a separately scoped measured ladder.
 
 ## Guardrails
 
@@ -23,9 +104,9 @@ sequential and are deleted as soon as their evidence is copied.
   termination deadline where supported.
 - Use a 60 GB local disk on Vast and a 50 GB container disk plus 20 GB
   `/workspace` volume on Runpod for the smoke profile. Allocate at least
-  450 GB for the GLM checkpoint and evidence; use at least a 500 GB full VM
-  disk on JarvisLabs because the appliance image, 309 GiB checkpoint, compile
-  caches, and evidence share one filesystem.
+  600 GB for the full GLM checkpoint, image and compile caches; use at least
+  650 GB for a JarvisLabs full VM. Optional bounded L2 needs additional local
+  space; do not count the same disk margin twice.
 - Use `Qwen/Qwen3.5-0.8B` through the `custom` profile with an 8K context. Its
   small download keeps the live test short while exercising the Qwen3.5
   architecture supported by the pinned vLLM runtime.
@@ -78,7 +159,6 @@ sequential and are deleted as soon as their evidence is copied.
 MODEL_PROFILE=custom
 MODEL_ID=Qwen/Qwen3.5-0.8B
 MODEL_DOWNLOAD_GIB=2
-MODEL_DISPLAY_NAME=Qwen3.5-0.8B Smoke
 SERVED_MODEL_NAME=qwen-smoke
 MAX_MODEL_LEN=8192
 MODEL_OUTPUT_LIMIT=1024

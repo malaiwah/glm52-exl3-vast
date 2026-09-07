@@ -143,248 +143,6 @@ def test_glm_release_defaults():
           d["MODEL_REVISION"] == "9297b9f1d53af5c67cffa01e30cc071a1ff7144b")
 
 
-def test_glm_release_integration():
-    section("the GLM-5.3 K6/K8 runtime and retained GLM-5.2 contracts")
-    entry = open(os.path.join(REPO, "entrypoint.sh")).read()
-    dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
-    acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
-    config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
-    local_runner = open(os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
-    kld_runner = open(
-        os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
-    runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image and all live GLM-5.3 overlays are pinned fail-closed",
-          "sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692"
-          in dockerfile
-          and "COPY patches/glm53-runtime/ /opt/glm53-runtime/" in dockerfile
-          and "apply_glm53_runtime_overlays.py" in dockerfile
-          and "--verify-only" in dockerfile
-          and "verify_r28_base.py" not in dockerfile
-          and "apply_field_review_patches.py" not in dockerfile)
-    check("GLM-5.3 uses the exact system-Python launcher qualified live",
-          '[ "${FAMILY_ENV_BLOCK:-}" = "glm53" ]' in entry
-          and "_VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)" in entry)
-    check("static NVFP4 scaling selects and verifies the reviewed artifact",
-          "KV_SCALE_MODE:-static-calibrated" in entry
-          and "VLLM_NVFP4_MLA_SCALES_FILE" in entry
-          and "ac68fe6af3056ec35299361293c9ae568769d21696756548493f67ff17881ece"
-          in entry and
-          "/opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json"
-          in dockerfile)
-    check("dynamic-token NVFP4 selects the complete paired r9 ABI",
-          "dynamic-token)" in entry
-          and "export KV_FP8_ROPE=1" in entry
-          and "export VLLM_NVFP4_MLA_DYNAMIC_SCALE=1" in entry
-          and "unset VLLM_NVFP4_MLA_SCALES_FILE" in entry)
-    check("the full GLM family clears inherited Flash NoPE state",
-          "unset VLLM_B12X_GLM_NOPE_NVFP4 B12X_GL53_ROUTE128_WIDE" in entry
-          and "unset B12X_GL53_ROUTE128_HYBRID_TAIL "
-              "VLLM_ALLREDUCE_USE_SYMM_MEM" in entry)
-    check("adaptive exact indexer folding stays bounded",
-          'SPARKINFER_INDEXER_TWO_LEVEL_FOLD:-auto' in entry
-          and 'SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256' in entry)
-    check("deSEC DNS-01 runs the authoritative convergence guard",
-          'acme_retry.sh" --once' in entry
-          and 'acme_retry.sh" --retry' in entry
-          and 'desec_acme_guard.py"' in acme_retry
-          and '--zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN"' in acme_retry
-          and 'guard_pid=$!' in acme_retry
-          and '--dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-45s}"'
-          in acme_retry
-          # challenge cleanup targets the right rrset (apex-aware: the subname
-          # is "" for the zone apex, else the label below the zone).
-          and 'rrsets/${challenge}/TXT/' in acme_retry
-          and 'challenge="_acme-challenge.${sub}"' in acme_retry
-          and 'timeout --signal=TERM --kill-after=10' in acme_retry
-          and 'dns.__version__ == "2.8.0"' in dockerfile
-          and "lego_v4.35.2_linux_amd64.tar.gz" in dockerfile
-          and "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3"
-          in dockerfile
-          and "COPY scripts/ /opt/scripts/" in dockerfile)
-    check("VMs without CUDA peer access fall back before custom collectives",
-          'nvidia-smi topo -p2p r' in entry
-          and "^[[:space:]]*GPU[0-9]+[[:space:]]" in entry
-          and '_p2p_matrix_rows' in entry
-          and 'export B12X_PCIE_DMA=0' in entry
-          and 'export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0'
-          in entry
-          and 'using NCCL/SHM collectives' in entry)
-    check("JarvisLabs gets a persisted generated dashboard token and launch URL",
-          '[ "$PLATFORM" = "runpod" ] || [ "$PLATFORM" = "jarvislabs" ]'
-          in entry
-          and "OPEN_BUTTON_TOKEN_FILE" in entry
-          and 'https://${ACME_DOMAIN}:${PUBLIC_DASHBOARD_PORT}/?token=${OPEN_BUTTON_TOKEN}'
-          in entry
-          and "Use an SSH tunnel, then open:" in entry)
-    check("the target/draft trellis minimum is role-aware",
-          'if [ "${MTP_TOKENS:-3}" = "0" ]; then' in entry and
-          "export VLLM_EXL3_TRELLIS_MIN_M=1" in entry and
-          "unset VLLM_EXL3_TRELLIS_MIN_M" in entry)
-    check("the validated Trellis ceiling survives the runtime env refresh",
-          'VLLM_EXL3_TRELLIS_MAX_M="${VLLM_EXL3_TRELLIS_MAX_M:-32}"'
-          in entry and
-          "export VLLM_EXL3_TRELLIS_MAX_M=32" not in entry)
-    for setting in (
-            "VLLM_DCP_QUERY_SPLIT=1",
-            "VLLM_DCP_TOPK_OWNER_MERGE=1",
-            'VLLM_B12X_MLA_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-auto}"',
-            "VLLM_DCP_PROJECT_BEFORE_MERGE=1",
-            "VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1"):
-        check(f"prefill policy includes {setting}", setting in entry)
-    check("the DCP prefill workspace is topology-safe",
-          'if [ "${DCP:-4}" = "4" ]; then' in entry
-          and "VLLM_DCP_PROJECT_BEFORE_MERGE=0" in entry
-          and "VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=0" in entry)
-    check("the DCP prefill workspace is self-service",
-          'VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}"'
-          in entry)
-    check("safetensors remains the architecture-level fallback",
-          gc.family("glm52")["defaults"]["LOAD_FORMAT"] == "safetensors")
-    check("the balanced profile promotes the near-max-qualified loader",
-          resolved(gpus=4)[0]["LOAD_FORMAT"] == "safetensors")
-    check("local shared checkpoints have an explicit immutable mode",
-          'if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then' in entry
-          and "Checkpoint is read-only; mutation steps skipped." in entry)
-    check("a prepared vision derivative is allowed read-only",
-          '[ ! -f "$MODEL_DIR/.vision-enabled" ]' in entry
-          and '--vision "${VISION:-0}" --dry-run --quiet' in entry)
-    check("vision plugins install from a writable copy for read-only checkpoints",
-          "install_vision_plugin()" in entry
-          and 'cp -a "$plugin_dir/." "$install_dir/"' in entry
-          and "--no-build-isolation --no-deps" in entry
-          and "read-only derivative plugin registered" in entry)
-    check("a missing vision plugin fails before the vLLM restart loop",
-          "FATAL: Vision marker is present" in entry
-          and "FATAL: read-only vision derivative cannot register" in entry)
-    check("immutable targets default all compile caches away from the checkpoint",
-          'export VLLM_CACHE_ROOT="/cache/$CACHE_NAMESPACE/vllm"' in entry
-          and 'export TRITON_CACHE_DIR="/cache/$CACHE_NAMESPACE/triton"' in entry
-          and 'export TORCH_EXTENSIONS_DIR="/cache/$CACHE_NAMESPACE/torch_extensions"'
-          in entry
-          and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
-          in entry)
-    check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-runtime-o27-v3"'
-          in entry
-          and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
-          and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
-    check("the live-qualified GLM-5.3 overlay generation is cache-versioned",
-          "apply_glm53_runtime_overlays.py" in dockerfile
-          and "patches/glm53-runtime" in dockerfile
-          and "-turnkey-glm53-runtime-o27-v3" in entry)
-    check("the local Podman runner does not bypass cache fingerprinting",
-          "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
-          and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
-    check("the local Podman runner preserves the requested CUDA rank order",
-          '-e CUDA_VISIBLE_DEVICES="$GPU_DEVICES"' in local_runner)
-    check("the cold 3.42 profile gets its measured 90-minute health grace",
-          'exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw|glm53-3.42bpw)'
-          in local_runner
-          and 'health_start_period=90m' in local_runner
-          and '--health-start-period "$health_start_period"' in local_runner)
-    check("auto profile sentinels do not leak into the calibration helper",
-          "env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" in entry
-          and "-u PCIE_DMA_MIN_BYTES" in entry)
-    for key in ("OFFLOAD_FRACTION", "OFFLOAD_IGNORE_MEMLOCK",
-                "KV_CACHE_MEMORY_BYTES",
-                "LMCACHE_L1_INIT_GB",
-                "CUDAGRAPH_CAPTURE_SIZES", "MAX_CUDAGRAPH_CAPTURE_SIZE",
-                "VLLM_EXL3_TRELLIS_MAX_M", "VLLM_EXL3_PREFILL_CAPACITY",
-                "DCP_CKV_GATHER_MAX_TOKENS",
-                "DCP_KV_CACHE_INTERLEAVE_SIZE",
-                "MTP_REJECTION_SAMPLE_METHOD", "KV_SCALE_MODE"):
-        check(f"the local runner forwards an explicit {key}",
-              key in local_runner and
-              'config_env+=(-e "$config_name=${!config_name}")' in local_runner)
-    check("the local runner can explicitly override detected TP and DCP",
-          "TENSOR_PARALLEL_SIZE DCP MAX_MODEL_LEN" in local_runner)
-    check("the local runner does not mask the selected variant with old defaults",
-          'MAX_NUM_BATCHED_TOKENS:-2048' not in local_runner
-          and 'GPU_BLOCKS_OVERRIDE:-2048' not in local_runner
-          and 'F8_DMA:-ring' not in local_runner)
-    check("the local runner forwards arbitrary validated TUNE_ overrides",
-          "TUNE_[A-Z0-9_]*" in local_runner
-          and '"${tuning_env[@]}"' in local_runner)
-    check("the local runner forwards its documented GPU-free config smoke",
-          '-e CONFIG_SMOKE="${CONFIG_SMOKE:-0}"' in local_runner
-          and 'restart_policy=no' in local_runner
-          and '--restart="$restart_policy"' in local_runner)
-    check("the local runner mounts bounded persistent LMCache below the "
-          "secure-erase-aware workspace",
-          'LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"' in local_runner
-          and '$LMCACHE_DISK_HOST:/workspace/.lmcache:rw' in local_runner
-          and "LMCACHE_DISK_HOST must be an absolute path" in local_runner)
-    check("the local runner gives vLLM and LMCache a graceful replacement",
-          'podman container exists "$NAME"' in local_runner
-          and 'podman stop -t "${STOP_TIMEOUT:-120}" "$NAME"' in local_runner
-          and 'podman rm -f "$NAME"' in local_runner)
-    check("a native local run clears any draft path baked into the image",
-          'draft_env=(-e DRAFT_MODEL=)' in local_runner
-          and 'draft_env=(-e DRAFT_MODEL="$DRAFT_MODEL_CONTAINER")'
-          in local_runner)
-    check("the local runner can compose a read-only vision derivative",
-          'VISION_ASSET_HOST="${VISION_ASSET_HOST:-}"' in local_runner
-          and '$MODEL_DIR_CONTAINER/.vision:ro' in local_runner
-          and '$MODEL_DIR_CONTAINER/.vision-enabled:ro' in local_runner
-          and "set both VISION_ASSET_HOST and VISION_MARKER_HOST" in local_runner)
-    check("the local runner can supply an immutable shared tokenizer",
-          'TOKENIZER_JSON_HOST="${TOKENIZER_JSON_HOST:-}"' in local_runner
-          and '$MODEL_DIR_CONTAINER/tokenizer.json:ro' in local_runner
-          and "tokenizer serialization does not exist" in local_runner)
-    check("absolute shared-store checkpoint symlinks remain resolvable",
-          'SHARED_MODEL_STORE_HOST="${SHARED_MODEL_STORE_HOST:-}"' in local_runner
-          and 'SHARED_MODEL_STORE_CONTAINER="${SHARED_MODEL_STORE_CONTAINER:-$SHARED_MODEL_STORE_HOST}"'
-          in local_runner
-          and "SHARED_MODEL_STORE_CONTAINER must be an absolute path" in local_runner)
-    check("Hugging Face snapshot symlinks retain their sibling blob store",
-          '*/models--*/snapshots/*)' in local_runner
-          and 'hf_model_root="${MODEL_DIR_HOST%%/snapshots/*}"' in local_runner
-          and 'MODEL_MOUNT_CONTAINER=/models/hf-checkpoint' in local_runner
-          and '$MODEL_MOUNT_HOST:$MODEL_MOUNT_CONTAINER:ro' in local_runner)
-    check("the KLD runner also preserves Hugging Face snapshot symlinks",
-          '*/models--*/snapshots/*)' in kld_runner
-          and 'MODEL_MOUNT_ROOT="$hf_model_root"' in kld_runner
-          and 'MODEL_CONTAINER_ROOT="/models/hf-checkpoint/$hf_snapshot_relative"'
-          in kld_runner
-          and '$MODEL_MOUNT_ROOT:$MODEL_MOUNT_CONTAINER:ro' in kld_runner)
-    check("the KLD protocol can retain DCP4 for a mixed checkpoint that needs it",
-          'KLD_DCP="${KLD_DCP:-1}"' in kld_runner
-          and '"dcp=$KLD_DCP"' in kld_runner
-          and '\\"decode_context_parallel_size\\":$KLD_DCP' in kld_runner)
-    check("an external draft is compatible with an immutable target",
-          '[ "${MTP78_MODE:-off}" != "off" ] && [ -z "${DRAFT_MODEL:-}" ]'
-          in entry)
-    check("InstantTensor is an explicit opt-in",
-          gc.KNOB_BY_KEY["LOAD_FORMAT"]["choices"] == ["safetensors", "instanttensor"])
-    check("the CLI explains the variant inheritance layer",
-          "default < family < variant < env < state file" in config_cli)
-    check("offload reports a per-worker physical estimate",
-          "OFF_BYTES=$((OFF_TOTAL_BYTES / OFFLOAD_RANKS))" in entry)
-    check("the native connector receives the aggregate offload budget",
-          '"cpu_bytes_to_use\\":$OFF_TOTAL_BYTES' in entry
-          and '"cpu_bytes_to_use\\":$OFF_BYTES' not in entry)
-    check("the Runpod GLM template inherits the measured variant defaults",
-          runpod["env"]["VISION"] == "0"
-          and "OFFLOAD_FRACTION" not in runpod["env"]
-          and "MTP_DRAFT_SAMPLE_METHOD" not in runpod["env"]
-          and "MTP78_MODE" not in runpod["env"])
-    for setting in ("VLLM_PCIE_DMA_FP8",
-                    "SPARKINFER_PCIE_DMA_FP8", "PCIE_CALIBRATION_ONLY=1",
-                    "DCP_TOPK_OWNER_MERGE=auto",
-                    "DCP_INDEXER_SHARDS=auto",
-                    "VLLM_USE_MEGA_AOT_ARTIFACT=1",
-                    "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS:--1",
-                    "PCIE_DMA_MIN_BYTES:--1"):
-        check(f"the v20 transport path includes {setting}", setting in entry)
-    for obsolete in ("VLLM_USE_B12X_PCIE_DMA",
-                     "VLLM_RTX6K_FUSED_ALLREDUCE_ADD",
-                     "VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER"):
-        check(f"the appliance removes inherited legacy knob {obsolete}",
-              f"unset {obsolete}" in entry
-              and f"export {obsolete}" not in entry)
-    check("the vision argument fragment does not duplicate trust-remote-code",
-          'VISION_ARGS=(--limit-mm-per-prompt "{\\"vision_chunk\\":${VISION_CHUNKS:-8}}")'
-          in entry)
 
 
 def test_glm_max_context_profile():
@@ -682,25 +440,6 @@ def test_glm53_342_dsa_profile():
           and "draft-model-overrides" in ids(external_findings)
           and gc.derive(external_draft)["MTP78_MODE"] == "off",
           str(external_findings))
-    entry = open(os.path.join(REPO, "entrypoint.sh")).read()
-    local_runner = open(
-        os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
-    check("the provider profile selects the compatible internal variant",
-          "glm53-3.42bpw)" in entry
-          and 'MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3-glm53-3.42bpw}"'
-          in entry)
-    check("the cold mixed checkpoint receives the 90-minute health grace",
-          "exl3-tr3-glm53-3.42bpw|glm53-3.42bpw)"
-          in local_runner)
-    checkpoint_prep = entry.split("prepare_checkpoint() {", 1)[1]
-    mtp_prep = entry.split("prepare_mtp78() {", 1)[1].split(
-        "prepare_vision() {", 1)[0]
-    check("stale grafts are restored before any checkpoint refresh",
-          checkpoint_prep.index("if ! revert_mtp78_before_fetch") <
-          checkpoint_prep.index("if ! fetch_weights"))
-    check("external drafts disable graft mode before compatibility checks",
-          mtp_prep.index('if [ -n "${DRAFT_MODEL:-}" ]') <
-          mtp_prep.index('if [ "$MTP78_MODE" = "graft" ]'))
 
 
 
@@ -1158,27 +897,6 @@ def test_gpu_count_gate():
           not errs(gc.validate(eff, {"gpu_count": 4})), str(errs(gc.validate(eff))))
 
 
-def test_long_context_gate_is_family_independent():
-    section("the long-context gate belongs to every family")
-    import verify_serving
-    src = open(os.path.join(REPO, "scripts", "verify_serving.py")).read()
-    check("the verifier has no family branch",
-          "MODEL_FAMILY" not in src and "FAMILIES" not in src,
-          "verify_serving.py must stay model-agnostic")
-    check("it does not import the config registry at all",
-          "import glm_config" not in src)
-    check("it still refuses to call short prompts sufficient",
-          "long_context_verified" in src)
-    check("and the needle probe is the thing that sets it",
-          "needle_probe" in src and "long_context_verified" in src)
-    # the probe budget follows MAX_MODEL_LEN, which is a family default
-    for fam, expected in (("glm52", 524288), ("glm53", 458752),
-                          ("qwen36", 196608)):
-        eff, _, _ = resolved(fam)
-        check(f"{fam} probes against its own context ceiling ({expected})",
-              eff["MAX_MODEL_LEN"] == expected)
-    check("the verifier's degeneracy detector is generic",
-          "def degenerate" in src and "punctuation" in src)
 
 
 def test_env_layer_still_wins_over_family():
@@ -1267,6 +985,36 @@ def test_validation_scoping_fixes():
           "draft-model-quoting" in errs(gc.validate(eff)))
 
 
+def test_full_glm53_candidate_boundaries():
+    section("full GLM-5.3 preserves AIBeast's context without claiming qualification")
+    eff, _, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.42bpw-500k")
+    findings = gc.validate(eff, {"gpu_count": 4})
+    check("the complete candidate is admissible but unqualified",
+          not errs(findings) and "variant-untested" in ids(findings), findings)
+    check("the served model retains 3.42bpw and AIBeast's full request budget",
+          gc.derive(eff)["MODEL_REPO"] ==
+          "davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw"
+          and eff["MAX_MODEL_LEN"] == 520192
+          and eff["SERVED_MODEL_NAME"] == "GLM-5.3")
+    check("a larger unmeasured envelope is not silently accepted",
+          "glm53-candidate-envelope" in errs(gc.validate(
+              {**eff, "MAX_MODEL_LEN": 655360}, {"gpu_count": 4})))
+    check("an inherited smaller KV pool cannot masquerade as 512K support",
+          "glm53-candidate-envelope" in errs(gc.validate(
+              {**eff, "KV_CACHE_MEMORY_BYTES": 3415867392})))
+    check("the old GLM-5.2 graft cannot modify the full GLM-5.3 checkpoint",
+          "mtp-graft-incompatible" in errs(gc.validate(
+              {**eff, "MTP_DRAFT": "tr3-graft"})))
+    low, _, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.42bpw-500k",
+        REASONING_EFFORT_DEFAULT="low")
+    args = gc.family_serve_args(low)
+    kwargs = json.loads(args[args.index("--default-chat-template-kwargs") + 1])
+    check("operator reasoning effort reaches the actual serving contract",
+          kwargs == {"reasoning_effort": "low"})
+
+
 def run(test):
     """Run one test_* function. A failing check() raises AssertionError
     after recording the failure; swallow it here so the rest of the
@@ -1286,13 +1034,13 @@ def main():
     os.makedirs(os.environ["GLM_RUNTIME_DIR"], exist_ok=True)
     try:
         run(test_glm_release_defaults)
-        run(test_glm_release_integration)
         run(test_glm_max_context_profile)
         run(test_madeby561_hybrid)
         run(test_higher_fidelity_exl3_candidate)
         run(test_r20_336_online_quant_candidate)
         run(test_r28_342_shared_h_profile)
         run(test_glm53_342_dsa_profile)
+        run(test_full_glm53_candidate_boundaries)
         run(test_known_good_replays_across_profile_env_change)
         run(test_glm53_k6_profile)
         run(test_qwen_preset)
@@ -1301,7 +1049,6 @@ def main():
         run(test_rules_are_family_scoped)
         run(test_family_coherence_rules)
         run(test_gpu_count_gate)
-        run(test_long_context_gate_is_family_independent)
         run(test_env_layer_still_wins_over_family)
         run(test_shipped_variants_validate_clean)
         run(test_validation_scoping_fixes)

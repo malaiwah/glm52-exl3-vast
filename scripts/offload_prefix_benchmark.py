@@ -132,6 +132,8 @@ def main(argv=None):
     parser.add_argument("--insecure", action="store_true")
     parser.add_argument("--out", default="")
     args = parser.parse_args(argv)
+    if args.prefix_tokens < 32 or args.eviction_prefixes < 1 or args.output_tokens < 1:
+        parser.error("prefix tokens >=32, eviction prefixes >=1, and output tokens >=1 required")
 
     base = args.base_url.rstrip("/")
     key = bench.read_key(args.api_key_file)
@@ -153,6 +155,10 @@ def main(argv=None):
             "%Y-%m-%dT%H:%M:%SZ"),
         "base_url": base,
         "model": model,
+        "prompt_identity": run_id,
+        "prompt_identity_policy": "caller-supplied" if args.prompt_seed else "fresh-uuid",
+        "cache_regime": "stage names describe intent; counter deltas are the hit evidence",
+        "metrics_scope": "server-wide; isolate other traffic during measurement",
         "settings": {
             "requested_prefix_tokens": args.prefix_tokens,
             "actual_target_prefix_tokens": actual,
@@ -167,28 +173,33 @@ def main(argv=None):
         "complete": False,
         "ok": False,
     }
-    write_result(args.out, doc)
+
+    def checkpoint():
+        if args.out:
+            write_result(args.out, doc)
+
+    checkpoint()
     try:
         doc["cold"] = run_request(
             base, key, model, target_prompt, actual, args.output_tokens,
             args.timeout, args.insecure)
-        write_result(args.out, doc)
+        checkpoint()
         doc["gpu_hot"] = run_request(
             base, key, model, target_prompt, actual, args.output_tokens,
             args.timeout, args.insecure)
-        write_result(args.out, doc)
+        checkpoint()
         for prompt, tokens in evictors:
             doc["eviction"].append(run_request(
                 base, key, model, prompt, tokens, args.output_tokens,
                 args.timeout, args.insecure))
-            write_result(args.out, doc)
+            checkpoint()
         doc["dram_reload"] = run_request(
             base, key, model, target_prompt, actual, args.output_tokens,
             args.timeout, args.insecure)
         doc["complete"] = True
         stages = [doc["cold"], doc["gpu_hot"], *doc["eviction"],
                   doc["dram_reload"]]
-        doc["ok"] = all(
+        doc["requests_ok"] = all(
             stage.get("request", {}).get("ok") for stage in stages)
         # A healthy request matrix is distinct from proving an external hit.
         # vLLM's connector-level counter applies to both the native
@@ -203,9 +214,11 @@ def main(argv=None):
         # proof that the external tier actually served tokens.
         doc.update(connector_hit_summary(
             doc["cold"].get("metrics", {}), reload_metrics))
+        doc["ok"] = bool(doc["requests_ok"] and doc["any_external_hit_observed"])
         write_result(args.out, doc)
-    except Exception as error:
+    except BaseException as error:
         doc["fatal_error"] = f"{type(error).__name__}: {error}"
+        doc["ok"] = False
         write_result(args.out, doc)
         raise
     return 0 if doc["ok"] and doc["any_external_hit_observed"] else 2

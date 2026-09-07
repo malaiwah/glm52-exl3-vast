@@ -13,7 +13,7 @@ was not found, which is an image/source requalification boundary.
 from __future__ import annotations
 
 import os
-import py_compile
+import tempfile
 from pathlib import Path
 
 
@@ -56,7 +56,10 @@ def patch_text(source: str) -> tuple[str, str]:
     # more than one site must not be silently half-patched (replace(..., 1)
     # would fix only the first and report success). Mirror the sibling
     # appliers, which require the anchor to occur exactly once.
-    if NEW in source:
+    old_count, new_count = source.count(OLD), source.count(NEW)
+    if new_count:
+        if old_count or new_count != 1:
+            raise ValueError("r11 EXL3 parity-call source contains mixed or duplicate anchors")
         return source, "already patched"
     if OLD not in source:
         raise ValueError("r11 EXL3 parity-call source anchor not found")
@@ -72,7 +75,8 @@ def main() -> int:
     try:
         source = TARGET.read_text()
         patched, status = patch_text(source)
-    except (OSError, ValueError) as error:
+        compile(patched, str(TARGET), "exec")
+    except (OSError, ValueError, SyntaxError) as error:
         print(f"exl3/parity-abi: {error}")
         return 1
 
@@ -81,18 +85,25 @@ def main() -> int:
         return 0
 
     backup = TARGET.with_suffix(TARGET.suffix + ".turnkey-original")
-    temporary = TARGET.with_suffix(TARGET.suffix + ".tmp")
+    temporary = None
     try:
+        # Validate before replacing anything; a stale backup must never replace
+        # today's source when a new patch fails to compile.
         if not backup.exists():
-            backup.write_text(source)
-        temporary.write_text(patched)
+            with tempfile.NamedTemporaryFile(mode="w", dir=TARGET.parent, delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(source)
+            os.replace(temporary, backup)
+            temporary = None
+        with tempfile.NamedTemporaryFile(mode="w", dir=TARGET.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(patched)
+        temporary.chmod(TARGET.stat().st_mode)
         os.replace(temporary, TARGET)
-        py_compile.compile(str(TARGET), doraise=True)
     except Exception as error:
-        temporary.unlink(missing_ok=True)
-        if backup.exists():
-            os.replace(backup, TARGET)
-        print(f"exl3/parity-abi: patch failed and was rolled back: {error}")
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        print(f"exl3/parity-abi: patch failed; original source retained: {error}")
         return 1
 
     print("exl3/parity-abi: patched OK")

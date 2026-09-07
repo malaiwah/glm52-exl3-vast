@@ -3,6 +3,66 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
+## Unreleased — full GLM-5.3 3.42bpw 520K candidate
+
+The next official release is intended to default to full non-Flash
+`MODEL_PROFILE=glm53-3.42bpw-500k`, architecture family `glm52`, variant
+`exl3-tr3-glm53-3.42bpw-500k`. It is **not GPU-qualified**. Candidate builds must
+publish only a commit SHA/digest until an authorized AIBeast maintenance
+window demonstrates at least 500,000 real input tokens plus useful output
+inside the preserved 520,192-token total envelope. No production stop, cutover,
+reboot enablement or `latest` promotion follows from staging alone.
+
+Checkpoint pin:
+`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`.
+All 81 LFS weight SHA-256/size pairs match independently evaluated
+`8bef807a0fcdd180e984a26b50e731cdba9a8ff2`; metadata and the chat template
+changed, so parser/tool continuation must be requalified. Planned TP4/DCP4,
+dynamic NVFP4 KV/FP8 RoPE, 4,518,907,904 KV bytes/GPU, scheduler 2048, prefill
+arena 1024, C8, native probabilistic MTP3, online K6 and GMU 0.93 retain an
+explicit memory budget, **not a capacity result**. No 750K claim is made.
+The previous full 3.42 profile remains at its qualified 393,216-token envelope;
+Flash and GLM-5.2 are explicit alternatives, not the new default.
+
+Exact safetensors-header accounting corrects the initial lower-bit preference:
+5.3 3.42bpw adds 0.848 GiB/rank versus the live 5.2 3.42bpw tensors, largely
+rotation-vector storage. Their BF16 carrier is identical. Preserve 3.42bpw
+and reduce workspace before considering the optional 3.25bpw experiment.
+The full accounting is retained in `maintenance/glm53-aibeast-500k/memory-comparison.json`.
+
+The immutable runtime parent remains
+`verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692`.
+The existing 27 overlays remain, with surgical parser #639/#640 and scheduler
+#546 backports and a fail-closed LMCache retrieve-deadline payload. These are
+candidate changes, not inherited upstream-head guarantees or live qualification.
+The parser repairs literal argument delimiters and stripped-stop recovery while
+preserving the installed parser ABI. The non-DP scheduler fix does not by itself
+enable prefill throttling: `prefill_schedule_interval` remains 1 (inert).
+Any interval above 1 needs explicit overlap/progress qualification; DP's
+synchronized counter behavior is unchanged.
+The build-time `/opt/runtime-provenance.json` hashes actual installed sources
+and native libraries and records package/module versions and registry pins;
+the stale copied r26 ledger is no longer current-runtime evidence. The image's
+own pushed digest must be recorded externally after publication.
+
+Operator fixes include full variant precedence, refusing invalid startup
+configs, warning for unqualified variants, and attempt-snapshot protection
+against stale verification/rollback state. Podman 4.9 staging uses explicit
+devices, separate state/cache/name/port, no automatic production stop and no
+restart policy. Rollback preserves the old image, environment and state.
+LMCache gains an optional aggregate `LMCACHE_L1_MAX_GB` ceiling (0 by default;
+candidate 125 GiB, lazy initial arena 20 GiB); it does not enlarge active context.
+
+Root/non-root (#20), host/bridge networking (#21), parent dependency index
+selection (#24), and complete core-runtime hash locks (#25) remain open
+hardening boundaries; scoped SOUL locks and loopback cache restrictions do
+not close them. The parent declares `LicenseRef-ShapleyMCG-1.0`; the full
+model uses the custom GLM-5.3 license. The appliance MIT license is not an
+umbrella license. See [attribution and provenance](README.md#attribution-licenses-and-runtime-provenance).
+
+The entries below are historical release evidence. Their “default” and
+“latest” statements describe those releases, not this unqualified candidate.
+
 ## GLM-5.3 full-model 3.42bpw
 
 ### Post-qualification review hardening

@@ -1,16 +1,17 @@
 # Self-service configuration
 
-A user rents the template, the image is locked in, and they get working
-defaults. Everything after that — model variant, draft type, speculation depth,
-context length, KV dtype, concurrency, DRAM offload, vision — is changeable
-from the landing page on `:1111`, applied by restarting vLLM only. No image
-rebuild, no re-rent, no SSH.
+A deployment can change supported model variants and runtime knobs from the
+landing page on `:1111` without rebuilding the image. Changes affecting model
+files require checkpoint preparation; engine-only changes restart vLLM.
+The next-release bare-launch default is full `glm53-3.42bpw-500k`, an unqualified
+520K reduced-workspace candidate, not permission to replace production. Persisted
+state still wins over new defaults. See the [candidate gate](../TEST_PLAN.md#full-glm-53-candidate-maintenance-gate).
 
 The parts:
 
 | file | role |
 |---|---|
-| `scripts/glm_config.py` | knob registry, three-layer resolution, pre-validation matrix, failure signatures. Imported by everything. |
+| `scripts/glm_config.py` | knob registry, family/variant-aware resolution, pre-validation matrix, failure signatures. Imported by everything. |
 | `scripts/config_cli.py` | the shell-facing side: `env`, `show`, `validate`, `mark-good`, `should-rollback`, `rollback`, `pending-analysis`. |
 | `scripts/verify_serving.py` | health + short prompts + **long-context needle probe**. Decides whether a config is good. |
 | `scripts/analyze_failure.py` | asks the running model to explain the config that failed. |
@@ -27,9 +28,7 @@ The parts:
 Lowest to highest precedence:
 
 ```
-built-in defaults  <  startup environment  <  JSON state file on the volume
-   glm_config.py         template env, frozen           $GLM_STATE_DIR/config.json
-                         at container start             written by the landing page
+built-in defaults < family < variant < startup environment < JSON state file
 ```
 
 **Why the file wins over env.** The environment comes from the rental template.
@@ -47,14 +46,17 @@ env layer on the next restart, and the layering would quietly become
 self-referential.
 
 **The state file is a diff, not a snapshot.** `glm_config.minimize()` stores
-only the knobs whose value differs from `defaults + env`. Writing all of them
+only the knobs whose value differs from the selected family/variant plus
+startup-environment baseline. Writing all of them
 would freeze the instance against its own template (a knob the user never
 touched would start winning over the operator's env), and it makes an exported
 config portable to an instance launched with different template env.
 
-Legacy spellings still feed the env layer: `MTP78_MODE`, `MTP78_TRELLIS=0`,
-`DRAFT_MODEL`, `TUNE_VLLM_EXL3_TRELLIS_MAX_M`. Nothing that worked as an env var
-before stopped working.
+Legacy spellings still feed the env layer where applicable: `MTP78_MODE`,
+`MTP78_TRELLIS=0`, `DRAFT_MODEL`, `TUNE_VLLM_EXL3_TRELLIS_MAX_M`.
+`MTP78_TRELLIS=0` selects the native in-checkpoint draft, not BF16.
+Full GLM-5.3 uses native EXL3/TR3 MTP3 and rejects GLM-5.2 graft/override and
+Flash runtime settings. Compatibility aliases do not bypass validation.
 
 ### Where state lives
 
@@ -77,14 +79,17 @@ applied in that container.
 }
 ```
 
-`values` holds knob keys from the registry only; unknown keys are ignored with
-a note and out-of-range values fall back to the layer below with a note. A
-state file that is not valid JSON is ignored entirely rather than
-bricking the boot — the note appears in the boot log and on `/config`.
+`values` holds knob keys from the registry. Resolution may expose fallback
+values and explanatory notes for malformed values; that display is not
+permission to launch a known-invalid configuration. Startup validation refuses
+known-invalid effective configurations before the engine starts.
 
-`known-good.json` stores `{ts, values, effective, sources, verify}`. Restoring
-it writes `values` back to the state file, so the restored configuration is
-reproduced through the same resolution path rather than pinned.
+`known-good.json` stores `{ts, values, effective, sources, verify}`. Rollback
+re-minimizes the saved effective configuration against the current startup
+environment and requires exact applicable-knob reproduction plus valid host
+topology. It does not blindly copy an old diff into a different baseline.
+Verification and rollback are tied to the attempt's configuration snapshot:
+a stale attempt cannot mark a newer user's configuration good or roll it back.
 
 ---
 
@@ -290,8 +295,9 @@ Design points:
   nothing better to fall back to, the engine keeps serving and the landing page
   says UNVERIFIED. Killing a partially-working endpoint on a rental to reach an
   identical one is not an improvement.
-- **Pre-validation also runs at boot.** A hand-edited state file that fails
-  validation is rolled back before the engine is started, not after.
+- **Pre-validation also runs at boot.** Known-invalid startup configurations
+  are refused before the engine starts. A valid rollback may restore service;
+  a failed rollback is not permission to launch the invalid values.
 - **What is preserved on rollback:** `failures/<UTC>/config.json` (the failed
   values and their resolution), `error.log` (tail of the failed boot),
   `diff.txt`, `meta.json` (reason + matched signatures). Ten failures are kept.

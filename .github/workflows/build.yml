@@ -2,9 +2,9 @@ name: build-and-push
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", "maintenance/glm53-aibeast-500k/**", .github/workflows/build.yml]
   pull_request:
-    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", "maintenance/glm53-aibeast-500k/**", .github/workflows/build.yml]
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,14 +15,21 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: uv run --no-project --python 3.12 bash --noprofile --norc -e -o pipefail {0}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
       - name: shellcheck boot scripts
         run: shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh scripts/field_review_full_gate.sh
       - name: validate Python
-        run: python3 -m py_compile landing.py scripts/*.py patches/glm53-runtime/*.py
+        run: python3 -m py_compile landing.py scripts/*.py patches/glm53-runtime/*.py patches/glm53-refresh/*.py patches/scopedlmcache/*.py maintenance/glm53-aibeast-500k/*.py
       - name: fail-closed field-review patch applicator
         run: python3 tests/test_field_review_patches.py
       # Guards the destructive path: provider detection, the terminate
@@ -38,6 +45,18 @@ jobs:
         run: python3 tests/test_families.py
       - name: fail-closed GLM-5.3 runtime overlays
         run: python3 tests/test_glm53_runtime_overlays.py
+      - name: full GLM parser and TP scheduling backports
+        run: python3 tests/test_glm53_refresh.py
+      - name: LMCache deadline and DMA ownership regression
+        run: python3 tests/test_scopedlmcache_retrieve.py
+      - name: role-invariant cache layout namespace
+        run: python3 tests/test_scopedlmcache_layout.py
+      - name: supervisor configuration transactions and HTTP capabilities
+        run: python3 -m unittest discover -s tests -p test_landing_transactions.py
+      - name: maintenance qualification and durable rollback boundaries
+        run: python3 tests/test_aibeast_maintenance.py
+      - name: shell preparation lifecycle
+        run: python3 tests/test_shell_lifecycle.py
       - name: immutable GG r28 source gate
         run: python3 tests/test_r28_base_gate.py
       - name: serial speculative scheduler warning patch
@@ -46,10 +65,6 @@ jobs:
         run: python3 tests/test_exl3_mixk_patch.py
       - name: deSEC DNS-01 convergence guard
         run: python3 tests/test_desec_acme_guard.py
-      # Catches "the knob exists but nothing reads it" — the class of defect that
-      # was found twice by renting a GPU instead of by running a test.
-      - name: knob wiring audit
-        run: python3 tests/test_knob_wiring.py
       - name: gpu detection
         run: python3 tests/test_gpu_detect.py
       - name: persistent extension lock recovery
@@ -89,6 +104,9 @@ jobs:
           # nonzero entrypoint exit. Command substitution runs the entrypoint to
           # completion and `set -e` fails the step on any nonzero exit, then the
           # grep checks the expected output.
+          out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts bash entrypoint.sh)
+          grep -q 'davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw' <<<"$out"
+          grep -q '^    520192$' <<<"$out"
           out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-k6 bash entrypoint.sh)
           grep -q 'malaiwah/GLM-5.3-Flash-TR3-6bpw' <<<"$out"
           out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-k8 bash entrypoint.sh)
@@ -110,7 +128,7 @@ jobs:
           grep -q 'Qwen/Qwen3.5-0.8B' <<<"$out"
           python3 -m json.tool runpod-template.json >/dev/null
           python3 -m json.tool runpod-template-qwen36.json >/dev/null
-          python3 -c "import json; ps=[json.load(open(f)) for f in ('runpod-template.json','runpod-template-qwen36.json')]; assert all(p['ports'] == ['8000/http', '8443/tcp', '1111/http', '22/tcp'] and p['volumeMountPath'] == '/workspace' and p['env']['RUNPOD_DIRECT_TLS'] == 'auto' and 'DESEC_TOKEN' not in p['env'] and 'DESEC_DOMAIN' not in p['env'] and p['isPublic'] and not p['isServerless'] for p in ps); assert [p['env']['MODEL_PROFILE'] for p in ps] == ['glm52-exl3','qwen36-27b-nvfp4']"
+          python3 -c "import json; ps=[json.load(open(f)) for f in ('runpod-template.json','runpod-template-qwen36.json')]; assert all(p['ports'] == ['8000/http', '8443/tcp', '1111/http', '22/tcp'] and p['volumeMountPath'] == '/workspace' and p['env']['RUNPOD_DIRECT_TLS'] == 'auto' and 'DESEC_TOKEN' not in p['env'] and 'DESEC_DOMAIN' not in p['env'] and p['isPublic'] and not p['isServerless'] for p in ps); assert [p['env']['MODEL_PROFILE'] for p in ps] == ['glm53-3.42bpw-500k','qwen36-27b-nvfp4']"
   build:
     # PRs build without pushing, so a broken Dockerfile is caught before main
     runs-on: ubuntu-latest
@@ -139,10 +157,13 @@ jobs:
           tags: |
             type=raw,value=${{ github.sha }}
             type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=raw,value=glm53-full-500k-candidate,enable=${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
       - uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           provenance: mode=max

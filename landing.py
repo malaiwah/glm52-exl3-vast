@@ -923,9 +923,8 @@ def boot_notes(limit=40):
     except OSError:
         return []
     if soul is not None:
-        # This card renders for tokenless visitors too; apply the repo's
-        # standard redaction so a future boot_note echoing a credentialed URL
-        # or env value cannot ship it to strangers.
+        # Defense in depth for the authenticated, secure boot-log view; this
+        # optional redactor is not the access-control boundary.
         notes = [soul.redact(ln) for ln in notes]
     return notes
 
@@ -1234,6 +1233,8 @@ def render_config(tok: str, secure: bool, banner=None, banner_cls="",
     parts.append(
         f"<h2>Import</h2><form method=post action='/config/import'>"
         f"<input type=hidden name=token value='{tok_q}'>"
+        f"<input type=hidden name=config_revision "
+        f"value='{_config_revision(effective)}'>"
         "<textarea class=imp name=doc placeholder='Paste a previously exported "
         "config JSON here'></textarea>"
         "<p><button type=submit>Import, validate &amp; restart</button></p></form>")
@@ -1241,6 +1242,8 @@ def render_config(tok: str, secure: bool, banner=None, banner_cls="",
     parts.append(
         f"<h2>Reset</h2><form method=post action='/config/reset'>"
         f"<input type=hidden name=token value='{tok_q}'>"
+        f"<input type=hidden name=config_revision "
+        f"value='{_config_revision(effective)}'>"
         "<p class=sub>Deletes the state file, returning to the template environment "
         "and the built-in defaults.</p>"
         "<p><button type=submit>Reset to defaults &amp; restart</button></p></form>")
@@ -1319,7 +1322,8 @@ def _coerce_imported_values(values: dict):
     return coerced, errs
 
 
-def apply_values(values: dict, *, form_submission=False, form_revision=""):
+def apply_values(values: dict, *, form_submission=False, form_revision=None,
+                 reset=False):
     """Validate a candidate, persist it, and ask the supervisor for a restart.
 
     -> (ok, findings, message). Nothing is written when validation finds an
@@ -1334,12 +1338,13 @@ def apply_values(values: dict, *, form_submission=False, form_revision=""):
     # The whole read-validate-write sequence runs under one lock so two tabs
     # (or an apply racing a reset) cannot interleave: the state that persists
     # must be a state one of them was actually shown. gc.state_lock() extends
-    # that serialization ACROSS processes, so a self-service apply cannot be
-    # clobbered by the PID-1 supervisor's concurrent rollback (and vice versa).
+    # serialization across processes; PID 1 also checks its attempt snapshot
+    # under that lock before rollback/mark-good so an older boot cannot
+    # overwrite a newer apply.
     with _config_lock, gc.state_lock():
         current, _s, _n = gc.resolve()
-        if form_submission and not hmac.compare_digest(
-                form_revision, _config_revision(current)):
+        if (form_submission or form_revision is not None) and not hmac.compare_digest(
+                (form_revision or "").encode("utf-8"), _config_revision(current).encode("ascii")):
             finding = {
                 "id": "stale-form",
                 "level": "error",
@@ -1370,20 +1375,27 @@ def apply_values(values: dict, *, form_submission=False, form_revision=""):
                         + html.escape(", ".join(sorted(set(dropped)))) + "</p>")
         good = gc.read_json(gc.p_known_good())
         # `current` was captured under the same lock before minimization.
-        if not gc.diff(current, effective):
+        if not reset and not gc.diff(current, effective):
             return True, findings, ("No change: the submitted configuration is the one "
                                     "running." + drop_msg)
-        gc.write_json_atomic(gc.p_state(), {
-            "values": minimal,
-            "written_at": gc.utcnow_iso()}, mode=0o600)
+        if reset:
+            try:
+                os.remove(gc.p_state())
+            except FileNotFoundError:
+                pass
+        else:
+            gc.write_json_atomic(gc.p_state(), {
+                "values": minimal,
+                "written_at": gc.utcnow_iso()}, mode=0o600)
         gc.set_apply_state("trial", since=gc.utcnow_iso(),
                            detail="restarting into a candidate configuration",
                            baseline=good.get("ts"))
         os.makedirs(gc.runtime_dir(), exist_ok=True)
         with open(gc.p_restart_flag(), "w") as f:
             f.write("landing-page\n")
-        msg = ("Applied. vLLM is restarting with:<br><pre>"
-               + html.escape(gc.diff_text(current, effective)) + "</pre>")
+        msg = (("State file removed; restarting on the template environment and "
+                "the built-in defaults." if reset else "Applied. vLLM is restarting with:")
+               + "<br><pre>" + html.escape(gc.diff_text(current, effective)) + "</pre>")
         # Not silently ignored: the user is told which knobs the selected family
         # does not have and that they were not written.
         return True, findings, msg + drop_msg
@@ -1813,7 +1825,7 @@ def render(secure: bool, tok: str = "") -> bytes:
             parts.append('<h2>Model</h2><div class=card>'
                          '<pre id=modeljson style="max-height:16rem;margin:0;border:none">'
                          'loading /v1/models&hellip;</pre></div>')
-    notes = boot_notes()
+    notes = boot_notes() if secure and authorized else []
     if notes:
         parts.append(
             "<h2>Boot log highlights</h2><div class=card><pre style='margin:0;"
@@ -1989,22 +2001,15 @@ class Handler(BaseHTTPRequestHandler):
                         body = render_config(tok, secure, "Nothing was imported.",
                                              "bad", errs)
                     else:
-                        ok, findings, msg = apply_values(coerced)
+                        ok, findings, msg = apply_values(
+                            coerced, form_revision=form.get("config_revision", [""])[0])
                         body = render_config(tok, secure, msg, "good" if ok else "bad",
                                              [] if ok else findings)
             elif url.path == "/config/reset":
-                with _config_lock, gc.state_lock():
-                    try:
-                        os.remove(gc.p_state())
-                    except OSError:
-                        pass
-                    gc.set_apply_state("trial", detail="reset to template env + defaults")
-                    os.makedirs(gc.runtime_dir(), exist_ok=True)
-                    with open(gc.p_restart_flag(), "w") as f:
-                        f.write("reset\n")
-                body = render_config(tok, secure,
-                                     "State file removed; restarting on the template "
-                                     "environment and the built-in defaults.", "good")
+                ok, findings, msg = apply_values(
+                    {}, reset=True, form_revision=form.get("config_revision", [""])[0])
+                body = render_config(tok, secure, msg, "good" if ok else "bad",
+                                     [] if ok else findings)
             elif url.path == "/config/restart":
                 os.makedirs(gc.runtime_dir(), exist_ok=True)
                 with open(gc.p_restart_flag(), "w") as f:

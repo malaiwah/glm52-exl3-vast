@@ -13,7 +13,6 @@ set -Eeuo pipefail
 
 main() {
   IMAGE="${TURNKEY_IMAGE:-ghcr.io/malaiwah/glm52-exl3-vast:latest}"
-  PROFILE="${MODEL_PROFILE:-glm52-exl3}"
   CONTAINER_NAME="${TURNKEY_CONTAINER_NAME:-glm52-turnkey}"
   WORKSPACE="${TURNKEY_WORKSPACE:-/home/turnkey}"
   REGION="${JARVISLABS_REGION:-}"
@@ -23,16 +22,13 @@ main() {
   # A re-run replaces the container but must not silently drop credentials the
   # previous launch persisted: an image refresh from a fresh shell without
   # re-exported HF_TOKEN/DESEC_TOKEN would rotate the API key and break cert
-  # renewal weeks later. TERMINATE_ENABLED is carried for the same reason —
-  # otherwise a bare re-run disarms self-termination (writes 0) and, because the
-  # JarvisLabs key is only persisted while the gate is on, drops the persisted
-  # termination key too, permanently losing self-termination. Carrying the gate
-  # forward keeps both. The environment always wins; the previous env file only
-  # fills in what this shell left unset (export TERMINATE_ENABLED=0 to disarm).
+  # renewal weeks later. Preserve the termination switch and previously stored
+  # key even when explicitly disarmed, so re-arming does not lose credentials.
+  # An explicitly supplied value (including empty) wins over persisted state.
   CARRIED=()
   carry_forward() {
     local key="$1" prior
-    [[ -n "${!key:-}" ]] && return 0
+    [[ "${!key+x}" == x ]] && return 0
     [[ -f "$ENV_FILE" ]] || return 0
     prior="$(grep -m1 "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)"
     if [[ -n "$prior" ]]; then
@@ -41,10 +37,17 @@ main() {
     fi
   }
   for key in HF_TOKEN DESEC_TOKEN DESEC_DOMAIN VLLM_API_KEY \
-             TERMINATE_ENABLED \
+             TERMINATE_ENABLED MODEL_PROFILE MODEL_FAMILY MODEL_VARIANT \
              JARVISLABS_API_KEY JARVISLABS_TERMINATE_API_KEY; do
     carry_forward "$key"
   done
+  if [[ -n "${MODEL_PROFILE:-}" ]]; then
+    PROFILE="$MODEL_PROFILE"
+  elif [[ -n "${MODEL_FAMILY:-}${MODEL_VARIANT:-}" ]]; then
+    PROFILE=""
+  else
+    PROFILE=glm53-3.42bpw-500k
+  fi
   if [[ "${#CARRIED[@]}" -gt 0 ]]; then
     echo ">>> Carried forward from the previous launch: ${CARRIED[*]}"
     echo ">>> (export a new value before running to replace one)"
@@ -74,7 +77,7 @@ main() {
   fi
 
   PASSTHROUGH_KEYS=(
-    MODEL_VARIANT MODEL_ID MODEL_DISPLAY_NAME SERVED_MODEL_NAME
+    MODEL_FAMILY MODEL_VARIANT MODEL_ID MODEL_DISPLAY_NAME SERVED_MODEL_NAME
     TENSOR_PARALLEL_SIZE MAX_MODEL_LEN MAX_NUM_SEQS MAX_NUM_BATCHED_TOKENS
     VLLM_EXL3_PREFILL_CAPACITY
     GPU_MEMORY_UTILIZATION KV_CACHE_MEMORY_BYTES GPU_BLOCKS_OVERRIDE
@@ -141,9 +144,11 @@ main() {
       value="${!key:-}"
       [[ -z "$value" ]] || printf '%s=%s\n' "$key" "$value"
     done
-    # JarvisLabs credentials are account-scoped, unlike Vast's instance key.
-    # Only place one in the appliance when self-termination is explicitly on.
-    if [[ "${TERMINATE_ENABLED:-0}" == "1" ]]; then
+    # Retain a previously persisted key while disarmed; do not introduce a new
+    # account credential into an unarmed appliance.
+    if [[ "${TERMINATE_ENABLED:-0}" == "1" ||
+          " ${CARRIED[*]} " == *" JARVISLABS_TERMINATE_API_KEY "* ||
+          " ${CARRIED[*]} " == *" JARVISLABS_API_KEY "* ]]; then
       if [[ -n "${JARVISLABS_TERMINATE_API_KEY:-}" ]]; then
         printf 'JARVISLABS_TERMINATE_API_KEY=%s\n' \
           "$JARVISLABS_TERMINATE_API_KEY"

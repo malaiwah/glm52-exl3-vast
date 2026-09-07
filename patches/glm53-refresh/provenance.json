@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "candidate_image": "docker.io/verdictai/glm53-flash-exl3-k4@sha256:6e2475d0568fd110eeaa1193157c7662747e096b476b05ed71ab247e081e9b82",
+  "integration_tree": "174c789e09984049d0d53b261024460ca5e9c449",
+  "installed_source_inspection": "All eight before hashes verified by docker cp from stopped candidate image; no image execution or GPUs.",
+  "upstream_merges": {
+    "640": "5c90fc8b93c56e0bf355fbdfb7fc2facc2770f98",
+    "639": "4c3c961d5540dc6e9cfa21f8641474dc31c0d76e",
+    "546": "9fdf065d7ec716ff585188eb430cf6a9f9d719b7"
+  },
+  "abi_adaptations": [
+    "Preserve TextChunk(text), omit absent deferred prefix token counts.",
+    "Preserve two-argument _apply_transition and _emit_for_state(text).",
+    "Preserve integration TOOL_DIRECT_NAME and TOOL_DIRECT_ARGS states."
+  ],
+  "files": [
+    {
+      "path": "vllm/parser/engine/token_id_scanner.py",
+      "payload": "token_id_scanner.py",
+      "integration_blob": "abcc2e2baec6547548fd0c9470bdae3fb6b9af24",
+      "before_sha256": "c9db6d6a29865d65ba1adc523015488aad4d7dbef46b7539041e9efbe81bd034",
+      "after_sha256": "d478c6304cb12e084df52831977e0702ce2cc262919111a12a7ef37d38ef32f1",
+      "replacements": [
+        {
+          "before": "        if not reconstructed:\n            return [TextChunk(delta_text)] + results\n\n        pos = delta_text.find(reconstructed)\n        if pos > 0:\n            return [TextChunk(delta_text[:pos])] + results\n        if pos == 0:\n            return results\n\n        # Fallback: SentencePiece context-dependent decoding mismatch.\n        # Rebuild from delta_text using PreLexedTerminals as split anchors.\n",
+          "after": "        if not reconstructed:\n            return [TextChunk(delta_text)] + results\n\n        if delta_text.endswith(reconstructed):\n            holdback = delta_text[: -len(reconstructed)]\n            return [TextChunk(holdback)] + results if holdback else results\n\n        # Serving strips a trailing stop token's text from delta_text but\n        # keeps its ID. Match without the trailing DROP terminals before\n        # falling back to anchor rebuilding, which would rebind an anchor\n        # to a literal lookalike earlier in the text.\n        retained = list(results)\n        trailing_drops: list[PreLexedTerminal] = []\n        while (\n            retained\n            and isinstance(retained[-1], PreLexedTerminal)\n            and retained[-1].terminal == DROP_TERMINAL\n        ):\n            trailing_drops.insert(0, retained.pop())\n        if trailing_drops:\n            retained_text = self._join_decoded_text(retained)\n            if retained_text and delta_text.endswith(retained_text):\n                for drop in trailing_drops:\n                    self._deferred_terminals.append(drop)\n                holdback = delta_text[: -len(retained_text)]\n                return [TextChunk(holdback)] + retained if holdback else retained\n\n        # Fallback: SentencePiece context-dependent decoding mismatch.\n        # Rebuild from delta_text using PreLexedTerminals as split anchors.\n"
+        }
+      ]
+    },
+    {
+      "path": "vllm/parser/engine/parser_engine_config.py",
+      "payload": "parser_engine_config.py",
+      "integration_blob": "b74809c30258a19544754048286bc291d20f8905",
+      "before_sha256": "83460a34f86d3bb639975feea0ddaa468de2814ab18bf9984c0d836e8042120e",
+      "after_sha256": "895af219fae67671e63d2e639e6a8e716d27ff989ac727744e8e9718f87b3fa4",
+      "replacements": [
+        {
+          "before": "* **transitions** \u2013 a state machine mapping\n  ``(state, terminal) \u2192 (new_state, events_to_emit)`` that drives semantic\n  event generation during streaming.\n* **content_events** \u2013 what :class:`EventType` to emit for plain content\n  (non-terminal text) in each state.\n\"\"\"\n",
+          "after": "* **transitions** \u2013 a state machine mapping\n  ``(state, terminal) \u2192 (new_state, events_to_emit)`` that drives semantic\n  event generation during streaming.\n* **non_whitespace_transitions** \u2013 optional state changes triggered by plain\n  content that contains a non-whitespace character.\n* **content_events** \u2013 what :class:`EventType` to emit for plain content\n  (non-terminal text) in each state.\n\"\"\"\n"
+        },
+        {
+          "before": "    TOOL_NAME = auto()\n    TOOL_ARGS = auto()\n    TOOL_BETWEEN = auto()\n    TOOL_DIRECT_NAME = auto()\n    TOOL_DIRECT_ARGS = auto()\n\n\n@dataclass(frozen=True, slots=True)\n",
+          "after": "    TOOL_NAME = auto()\n    TOOL_ARGS = auto()\n    TOOL_BETWEEN = auto()\n    TOOL_DIRECT_NAME = auto()\n    TOOL_DIRECT_ARGS = auto()\n    TOOL_ARG_END_PENDING = auto()\n\n\n@dataclass(frozen=True, slots=True)\n"
+        },
+        {
+          "before": "    # Reject tool calls whose names are absent from the request tools.\n    validate_tool_names: bool = False\n\n    @cached_property\n    def terminal_defs(self):\n        from vllm.parser.engine.incremental_lexer import terminals_from_literals\n",
+          "after": "    # Reject tool calls whose names are absent from the request tools.\n    validate_tool_names: bool = False\n\n    non_whitespace_transitions: dict[ParserState, Transition] = field(\n        default_factory=dict,\n    )\n\n    @cached_property\n    def terminal_defs(self):\n        from vllm.parser.engine.incremental_lexer import terminals_from_literals\n"
+        }
+      ]
+    },
+    {
+      "path": "vllm/parser/engine/streaming_parser_engine.py",
+      "payload": "streaming_parser_engine.py",
+      "integration_blob": "d697665a297107b5bcba0d4bc6e339f773970a19",
+      "before_sha256": "0f4625066e178ea5b3fd4784812103ce3b1362fbc278700518b8ab6b8ba57074",
+      "after_sha256": "26997d3653f1668e7f100752dbb3d4d6ee6df7c721e414b069a823187eee3b29",
+      "replacements": [
+        {
+          "before": "            ParserState.TOOL_ARGS,\n            ParserState.TOOL_NAME,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_DIRECT_NAME,\n            ParserState.TOOL_DIRECT_ARGS,\n        ):\n            if self.tool_index >= 0:\n                events.append(\n",
+          "after": "            ParserState.TOOL_ARGS,\n            ParserState.TOOL_NAME,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_ARG_END_PENDING,\n            ParserState.TOOL_DIRECT_NAME,\n            ParserState.TOOL_DIRECT_ARGS,\n        ):\n            if self.tool_index >= 0:\n                events.append(\n"
+        },
+        {
+          "before": "            ParserState.TOOL_NAME,\n            ParserState.TOOL_ARGS,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_DIRECT_NAME,\n            ParserState.TOOL_DIRECT_ARGS,\n        }\n    )\n\n",
+          "after": "            ParserState.TOOL_NAME,\n            ParserState.TOOL_ARGS,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_ARG_END_PENDING,\n            ParserState.TOOL_DIRECT_NAME,\n            ParserState.TOOL_DIRECT_ARGS,\n        }\n    )\n\n"
+        },
+        {
+          "before": "        return self._apply_transition(transition, value)\n\n    def _emit_for_state(self, text: str) -> list[SemanticEvent]:\n        if self.state == ParserState.MESSAGE_HEADER:\n            self._message_header_buffer += text\n",
+          "after": "        return self._apply_transition(transition, value)\n\n    def _emit_for_state(self, text: str) -> list[SemanticEvent]:\n        transition = self.config.non_whitespace_transitions.get(self.state)\n        if transition is not None and text.strip():\n            return self._apply_transition(transition, text)\n        if self.state == ParserState.MESSAGE_HEADER:\n            self._message_header_buffer += text\n"
+        }
+      ]
+    },
+    {
+      "path": "vllm/parser/glm47_moe.py",
+      "payload": "glm47_moe.py",
+      "integration_blob": "8aa4feef2599bac6406d103788edf370be60bd73",
+      "before_sha256": "ce3629319e56e882d25cb75d62e3e7088a4eec1518885fc69fc696eafb4a97b2",
+      "after_sha256": "b76ea87090a1b823c272aa0d338cadf53a5aa3d845c3b3cdaed6258fa5a00ff8",
+      "replacements": [
+        {
+          "before": "\nThe function name can be followed directly by the first ``<arg_key>`` tag,\nand tool calls may have no arguments.\n\"\"\"\n\nfrom __future__ import annotations\n",
+          "after": "\nThe function name can be followed directly by the first ``<arg_key>`` tag,\nand tool calls may have no arguments.\n\nA literal tag inside an argument value has the same token ID as the\nstructural tag, so position is the only signal: ``</tool_call>`` is\nstructural only outside an argument value, and ``</arg_value>`` is structural\nonly when the next non-whitespace text is ``<arg_key>`` or ``</tool_call>``.\n\"\"\"\n\nfrom __future__ import annotations\n"
+        },
+        {
+          "before": "ARG_VALUE_START = \"<arg_value>\"\nARG_VALUE_END = \"</arg_value>\"\n\n_ARG_RE = re.compile(\n    r\"<arg_key>(?P<key>.*?)</arg_key>\\s*\"\n    r\"<arg_value>(?P<value>.*?)</arg_value>\",\n    re.DOTALL,\n)\n_PARTIAL_ARG_RE = re.compile(\n    r\"<arg_key>(?P<key>.*?)</arg_key>\\s*\"\n    r\"<arg_value>(?P<value>.*)$\",\n    re.DOTALL,\n",
+          "after": "ARG_VALUE_START = \"<arg_value>\"\nARG_VALUE_END = \"</arg_value>\"\n\n# A complete argument ends at the first ``</arg_value>`` that is followed\n# by the next ``<arg_key>`` or by the end of the arguments. Any other\n# ``</arg_value>`` is data inside the value.\n_ARG_RE = re.compile(\n    r\"<arg_key>(?P<key>.*?)</arg_key>\\s*\"\n    r\"<arg_value>(?P<value>.*?)</arg_value>(?=\\s*(?:<arg_key>|$))\",\n    re.DOTALL,\n)\n_TAIL_ARG_RE = re.compile(\n    r\"<arg_key>(?P<key>.*?)</arg_key>\\s*\"\n    r\"<arg_value>(?P<value>.*)$\",\n    re.DOTALL,\n"
+        },
+        {
+          "before": "\ndef _glm47_arg_converter(raw_args: str, partial: bool) -> str:\n    params: dict[str, object] = {}\n\n    for match in _ARG_RE.finditer(raw_args):\n        params[match.group(\"key\").strip()] = match.group(\"value\")\n\n    if partial:\n        remaining = _ARG_RE.sub(\"\", raw_args)\n        match = _PARTIAL_ARG_RE.search(remaining)\n        if match:\n            key = match.group(\"key\").strip()\n            if key:\n                params[key] = match.group(\"value\")\n\n    return json.dumps(params, ensure_ascii=False)\n\n",
+          "after": "\ndef _glm47_arg_converter(raw_args: str, partial: bool) -> str:\n    params: dict[str, object] = {}\n    pos = 0\n\n    for match in _ARG_RE.finditer(raw_args):\n        if partial and match.end() == len(raw_args.rstrip()):\n            # The final </arg_value> may still turn out to be data once\n            # more text arrives, so leave it to the tail below.\n            break\n        params[match.group(\"key\").strip()] = match.group(\"value\")\n        pos = match.end()\n\n    tail = _TAIL_ARG_RE.search(raw_args, pos)\n    if tail:\n        key = tail.group(\"key\").strip()\n        value = tail.group(\"value\")\n        last_end = value.rfind(ARG_VALUE_END)\n        if last_end >= 0:\n            value = value[:last_end]\n        if key:\n            params[key] = value\n\n    return json.dumps(params, ensure_ascii=False)\n\n"
+        },
+        {
+          "before": "@functools.cache\ndef glm47_moe_config(thinking: bool = True) -> ParserEngineConfig:\n    arg_tag_transitions = {\n        (ParserState.TOOL_ARGS, terminal): Transition(\n            ParserState.TOOL_ARGS,\n            (EventType.ARG_VALUE_CHUNK,),\n        )\n        for terminal in (\n            \"ARG_KEY_START\",\n            \"ARG_KEY_END\",\n            \"ARG_VALUE_START\",\n            \"ARG_VALUE_END\",\n        )\n    }\n\n    reasoning_terminals = (\n",
+          "after": "@functools.cache\ndef glm47_moe_config(thinking: bool = True) -> ParserEngineConfig:\n    arg_tag_transitions = {\n        (ParserState.TOOL_NAME, \"ARG_KEY_START\"): Transition(\n            ParserState.TOOL_BETWEEN,\n            (EventType.ARG_VALUE_CHUNK,),\n        ),\n        (ParserState.TOOL_BETWEEN, \"ARG_KEY_START\"): Transition(\n            ParserState.TOOL_BETWEEN,\n            (EventType.ARG_VALUE_CHUNK,),\n        ),\n        (ParserState.TOOL_BETWEEN, \"ARG_KEY_END\"): Transition(\n            ParserState.TOOL_BETWEEN,\n            (EventType.ARG_VALUE_CHUNK,),\n        ),\n        (ParserState.TOOL_BETWEEN, \"ARG_VALUE_START\"): Transition(\n            ParserState.TOOL_ARGS,\n            (EventType.ARG_VALUE_CHUNK,),\n        ),\n        # A </arg_value> is only structural if the next non-whitespace text\n        # is <arg_key> or </tool_call>; anything else means it was data.\n        (ParserState.TOOL_ARGS, \"ARG_VALUE_END\"): Transition(\n            ParserState.TOOL_ARG_END_PENDING,\n            (EventType.ARG_VALUE_CHUNK,),\n        ),\n        (ParserState.TOOL_ARG_END_PENDING, \"ARG_VALUE_END\"): Transition(\n            ParserState.TOOL_ARG_END_PENDING,\n            (EventType.ARG_VALUE_CHUNK,),\n        ),\n        (ParserState.TOOL_ARG_END_PENDING, \"ARG_KEY_START\"): Transition(\n            ParserState.TOOL_BETWEEN,\n            (EventType.ARG_VALUE_CHUNK,),\n        ),\n    }\n\n    reasoning_terminals = (\n"
+        },
+        {
+          "before": "                ParserState.TOOL_NAME,\n                (EventType.TOOL_CALL_START,),\n            ),\n            (ParserState.TOOL_NAME, \"ARG_KEY_START\"): Transition(\n                ParserState.TOOL_ARGS,\n                (EventType.ARG_VALUE_CHUNK,),\n            ),\n            (ParserState.TOOL_NAME, \"TOOL_END\"): Transition(\n                ParserState.CONTENT,\n                (EventType.TOOL_CALL_END,),\n            ),\n            (ParserState.TOOL_ARGS, \"TOOL_END\"): Transition(\n                ParserState.CONTENT,\n                (EventType.TOOL_CALL_END,),\n            ),\n            **arg_tag_transitions,\n        },\n        arg_converter=_glm47_arg_converter,\n        stream_arg_deltas=True,\n        tool_args_json=False,\n",
+          "after": "                ParserState.TOOL_NAME,\n                (EventType.TOOL_CALL_START,),\n            ),\n            (ParserState.TOOL_NAME, \"TOOL_END\"): Transition(\n                ParserState.CONTENT,\n                (EventType.TOOL_CALL_END,),\n            ),\n            (ParserState.TOOL_BETWEEN, \"TOOL_END\"): Transition(\n                ParserState.CONTENT,\n                (EventType.TOOL_CALL_END,),\n            ),\n            (ParserState.TOOL_ARG_END_PENDING, \"TOOL_END\"): Transition(\n                ParserState.CONTENT,\n                (EventType.TOOL_CALL_END,),\n            ),\n            **arg_tag_transitions,\n        },\n        non_whitespace_transitions={\n            ParserState.TOOL_ARG_END_PENDING: Transition(\n                ParserState.TOOL_ARGS,\n                (EventType.ARG_VALUE_CHUNK,),\n            ),\n        },\n        content_events={\n            ParserState.CONTENT: EventType.TEXT_CHUNK,\n            ParserState.REASONING: EventType.REASONING_CHUNK,\n            ParserState.TOOL_NAME: EventType.TOOL_NAME,\n            ParserState.TOOL_ARGS: EventType.ARG_VALUE_CHUNK,\n            ParserState.TOOL_BETWEEN: EventType.ARG_VALUE_CHUNK,\n            ParserState.TOOL_ARG_END_PENDING: EventType.ARG_VALUE_CHUNK,\n        },\n        arg_converter=_glm47_arg_converter,\n        stream_arg_deltas=True,\n        tool_args_json=False,\n"
+        }
+      ]
+    },
+    {
+      "path": "vllm/config/scheduler.py",
+      "payload": "scheduler_config.py",
+      "integration_blob": "1b82b2c51283c8ab9e790c53fc88136e5a233104",
+      "before_sha256": "3cf5d41a5d662ab0eada6f3128e2538abc0a250d6aef82acab7df7dd84e498bc",
+      "after_sha256": "d70698ec13248054248aea0824ffa9661edc9150be124424d0738cc775ecbfd7",
+      "replacements": [
+        {
+          "before": "    (the default) disables the watermark.\"\"\"\n\n    prefill_schedule_interval: int = Field(default=1, ge=1)\n    \"\"\"For data-parallel deployments, only admit new prefill requests\n    once every N engine steps, aligned across DP ranks, to better balance\n    per-step forward-pass times.\"\"\"\n\n    async_scheduling: bool | None = None\n    \"\"\"If set to False, disable async scheduling. Async scheduling helps to\n",
+          "after": "    (the default) disables the watermark.\"\"\"\n\n    prefill_schedule_interval: int = Field(default=1, ge=1)\n    \"\"\"Schedule prefill work once every N engine steps while decode requests\n    are running. Data-parallel engines align the cadence across DP ranks.\"\"\"\n\n    async_scheduling: bool | None = None\n    \"\"\"If set to False, disable async scheduling. Async scheduling helps to\n"
+        }
+      ]
+    },
+    {
+      "path": "vllm/v1/core/sched/interface.py",
+      "payload": "scheduler_interface.py",
+      "integration_blob": "c15296dd0516b303cb19c3410b6e05c3d3dcd51f",
+      "before_sha256": "be6c008664096c5660a8879de72b315bbe479bf1d688be9b25891063ec53a367",
+      "after_sha256": "049b1f3cb82d69295d0e642af9f8bb4c07f971168d2e8543de43c29538bd9350",
+      "replacements": [
+        {
+          "before": "\n\nclass SchedulerInterface(ABC):\n    @abstractmethod\n    def __init__(\n        self,\n",
+          "after": "\n\nclass SchedulerInterface(ABC):\n    current_step: int\n    \"\"\"Number of scheduling decisions completed by this scheduler.\n\n    Implementations initialize this counter to zero and increment it exactly\n    once at the start of every ``schedule`` call. Engine-level prefill cadence\n    reads the counter before the next scheduling decision.\n    \"\"\"\n\n    @abstractmethod\n    def __init__(\n        self,\n"
+        },
+        {
+          "before": "        preparing inputs to the model.\n\n        Args:\n            throttle_prefills: DP prefill balancing. When True (set by the DP\n                engine core on non-cadence-aligned steps), new prefill compute is\n                deferred to a later step so prefills stay aligned across DP ranks;\n                automatically overridden when the rank is saturated.\n\n        Returns:\n            A SchedulerOutput object containing information about the scheduled\n",
+          "after": "        preparing inputs to the model.\n\n        Args:\n            throttle_prefills: When True, defer prefill compute while decode\n                requests are running. Engine cores use this signal on\n                non-cadence steps. A saturated prefill queue overrides the signal\n                so queued requests continue to make progress.\n\n        Returns:\n            A SchedulerOutput object containing information about the scheduled\n"
+        }
+      ]
+    },
+    {
+      "path": "vllm/v1/core/sched/scheduler.py",
+      "payload": "scheduler.py",
+      "integration_blob": "4627fc68c97e879877d9be8b7a7dfab28b4890e4",
+      "before_sha256": "2488d3dd87764fc04e1f4ec770528b2d5fbb0e357315b91bb125479eab9007e5",
+      "after_sha256": "8cfbb80da8420138ef291af89a96c436fdaf578b5e795a6837e32dde578a6573",
+      "replacements": [
+        {
+          "before": "\n        self.kv_cache_manager.new_step_starts()\n\n        # DP prefill balancing: on a throttled (non-cadence-aligned) step, defer\n        # all prefill compute unless saturated.\n        defer_prefills = (\n            throttle_prefills and not self.prefill_capacity_bound\n        ) and any(not r.is_prefill_chunk for r in self.running)\n\n        # First, schedule the RUNNING requests.\n        req_index = 0\n",
+          "after": "\n        self.kv_cache_manager.new_step_starts()\n\n        # On a throttled cadence step, defer prefill compute only when this\n        # decision can schedule decode work. Pipeline-parallel async requests\n        # can be temporarily ineligible; admitting prefill in that case avoids\n        # an empty model-executor step.\n        has_eligible_decode = any(\n            not request.is_prefill_chunk\n            and self.current_step >= request.next_decode_eligible_step\n            for request in self.running\n        )\n        defer_prefills = (\n            throttle_prefills and not self.prefill_capacity_bound\n        ) and has_eligible_decode\n\n        # First, schedule the RUNNING requests.\n        req_index = 0\n"
+        },
+        {
+          "before": "                continue\n\n            if defer_prefills and request.is_prefill_chunk:\n                # DP prefill balancing: defer this in-progress prefill chunk to a\n                # cadence-aligned step; decodes still run to fill this step.\n                req_index += 1\n                continue\n\n",
+          "after": "                continue\n\n            if defer_prefills and request.is_prefill_chunk:\n                # Defer this in-progress chunk to a cadence-aligned step;\n                # decodes still run to fill this step.\n                req_index += 1\n                continue\n\n"
+        }
+      ]
+    },
+    {
+      "path": "vllm/v1/engine/core.py",
+      "payload": "engine_core.py",
+      "integration_blob": "ff23e494e14beae4173f20c94c2ec2d54ce0f260",
+      "installed_base_note": "Preserves parent GLM prefix-caching participation block-size selection absent from public integration blob.",
+      "before_sha256": "e1f1892cf625db6ba5896a6d49a055e924ad94a8301cfdc3bb9d13e1d89ca9dd",
+      "after_sha256": "27b5bfe913f95c1ed9593df6210274b8a58f102ec43ae446a44c8248f49b4390",
+      "replacements": [
+        {
+          "before": "            eco.scheduler_stats.iteration_details = iteration_details\n\n    def _should_throttle_prefills(self) -> bool:\n        \"\"\"Whether to defer new prefills this step (DP prefill balancing).\n        Overridden by the DP engine core; never throttles otherwise.\"\"\"\n        return False\n\n    def step(self) -> tuple[dict[int, EngineCoreOutputs], bool]:\n        \"\"\"Schedule, execute, and make output.\n",
+          "after": "            eco.scheduler_stats.iteration_details = iteration_details\n\n    def _should_throttle_prefills(self) -> bool:\n        \"\"\"Defer prefills on non-cadence steps in a non-DP engine.\n\n        ``Scheduler.current_step`` counts completed scheduling decisions. A\n        value divisible by the configured interval therefore releases prefill\n        work on the next decision, including the first decision after startup.\n        The data-parallel engine overrides this method with a counter that is\n        synchronized across DP ranks.\n        \"\"\"\n        interval = self.vllm_config.scheduler_config.prefill_schedule_interval\n        if interval <= 1:\n            return False\n        current_step = getattr(self.scheduler, \"current_step\", None)\n        if (\n            not isinstance(current_step, int)\n            or isinstance(current_step, bool)\n            or current_step < 0\n        ):\n            raise RuntimeError(\n                \"prefill_schedule_interval greater than one requires \"\n                \"scheduler.current_step to be a non-negative integer that \"\n                \"advances once per schedule() call\"\n            )\n        return current_step % interval != 0\n\n    def step(self) -> tuple[dict[int, EngineCoreOutputs], bool]:\n        \"\"\"Schedule, execute, and make output.\n"
+        }
+      ]
+    }
+  ]
+}

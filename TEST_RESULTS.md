@@ -12,7 +12,10 @@ and the per-release `docs/glm52-rXX-*.md` files. This file records provider
 integration evidence, bug discoveries and fixes, cost tracking, and the
 decision history that explains why the codebase is the way it is.
 
-Current profile qualification: **GLM-5.3 full-model mixed 3.42bpw** (2026-08-29 on JarvisLabs).
+Latest completed full-model qualification: **GLM-5.3 mixed 3.42bpw at 393,216
+tokens** (2026-08-29 on JarvisLabs). The new default full 3.25bpw 512K
+candidate is **not GPU-qualified**; no historical result below is evidence
+that it serves 500K on AIBeast.
 
 ## Contents
 
@@ -29,10 +32,31 @@ Current profile qualification: **GLM-5.3 full-model mixed 3.42bpw** (2026-08-29 
 
 ## Current qualification status
 
+The primary full `glm53-3.42bpw-500k` candidate is pinned to
+`99c6f951333d2b38f1efefa533c7afadf0d376e3`. All 81 weight-file LFS identities
+match evaluated `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`; the updated
+template still changes conversational behavior. Both complete 81-shard
+headers were also compared against the live GLM-5.2 3.42bpw checkpoint:
+the BF16 carrier is identical, and 5.3 adds 0.848 GiB/rank of quantized
+payload/rotations. The 5.2 index includes headers; the 5.3 index excludes them.
+See `maintenance/glm53-aibeast-500k/memory-comparison.json` for exact bytes.
+
+AIBeast's preserved boot reports 81.73 GiB model loading and 0.75 GiB graphs
+per rank. The older 5.3 receipt reports 82.42 GiB and 0.61 GiB on another
+runtime. The new 520,192-token, 4,518,907,904-byte/GPU arm reduces
+scheduler/prefill workspace to 2048/1024 without lowering weight precision.
+This is not GPU qualification. First-use sampling, >=500K retrieval,
+concurrency and cache/restart gates remain required. No 750K result is claimed.
+
+All qualified rows below retain their original hardware/runtime scope. The
+3.42 results and older GLM-5.2/Flash measurements are not retroactively
+relabelled as tests of the refreshed candidate.
+
 | profile | release | hardware | status | section |
 |---|---|---|---|---|
+| Full GLM-5.3 EXL3 TR3 3.42bpw reduced-workspace (next-release default) | refreshed candidate | target: 4x RTX PRO 6000 (AIBeast) | **Unqualified: preserved 520,192 total tokens** | [maintenance gate](TEST_PLAN.md#full-glm-53-candidate-maintenance-gate) |
 | GLM-5.3 full-model EXL3 TR3 3.42bpw | 27-overlay r28 runtime | 4x RTX PRO 6000 (JarvisLabs) | Qualified | [GLM-5.3 full model](#glm-53-full-model-342bpw-qualification-jarvislabs-2026-08-29) |
-| GLM-5.2 EXL3 TR3 3.0bpw (default) | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
+| GLM-5.2 EXL3 TR3 3.0bpw (historical default) | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
 | GLM-5.2 EXL3 TR3 3.36bpw | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
 | GLM-5.2 EXL3 TR3 3.25bpw mixed-K | GG v20-r17 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r17 gate](#gg-v20-r17-native-mixed-k-production-gate-2026-08-01) |
 | Qwen3.6-27B NVFP4 vision | GG v20-r9 | 1x RTX 5090 (Vast) | Qualified | [Qwen section](#qwen36-27b-nvfp4-qualification-vast-rtx-5090) |

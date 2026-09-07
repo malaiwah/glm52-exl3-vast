@@ -1,13 +1,15 @@
-# GLM-5.3-Flash K6/K8 runtime. The immutable parent supplies the
-# Glm5Next/vLLM/B12X/TR3/EXL3 stack qualified on four RTX PRO 6000 Blackwell
-# GPUs. The fail-closed overlay installer adds the exact live-qualified fixes;
-# both the parent state and every resulting file are SHA-256 pinned.
-FROM docker.io/verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692
+# Full GLM-5.3 release candidate. Keep the matched immutable runtime and
+# fail-closed source overlays; 500K+ GPU qualification precedes promotion.
+ARG BASE_IMAGE=docker.io/verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692
+FROM ${BASE_IMAGE}
+ARG BASE_IMAGE
+ARG SOURCE_REVISION=uncommitted
 USER root
 LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai, Runpod, and JarvisLabs" \
-      org.opencontainers.image.description="Profile-driven OpenAI endpoint with live-qualified GLM-5.3-Flash TR3 EXL3 K6 production and K8 quality-max profiles for four RTX PRO 6000 Blackwell GPUs." \
-      ai.malaiwah.evidence="GLM-5.3-Flash-TR3-K6-K8 TP4-DCP4 B12X-sparse-MLA Triton-MoE NVFP4-DS-MLA-KV" \
-      ai.malaiwah.base="verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692"
+      org.opencontainers.image.description="Full GLM-5.3 EXL3 3.42bpw 520K reduced-workspace candidate with bounded LMCache, parser fixes, and isolated maintenance preparation." \
+      ai.malaiwah.evidence="GLM-5.3-full-500K-candidate GPU-qualification-required" \
+      ai.malaiwah.base="verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692" \
+      ai.malaiwah.parent.license="LicenseRef-ShapleyMCG-1.0"
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 COPY requirements-soul.lock /opt/requirements-soul.lock
@@ -43,7 +45,8 @@ COPY sshd_config /etc/ssh/sshd_config.d/99-model-turnkey.conf
 COPY landing.py /opt/landing.py
 COPY scripts/ /opt/scripts/
 COPY patches/glm53-runtime/ /opt/glm53-runtime/
-COPY patches/field-review-r26/ledger.json /opt/field-review-r26-ledger.json
+COPY patches/glm53-refresh/ /opt/glm53-refresh/
+COPY patches/scopedlmcache/ /opt/scopedlmcache/
 COPY soul/ /opt/soul/
 COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # The public Vast template may still call glm52-entry.sh from its onstart field.
@@ -54,10 +57,19 @@ RUN set -eux; \
     python3 /opt/scripts/apply_glm53_runtime_overlays.py /opt/glm53-runtime --verify-only; \
     python3 /opt/scripts/apply_glm53_runtime_overlays.py /opt/glm53-runtime; \
     python3 /opt/scripts/apply_glm53_runtime_overlays.py /opt/glm53-runtime --verify-only; \
+    python3 /opt/scripts/apply_glm53_refresh.py /opt/glm53-refresh; \
+    python3 /opt/scripts/apply_glm53_refresh.py /opt/glm53-refresh --verify-only; \
+    python3 /opt/scripts/patch_scopedlmcache_retrieve.py; \
+    python3 /opt/scripts/patch_scopedlmcache_retrieve.py --verify-only; \
+    python3 /opt/scripts/patch_scopedlmcache_retrieve.py --layout; \
+    python3 /opt/scripts/patch_scopedlmcache_retrieve.py --layout --verify-only; \
+    python3 /opt/scripts/write_runtime_provenance.py \
+      --parent-image "$BASE_IMAGE" --source-revision "$SOURCE_REVISION" \
+      --output /opt/runtime-provenance.json; \
     chmod +x /usr/local/bin/model-turnkey-entry.sh /opt/scripts/soul_launcher.py \
       /opt/scripts/soul_controller.py /opt/scripts/soul_config.py \
       /opt/scripts/glm52_lmcache_wrapper.sh /opt/scripts/acme_retry.sh; \
-    chmod -R a-w /opt/soul /opt/glm53-runtime; \
+    chmod -R a-w /opt/soul /opt/glm53-runtime /opt/glm53-refresh /opt/scopedlmcache; \
     ln -sf model-turnkey-entry.sh /usr/local/bin/glm52-entry.sh
 EXPOSE 22 8000 8443 1111
 ENTRYPOINT ["/usr/local/bin/model-turnkey-entry.sh"]

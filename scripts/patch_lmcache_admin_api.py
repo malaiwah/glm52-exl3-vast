@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Restrict LMCache's unauthenticated HTTP server to read-only liveness routes."""
 import argparse
-import importlib.util
 import os
 from pathlib import Path
+
+from patch_scopedlmcache_retrieve import package_source
 
 BEFORE = """        for r in discover_api_routers(apis_path, apis_package):
             self.router.include_router(r)
@@ -24,11 +25,7 @@ AFTER = """        # The MP protocol is the appliance's cache control plane. Its
 
 
 def default_target() -> Path:
-    spec = importlib.util.find_spec(
-        "lmcache.v1.multiprocess.http_api_registry")
-    if spec is None or not spec.origin:
-        raise RuntimeError("LMCache HTTP API registry is not installed")
-    return Path(spec.origin)
+    return package_source("lmcache", "v1/multiprocess/http_api_registry.py")
 
 
 def patch(path: Path, verify_only: bool = False) -> str:

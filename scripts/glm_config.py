@@ -126,10 +126,12 @@ FAMILIES = {
             "--attention-backend", "B12X_MLA_SPARSE",
             "--moe-backend", "b12x",
             "--load-format", "%(LOAD_FORMAT)s",
+            "--prefill-schedule-interval", "%(PREFILL_SCHEDULE_INTERVAL)s",
             "--enable-auto-tool-choice",
             "--tool-call-parser", "glm47",
             "--reasoning-parser", "glm45",
-            "--default-chat-template-kwargs", '{"reasoning_effort":"high"}',
+            "--default-chat-template-kwargs",
+            '{"reasoning_effort":"%(REASONING_EFFORT_DEFAULT)s"}',
             "--hf-overrides",
             '{"use_index_cache":true,"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSS'
             'FSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}',
@@ -732,6 +734,53 @@ VARIANTS["exl3-tr3-glm53-3.42bpw"]["defaults"].update({
     "KV_CACHE_MEMORY_BYTES": 3415867392,
 })
 
+# Release candidate for preserving a full binary-512K request on four 96 GiB
+# GPUs. The smaller K3/K4 payload recovers ~3.67 GiB/rank relative to 3.42bpw.
+# That is a memory budget, NOT a serving qualification: first-use sampling,
+# full-context retrieval, concurrency and LMCache recovery must all pass.
+VARIANTS["exl3-tr3-glm53-3.25bpw"] = {
+    "family": "glm52",
+    "label": "GLM-5.3 EXL3-TR3 mixed 3.25bpw — 512K release candidate",
+    "repo": "davidsyoung/GLM-5.3-EXL3-TR3-3.25bpw",
+    "revision": "6d6bd738c0c1635513e0bd0fdf0302049bd820a9",
+    "dirname": "GLM-5.3-EXL3-TR3-3.25bpw",
+    "quantization": "exl3",
+    "native_mtp_format": "exl3-tr3",
+    "default_draft": "native",
+    "mtp_graft_compatible": False,
+    "defaults": dict(VARIANTS["exl3-tr3-glm53-3.42bpw"]["defaults"]),
+    "runtime_env": dict(VARIANTS["exl3-tr3-glm53-3.42bpw"]["runtime_env"]),
+    "kv_scales_calibrated": True,
+    "download_gib": 317,
+    "tested": False,
+}
+VARIANTS["exl3-tr3-glm53-3.25bpw"]["defaults"].update({
+    "MAX_MODEL_LEN": 524288,
+    # Same DCP4 dynamic-token layout: 8,687 bytes per logical token per rank.
+    "KV_CACHE_MEMORY_BYTES": 4554489856,
+    "MAX_NUM_BATCHED_TOKENS": 2048,
+    "VLLM_EXL3_PREFILL_CAPACITY": 1024,
+})
+
+# Prefer the existing 3.42bpw fidelity at AIBeast's exact 520,192-token limit.
+# Header accounting shows +0.848 GiB/rank versus the live 5.2 checkpoint,
+# mainly its per-expert rotations. Reduce workspace before reducing weight
+# precision; the older 3K/3K workspace OOM is not qualification of this arm.
+VARIANTS["exl3-tr3-glm53-3.42bpw-500k"] = {
+    **VARIANTS["exl3-tr3-glm53-3.42bpw"],
+    "label": "GLM-5.3 EXL3-TR3 3.42bpw — 520K reduced-workspace candidate",
+    "revision": "99c6f951333d2b38f1efefa533c7afadf0d376e3",
+    "defaults": {
+        **VARIANTS["exl3-tr3-glm53-3.42bpw"]["defaults"],
+        "MAX_MODEL_LEN": 520192,
+        "KV_CACHE_MEMORY_BYTES": 4518907904,
+        "MAX_NUM_BATCHED_TOKENS": 2048,
+        "VLLM_EXL3_PREFILL_CAPACITY": 1024,
+    },
+    "runtime_env": dict(VARIANTS["exl3-tr3-glm53-3.42bpw"]["runtime_env"]),
+    "tested": False,
+}
+
 # MTP draft types -> the three env knobs the serve path actually consumes.
 # `tr3-graft`   in-place surgery on layer 78 of the target (the ONLY draft with
 #               long-context evidence: needle 6/6 fp8, armC 3/3 at 150/190/250K)
@@ -794,16 +843,43 @@ KNOBS = [
              "Which checkpoint is served. The family default is a coherent measured "
              "profile, not a model-name alias: it carries the quantizer, topology, "
              "memory shape, parsers, and runtime environment qualified together. "
-             "GLM-5.3 K6 is about 237 GiB and is pinned to TP4/DCP4; K8 is about "
-             "309 GiB and remains marked unqualified until its four-GPU serving pass "
-             "completes. Switching variants triggers a fresh multi-hundred-GB "
-             "download.")),
+             "The primary full GLM-5.3 candidate retains 3.42bpw and 520,192 tokens "
+             "with reduced workspace; GPU qualification is still required. The "
+             "older 3.42bpw envelope is qualified to 393,216 tokens. 3.25bpw and "
+             "Flash K6/K8 remain explicit alternatives, not silent substitutes. "
+             "Switching variants triggers a fresh multi-hundred-GB download.")),
 
     dict(key="MODEL_ID", families=("custom",), type="str", default="",
          group="Model", scope="download", label="Hugging Face model ID",
          rationale=(
              "Repository to download for the custom profile, for example "
              "'Qwen/Qwen3.5-0.8B'. Required when MODEL_FAMILY=custom.")),
+
+    dict(key="REASONING_EFFORT_DEFAULT", families=("glm52",), type="choice",
+         default="high", choices=["low", "high", "max"],
+         group="Model", scope="engine", label="Default reasoning effort",
+         rationale=(
+             "Server-wide GLM chat-template default. Requests may override it. "
+             "High preserves the existing appliance setting; low trades reasoning "
+             "budget for latency, while max follows the full GLM-5.3 benchmark "
+             "configuration. Compare task quality before changing production.")),
+
+    dict(key="PREFILL_SCHEDULE_INTERVAL", families=("glm52",), type="int",
+         default=1, min=1, max=64, group="Serving", scope="engine",
+         label="Prefill admission cadence",
+         rationale=(
+             "Admit chunked prefills every N scheduler steps while eligible decode "
+             "work exists. 1 preserves the current unthrottled policy. The TP "
+             "cadence backport makes values above 1 effective outside DP; compare "
+             "concurrent decode latency and prefill throughput before promotion.")),
+
+    dict(key="TRUST_REMOTE_CODE", type="bool", default=False,
+         group="Model", scope="engine", label="Allow checkpoint Python code",
+         rationale=(
+             "Opt in only for a reviewed checkpoint requiring custom Hugging Face "
+             "Python code. Native GLM-5.3/5.2 and Qwen architectures do not need "
+             "this permission. Enabling it executes checkpoint-supplied code "
+             "with the inference process's privileges.")),
 
     dict(key="QUANTIZATION", families=("custom",), type="str", default="",
          group="Model", scope="engine", label="vLLM quantization method",
@@ -1227,6 +1303,14 @@ KNOBS = [
              "restart-persistent bounded NVMe test. Native remains the rollback "
              "control.")),
 
+    dict(key="LMCACHE_L1_MAX_GB", type="int", default=0, min=0, max=8192,
+         group="Memory", scope="engine", label="LMCache RAM ceiling (GiB)",
+         rationale=(
+             "Optional absolute ceiling on the RAM tier computed from "
+             "OFFLOAD_FRACTION. 0 leaves fraction-based sizing unchanged. A "
+             "positive value caps LMCache's aggregate L1 without increasing a "
+             "smaller cgroup-aware budget; it does not enable offload by itself.")),
+
     dict(key="PREFIX_CACHE_DISK_GB", type="int", default=0, min=0, max=8192,
          group="Memory", scope="engine", label="LMCache NVMe limit (GiB)",
          rationale=(
@@ -1401,25 +1485,16 @@ def state_lock():
     in-process threading.Lock does not serialize against the supervisor's
     rollback, so a self-service apply landing between a verify failure and the
     supervisor's rollback could be silently clobbered while the UI reports
-    "Applied". Both sides take this flock around their read-validate-write so the
-    state that persists is one a reader actually saw. Advisory and best-effort:
-    if the lock file cannot be opened, proceed rather than brick the editor."""
-    lock_f = None
-    try:
-        os.makedirs(state_dir(), exist_ok=True)
-        lock_f = open(os.path.join(state_dir(), ".state.lock"), "w")
+    "Applied". Both sides take this flock around their read-validate-write.
+    Lock acquisition failures propagate: mutating shared state without the lock
+    can lose an accepted operator update."""
+    os.makedirs(state_dir(), exist_ok=True)
+    with open(os.path.join(state_dir(), ".state.lock"), "a") as lock_f:
         fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
-    except OSError:
-        lock_f = None
-    try:
-        yield
-    finally:
-        if lock_f is not None:
-            try:
-                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
-            except OSError:
-                pass
-            lock_f.close()
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
 
 
 def env_layer(env=None, invalid=None) -> dict:
@@ -1712,7 +1787,7 @@ def resolve_family(state_values, env_values) -> str:
 def resolve(state_values=None, env_values=None):
     """-> (effective {key: value}, sources {key: ...}, notes[])
 
-    Sources, lowest to highest: 'default' < 'family' < 'env' < 'file'.
+    Sources, lowest to highest: 'default' < 'family' < 'detected' < 'variant' < 'env' < 'file'.
     The family layer sits between the built-in defaults and the environment: it
     is what "GLM-5.2 wants TP=4 and Qwen3.6 wants TP=1" means, and the operator
     must still be able to override it from the template or the page.
@@ -1909,6 +1984,8 @@ def family_serve_args(cfg: dict):
     fam = family(cfg.get("MODEL_FAMILY"))
     subs = {k: to_text(KNOB_BY_KEY[k], v) for k, v in cfg.items() if k in KNOB_BY_KEY}
     args = [a % subs if "%(" in a else a for a in fam.get("serve_args", [])]
+    if cfg.get("TRUST_REMOTE_CODE"):
+        args += ["--trust-remote-code"]
     if cfg.get("MODEL_FAMILY") == "glm52" and cfg.get("CLAMP_ROPE_TABLES", True):
         # Keep this conditional rather than formatting a sentinel into the JSON:
         # disabling the experiment must omit the override entirely so the checkpoint's
@@ -2346,6 +2423,26 @@ def validate(cfg: dict, context=None):
             "The inherited larger envelope passed startup but OOMed on its first "
             "temperature-1 sample. Use TUNE_* only for an explicitly monitored "
             "runtime experiment.")
+    elif cfg["MODEL_VARIANT"] in (
+            "exl3-tr3-glm53-3.25bpw", "exl3-tr3-glm53-3.42bpw-500k"):
+        envelope = variant["defaults"]
+        if (cfg["TENSOR_PARALLEL_SIZE"] != 4 or cfg["DCP"] != "4"
+                or cfg["KV_CACHE_DTYPE"] != "nvfp4_ds_mla"
+                or cfg["KV_SCALE_MODE"] != "dynamic-token"
+                or cfg["MAX_MODEL_LEN"] > envelope["MAX_MODEL_LEN"]
+                or fixed_kv != envelope["KV_CACHE_MEMORY_BYTES"]
+                or cfg["MAX_NUM_BATCHED_TOKENS"] > 2048
+                or cfg["VLLM_EXL3_PREFILL_CAPACITY"] > 1024):
+            err("glm53-candidate-envelope",
+                ["MODEL_VARIANT", "MAX_MODEL_LEN", "KV_CACHE_MEMORY_BYTES",
+                 "TENSOR_PARALLEL_SIZE", "DCP", "KV_CACHE_DTYPE", "KV_SCALE_MODE",
+                 "MAX_NUM_BATCHED_TOKENS", "VLLM_EXL3_PREFILL_CAPACITY"],
+                "the full GLM-5.3 release candidate is bounded to TP4/DCP4, "
+                f"dynamic-token NVFP4 KV, MAX_MODEL_LEN<={envelope['MAX_MODEL_LEN']}, "
+                f"KV_CACHE_MEMORY_BYTES={envelope['KV_CACHE_MEMORY_BYTES']}, "
+                "scheduler<=2048 and prefill workspace<=1024 rows. This planned envelope requires "
+                "GPU qualification; do not infer a larger supported context "
+                "from a profiler's logical pool size.")
     elif fixed_kv:
         warn("fixed-kv-cache",
              ["KV_CACHE_MEMORY_BYTES", "GPU_MEMORY_UTILIZATION"],

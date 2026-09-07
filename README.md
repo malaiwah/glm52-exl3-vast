@@ -1,21 +1,24 @@
 # Model turnkey for Vast.ai, Runpod, and JarvisLabs
 
-One image, coherent profiles for **GLM-5.3-Flash**, **GLM-5.2**,
-**Qwen3.6-27B**, and compatible vLLM checkpoints. It supplies an authenticated
+One image, coherent profiles for **full GLM-5.3 (non-Flash)**, **GLM-5.3-Flash**,
+**GLM-5.2**, **Qwen3.6-27B**, and compatible vLLM checkpoints. It supplies an authenticated
 OpenAI-compatible endpoint, persistent model downloads and compile caches, a
 live dashboard, key-only SSH, provider-aware URLs, optional TLS, crash
 supervision, and an opt-in embedded diagnostic [SOUL](docs/soul.md).
 
-The current `glm53-k6` production profile serves
-[`malaiwah/GLM-5.3-Flash-TR3-6bpw`](https://huggingface.co/malaiwah/GLM-5.3-Flash-TR3-6bpw)
-on four RTX PRO 6000 Blackwell cards: TP4/DCP4, EXL3 K6, B12X sparse MLA,
-Triton MoE, calibrated NVFP4 MLA KV, and a 458,752-token request limit. The
-separately qualified `glm53-k8` profile serves the
-[`K8 sibling`](https://huggingface.co/malaiwah/GLM-5.3-Flash-TR3-8bpw) as a
-quality-max alternative; its 30% larger checkpoint and native eager MoE path
-make it substantially slower, so K6 remains the production default. Provider
-templates retain `glm52-exl3` for compatibility. Exact runtime and checkpoint
-pins are in the [changelog](CHANGELOG.md).
+The next-release default is **`MODEL_PROFILE=glm53-3.42bpw-500k`**, the full 755B
+`glm_moe_dsa` model, not Flash. It retains 3.42bpw and AIBeast's **520,192-token**
+request limit as a reduced-workspace candidate, not a completed capacity
+test. The intended official release follows the exact-image AIBeast maintenance
+gate below; until then publish only a candidate SHA/digest, **not `latest`**.
+Changing this repository's bare-launch default does not switch a running
+production service or its persisted configuration.
+
+The full `glm53-3.42bpw` profile retains its separately qualified 393,216-token
+safe envelope. Flash `glm53-k6` / `glm53-k8` and `glm52-exl3` remain explicit
+alternatives, not the new default. Existing hosted provider links may still
+select their historical profiles; inspect the profile and image pin before
+renting. Exact runtime and checkpoint pins are in the [changelog](CHANGELOG.md).
 
 ## Contents
 
@@ -62,6 +65,7 @@ answers only to you.
 
 | profile | provider | launch | hardware | disk | first-boot budget |
 |---|---|---|---|---|---|
+| GLM-5.3 full 3.42bpw **500K+ candidate** | own host / separately authorized maintenance | [docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB**, extra space for optional L2 | unmeasured; full-context qualification required |
 | GLM-5.3-Flash K6 | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **450 GB** | 2–12 min once weights are local |
 | GLM-5.3-Flash K8 quality-max | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **525 GB** | 2–15 min once weights are local |
 | GLM-5.3 full 3.42bpw | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | up to 90 min cold; ~9 min with warm runtime cache |
@@ -83,19 +87,22 @@ under [What startup looks like](#what-startup-looks-like).
 
 ### Self-serve with Docker or Podman
 
-The same appliance image runs on hardware you own. With Docker and the NVIDIA
-container toolkit, this downloads the selected profile's weights into
-`/srv/turnkey` on first boot and prints the API key and dashboard token in
-the container logs:
+Use a separately staged candidate image on idle, authorized hardware. Set
+`IMAGE` to the candidate's immutable published `repo@sha256:…` reference, not
+`latest`; the existing production image does not acquire this profile by
+changing an environment variable. With Docker and the NVIDIA container toolkit,
+the following downloads weights into a dedicated workspace and prints keys in
+the container logs. **Do not launch alongside the production GPU workload.**
 
 ```bash
-sudo docker run -d --name glm53-turnkey \
-  --restart unless-stopped \
+: "${IMAGE:?Set IMAGE to the published candidate repository@sha256:digest}"
+sudo docker run -d --name glm53-342-candidate \
+  --restart no \
   --gpus all --ipc=host --network host \
   --ulimit memlock=-1:-1 \
-  -e MODEL_PROFILE=glm53-k6 \
-  -v /srv/turnkey:/workspace \
-  ghcr.io/malaiwah/glm52-exl3-vast:latest
+  -e MODEL_PROFILE=glm53-3.42bpw-500k -e PORT=8001 \
+  -v /srv/turnkey-glm53-candidate:/workspace \
+  "$IMAGE"
 ```
 
 This is the same container shape used on JarvisLabs. Select
@@ -103,12 +110,15 @@ This is the same container shape used on JarvisLabs. Select
 `MODEL_PROFILE=glm52-exl3` for the legacy four-GPU profile, or
 `MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU profile; add
 `-e HF_TOKEN=...` for authenticated downloads. Follow first boot with
-`sudo docker logs -f glm53-turnkey`. The endpoint is
-`http://localhost:8000/v1` and the tokenized dashboard is on `:1111`; keep
+`sudo docker logs -f glm53-342-candidate`. This example's endpoint is
+`http://localhost:8001/v1` and the tokenized dashboard is on `:1111`; keep
 both behind your LAN or an SSH tunnel, or configure TLS as described in
 [Security](#security).
 
-**Prerequisite — NVIDIA P2P driver override (critical for multi-GPU PCIe performance).**
+**Host-driver maintenance only — NVIDIA P2P override.** The commands below
+unload NVIDIA modules and must not run while production or another GPU client
+is active. Schedule a separate authorized maintenance window; this is not a
+candidate-staging prerequisite to execute automatically.
 On direct-attach multi-GPU systems where `nvidia-smi topo -m` shows `PHB` or
 `NODE` between GPUs, create `/etc/modprobe.d/nvidia-p2p-override.conf`:
 
@@ -130,10 +140,10 @@ full PCIe topology and tuning guidance.
 
 ```yaml
 services:
-  glm52-turnkey:
-    image: ghcr.io/malaiwah/glm52-exl3-vast:latest
-    container_name: glm52-turnkey
-    restart: unless-stopped
+  glm53-candidate:
+    image: ${IMAGE:?Set an immutable published candidate image}
+    container_name: glm53-342-candidate
+    restart: "no"
     ipc: host
     network_mode: host
     ulimits:
@@ -146,14 +156,14 @@ services:
               count: all
               capabilities: [gpu]
     environment:
-      - MODEL_PROFILE=glm52-exl3
-      # - MODEL_VARIANT=exl3-tr3-3.42bpw  # higher fidelity, ~328 GiB
-      # - MODEL_PROFILE=glm53-3.42bpw      # qualified full 755B glm_moe_dsa
+      - MODEL_PROFILE=glm53-3.42bpw-500k
+      - PORT=8001
+      # - MODEL_PROFILE=glm53-3.42bpw  # previous qualified 393216-token full model
       # - HF_TOKEN=hf_your_token_here     # faster authenticated downloads
       # - PREFIX_CACHE_DISK_GB=32         # LMCache L2 disk tier (GiB)
       # - PREFIX_CACHE_DISK_FRACTION=0.5  # ...or fraction of free disk
     volumes:
-      - /srv/turnkey:/workspace
+      - /srv/turnkey-glm53-candidate:/workspace
 ```
 
 Then:
@@ -167,6 +177,11 @@ For rootless Podman against a checkpoint already on disk — no download, the
 checkpoint mounted read-only — use the checked-in runner:
 
 ```bash
+export MODEL_PROFILE=glm53-3.42bpw-500k
+export GPU_DEVICE_MODE=manual  # Podman 4.9: explicit devices, not newer CDI syntax
+export NAME=glm53-342-candidate
+export PORT=8001
+export RESTART_POLICY=no
 export MODEL_DIR_HOST=/path/to/complete/checkpoint
 export DOWNLOAD_MARKER_HOST=/path/to/flags/.download-complete
 bash scripts/run-local-podman.sh
@@ -186,12 +201,70 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 
 | `MODEL_PROFILE` | intended use | default hardware | download / context |
 |---|---|---|---|
+| **`glm53-3.42bpw-500k`** | **next-release default; reduced-workspace full-quality candidate, NOT GPU-qualified** | 4x RTX PRO 6000 Blackwell 96 GB | ~331 GiB / planned 520,192 total tokens |
+| `glm53-3.25bpw` | optional lower-bit capacity experiment, NOT GPU-qualified | 4x RTX PRO 6000 Blackwell 96 GB | ~317 GiB / planned 524,288 total tokens |
 | `glm53-k6` | validated GLM-5.3-Flash TR3 EXL3 K6 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~237 GiB / 458,752 |
 | `glm53-k8` | validated GLM-5.3-Flash TR3 EXL3 K8 quality-max stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 458,752 |
 | `glm53-3.42bpw` | validated GLM-5.3 full-model mixed K3/K4 EXL3 stack | 4x RTX PRO 6000 Blackwell 96 GB | ~331 GiB / 393,216 |
 | `glm52-exl3` | validated GLM-5.2 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 512K |
 | `qwen36-27b-nvfp4` | vision-enabled, lower-cost production/development | 1x RTX 5090 32 GB | ~21 GiB / 192K |
 | `custom` | another conventional vLLM checkpoint | configurable | conservative 32K defaults |
+
+### GLM-5.3 full-model 3.42bpw 500K: candidate to official release
+
+The primary profile is `glm53-3.42bpw-500k`, variant
+`exl3-tr3-glm53-3.42bpw-500k`, architecture family **`glm52`**. The family
+reflects the unchanged full-model architecture, not the checkpoint version.
+It pins
+[`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/tree/99c6f951333d2b38f1efefa533c7afadf0d376e3).
+All 81 weight-file LFS SHA-256/size pairs match evaluated revision
+`8bef807a0fcdd180e984a26b50e731cdba9a8ff2`. The newer chat template still
+requires tool/continuation qualification. Validate metadata against pinned HF
+Git object IDs; do not bypass stale manifest entries indiscriminately.
+
+The [header accounting](maintenance/glm53-aibeast-500k/memory-comparison.json)
+compares every tensor in the live willfalco 5.2 and davidsyoung 5.3 3.42bpw
+checkpoints. Their BF16 carrier and router-bias storage are identical.
+The new quant has **0.848 GiB/rank** more tensor payload: approximately
+0.665 GiB of per-expert rotation vectors and 0.182 GiB of Trellis data.
+The index totals were not directly comparable: 5.2 counts shard headers and
+5.3 counts only tensor bytes. This is quantization/layout overhead, not a
+larger model architecture.
+
+The live 5.2 boot recorded 81.73 GiB model loading and 0.75 GiB graphs/rank;
+the older 5.3 qualification recorded 82.42 GiB and 0.61 GiB on a different
+runtime. Those are not a controlled same-runtime A/B. The historical 5.3
+520K failure used a 3072-row scheduler and prefill workspace; it does not
+establish that a smaller-workspace 3.42bpw arm cannot fit.
+
+Therefore preserve weight precision and the existing **520,192 total-token**
+budget first: TP4/DCP4, native probabilistic MTP3, online K6, dynamic NVFP4 KV
+with FP8 RoPE, `KV_CACHE_MEMORY_BYTES=4518907904` per GPU, scheduler 2048,
+prefill arena 1024, C8, GMU 0.93. This is a planned budget, **not GPU capacity
+proof**. The optional 3.25bpw profile is not a silent substitute. DRAM/NVMe
+prefix caching does not enlarge active GPU context; no 750K claim is made.
+
+The [maintenance assets](maintenance/glm53-aibeast-500k/) stage a separate
+name, port, state and cache using Podman 4.9-compatible device mappings.
+`start` refuses while production is running. An authorized window must prove:
+
+- exact published image without runtime-source mounts and all pinned model
+  files verified;
+- the initial cold engine and first temperature-1 sampler, without a hidden
+  warmed retry; automatic startup verification is disabled only in this
+  isolated qualification stage so the runner owns the first API sample;
+- strict output, tools/continuation and tokenizer-exact multi-depth retrieval
+  with **at least 500,000 real input tokens plus useful output** inside 520,192;
+- C1/C4/C8 and measured long-prefill/active-decode overlap, with both stream
+  timelines and physical memory/error evidence;
+- LMCache cold/warm/L2 hits, bounded eviction, restart and failure recovery.
+
+Deadline ownership is tested on the actual installed adapter using controlled
+CPU futures; this is not a claimed 180-second GPU DMA-hang injection. Real
+cache round trips and engine-group recovery remain separate GPU gates.
+Rollback retains the old service/image/state and revokes candidate reboot
+eligibility before stopping it. Neither staging nor qualification automatically
+cuts over production or promotes `latest`.
 
 ### GLM-5.3 full-model 3.42bpw
 
@@ -248,8 +321,8 @@ MLA, Triton MoE, NOPE/index-pool compression, calibrated KV scales, topology,
 and scheduler bounds are one contract. Both profiles intentionally disable
 speculative decoding.
 
-K6 uses the qualified B12X fused Trellis kernel and remains the production
-default. K8 cannot safely widen that decoder: eight overlapping 16-bit MCG
+K6 uses the qualified B12X fused Trellis kernel and remains an explicit Flash
+alternative. K8 cannot safely widen that decoder: eight overlapping 16-bit MCG
 windows span 72 bits, while its two-word path represents only 64. K8 therefore
 uses ExLlamaV3's native K8 routed-expert kernel in eager mode with a 512-token
 scheduler and parity arena.
@@ -303,10 +376,10 @@ named profile when a model needs more than conventional vLLM flags.
 
 ### GLM flagship variant matrix (beta)
 
-There are seven measured GLM-5.2/GLM-5.3 variants. `exl3-tr3` is the balanced
-GLM-5.2 provider-template default. `exl3-tr3-max-context` trades ordinary-workload
-speed for the largest DCP4 envelope. `madeby561-hybrid` remains the immutable
-v20 production control:
+The following matrix records measured GLM-5.2/GLM-5.3 alternatives; it does
+not qualify the new full 3.42bpw reduced-workspace candidate above. `exl3-tr3` is the historical
+GLM-5.2 provider-template selection. `exl3-tr3-max-context` trades ordinary-workload
+speed for context experiments. `madeby561-hybrid` remains the immutable v20 control:
 
 ```text
 MODEL_PROFILE=glm52-exl3
@@ -725,8 +798,8 @@ pause—after the optional session erase.
 
 ## Running it on your own hardware
 
-The same image drops onto an owned box as a transparent replacement for an
-existing endpoint:
+Stage the replacement independently; a running endpoint is not a disposable
+container. Keep its image, launch environment, state and cache for rollback.
 
 <details>
 <summary><b>AIBeast / owned Linux host + rootless Podman</b></summary>
@@ -736,35 +809,49 @@ Point it at an existing read-only Hugging Face checkpoint, a writable cache,
 and a tiny writable flag directory. No weights are downloaded or mutated:
 
 ```bash
-export IMAGE=ghcr.io/malaiwah/glm52-exl3-vast:latest
-export MODEL_DIR_HOST=/mnt/vault/llm/huggingface/\
-models--brandonmusic--GLM-5.2-EXL3-TR3-3.0bpw/snapshots/\
-9297b9f1d53af5c67cffa01e30cc071a1ff7144b
-export DOWNLOAD_MARKER_HOST=/mnt/fast/turnkey-flags/.download-complete
-export CACHE_VOLUME=glm52-turnkey-cache
-export STATE_VOLUME=glm52-turnkey-state
-export PORT=8000
+: "${IMAGE:?Set IMAGE to the published candidate repository@sha256:digest}"
+export IMAGE
+export MODEL_PROFILE=glm53-3.42bpw-500k
+export MODEL_DIR_HOST=/mnt/vault/llm/huggingface/hub/\
+models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw/snapshots/\
+99c6f951333d2b38f1efefa533c7afadf0d376e3
+export DOWNLOAD_MARKER_HOST=/mnt/fast/glm53-candidate-flags/.download-complete
+export NAME=glm53-342-candidate
+export CACHE_VOLUME=glm53-candidate-cache
+export STATE_VOLUME=glm53-candidate-state
+export PORT=8001
+export GPU_DEVICE_MODE=manual
+export RESTART_POLICY=no
 
 bash scripts/run-local-podman.sh
 ```
 
 The runner uses host networking/IPC, passes the NVIDIA and DRI devices,
 mounts the checkpoint read-only, and keeps compilation output outside the
-checkpoint. To inspect the exact command without touching GPUs:
+checkpoint. Podman 4.9 uses manual NVIDIA/DRI devices; `GPU_DRM_DEVICES`
+can specify the inventoried DRM render devices. The generic runner refuses an
+existing name by default. `REPLACE_EXISTING=1` plus a fresh `ROLLBACK_NAME`
+explicitly stops and renames that named container rather than deleting it;
+do not use this as an implicit production cutover. Prefer the maintenance
+assets for AIBeast: their `start` refuses while production runs, and `rollback`
+stops only the candidate before restarting the preserved old service.
+Never reuse old state/cache volumes for the candidate: stored overrides win
+over new defaults, and candidate writes would contaminate rollback.
+To print the resolved configuration without running the GPU service:
 
 ```bash
 CONFIG_SMOKE=1 bash scripts/run-local-podman.sh
 ```
 
-LMCache DRAM is selected by both the flagship and qualified 3.25-bpw profiles.
-A positive
+LMCache DRAM is selected by the GLM profiles; historical GLM-5.2 offload
+measurements are not full GLM-5.3 qualification. A positive
 `PREFIX_CACHE_DISK_GB` additionally stores bounded derived KV under the
 writable LMCache mount. On an owned host, create a dedicated local NVMe
 directory and bind it at the appliance's secure-erase-aware path:
 
 ```bash
-mkdir -p /mnt/fast/lmcache/glm52-3.25-r17
-export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm52-3.25-r17
+mkdir -p /mnt/fast/lmcache/glm53-candidate
+export LMCACHE_DISK_HOST=/mnt/fast/lmcache/glm53-candidate
 export PREFIX_CACHE_BACKEND=lmcache
 export PREFIX_CACHE_DISK_GB=512
 bash scripts/run-local-podman.sh
@@ -790,11 +877,14 @@ public model API at port 8000.
 
 The serve line is no longer GLM-only. A **family** supplies the architecture's
 engine flags, applicable knobs and validation rules; the config layer resolves
-`defaults < family < startup env < state file` inside it. The provider-facing
+`defaults < family < variant < startup env < state file` inside it. The provider-facing
 `MODEL_PROFILE` names map to the editable families:
 
 | startup profile | self-service family / variant |
 |---|---|
+| `glm53-3.25bpw` (candidate default) | `glm52` / `exl3-tr3-glm53-3.25bpw` |
+| `glm53-3.42bpw` | `glm52` / `exl3-tr3-glm53-3.42bpw` |
+| `glm53-k6` / `glm53-k8` | `glm53` / `glm53-k6` or `glm53-k8` |
 | `glm52-exl3` | `glm52` / `exl3-tr3` |
 | `qwen36-27b-nvfp4` | `qwen36` / `qwen36-nvfp4` |
 | `custom` | `custom` / `custom` plus `MODEL_ID` |
@@ -944,17 +1034,21 @@ GLM-5.2 vision merges are in
 
 ## GLM profile: MTP78 draft
 
-The pinned Brandon revision serializes the layer-78 MTP draft natively in the
-same rank-sliced EXL3/TR3 format as the target experts, so the default
-performs no checkpoint surgery, and MTP-5 is the qualified speculation depth.
+Full GLM-5.3 profiles use the checkpoint's native EXL3/TR3 MTP draft with
+MTP3 and reject GLM-5.2 graft/override paths. For the explicit GLM-5.2 Brandon
+profile, the native quantized layer-78 draft retains its historical MTP5
+qualification. `MTP78_TRELLIS=0` selects `MTP_DRAFT=native`, not BF16;
+use the registry's `MTP_DRAFT` selector rather than inferring dtype from this
+legacy boolean.
 The 4-arm draft comparison, speculation-depth measurements, historical graft
 evidence, and the experimental separate-draft override are in
 [docs/mtp78.md](docs/mtp78.md); every non-default flag is justified in
 [docs/glm52-tuning-rationale.md](docs/glm52-tuning-rationale.md).
 
 ## Vast.ai template settings (manual setup)
-- **Image**: `ghcr.io/malaiwah/glm52-exl3-vast:latest` (the ghcr.io package
-  must be set to **public** visibility, or vast hosts can't pull it)
+- **Image**: an immutable published candidate digest for qualification; a
+  qualified release digest for production. Do not promote the candidate to
+  `latest` before the GPU gate. The GHCR package must be pullable by the host.
 - **Launch mode**: docker ENTRYPOINT (vLLM logs appear on the instance console;
   the image starts its own key-only SSH daemon)
 - **Docker options**: `-p 22:22 -p 8000:8000 -p 1111:1111`. Vast's current
@@ -962,20 +1056,22 @@ evidence, and the experimental separate-draft override are in
   accepts only ports, environment variables and hostname in this field;
   `--ipc` and `--ulimit` entries are ignored. Port 22 is SSH and port 1111 is
   the landing page.
-- **Profile**: `MODEL_PROFILE=glm52-exl3` (default), or
-  `MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU vision model.
+- **Profile**: `MODEL_PROFILE=glm53-3.25bpw` (candidate default);
+  `glm52-exl3` and Flash profiles are explicit alternatives, or choose
+  `qwen36-27b-nvfp4` for the one-GPU vision model.
 - **Disk**: >=600 GB for GLM (3.42bpw weights ~339 GB + image ~39 GB + JIT caches ~15 GB + margin); >=100 GB for Qwen.
 - **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB) for GLM; one RTX PRO 6000
   Blackwell or RTX 5090 for Qwen.
 - **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
   applicable Hub rate limits), `OFFLOAD_FRACTION`
-  (GLM default 0.5 for reusable agentic prefixes), `MTP_TOKENS` (GLM default 5; Qwen
-  default 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (GLM 524288; Qwen 196608),
+  (GLM default 0.5 for reusable agentic prefixes), `MTP_TOKENS` (full GLM-5.3
+  3; Flash/Qwen 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (full 3.25 candidate
+  524288; qualified full 3.42 393216; Flash 458752; Qwen 196608),
   `VLLM_EXL3_PREFILL_CAPACITY` (GLM-only reusable EXL3 arena; the mixed
   3.25-bpw profile selects 1024 rows inside its 2048-token scheduler chunk;
   the r20/3.36-bpw K6 profile selects its qualified 3072/3072 PP-first shape),
   `SERVED_MODEL_NAME`,
-  `MTP78_TRELLIS` (default 1: quantized trellis draft, see MTP78 section; 0 folds into `MTP_DRAFT=native`, i.e. the native in-checkpoint draft — which on the pinned EXL3-TR3 checkpoint is itself a trellis draft, not a BF16 one),
+  `MTP_DRAFT` (native for full GLM-5.3; `off` disables speculation),
   `LANDING_PAGE` (default 1; 0 disables the :1111 landing page). Recommended
   extra env: `OPEN_BUTTON_PORT=1111` — the dashboard **Open** button then hits
   the landing page: live boot status (weight-download progress, TLS, engine),
@@ -995,12 +1091,12 @@ The most common first-launch knobs:
 
 | env | default | purpose |
 |---|---|---|
-| `MODEL_PROFILE` | `glm52-exl3` | `qwen36-27b-nvfp4` for the one-GPU profile, or `custom` with `MODEL_ID` |
+| `MODEL_PROFILE` | `glm53-3.25bpw` | full non-Flash 512K candidate; other models must be selected explicitly |
 | `HF_TOKEN` | (unset) | authenticated downloads and higher Hub rate limits |
 | `DESEC_TOKEN` / `DESEC_DOMAIN` | (unset) | turnkey TLS via deSEC DNS-01 (see [Security](#security)) |
 | `OPEN_BUTTON_TOKEN` | provider-specific | exposes the `:1111` landing page and config editor |
-| `MAX_MODEL_LEN` | 524288 GLM / 196608 Qwen | qualified context envelope |
-| `MTP_TOKENS` | 5 GLM / 0 Qwen | speculation depth |
+| `MAX_MODEL_LEN` | profile-specific | full 3.25 candidate 524288 (unqualified); full 3.42 393216; Flash 458752; Qwen 196608 |
+| `MTP_TOKENS` | full GLM-5.3 3 / Flash and Qwen 0 | speculation depth; GLM-5.2 variant-specific |
 | `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host-DRAM prefix cache (not active-context capacity) |
 | `TERMINATE_ENABLED` | `0` | expose the in-container terminate control |
 | `AUTH` | `key` | `none` only on a trusted private network |
@@ -1008,10 +1104,11 @@ The most common first-launch knobs:
 
 Every knob — including KV sizing, offload/memlock behaviour, verification,
 SOUL autonomy, and termination — is documented with its default and rationale
-in [docs/configuration.md](docs/configuration.md). A final `TUNE_*`
-environment layer (e.g. `TUNE_VLLM_EXL3_TRELLIS_MIN_M`) overrides any resolved
-value and is intended for advanced A/B experiments; it is not exposed in the
-self-service UI.
+in [docs/configuration.md](docs/configuration.md). A final supported `TUNE_*`
+runtime environment layer is intended for advanced A/B experiments and is not
+exposed in the self-service UI. It does not bypass family/profile safety
+validation: full-model launches reject incompatible Flash flags and unsafe
+KV/context combinations.
 
 ## Evidence / why these defaults
 Root-cause investigation of the long-context corruption and the validated
@@ -1055,6 +1152,22 @@ Relocated deep-dive records:
 VRAM, and traffic on the box are visible to a determined host. These controls
 are the padlock that keeps honest people honest; truly sensitive work belongs
 on hardware you own.
+
+**Open hardening scope:** container PID 1 still runs as root
+([#20](https://github.com/malaiwah/glm52-exl3-vast/issues/20)). Rootless Podman
+maps that identity into a host user namespace; it is not a non-root application
+and still exposes that user's mounted files and devices. Host networking/IPC
+remain in owned-host examples ([#21](https://github.com/malaiwah/glm52-exl3-vast/issues/21)):
+loopback cache listeners and API authentication do not isolate NCCL/worker
+sockets or other host services. Use host firewall/SSH boundaries; bridge TP4/DCP4
+and a non-root entrypoint require separate compatibility qualification.
+Parent ML dependency index selection
+([#24](https://github.com/malaiwah/glm52-exl3-vast/issues/24)) and complete
+hash-locked core ML requirements
+([#25](https://github.com/malaiwah/glm52-exl3-vast/issues/25)) remain open.
+The hash-locked SOUL venv and immutable parent digest narrow their respective
+boundaries; they do not retroactively make the parent's dependency build
+hash-verified or first-index-only.
 
 - **API key** (on by default): set `VLLM_API_KEY`, or one is auto-generated and
   printed in the instance console logs at boot. All /v1 calls need
@@ -1134,3 +1247,30 @@ on hardware you own.
   which is the default) and be aware JIT compilation may still fail.
   Qwen's checkpoint is about 21 GiB; its 100 GB volume leaves room for
   cache and experiments.
+
+## Attribution, licenses and runtime provenance
+
+This repository's [MIT license](LICENSE) covers its own licensed appliance
+code, not every file in the image or the model weights. Preserve bundled
+third-party copyright/license/notice files when redistributing. The parent
+runtime combines vLLM, B12X/SparkInfer, ExLlamaV3 and CUDA/NCCL components;
+their licenses remain separate. In particular, the
+[parent runtime](https://github.com/brandonmmusic-max/glm-5.3-flash-exl3-4bpw)
+declares **`LicenseRef-ShapleyMCG-1.0`**; retain its Shapley/MCG license and
+notices alongside the [ExLlamaV3 lineage](https://github.com/turboderp-org/exllamav3)
+attribution. An appliance OCI label saying MIT is not a license grant for
+that parent or its codebook implementation.
+
+Full GLM-5.3 weights use the custom
+[GLM-5.3 license](https://huggingface.co/zai-org/GLM-5.3/blob/aca966e4e02791568aa6a4ced368624b3d897f42/LICENSE),
+as the [quant model card](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.25bpw)
+declares. Encoder/tooling MIT attribution does not change that model license.
+Review its notice, use and commercial MaaS conditions before deployment.
+
+The build generates `/opt/runtime-provenance.json` from the **installed**
+filesystem after all overlays. It records the parent digest, actual critical
+source and native-library hashes, package/module locations and versions, and
+model pins from the registry. It replaces the stale r26 ledger, not historical
+r26 evidence. The output cannot know the image's own future registry digest:
+record the pushed manifest digest separately alongside the extracted JSON.
+Source hashes alone are not GPU, model-capacity, or supply-chain qualification.
