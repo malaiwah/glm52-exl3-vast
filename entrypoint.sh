@@ -13,6 +13,27 @@
 set -e
 
 SCRIPTS_DIR="${SCRIPTS_DIR:-/opt/scripts}"
+
+# GLM-5.3-Flash is not served by this image any more: the Gilded Gnosis base
+# carries no GLM5Next/pooled-indexer runtime to load it with. A withdrawn Flash
+# selector must be refused here, at the gate, and with the reason and the image
+# that DOES serve it named — the resolver below would otherwise reduce an
+# unknown family/variant to a default and boot a different model on a rented
+# four-GPU host. glm_config owns the wording so both paths say the same thing.
+refuse_flash_selector() {
+  python3 -c "
+import sys; sys.path.insert(0, '$SCRIPTS_DIR')
+import glm_config as gc
+print(gc.flash_unavailable_message(sys.argv[2], sys.argv[1]))" "$1" "$2" >&2 ||
+    echo "FATAL: $1=$2 selects GLM-5.3-Flash, which this image cannot serve." >&2
+  exit 1
+}
+case "${MODEL_FAMILY:-}" in
+  glm53) refuse_flash_selector MODEL_FAMILY "$MODEL_FAMILY" ;;
+esac
+case "${MODEL_VARIANT:-}" in
+  glm53-k6|glm53-k8) refuse_flash_selector MODEL_VARIANT "$MODEL_VARIANT" ;;
+esac
 MODEL_PROFILE="${MODEL_PROFILE:-}"
 if [ -z "$MODEL_PROFILE" ]; then
   if [ -n "${MODEL_FAMILY:-}${MODEL_VARIANT:-}" ]; then
@@ -30,8 +51,7 @@ case "$MODEL_PROFILE" in
     MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}"
     ;;
   glm53-k6|glm53-k8)
-    export MODEL_FAMILY="${MODEL_FAMILY:-glm53}"
-    export MODEL_VARIANT="${MODEL_VARIANT:-$MODEL_PROFILE}"
+    refuse_flash_selector MODEL_PROFILE "$MODEL_PROFILE"
     ;;
   glm53-3.25bpw|glm53-3.42bpw|glm53-3.42bpw-500k)
     # GLM-5.3 retains GLM-5.2's glm_moe_dsa architecture. Reuse that measured
@@ -50,7 +70,7 @@ case "$MODEL_PROFILE" in
     ;;
   *)
     echo "FATAL: unknown MODEL_PROFILE=$MODEL_PROFILE"
-    echo "FATAL: choose glm53-3.42bpw-500k, glm53-3.25bpw, glm53-k6, glm53-k8, glm53-3.42bpw, glm52-exl3, qwen36-27b-nvfp4, or custom"
+    echo "FATAL: choose glm53-3.42bpw-500k, glm53-3.25bpw, glm53-3.42bpw, glm52-exl3, qwen36-27b-nvfp4, or custom"
     exit 1
     ;;
 esac
@@ -274,12 +294,6 @@ apply_config() {
         *) MODEL_PROFILE=glm52-exl3 ;;
       esac
       ;;
-    glm53)
-      case "${MODEL_VARIANT:-glm53-k6}" in
-        glm53-k8) MODEL_PROFILE=glm53-k8 ;;
-        *) MODEL_PROFILE=glm53-k6 ;;
-      esac
-      ;;
     qwen36) MODEL_PROFILE=qwen36-27b-nvfp4 ;;
     custom) MODEL_PROFILE=custom ;;
   esac
@@ -318,8 +332,7 @@ apply_config() {
   # calibrator cannot merely choose a conservative crossover: every custom
   # channel fails cudaIpcOpenMemHandle. Detect that hard capability boundary
   # before calibration and retain vLLM's NCCL/SHM fallbacks.
-  if { [ "${MODEL_FAMILY:-glm52}" = "glm52" ] ||
-       [ "${MODEL_FAMILY:-glm52}" = "glm53" ]; } &&
+  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] &&
      [ "${B12X_PCIE_DMA:-1}" = "1" ] &&
      command -v nvidia-smi >/dev/null 2>&1; then
     _p2p_matrix="$(nvidia-smi topo -p2p r 2>/dev/null || true)"
@@ -364,7 +377,7 @@ apply_config
 # of GB they did not ask for, onto a disk that may not hold it, at rental rates,
 # with the UI reporting progress as though everything were fine.
 case "${FAMILY_ENV_BLOCK:-}" in
-  glm52|glm53|generic) ;;
+  glm52|generic) ;;
   *)
     echo "FATAL: MODEL_FAMILY='${MODEL_FAMILY:-?}' resolved to an engine environment"
     echo "       block ('${FAMILY_ENV_BLOCK:-}') that this entrypoint does not implement."
@@ -1474,60 +1487,6 @@ prepare_checkpoint() {
       prepare_vision || return 1
       python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-0}" || return 1
     fi
-  elif [ "${MODEL_FAMILY:-}" = "glm53" ]; then
-    if ! MODEL_DIR="$MODEL_DIR" MODEL_VARIANT="${MODEL_VARIANT:-glm53-k6}" \
-         MAX_MODEL_LEN="${MAX_MODEL_LEN:-458752}" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-model_dir = Path(os.environ["MODEL_DIR"])
-config = json.loads((model_dir / "config.json").read_text())
-variant = os.environ["MODEL_VARIANT"]
-expected_bits = {"glm53-k6": 6, "glm53-k8": 8}.get(variant)
-if expected_bits is None:
-    raise SystemExit(f"FATAL: unsupported GLM-5.3 variant {variant!r}")
-architectures = config.get("architectures") or []
-if architectures != ["Glm5NextForConditionalGeneration"]:
-    raise SystemExit(
-        "FATAL: GLM-5.3 profile requires Glm5NextForConditionalGeneration; "
-        f"checkpoint declares {architectures!r}"
-    )
-quant = config.get("quantization_config") or {}
-if (
-    str(quant.get("quant_method", "")).lower() != "exl3"
-    or str(quant.get("codebook", "")).lower() != "mcg"
-    or int(quant.get("bits", 0)) != expected_bits
-):
-    raise SystemExit(
-        f"FATAL: {variant} requires EXL3/MCG K{expected_bits}; "
-        f"checkpoint declares {quant!r}"
-    )
-text = config.get("text_config") or {}
-native_context = int(text.get("max_position_embeddings", 0))
-requested_context = int(os.environ["MAX_MODEL_LEN"])
-if native_context < requested_context:
-    raise SystemExit(
-        f"FATAL: requested context {requested_context} exceeds checkpoint native "
-        f"limit {native_context}"
-    )
-if not (
-    text.get("mla_use_nope") is True
-    and int(text.get("index_kpool", 0)) == 4
-    and text.get("index_kpool_compress") is True
-):
-    raise SystemExit(
-        "FATAL: GLM-5.3 sparse-MLA NOPE/K-pool contract is missing from config.json"
-    )
-print(
-    f">>> GLM-5.3 checkpoint verified: {architectures[0]}, "
-    f"EXL3/MCG K{expected_bits}, native context {native_context}"
-)
-PY
-    then
-      echo "!!! checkpoint verification failed; supervisor will retry"
-      return 1
-    fi
   elif [ "${MODEL_FAMILY:-}" = "qwen36" ]; then
     if ! MODEL_DIR="$MODEL_DIR" MTP_TOKENS="${MTP_TOKENS:-0}" python3 - <<'PY'
 import json
@@ -1726,9 +1685,10 @@ if [ "${FAMILY_ENV_BLOCK:-glm52}" = "glm52" ]; then
 # conversion/cache contract in the same long-lived PID 1 environment.
 unset VLLM_EXL3_ONLINE_TRELLIS_BITS VLLM_EXL3_ENCODER_SOURCE
 unset VLLM_EXL3_ONLINE_CACHE_DIR VLLM_EXL3_ONLINE_CACHE_MODE
-# The parent image is GLM-5.3-Flash-first. Its NoPE cache and route flags are
-# mutually exclusive with the full GLM_NSA record selected below; leaving them
-# inherited makes KV_FP8_ROPE=1 fail before any weights load.
+# The Gilded Gnosis base no longer carries the GLM-5.3-Flash NoPE cache and
+# route flags, but a template or a TUNE_ override can still inject them. They
+# are mutually exclusive with the full GLM_NSA record selected below; leaving
+# one of them set makes KV_FP8_ROPE=1 fail before any weights load.
 unset VLLM_B12X_GLM_NOPE_NVFP4 B12X_GL53_ROUTE128_WIDE
 unset B12X_GL53_ROUTE128_HYBRID_TAIL VLLM_ALLREDUCE_USE_SYMM_MEM
 export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_SPARSE_INDEXER=1
@@ -1850,6 +1810,54 @@ export SPARKINFER_INDEXER_TWO_LEVEL_FOLD="${SPARKINFER_INDEXER_TWO_LEVEL_FOLD:-a
 export SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB="${SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256}"
 unset _GLM_NVFP4_SCALE_FILE _GLM_NVFP4_SCALE_SHA256
 
+# The Gilded Gnosis base carries the EXL3 kernel package at /opt/exllamav3
+# (exllamav3_ext.cpython-312-x86_64-linux-gnu.so) and the online encoder
+# checkout at /opt/exllamav3-python/exllamav3. Both are OCI defaults of the
+# base image. State the extension path explicitly so a family switch or a
+# provider template cannot leave it unset, and fail closed here instead of
+# letting an EXL3 checkpoint discover at load time that its kernels are absent.
+_glm_exl3_ext=/opt/exllamav3
+if [ -d "$_glm_exl3_ext" ]; then
+  export VLLM_EXL3_EXT_PATH="$_glm_exl3_ext"
+elif [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  unset VLLM_EXL3_EXT_PATH
+else
+  echo "FATAL: the pinned EXL3 extension directory is missing: $_glm_exl3_ext" >&2
+  return 1
+fi
+unset _glm_exl3_ext
+# ONLINE_QUANT=exl3-b6 re-encodes eligible BF16 tensors at load time through
+# that pinned encoder checkout; apply_profile_runtime_env exports its path
+# right after this block, so the directory has to exist before the engine runs.
+if [ "${ONLINE_QUANT:-none}" = "exl3-b6" ] &&
+   [ "${CONFIG_SMOKE:-0}" != "1" ] &&
+   [ ! -d /opt/exllamav3-python/exllamav3 ]; then
+  echo "FATAL: ONLINE_QUANT=exl3-b6 needs the pinned EXL3 encoder source," >&2
+  echo "FATAL: /opt/exllamav3-python/exllamav3, which is not in this image." >&2
+  return 1
+fi
+
+# The Gilded Gnosis base ships its own local-inference NCCL build (2.30.4) and
+# its OCI environment points every consumer at it. State that load-bearing
+# default explicitly so a family switch, a template value or a provider-injected
+# LD_PRELOAD cannot leave the collectives on a different library than the one
+# this profile was qualified with — and fail closed if the pinned library is not
+# in the image, because a silently different NCCL is exactly the class of
+# difference that shows up as a hang at the first all-reduce.
+_glm_nccl=/opt/libnccl-local-inference.so.2.30.4
+if [ -e "$_glm_nccl" ]; then
+  export NCCL_LOCAL_INFERENCE_PATH="$_glm_nccl"
+  export NCCL_PR2127_PATH="$_glm_nccl"
+  export VLLM_NCCL_SO_PATH="$_glm_nccl"
+  export LD_PRELOAD="$_glm_nccl"
+elif [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  unset NCCL_LOCAL_INFERENCE_PATH NCCL_PR2127_PATH VLLM_NCCL_SO_PATH LD_PRELOAD
+else
+  echo "FATAL: pinned local-inference NCCL library is missing: $_glm_nccl" >&2
+  return 1
+fi
+unset _glm_nccl
+
   # v20's calibrator measures the lossless DMA crossover, DCP query split and
   # CKV prefetch overlap before model load, then caches the result by topology.
   # Compressed wire modes remain explicit experiments and the image launcher
@@ -1901,77 +1909,6 @@ unset _GLM_NVFP4_SCALE_FILE _GLM_NVFP4_SCALE_SHA256
   if [ "${PCIE_DMA_MIN_BYTES:--1}" != "-1" ]; then
     export VLLM_PCIE_DMA_MIN_BYTES="$PCIE_DMA_MIN_BYTES"
   fi
-elif [ "${FAMILY_ENV_BLOCK:-}" = "glm53" ]; then
-  # Exact environment used by the four-card K6 qualification. The pinned parent
-  # carries the Glm5Next/B12X stack; these exports make its load-bearing OCI
-  # defaults explicit and make a runtime switch back from another family safe.
-  export PYTHONPATH=/opt/infernal-invocation/vllm:/opt/infernal-invocation/b12x:/opt/exllamav3
-  export OMP_NUM_THREADS=1 LLM_WORKER_MULTIPROC_METHOD=spawn
-  export VLLM_EXL3_EXT_PATH=/opt/exllamav3
-  export VLLM_EXL3_ENCODER_SOURCE=/opt/exllamav3-python/exllamav3
-  export VLLM_EXL3_ENCODER_REVISION=704aefd743b390af4bd0fb429d1906f9b964c7d8
-  export VLLM_EXL3_ONLINE_CACHE_DIR="$MODEL_ROOT/.exl3-online"
-  export VLLM_EXL3_ONLINE_CACHE_MODE=readwrite
-  export VLLM_EXL3_PREFILL_BLOCK_M=128 VLLM_EXL3_PREFILL_TRELLIS=1
-  export B12X_GL53_ROUTE128_WIDE=1 B12X_GL53_ROUTE128_HYBRID_TAIL=1
-  export VLLM_B12X_GLM_NOPE_NVFP4=1
-  export VLLM_USE_AOT_COMPILE=0 VLLM_USE_MEGA_AOT_ARTIFACT=1
-  export VLLM_USE_BREAKABLE_CUDAGRAPH=1
-  export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_MOE=0
-  export VLLM_USE_B12X_SPARSE_INDEXER=1 VLLM_USE_V2_MODEL_RUNNER=1
-  export VLLM_ALLREDUCE_USE_SYMM_MEM=0
-  export VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE=64KB
-  export VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
-  export VLLM_DISABLED_KERNELS=MarlinFP8ScaledMMLinearKernel
-  export VLLM_B12X_ABSORB_BMM=0 B12X_MOE_FORCE_A16=1
-  if [ "${B12X_PCIE_DMA:-1}" = "1" ]; then
-    export VLLM_ENABLE_PCIE_ALLREDUCE=1 VLLM_PCIE_ALLREDUCE_BACKEND=b12x
-    export VLLM_USE_B12X_DCP_A2A=1
-  else
-    export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0
-    unset VLLM_PCIE_ALLREDUCE_BACKEND
-  fi
-  _glm53_nccl=/opt/local-inference/nccl/lib/libnccl.so.2.31.2
-  if [ -f "$_glm53_nccl" ]; then
-    export NCCL_LOCAL_INFERENCE_PATH="$_glm53_nccl"
-    export NCCL_PR2127_PATH="$_glm53_nccl"
-    export VLLM_NCCL_SO_PATH="$_glm53_nccl"
-    export LD_PRELOAD="$_glm53_nccl"
-  elif [ "${CONFIG_SMOKE:-0}" = "1" ]; then
-    unset NCCL_LOCAL_INFERENCE_PATH NCCL_PR2127_PATH VLLM_NCCL_SO_PATH LD_PRELOAD
-  else
-    echo "FATAL: pinned local-inference NCCL library is missing: $_glm53_nccl" >&2
-    return 1
-  fi
-  unset _glm53_nccl
-  export VLLM_NVFP4_MLA_SCALES_FILE=/opt/glm53/calibration/glm53_nvfp4_mla_outer_scales_mtp_power2_v2.json
-  export VLLM_NVFP4_MLA_DYNAMIC_SCALE=0 KV_FP8_ROPE=0
-  if [ "${CONFIG_SMOKE:-0}" != "1" ]; then
-    _glm53_scale_sha="$(
-      sha256sum "$VLLM_NVFP4_MLA_SCALES_FILE" 2>/dev/null | awk '{print $1}'
-    )"
-    if [ "$_glm53_scale_sha" != "f10b6ee1116d71c4b61c4603d38cb257b3f0dcfde9bcc0847839e48ac9baeb1d" ]; then
-      echo "FATAL: the pinned GLM-5.3 NVFP4 MLA scale artifact is missing or changed." >&2
-      return 1
-    fi
-    unset _glm53_scale_sha
-  fi
-  unset VLLM_EXL3_ONLINE_TRELLIS_BITS VLLM_EXL3_ABI_SHIM
-  unset VLLM_USE_FUSED_MOE_GROUPED_TOPK VLLM_USE_B12X_MHC B12X_MHC_MAX_TOKENS
-  unset VLLM_USE_B12X_WO_PROJECTION B12X_MLA_SM120_UNIFIED B12X_DENSE_SPLITK_TURBO
-  unset B12X_W4A16_TC_DECODE B12X_W4A8_TINY_DECODE
-  unset VLLM_DISABLE_SHARED_EXPERTS_STREAM VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE
-  unset VLLM_B12X_MLA_SPEC_DECODE_MAX_Q VLLM_DCP_A2A_MAX_TOKENS
-  unset VLLM_DCP_A2A_LARGE_BACKEND VLLM_DCP_GLOBAL_TOPK VLLM_DCP_SHARD_DRAFT
-  unset VLLM_DCP_QUERY_SPLIT VLLM_DCP_TOPK_OWNER_MERGE VLLM_DCP_INDEXER_SHARDS
-  unset VLLM_B12X_MLA_CKV_GATHER VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS
-  unset VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS VLLM_B12X_MLA_CKV_PREFETCH_DEPTH
-  unset VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB
-  unset VLLM_DCP_PROJECT_BEFORE_MERGE VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE
-  unset VLLM_DCP_PROJECT_BEFORE_MERGE_MIN_PREFILL_TOKENS
-  unset VLLM_PCIE_DMA_FP8 B12X_PCIE_DMA_FP8 SPARKINFER_PCIE_DMA_FP8
-  unset SPARKINFER_INDEXER_TWO_LEVEL_FOLD SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB
-  echo ">>> GLM-5.3 runtime: TP4/DCP4 B12X sparse MLA, Triton MoE, EXL3, NVFP4 MLA KV"
 else
   echo ">>> ${MODEL_FAMILY:-?}: skipping the GLM-5.2 engine environment (b12x kernels,"
   echo ">>> MLA/DCP path, EXL3 trellis). Only the common block above is exported."
@@ -2513,12 +2450,7 @@ fi
 # FAMILY_SERVE_ARGS, which the config layer built for the selected MODEL_FAMILY.
 # That is what makes a second model family possible without a second serve line,
 # and what removed `--tensor-parallel-size 4` as a literal.
-# GLM-5.3 qualification used the parent image's system Python plus the pinned
-# source-tree PYTHONPATH. Its /opt/venv console script has a different Python
-# environment, so do not silently cross that runtime boundary.
-if [ "${FAMILY_ENV_BLOCK:-}" = "glm53" ]; then
-  _VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)
-elif command -v vllm >/dev/null 2>&1; then
+if command -v vllm >/dev/null 2>&1; then
   _VLLM_LAUNCH=(vllm)
 else
   _VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)

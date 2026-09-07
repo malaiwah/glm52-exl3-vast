@@ -9,12 +9,12 @@ as `defaults < family < variant < startup env < state file`; see
 
 | env | default | why you'd change it |
 |---|---|---|
-| `MODEL_PROFILE` | `glm53-3.42bpw-500k` | full 3.42bpw reduced-workspace **candidate** preserving 520,192 tokens; not GPU-qualified. The older full `glm53-3.42bpw` retains 393,216; 3.25bpw, Flash, GLM-5.2 and custom are explicit alternatives |
+| `MODEL_PROFILE` | `glm53-3.42bpw-500k` | full 3.42bpw reduced-workspace **candidate** preserving 520,192 tokens; not GPU-qualified. The older full `glm53-3.42bpw` retains 393,216; 3.25bpw, GLM-5.2 and custom are explicit alternatives. Flash `glm53-k6`/`glm53-k8` are refused on this base |
 | `MODEL_ID` | custom profile only | select a checkpoint for `MODEL_PROFILE=custom`; named GLM profiles own their immutable model revisions and cannot safely be changed by substituting only a model ID |
 | `MODEL_DIR` | profile-specific path under `/workspace` | point at complete weights; the completion marker must match the pinned model repository and revision |
 | `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working; this is also the name every dashboard page displays |
 | `TENSOR_PARALLEL_SIZE` | 4 GLM / 1 Qwen | match a supported profile topology |
-| `MAX_MODEL_LEN` | profile-specific | primary full 3.42bpw candidate 520192 total tokens; older qualified full 3.42 393216; optional 3.25 experiment 524288; Flash 458752. Include templating/output and require exact-image boundary retrieval |
+| `MAX_MODEL_LEN` | profile-specific | primary full 3.42bpw candidate 520192 total tokens; older qualified full 3.42 393216; optional 3.25 experiment 524288. Include templating/output and require exact-image boundary retrieval |
 | `MULTIMODAL` | n/a GLM / 1 Qwen | Qwen `0` saves vision VRAM with `--language-model-only`; GLM vision remains controlled by `VISION` (default 0) |
 | `MM_MAX_PIXELS` | n/a GLM / 8388608 Qwen | cap native image processing near a 4K working image; the 5K detail gate passed at this value |
 | `QUANTIZATION` | custom profile only | vLLM quantizer name such as `modelopt` |
@@ -52,7 +52,7 @@ as `defaults < family < variant < startup env < state file`; see
 | `VERIFY_NEEDLE_TOKENS` | `32768` | size of the long-context retrieval probe |
 | `VERIFY_HEALTH_TIMEOUT_S` | `3600` | health wait after vLLM launch; accommodates first local NFS/cachefilesd page-in. Model download occurs before this timer. |
 | `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures and logs live |
-| `MODEL_FAMILY` / `MODEL_VARIANT` | selected by `MODEL_PROFILE` | primary candidate `glm52` / `exl3-tr3-glm53-3.42bpw-500k`; the family names architecture, not checkpoint version. Flash uses `glm53` |
+| `MODEL_FAMILY` / `MODEL_VARIANT` | selected by `MODEL_PROFILE` | primary candidate `glm52` / `exl3-tr3-glm53-3.42bpw-500k`; the family names architecture, not checkpoint version. The Flash `glm53` family is withdrawn from this image |
 | `SSHD` | `auto` | `auto` starts the bundled key-only sshd when a provider injects a public key and nothing is already listening; `0` never starts it and `1` always tries |
 | `CONFIG_SMOKE` | `0` | `1` resolves the config, prints the argv and exits without downloading or touching a GPU |
 | `TERMINATE_ENABLED` | `0` | `1` exposes the terminate control on the landing page (startup env only) |

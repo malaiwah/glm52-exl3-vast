@@ -2,9 +2,9 @@ name: build-and-push
 on:
   push:
     branches: [main]
-    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", "maintenance/glm53-aibeast-500k/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", "maintenance/**", .github/workflows/build.yml]
   pull_request:
-    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", "maintenance/glm53-aibeast-500k/**", .github/workflows/build.yml]
+    paths: [Dockerfile, entrypoint.sh, landing.py, "requirements-soul.*", "runpod-template*.json", sshd_config, "patches/**", "scripts/**", "soul/**", "tests/**", "maintenance/**", .github/workflows/build.yml]
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,7 +29,7 @@ jobs:
       - name: shellcheck boot scripts
         run: shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh scripts/field_review_full_gate.sh
       - name: validate Python
-        run: python3 -m py_compile landing.py scripts/*.py patches/glm53-runtime/*.py patches/glm53-refresh/*.py patches/scopedlmcache/*.py maintenance/glm53-aibeast-500k/*.py
+        run: python3 -m py_compile landing.py scripts/*.py patches/glm53-refresh/*.py patches/scopedlmcache/*.py maintenance/glm53-aibeast-500k/*.py
       - name: fail-closed field-review patch applicator
         run: python3 tests/test_field_review_patches.py
       # Guards the destructive path: provider detection, the terminate
@@ -43,8 +43,8 @@ jobs:
       # stay scoped to the family they were measured on.
       - name: model family tests
         run: python3 tests/test_families.py
-      - name: fail-closed GLM-5.3 runtime overlays
-        run: python3 tests/test_glm53_runtime_overlays.py
+      - name: Gilded Gnosis base composition gate
+        run: python3 tests/test_gilded_base_gate.py
       - name: full GLM parser and TP scheduling backports
         run: python3 tests/test_glm53_refresh.py
       - name: LMCache deadline and DMA ownership regression
@@ -109,10 +109,14 @@ jobs:
           out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts bash entrypoint.sh)
           grep -q 'davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw' <<<"$out"
           grep -q '^    520192$' <<<"$out"
-          out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-k6 bash entrypoint.sh)
-          grep -q 'malaiwah/GLM-5.3-Flash-TR3-6bpw' <<<"$out"
-          out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-k8 bash entrypoint.sh)
-          grep -q 'malaiwah/GLM-5.3-Flash-TR3-8bpw' <<<"$out"
+          for flash in glm53-k6 glm53-k8; do
+            if out=$(CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=$flash bash entrypoint.sh 2>&1); then
+              echo "the Gilded Gnosis image accepted removed Flash profile $flash" >&2
+              exit 1
+            fi
+            grep -q 'cannot serve' <<<"$out"
+            grep -q 'sha256:9d7ab60a3ad666edb8d38812ec6709909e6752a78fad464c842c7b17659f5d5b' <<<"$out"
+          done
           out=$(VLLM_B12X_GLM_NOPE_NVFP4=1 B12X_GL53_ROUTE128_WIDE=1 \
             B12X_GL53_ROUTE128_HYBRID_TAIL=1 VLLM_ALLREDUCE_USE_SYMM_MEM=0 \
             CONFIG_SMOKE=1 SCRIPTS_DIR=scripts MODEL_PROFILE=glm53-3.42bpw bash entrypoint.sh)
@@ -143,7 +147,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: free runner disk (GLM-5.3 parent is ~46GB; stock runners flake on space)
+      - name: free runner disk (the Gilded Gnosis parent is tens of GB; stock runners flake on space)
         run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/hostedtoolcache/CodeQL
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0

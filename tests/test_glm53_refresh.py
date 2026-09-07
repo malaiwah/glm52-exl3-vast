@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""CPU regressions executing the shipped old-ABI runtime code.
+"""CPU regressions executing the shipped Gilded-derived runtime code.
 
 The exact unchanged events/lexer fixtures keep these tests self-contained.
-GLM53_REFRESH_BASE_ROOT optionally selects an extracted candidate for those modules.
+GLM53_REFRESH_BASE_ROOT optionally selects an extracted Gilded tree for those
+modules; it defaults to the read-only extraction at /tmp/lil-gg-installed-before
+when that is present, which also cross-checks the pinned before bytes.
 GLM53_REFRESH_TEST_ROOT optionally selects all eight runtime sources instead of
-payloads, so the same regressions can reproduce against the unpatched candidate.
+payloads, so the same regressions can reproduce against the unpatched base.
 No vLLM package initialization, Torch import, CUDA or model weights are needed.
 """
 import ast
@@ -16,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -26,17 +29,46 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 PAYLOADS = REPO / "patches/glm53-refresh"
+EXTRACTED_BASE = Path(os.environ.get("GLM53_REFRESH_BASE_ROOT",
+                                     "/tmp/lil-gg-installed-before"))
 SPEC = importlib.util.spec_from_file_location(
     "apply_glm53_refresh", REPO / "scripts/apply_glm53_refresh.py")
 INSTALLER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(INSTALLER)
+LEDGER = json.loads((PAYLOADS / "provenance.json").read_text())
+
+
+def base_bytes(entry):
+    """The pinned Gilded before bytes for one ledger entry.
+
+    Derived by reversing the recorded hunks in the payload, which is exactly
+    what the installer's provenance check proves. When the read-only extraction
+    from the live Gilded container is available the derived bytes are compared
+    against it, so a silently re-pinned payload cannot pass.
+    """
+    text = (PAYLOADS / entry["payload"]).read_text()
+    for replacement in reversed(entry["replacements"]):
+        if text.count(replacement["after"]) != 1:
+            raise RuntimeError(f"non-unique refresh anchor: {entry['payload']}")
+        text = text.replace(replacement["after"], replacement["before"], 1)
+    data = text.encode()
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != entry["before_sha256"]:
+        raise RuntimeError(f"payload does not reproduce pinned base: {entry['path']}")
+    extracted = EXTRACTED_BASE / entry["path"]
+    if extracted.is_file():
+        actual = hashlib.sha256(extracted.read_bytes()).hexdigest()
+        if actual != entry["before_sha256"]:
+            raise RuntimeError(
+                f"extracted base disagrees with pinned before state: {entry['path']}")
+    return data
 
 
 def source_path(name):
     root = os.environ.get("GLM53_REFRESH_TEST_ROOT")
     if root:
-        target = next(row[1] for row in INSTALLER.OVERLAYS if row[0] == name)
-        return Path(root) / Path(target).relative_to(INSTALLER.DEFAULT_ROOT)
+        relative = next(row[1] for row in INSTALLER.OVERLAYS if row[0] == name)
+        return Path(root) / relative
     return PAYLOADS / name
 
 
@@ -174,9 +206,9 @@ class ConverterTests(unittest.TestCase):
 class StreamingParserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        root = os.environ.get("GLM53_REFRESH_BASE_ROOT")
         fixtures = REPO / "tests/fixtures/glm53-refresh"
-        helpers = Path(root) / "vllm/parser/engine" if root else fixtures
+        extracted = EXTRACTED_BASE / "vllm/parser/engine"
+        helpers = extracted if extracted.is_dir() else fixtures
         provenance = json.loads((fixtures / "provenance.json").read_text())
         for entry in provenance["files"]:
             actual = hashlib.sha256((helpers / entry["fixture"]).read_bytes()).hexdigest()
@@ -184,7 +216,7 @@ class StreamingParserTests(unittest.TestCase):
                 raise RuntimeError(f"unreviewed parser dependency: {entry['fixture']}")
         cls.modules = mock.patch.dict(sys.modules)
         cls.modules.start()
-        # This exact old lexer uses compile/escape only to retain .pattern;
+        # This exact lexer uses compile/escape only to retain .pattern;
         # all matching and chunk holdback runs its real literal/prefix logic.
         # stdlib re supplies that metadata without adding a CI binary dependency.
         sys.modules["regex"] = re
@@ -293,13 +325,16 @@ class CadenceTests(unittest.TestCase):
             num_tokens_with_spec=8 if prefill else 9, num_tokens=8 if prefill else 9,
             has_encoder_inputs=False, spec_token_ids=[], num_stale_output_tokens=0,
             status=self.status.WAITING, drop_stale_output=False,
+            shared_prefix_boundary=0, mm_features=None, block_hashes=[],
+            num_preemptions=0, skip_reading_prefix_cache=False,
             prefill_stats=None)
 
     def scheduler(self, running=(), waiting=(), *, capacity_bound=False):
         blocks = SimpleNamespace(get_block_ids=lambda: ([1],))
         cache = SimpleNamespace(new_step_starts=lambda: None,
             allocate_slots=lambda *_, **__: blocks, get_blocks=lambda *_: blocks,
-            record_prefix_cache_stats=lambda *_: None,
+            record_prefix_cache_stats=lambda *_: None, log_stats=False,
+            get_computed_blocks=lambda _: (blocks, 0, 0),
             empty_kv_cache_blocks=blocks, get_num_common_prefix_blocks=lambda *_: [0],
             take_kv_cache_block_copies=lambda: ([], []))
         scheduler = SimpleNamespace(current_step=0, max_num_scheduled_tokens=50,
@@ -319,7 +354,6 @@ class CadenceTests(unittest.TestCase):
             finished_req_ids=set(), defer_block_free=False,
             encoder_cache_manager=SimpleNamespace(get_freed_mm_hashes=lambda: [], get_manager_metadata=lambda: None),
             _get_new_block_ids_to_zero=lambda: [],
-            _get_local_prefix_cache_hit=lambda _: (blocks, 0, None, False),
             _make_cached_request_data=lambda *args: SimpleNamespace(req_ids=[r.request_id for r in args[0]]),
             _update_after_schedule=lambda _: None,
             _is_blocked_waiting_status=lambda _: False)
@@ -392,52 +426,95 @@ class InstallerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
-        self.ledger = json.loads((PAYLOADS / "provenance.json").read_text())
+        self.root = Path(self.temp.name) / "site-packages"
+        self.mirror = Path(self.temp.name) / "opt-vllm"
         self.originals = {}
-        for entry in self.ledger["files"]:
-            text = (PAYLOADS / entry["payload"]).read_text()
-            for replacement in reversed(entry["replacements"]):
-                self.assertEqual(text.count(replacement["after"]), 1)
-                text = text.replace(replacement["after"], replacement["before"], 1)
-            data = text.encode()
-            self.assertEqual(hashlib.sha256(data).hexdigest(), entry["before_sha256"])
-            path = self.root / entry["path"]
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-            self.originals[path] = data
+        for entry in LEDGER["files"]:
+            data = base_bytes(entry)
+            for target in (self.root / entry["path"], self.mirror / entry["path"]):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                self.originals[target] = data
+
+    def installed(self):
+        return {self.root / e["path"]: (PAYLOADS / e["payload"]).read_bytes()
+                for e in LEDGER["files"]}
+
+    def snapshot(self):
+        return {path: path.read_bytes() for path in self.originals}
+
+    def install(self, source=PAYLOADS, **kwargs):
+        kwargs.setdefault("root", self.root)
+        kwargs.setdefault("mirror_root", self.mirror)
+        INSTALLER.install(source, **kwargs)
+
+    def test_pinned_roots_and_relative_targets_compose_both_trees(self):
+        self.assertEqual(str(INSTALLER.DEFAULT_ROOT),
+                         "/opt/venv/lib/python3.12/site-packages")
+        self.assertEqual(str(INSTALLER.DEFAULT_MIRROR_ROOT), "/opt/vllm")
+        # Enumerating the manifest must not require the image to be present.
+        targets = [str(target) for _payload, target, _b, _a
+                   in INSTALLER.resolve_targets()]
+        self.assertIn("/opt/venv/lib/python3.12/site-packages/vllm/parser/glm47_moe.py",
+                      targets)
+        self.assertIn("/opt/vllm/vllm/parser/glm47_moe.py", targets)
+        self.assertEqual(len(targets), 2 * len(INSTALLER.OVERLAYS))
 
     def test_verify_then_install_and_idempotent_reapplication(self):
-        INSTALLER.install(PAYLOADS, root=self.root, verify_only=True)
-        self.assertEqual({p: p.read_bytes() for p in self.originals}, self.originals)
-        INSTALLER.install(PAYLOADS, root=self.root)
-        expected = {self.root / e["path"]: (PAYLOADS / e["payload"]).read_bytes()
-                    for e in self.ledger["files"]}
+        self.install(verify_only=True)
+        self.assertEqual(self.snapshot(), self.originals)
+        self.install()
+        expected = self.installed()
         self.assertEqual({p: p.read_bytes() for p in expected}, expected)
-        INSTALLER.install(PAYLOADS, root=self.root, verify_only=True)
-        INSTALLER.install(PAYLOADS, root=self.root)
+        # The debug source tree receives the identical payload.
+        for entry in LEDGER["files"]:
+            self.assertEqual((self.mirror / entry["path"]).read_bytes(),
+                             (PAYLOADS / entry["payload"]).read_bytes())
+        self.install(verify_only=True)
+        self.install()
         self.assertEqual({p: p.read_bytes() for p in expected}, expected)
+
+    def test_absent_mirror_installs_runtime_root_only(self):
+        shutil.rmtree(self.mirror)
+        self.install()
+        expected = self.installed()
+        self.assertEqual({p: p.read_bytes() for p in expected}, expected)
+        self.install(verify_only=True)
+
+    def test_partial_mirror_is_refused_without_any_write(self):
+        (self.mirror / LEDGER["files"][0]["path"]).unlink()
+        remaining = {path: data for path, data in self.originals.items()
+                     if path.exists()}
+        with self.assertRaises(RuntimeError):
+            self.install()
+        self.assertEqual({p: p.read_bytes() for p in remaining}, remaining)
 
     def test_mixed_and_unknown_states_reject_without_partial_mutation(self):
-        first = self.ledger["files"][0]
-        path = self.root / first["path"]
-        for invalid in ((PAYLOADS / first["payload"]).read_bytes(), b"unreviewed source\n"):
-            with self.subTest(state="mixed" if invalid != b"unreviewed source\n" else "unknown"):
+        first = LEDGER["files"][0]
+        payload = (PAYLOADS / first["payload"]).read_bytes()
+        for label, path, invalid in (
+                ("mixed root", self.root / first["path"], payload),
+                ("mixed mirror", self.mirror / first["path"], payload),
+                ("unknown root", self.root / first["path"], b"unreviewed source\n"),
+                ("corrupt byte", self.mirror / first["path"],
+                 self.originals[self.mirror / first["path"]][:-1] + b"#")):
+            with self.subTest(state=label):
+                original = path.read_bytes()
                 path.write_bytes(invalid)
-                before = {p: p.read_bytes() for p in self.originals}
+                before = self.snapshot()
                 with self.assertRaises(RuntimeError):
-                    INSTALLER.install(PAYLOADS, root=self.root)
-                self.assertEqual({p: p.read_bytes() for p in self.originals}, before)
+                    self.install()
+                self.assertEqual(self.snapshot(), before)
+                path.write_bytes(original)
 
     def test_corrupt_payload_rejects_before_any_target_write(self):
-        import shutil
-        copies = self.root / "payloads"
+        copies = Path(self.temp.name) / "payloads"
         shutil.copytree(PAYLOADS, copies)
-        first = self.ledger["files"][0]
+        first = LEDGER["files"][0]
         (copies / first["payload"]).write_text("corrupt\n")
         with self.assertRaises(RuntimeError):
-            INSTALLER.install(copies, root=self.root)
-        self.assertEqual({p: p.read_bytes() for p in self.originals}, self.originals)
+            self.install(copies)
+        self.assertEqual(self.snapshot(), self.originals)
 
 
 if __name__ == "__main__":

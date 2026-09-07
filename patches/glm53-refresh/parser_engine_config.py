@@ -35,8 +35,6 @@ class ParserState(Enum):
     TOOL_NAME = auto()
     TOOL_ARGS = auto()
     TOOL_BETWEEN = auto()
-    TOOL_DIRECT_NAME = auto()
-    TOOL_DIRECT_ARGS = auto()
     TOOL_ARG_END_PENDING = auto()
 
 

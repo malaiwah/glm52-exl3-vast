@@ -20,7 +20,6 @@ import re
 import sys
 import tempfile
 
-import apply_glm53_runtime_overlays
 import apply_glm53_refresh
 import glm_config
 import patch_lmcache_admin_api
@@ -54,8 +53,7 @@ def module_records() -> dict:
     # distribution metadata is recorded explicitly, not assigned a fake version.
     distribution_names = importlib.metadata.packages_distributions()
     result = {}
-    for name in ("vllm", "b12x", "torch", "triton", "lmcache",
-                 "torchao", "tilelang"):
+    for name in ("vllm", "b12x", "torch", "triton", "lmcache", "tilelang"):
         spec = importlib.util.find_spec(name)
         if spec is None or not spec.origin or not spec.submodule_search_locations:
             raise RuntimeError(f"required runtime package unavailable: {name}")
@@ -87,22 +85,30 @@ def module_records() -> dict:
 def installed_sources(modules: dict) -> list[dict]:
     result = []
     seen = set()
-    for installer in (apply_glm53_runtime_overlays, apply_glm53_refresh):
+    for installer in (apply_glm53_refresh,):
         if not installer.OVERLAYS:
             raise RuntimeError(f"empty critical installer manifest: {installer.__name__}")
-        for payload, destination, _before, expected in installer.OVERLAYS:
+        mirror_root = Path(installer.DEFAULT_MIRROR_ROOT).resolve(strict=True)
+        for payload, destination, _before, expected in installer.resolve_targets():
             path = Path(destination)
-            if destination in seen:
-                raise RuntimeError(f"overlapping critical installer targets: {destination}")
-            seen.add(destination)
+            if path in seen:
+                raise RuntimeError(f"overlapping critical installer targets: {path}")
+            seen.add(path)
             record = file_record(path, expected)
             installed = Path(record["resolved_path"])
             owners = [name for name, info in modules.items()
                       if any(installed.is_relative_to(Path(root))
                              for root in info["package_roots"])]
-            if len(owners) != 1:
+            if len(owners) == 1:
+                record.update(module=owners[0], role="imported_runtime")
+            elif not owners and installed.is_relative_to(mirror_root):
+                # The base image also ships a source tree for its own debug
+                # tooling. It is not importable, so it has no owning package,
+                # but it must never drift from the installed runtime.
+                record.update(module=None, role="base_image_source_tree")
+            else:
                 raise RuntimeError(f"critical target not in one resolved runtime package: {path}")
-            record.update(installer=installer.__name__, payload=payload, module=owners[0])
+            record.update(installer=installer.__name__, payload=payload)
             result.append(record)
     cache_path = patch_scopedlmcache_retrieve.default_target()
     record = file_record(cache_path, patch_scopedlmcache_retrieve.AFTER_SHA256)
@@ -142,15 +148,19 @@ def native_libraries(modules: dict) -> dict:
     lib_dirs = {Path(p) for p in os.environ.get("LD_LIBRARY_PATH", "").split(":") if p}
     lib_dirs.update(Path(p) / "lib" for p in modules["torch"]["package_roots"])
     lib_dirs.update(Path(p) / "nvidia/nccl/lib" for p in sys.path if p)
+    lib_dirs.add(Path("/opt"))
     lib_dirs.add(Path("/usr/lib/x86_64-linux-gnu"))
     for directory in lib_dirs:
         if directory.is_dir():
-            nccl.update(directory.glob("libnccl.so*"))
+            nccl.update(directory.glob("libnccl*.so*"))
+    # Gilded Gnosis splits ExLlama: the encoder Python source is loaded from
+    # VLLM_EXL3_ENCODER_SOURCE, while the native extension lives in the
+    # separate VLLM_EXL3_EXT_PATH directory. Record both.
     exllama = set()
     roots = {Path(p) for p in modules["exllamav3"]["package_roots"]}
-    checkout = Path("/opt/exllamav3")
-    if checkout.is_dir():
-        roots.add(checkout)
+    ext_path = Path(os.environ.get("VLLM_EXL3_EXT_PATH", "/opt/exllamav3"))
+    if ext_path.is_dir():
+        roots.add(ext_path)
     for root in roots:
         exllama.update(root.rglob("*.so"))
     for directory in {Path(p) for p in sys.path if p}:
@@ -168,7 +178,7 @@ def collect(parent_image: str, source_revision: str | None) -> dict:
     if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", parent_image):
         raise ValueError("parent image must be an immutable repository@sha256:digest reference")
     modules = module_records()
-    scripts = (apply_glm53_runtime_overlays, apply_glm53_refresh, glm_config,
+    scripts = (apply_glm53_refresh, glm_config,
                patch_lmcache_admin_api, patch_scopedlmcache_retrieve)
     return {
         "schema_version": 1,

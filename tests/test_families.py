@@ -566,89 +566,54 @@ def test_known_good_replays_across_profile_env_change():
             pass
 
 
-def test_glm53_k6_profile():
-    section("the GLM-5.3 Flash K6 production profile")
-    eff, src, _ = resolved("glm53", gpus=4)
-
-
-    check("GLM-5.3 selects the K6 checkpoint",
-          eff["MODEL_VARIANT"] == "glm53-k6"
-          and src["MODEL_VARIANT"] == "family")
-    check("K6 pins the live-qualified TP4/DCP4 topology",
-          eff["TENSOR_PARALLEL_SIZE"] == 4
-          and eff["DCP"] == "4"
-          and src["TENSOR_PARALLEL_SIZE"] == "variant"
-          and src["DCP"] == "variant")
-    check("K6 pins the qualified memory and scheduler shape",
-          eff["MAX_MODEL_LEN"] == 458752
-          and eff["GPU_MEMORY_UTILIZATION"] == 0.93
-          and eff["MAX_NUM_BATCHED_TOKENS"] == 3072
-          and eff["MAX_NUM_SEQS"] == 8
-          and eff["GPU_BLOCKS_OVERRIDE"] == 0)
-    check("K6 uses calibrated NVFP4 MLA KV without speculative decode",
-          eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"
-          and eff["MTP_TOKENS"] == 0)
-
-    derived = gc.derive(eff)
-    check("K6 repository and revision are immutable",
-          derived["MODEL_REPO"] == "malaiwah/GLM-5.3-Flash-TR3-6bpw"
-          and derived["MODEL_REVISION"] ==
-          "be51877455a8786ebdd5f96053aff6dc74a0996f")
-    check("K6 uses its dedicated runtime block",
-          derived["FAMILY_ENV_BLOCK"] == "glm53"
-          and derived["MTP78_MODE"] == "off")
-    line = " ".join(derived["FAMILY_SERVE_ARGS"])
-    for flag in (
-            "--quantization exl3",
-            "--generation-config vllm",
-            "--decode-context-parallel-size 4",
-            "--dcp-comm-backend a2a",
-            "--attention-backend B12X_MLA_SPARSE",
-            "--moe-backend triton",
-            "--load-format safetensors",
-            "--long-prefill-token-threshold 2048",
-            "--tool-call-parser glm47",
-            "--reasoning-parser glm45"):
-        check(f"K6 serve args carry {flag}", flag in line, line)
-    check("K6 clamps runtime metadata to the qualified request envelope",
-          '"max_position_embeddings":458752' in line, line)
-    check("K6 captures the measured m=1 through m=32 widths",
-          '"cudagraph_capture_sizes":[1,2,3,4,8,12,16,20,24,28,32]'
-          in line, line)
-    check("K6 resolves with zero error-level findings",
-          not errs(gc.validate(eff, {"gpu_count": 4})),
-          str(errs(gc.validate(eff, {"gpu_count": 4}))))
-
-    off_topology, _, _ = resolved(
-        "glm53", gpus=8, TENSOR_PARALLEL_SIZE=8)
-    check("an unqualified GLM-5.3 rank count is refused",
-          "glm53-needs-tp4" in errs(gc.validate(off_topology, {"gpu_count": 8})))
-    pinned_pool, _, _ = resolved(
-        "glm53", gpus=4, GPU_BLOCKS_OVERRIDE=2048)
-    check("GLM-5.3 rejects the inapplicable GLM-5.2 block formula",
-          "glm53-pool-must-auto" in errs(gc.validate(pinned_pool)))
-
-    k8, k8_src, _ = resolved(
-        "glm53", gpus=4, MODEL_VARIANT="glm53-k8")
-    k8_derived = gc.derive(k8)
-    check("the K8 sibling selects its immutable checkpoint and bounded scheduler",
-          k8_derived["MODEL_REPO"] == "malaiwah/GLM-5.3-Flash-TR3-8bpw"
-          and k8_derived["MODEL_REVISION"] ==
-          "b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae"
-          and k8["SERVED_MODEL_NAME"] == "GLM-5.3-Flash-K8"
-          and k8["MAX_NUM_BATCHED_TOKENS"] == 512
-          and k8["VLLM_EXL3_PREFILL_CAPACITY"] == 512)
-    k8_line = " ".join(k8_derived["FAMILY_SERVE_ARGS"])
-    check("K8 uses the native eager EXL3 path instead of the K6 fused decoder",
-          "--enforce-eager" in k8_line
-          and "--compilation-config" not in k8_line, k8_line)
-    check("K8 bounds the EXL3 parity arena through normal config precedence",
-          k8["VLLM_EXL3_PREFILL_CAPACITY"] == 512
-          and k8_src["VLLM_EXL3_PREFILL_CAPACITY"] == "variant")
-    k8_findings = gc.validate(k8, {"gpu_count": 4})
-    check("K8 is live-qualified on its pinned four-GPU topology",
-          not errs(k8_findings)
-          and "variant-untested" not in ids(k8_findings), str(k8_findings))
+def test_flash_is_refused_not_substituted():
+    section("GLM-5.3-Flash is refused, with the image that serves it named")
+    check("only the Gilded-servable families are selectable",
+          list(gc.FAMILIES) == ["glm52", "qwen36", "custom"],
+          str(list(gc.FAMILIES)))
+    check("no Flash checkpoint variant is selectable",
+          not [n for n in gc.VARIANTS if n.startswith("glm53-")],
+          str(list(gc.VARIANTS)))
+    check("the full GLM-5.3/GLM-5.2 profiles and the other families remain",
+          {"exl3-tr3", "exl3-tr3-3.25bpw", "exl3-tr3-3.36bpw",
+           "exl3-tr3-3.42bpw", "exl3-tr3-glm53-3.42bpw",
+           "exl3-tr3-glm53-3.25bpw", "exl3-tr3-glm53-3.42bpw-500k",
+           "qwen36-nvfp4", "custom"} <= set(gc.VARIANTS),
+          str(sorted(gc.VARIANTS)))
+    check("no knob is still scoped to the withdrawn Flash family",
+          not [k["key"] for k in gc.KNOBS
+               if "glm53" in (k.get("families") or ())],
+          str([k["key"] for k in gc.KNOBS
+               if "glm53" in (k.get("families") or ())]))
+    # The refusal must not be a ConfigError: every ConfigError in the resolver
+    # degrades to the layer below, which is precisely the silent substitution
+    # this rule exists to prevent.
+    check("the refusal is not the exception type the resolver swallows",
+          not issubclass(gc.FlashProfileUnavailable, gc.ConfigError))
+    for key, value in (("MODEL_FAMILY", "glm53"),
+                       ("MODEL_VARIANT", "glm53-k6"),
+                       ("MODEL_VARIANT", "glm53-k8")):
+        for layer in ("state_values", "env_values"):
+            kwargs = {"state_values": {}, "env_values": {}}
+            kwargs[layer] = {key: value}
+            message = ""
+            try:
+                gc.resolve(**kwargs)
+            except gc.FlashProfileUnavailable as exc:
+                message = str(exc)
+            check(f"{key}={value} from the {layer} layer fails closed",
+                  bool(message), "resolve() returned a substitute instead")
+            check(f"and the {key} refusal names what is missing and where "
+                  "Flash is served",
+                  key in message and value in message
+                  and "GLM5Next" in message
+                  and "Gilded Gnosis" in message
+                  and gc.FLASH_IMAGE in message, message)
+    check("the refusal points at the full GLM-5.3 profile as the alternative",
+          "glm53-3.42bpw-500k" in gc.flash_unavailable_message("glm53-k6"))
+    check("a Flash selector that is not requested changes nothing",
+          gc.resolve(state_values={}, env_values={})[0]["MODEL_FAMILY"]
+          == "glm52")
 
 
 def test_qwen_preset():
@@ -1042,7 +1007,7 @@ def main():
         run(test_glm53_342_dsa_profile)
         run(test_full_glm53_candidate_boundaries)
         run(test_known_good_replays_across_profile_env_change)
-        run(test_glm53_k6_profile)
+        run(test_flash_is_refused_not_substituted)
         run(test_qwen_preset)
         run(test_custom_profile)
         run(test_inapplicable_knobs)

@@ -22,6 +22,15 @@ The release intent is `MODEL_PROFILE=glm53-3.42bpw-500k`, variant
 Its 81 weight LFS identities match evaluated `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`;
 the changed template still needs the parser/continuation gate.
 
+The candidate image is now rooted on local-inference-lab's Gilded Gnosis v20
+r34 (`docker.io/voipmonitor/vllm@sha256:820181fb…`, CUDA 13.2.1 / Torch
+2.12.0+cu132 / NCCL 2.30.4) plus the reviewed r34 maintenance sources and this
+repository's fail-closed overlays. That is the same runtime family currently
+serving production, so its cold-boot, cache and recovery evidence must still be
+re-measured for GLM-5.3 weights, but a CUDA/Torch/NCCL platform change is no
+longer part of this gate. The earlier VerdictAI-based candidate is superseded;
+its published digest remains the GLM-5.3-Flash lineage only.
+
 Use [maintenance/glm53-aibeast-500k](maintenance/glm53-aibeast-500k/) to stage
 an immutable candidate independently. Podman 4.9 uses inventoried manual
 devices, GPU order 2,1,0,3, separate port/name/state/cache, and restart disabled.

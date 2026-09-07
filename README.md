@@ -1,6 +1,6 @@
 # Model turnkey for Vast.ai, Runpod, and JarvisLabs
 
-One image, coherent profiles for **full GLM-5.3 (non-Flash)**, **GLM-5.3-Flash**,
+One image, coherent profiles for **full GLM-5.3 (non-Flash)**,
 **GLM-5.2**, **Qwen3.6-27B**, and compatible vLLM checkpoints. It supplies an authenticated
 OpenAI-compatible endpoint, persistent model downloads and compile caches, a
 live dashboard, key-only SSH, provider-aware URLs, optional TLS, crash
@@ -14,11 +14,22 @@ gate below; until then publish only a candidate SHA/digest, **not `latest`**.
 Changing this repository's bare-launch default does not switch a running
 production service or its persisted configuration.
 
+The runtime base is local-inference-lab's **Gilded Gnosis v20 r34**
+(`docker.io/voipmonitor/vllm@sha256:820181fb…`: vLLM `e2666d9a65` integration
+tree `4d006a43`, B12X/SparkInfer `cd3ce190`, LMCache `0.5.2+glm52dcp.4`,
+FlashInfer `1ac69427`, NCCL 2.30.4, Torch 2.12.0+cu132, CUDA 13.2.1), plus the
+reviewed r34 maintenance sources and this repository's fail-closed overlays.
+Every parent state and every installed file is SHA-256 pinned.
+
 The full `glm53-3.42bpw` profile retains its separately qualified 393,216-token
-safe envelope. Flash `glm53-k6` / `glm53-k8` and `glm52-exl3` remain explicit
-alternatives, not the new default. Existing hosted provider links may still
-select their historical profiles; inspect the profile and image pin before
-renting. Exact runtime and checkpoint pins are in the [changelog](CHANGELOG.md).
+safe envelope, and `glm52-exl3` remains an explicit alternative. **GLM-5.3-Flash
+is not served by this image**: the Gilded Gnosis base does not contain the
+GLM5Next pooled-indexer runtime Flash needs, so Flash stays on the separately
+published VerdictAI-derived lineage
+(`ghcr.io/malaiwah/glm52-exl3-vast@sha256:9d7ab60a…`). Existing hosted provider
+links may still select their historical profiles; inspect the profile and image
+pin before renting. Exact runtime and checkpoint pins are in the
+[changelog](CHANGELOG.md).
 
 ## Contents
 
@@ -66,8 +77,6 @@ answers only to you.
 | profile | provider | launch | hardware | disk | first-boot budget |
 |---|---|---|---|---|---|
 | GLM-5.3 full 3.42bpw **500K+ candidate** | own host / separately authorized maintenance | [docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB**, extra space for optional L2 | unmeasured; full-context qualification required |
-| GLM-5.3-Flash K6 | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **450 GB** | 2–12 min once weights are local |
-| GLM-5.3-Flash K8 quality-max | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **525 GB** | 2–15 min once weights are local |
 | GLM-5.3 full 3.42bpw | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | up to 90 min cold; ~9 min with warm runtime cache |
 | GLM-5.2 flagship (3.42bpw) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | 60–90 min |
 | GLM-5.2 flagship (3.42bpw) | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | ~30 min (Secure) |
@@ -203,8 +212,7 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 |---|---|---|---|
 | **`glm53-3.42bpw-500k`** | **next-release default; reduced-workspace full-quality candidate, NOT GPU-qualified** | 4x RTX PRO 6000 Blackwell 96 GB | ~331 GiB / planned 520,192 total tokens |
 | `glm53-3.25bpw` | optional lower-bit capacity experiment, NOT GPU-qualified | 4x RTX PRO 6000 Blackwell 96 GB | ~317 GiB / planned 524,288 total tokens |
-| `glm53-k6` | validated GLM-5.3-Flash TR3 EXL3 K6 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~237 GiB / 458,752 |
-| `glm53-k8` | validated GLM-5.3-Flash TR3 EXL3 K8 quality-max stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 458,752 |
+| ~~`glm53-k6`~~ / ~~`glm53-k8`~~ | GLM-5.3-Flash: **refused** on this base; served by the VerdictAI-derived lineage `ghcr.io/malaiwah/glm52-exl3-vast@sha256:9d7ab60a…` | 4x RTX PRO 6000 Blackwell 96 GB | n/a here |
 | `glm53-3.42bpw` | validated GLM-5.3 full-model mixed K3/K4 EXL3 stack | 4x RTX PRO 6000 Blackwell 96 GB | ~331 GiB / 393,216 |
 | `glm52-exl3` | validated GLM-5.2 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 512K |
 | `qwen36-27b-nvfp4` | vision-enabled, lower-cost production/development | 1x RTX 5090 32 GB | ~21 GiB / 192K |
@@ -311,9 +319,17 @@ to `127.0.0.1:8089`, exposed only its six read-only information/version paths,
 and had no credential-like variables; a synthetic SOUL launch completed the
 post-hardening key handshake and reaped a detached child for the `soul` uid.
 
-### GLM-5.3-Flash K6 and K8
+### GLM-5.3-Flash K6 and K8: a separate lineage, not this image
 
-The profiles pin checkpoint revisions
+This image refuses `glm53-k6` and `glm53-k8`. Flash needs the GLM5Next model,
+pooled-indexer and KV-pool warmup runtime, which the Gilded Gnosis base does
+not contain; the VerdictAI-derived image
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:9d7ab60a3ad666edb8d38812ec6709909e6752a78fad464c842c7b17659f5d5b`
+remains the Flash lineage. The measurements below are the retained evidence for
+that lineage, kept because they set the family boundary this repository still
+reasons about.
+
+Those profiles pin checkpoint revisions
 `be51877455a8786ebdd5f96053aff6dc74a0996f` (K6) and
 `b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae` (K8). Do not transplant only a
 model directory into a GLM-5.2 launch: Glm5Next routing, EXL3 encoding, sparse
@@ -321,8 +337,8 @@ MLA, Triton MoE, NOPE/index-pool compression, calibrated KV scales, topology,
 and scheduler bounds are one contract. Both profiles intentionally disable
 speculative decoding.
 
-K6 uses the qualified B12X fused Trellis kernel and remains an explicit Flash
-alternative. K8 cannot safely widen that decoder: eight overlapping 16-bit MCG
+K6 uses the qualified B12X fused Trellis kernel and remains that lineage's
+production kernel. K8 cannot safely widen that decoder: eight overlapping 16-bit MCG
 windows span 72 bits, while its two-word path represents only 64. K8 therefore
 uses ExLlamaV3's native K8 routed-expert kernel in eager mode with a 512-token
 scheduler and parity arena.
@@ -882,9 +898,10 @@ engine flags, applicable knobs and validation rules; the config layer resolves
 
 | startup profile | self-service family / variant |
 |---|---|
-| `glm53-3.25bpw` (candidate default) | `glm52` / `exl3-tr3-glm53-3.25bpw` |
+| `glm53-3.42bpw-500k` (candidate default) | `glm52` / `exl3-tr3-glm53-3.42bpw-500k` |
+| `glm53-3.25bpw` | `glm52` / `exl3-tr3-glm53-3.25bpw` |
 | `glm53-3.42bpw` | `glm52` / `exl3-tr3-glm53-3.42bpw` |
-| `glm53-k6` / `glm53-k8` | `glm53` / `glm53-k6` or `glm53-k8` |
+| ~~`glm53-k6`~~ / ~~`glm53-k8`~~ | withdrawn with the `glm53` Flash family; refused, not remapped |
 | `glm52-exl3` | `glm52` / `exl3-tr3` |
 | `qwen36-27b-nvfp4` | `qwen36` / `qwen36-nvfp4` |
 | `custom` | `custom` / `custom` plus `MODEL_ID` |
@@ -1056,17 +1073,16 @@ evidence, and the experimental separate-draft override are in
   accepts only ports, environment variables and hostname in this field;
   `--ipc` and `--ulimit` entries are ignored. Port 22 is SSH and port 1111 is
   the landing page.
-- **Profile**: `MODEL_PROFILE=glm53-3.25bpw` (candidate default);
-  `glm52-exl3` and Flash profiles are explicit alternatives, or choose
-  `qwen36-27b-nvfp4` for the one-GPU vision model.
+- **Profile**: `MODEL_PROFILE=glm53-3.42bpw-500k` (candidate default);
+  `glm53-3.42bpw`, `glm53-3.25bpw` and `glm52-exl3` are explicit alternatives,
+  or choose `qwen36-27b-nvfp4` for the one-GPU vision model.
 - **Disk**: >=600 GB for GLM (3.42bpw weights ~339 GB + image ~39 GB + JIT caches ~15 GB + margin); >=100 GB for Qwen.
 - **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB) for GLM; one RTX PRO 6000
   Blackwell or RTX 5090 for Qwen.
 - **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
   applicable Hub rate limits), `OFFLOAD_FRACTION`
-  (GLM default 0.5 for reusable agentic prefixes), `MTP_TOKENS` (full GLM-5.3
-  3; Flash/Qwen 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (full 3.25 candidate
-  524288; qualified full 3.42 393216; Flash 458752; Qwen 196608),
+  3; Qwen 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (full 3.42 candidate
+  520192; qualified full 3.42 393216; optional 3.25 experiment 524288; Qwen 196608),
   `VLLM_EXL3_PREFILL_CAPACITY` (GLM-only reusable EXL3 arena; the mixed
   3.25-bpw profile selects 1024 rows inside its 2048-token scheduler chunk;
   the r20/3.36-bpw K6 profile selects its qualified 3072/3072 PP-first shape),
@@ -1091,12 +1107,12 @@ The most common first-launch knobs:
 
 | env | default | purpose |
 |---|---|---|
-| `MODEL_PROFILE` | `glm53-3.25bpw` | full non-Flash 512K candidate; other models must be selected explicitly |
+| `MODEL_PROFILE` | `glm53-3.42bpw-500k` | full non-Flash 520K candidate; other models must be selected explicitly |
 | `HF_TOKEN` | (unset) | authenticated downloads and higher Hub rate limits |
 | `DESEC_TOKEN` / `DESEC_DOMAIN` | (unset) | turnkey TLS via deSEC DNS-01 (see [Security](#security)) |
 | `OPEN_BUTTON_TOKEN` | provider-specific | exposes the `:1111` landing page and config editor |
-| `MAX_MODEL_LEN` | profile-specific | full 3.25 candidate 524288 (unqualified); full 3.42 393216; Flash 458752; Qwen 196608 |
-| `MTP_TOKENS` | full GLM-5.3 3 / Flash and Qwen 0 | speculation depth; GLM-5.2 variant-specific |
+| `MAX_MODEL_LEN` | profile-specific | full 3.42 candidate 520192 (unqualified); qualified full 3.42 393216; 3.25 experiment 524288; Qwen 196608 |
+| `MTP_TOKENS` | full GLM-5.3 3 / Qwen 0 | speculation depth; GLM-5.2 variant-specific |
 | `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host-DRAM prefix cache (not active-context capacity) |
 | `TERMINATE_ENABLED` | `0` | expose the in-container terminate control |
 | `AUTH` | `key` | `none` only on a trusted private network |

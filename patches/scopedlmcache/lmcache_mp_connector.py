@@ -44,7 +44,6 @@ from lmcache.integration.vllm.kv_cache_group_edits import (
     validate_kv_cache_groups,
 )
 from lmcache.integration.vllm.kv_cache_groups import (
-    _is_mamba_spec,
     create_engine_group_infos_from_vllm,
     effective_tokens_per_block,
 )
@@ -103,34 +102,6 @@ logger = lmcache_init_logger(__name__)
 
 
 # Helper functions
-def _recurrent_safe_lookup_end(num_tokens: int, chunk_tokens: int) -> int:
-    """Return the largest reusable recurrent-state prefix boundary.
-
-    vLLM recomputes the final prompt token after a complete external prefix
-    hit so the forward pass can produce sampling logits. A recurrent cache
-    object stores the state *after* its boundary token, so restoring a state
-    through the final prompt token would apply that token twice. Keep the
-    external hit below the final token and align it to the LMCache object
-    boundary. Attention-only models do not use this restriction.
-
-    Args:
-        num_tokens: Number of prompt tokens available to the lookup.
-        chunk_tokens: Tokens represented by one LMCache object.
-
-    Returns:
-        A non-negative object-aligned prefix length strictly below the final
-        prompt token.
-
-    Raises:
-        ValueError: If ``chunk_tokens`` is not positive.
-    """
-    if chunk_tokens <= 0:
-        raise ValueError(f"chunk_tokens must be positive, got {chunk_tokens}")
-    if num_tokens <= 1:
-        return 0
-    return ((num_tokens - 1) // chunk_tokens) * chunk_tokens
-
-
 def _has_preemption_reqs(scheduler_output: SchedulerOutput) -> bool:
     """Return whether the scheduler output contains preemption-related requests.
 
@@ -776,9 +747,6 @@ class LMCacheMPConnector(KVConnectorBase_V1, SupportsHMA):
             if kv_cache_config is not None
             else ()
         )
-        self._has_recurrent_cache = any(
-            _is_mamba_spec(group.kv_cache_spec) for group in vllm_groups
-        )
         # Tokens covered by one paged chunk (one block ID) of each engine
         # group, from the group's KV cache spec. Hybrid models can mix
         # different values (e.g. gemma-4: sliding-window groups 32,
@@ -848,14 +816,11 @@ class LMCacheMPConnector(KVConnectorBase_V1, SupportsHMA):
         kv_cache_config = getattr(self, "_kv_cache_config", None)
         # Must precede both group-info creation and transfer registration so
         # they see the same edited views.
-        layout_hints = vllm_layout_hints()
-        kv_caches = apply_kv_cache_group_edits(
-            kv_cache_config, kv_caches, layout_hints=layout_hints
-        )
+        kv_caches = apply_kv_cache_group_edits(kv_cache_config, kv_caches)
         engine_group_infos = create_engine_group_infos_from_vllm(
             kv_cache_config,
             kv_caches,
-            layout_hints=layout_hints,
+            layout_hints=vllm_layout_hints(),
             dcp_size=self.worker_adapter.parallel_strategy.dcp_size,
         )
         self.worker_adapter.register_kv_caches(
@@ -1091,19 +1056,9 @@ class LMCacheMPConnector(KVConnectorBase_V1, SupportsHMA):
         if request.status == RequestStatus.PREEMPTED:
             return 0, False
 
-        lookup_token_ids = list(request.all_token_ids)
-        if self._has_recurrent_cache:
-            safe_end = _recurrent_safe_lookup_end(
-                len(lookup_token_ids),
-                self.scheduler_adapter.lmcache_tokens_per_chunk,
-            )
-            del lookup_token_ids[safe_end:]
-            if not lookup_token_ids:
-                return 0, False
-
         self.scheduler_adapter.maybe_submit_lookup_request(
             request.request_id,
-            token_ids=lookup_token_ids,
+            token_ids=list(request.all_token_ids),
             cache_salt=tracker.cache_salt,
         )
 

@@ -1,17 +1,25 @@
 {
   "schema_version": 1,
-  "candidate_image": "docker.io/verdictai/glm53-flash-exl3-k4@sha256:6e2475d0568fd110eeaa1193157c7662747e096b476b05ed71ab247e081e9b82",
+  "candidate_image": "docker.io/voipmonitor/vllm@sha256:820181fbbc975cd5291c411cda9771d58fecee1636d916f508f47230df20592b",
+  "candidate_image_note": "Gilded Gnosis v20 r34 (local-inference-lab) parent image. The recorded before-states are the r34 maintenance-layer states, which the appliance Dockerfile applies before this overlay; they were extracted read-only from the live container glm52-turnkey-r34-maint-20260815-v1.",
+  "install_root": "/opt/venv/lib/python3.12/site-packages",
+  "mirror_root": "/opt/vllm",
+  "mirror_note": "Gilded ships a debug source tree at /opt/vllm/vllm/<relative path>. All eight targets are byte-identical to the site-packages copies there, so the installer applies and pins the identical payload in both roots when the mirror exists.",
   "integration_tree": "174c789e09984049d0d53b261024460ca5e9c449",
-  "installed_source_inspection": "All eight before hashes verified by docker cp from stopped candidate image; no image execution or GPUs.",
+  "installed_source_inspection": "All eight before hashes computed from bytes copied read-only out of the live Gilded r34 maintenance container (podman cp); no container mutation, no image build, no GPUs.",
   "upstream_merges": {
     "640": "5c90fc8b93c56e0bf355fbdfb7fc2facc2770f98",
     "639": "4c3c961d5540dc6e9cfa21f8641474dc31c0d76e",
     "546": "9fdf065d7ec716ff585188eb430cf6a9f9d719b7"
   },
   "abi_adaptations": [
-    "Preserve TextChunk(text), omit absent deferred prefix token counts.",
-    "Preserve two-argument _apply_transition and _emit_for_state(text).",
-    "Preserve integration TOOL_DIRECT_NAME and TOOL_DIRECT_ARGS states."
+    "Preserved the Gilded parser ABI unchanged: TextChunk(text) single-argument construction, two-argument _apply_transition(transition, value) and _emit_for_state(text).",
+    "Gilded ParserState has no TOOL_DIRECT_NAME/TOOL_DIRECT_ARGS, so the TOOL_ARG_END_PENDING hunks are re-anchored on the Gilded TOOL_BETWEEN tail in parser_engine_config.py and on both Gilded tool-state collections in streaming_parser_engine.py; no Verdict-only state is imported.",
+    "Gilded streaming_parser_engine._emit_for_state has no MESSAGE_HEADER buffering, so the non_whitespace_transitions dispatch is re-anchored directly above the Gilded 'if self.state == ParserState.TOOL_ARGS:' branch; the Gilded skip_tool_parsing / MESSAGE_HEADER handling is left untouched.",
+    "vllm/config/scheduler.py already declares prefill_schedule_interval: int = Field(default=1, ge=1); only its docstring is changed, and the Gilded partial-prefill configuration is preserved.",
+    "vllm/v1/core/sched/scheduler.py before-state is the r34 maintenance file 23a0f2ce...; both cadence hunks applied verbatim and every Gilded-only construct, including hybrid external-cache invalid-block recovery, survives.",
+    "vllm/v1/engine/core.py keeps the Gilded GLM prefix-caching participation block-size selection and the DPEngineCoreProc step_counter cadence; only EngineCore._should_throttle_prefills is rewritten.",
+    "Gilded also ships a debug source tree under /opt/vllm; all eight targets are byte-identical in both roots, so each payload is installed and pinned twice with the same before/after hashes."
   ],
   "files": [
     {
@@ -30,17 +38,17 @@
     {
       "path": "vllm/parser/engine/parser_engine_config.py",
       "payload": "parser_engine_config.py",
-      "integration_blob": "b74809c30258a19544754048286bc291d20f8905",
-      "before_sha256": "83460a34f86d3bb639975feea0ddaa468de2814ab18bf9984c0d836e8042120e",
-      "after_sha256": "895af219fae67671e63d2e639e6a8e716d27ff989ac727744e8e9718f87b3fa4",
+      "integration_blob_note": "Hunks originate in integration blob b74809c30258a19544754048286bc291d20f8905; the payload is Gilded-derived (no TOOL_DIRECT_* states) so that blob is not its hash.",
+      "before_sha256": "f7350e0ca9124001684f1f874ee72bf6a34932d3e4b84cc84567bbccf2f3e4b9",
+      "after_sha256": "92de004c7ca85975d940d578773b03f43de9da5a373c9a1c96f9c00dd1840d0b",
       "replacements": [
         {
           "before": "* **transitions** \u2013 a state machine mapping\n  ``(state, terminal) \u2192 (new_state, events_to_emit)`` that drives semantic\n  event generation during streaming.\n* **content_events** \u2013 what :class:`EventType` to emit for plain content\n  (non-terminal text) in each state.\n\"\"\"\n",
           "after": "* **transitions** \u2013 a state machine mapping\n  ``(state, terminal) \u2192 (new_state, events_to_emit)`` that drives semantic\n  event generation during streaming.\n* **non_whitespace_transitions** \u2013 optional state changes triggered by plain\n  content that contains a non-whitespace character.\n* **content_events** \u2013 what :class:`EventType` to emit for plain content\n  (non-terminal text) in each state.\n\"\"\"\n"
         },
         {
-          "before": "    TOOL_NAME = auto()\n    TOOL_ARGS = auto()\n    TOOL_BETWEEN = auto()\n    TOOL_DIRECT_NAME = auto()\n    TOOL_DIRECT_ARGS = auto()\n\n\n@dataclass(frozen=True, slots=True)\n",
-          "after": "    TOOL_NAME = auto()\n    TOOL_ARGS = auto()\n    TOOL_BETWEEN = auto()\n    TOOL_DIRECT_NAME = auto()\n    TOOL_DIRECT_ARGS = auto()\n    TOOL_ARG_END_PENDING = auto()\n\n\n@dataclass(frozen=True, slots=True)\n"
+          "before": "    TOOL_NAME = auto()\n    TOOL_ARGS = auto()\n    TOOL_BETWEEN = auto()\n\n\n@dataclass(frozen=True, slots=True)\n",
+          "after": "    TOOL_NAME = auto()\n    TOOL_ARGS = auto()\n    TOOL_BETWEEN = auto()\n    TOOL_ARG_END_PENDING = auto()\n\n\n@dataclass(frozen=True, slots=True)\n"
         },
         {
           "before": "    # Reject tool calls whose names are absent from the request tools.\n    validate_tool_names: bool = False\n\n    @cached_property\n    def terminal_defs(self):\n        from vllm.parser.engine.incremental_lexer import terminals_from_literals\n",
@@ -51,21 +59,21 @@
     {
       "path": "vllm/parser/engine/streaming_parser_engine.py",
       "payload": "streaming_parser_engine.py",
-      "integration_blob": "d697665a297107b5bcba0d4bc6e339f773970a19",
-      "before_sha256": "0f4625066e178ea5b3fd4784812103ce3b1362fbc278700518b8ab6b8ba57074",
-      "after_sha256": "26997d3653f1668e7f100752dbb3d4d6ee6df7c721e414b069a823187eee3b29",
+      "integration_blob_note": "Hunks originate in integration blob d697665a297107b5bcba0d4bc6e339f773970a19; the payload is Gilded-derived (no MESSAGE_HEADER buffering, no TOOL_DIRECT_* states) so that blob is not its hash.",
+      "before_sha256": "2eace718fc728b46676cd5d01eee2c893aec396a4551f05c529e83a120d07715",
+      "after_sha256": "722051a19deda2fd54fe9e1a59af61cc987621809f69d78a76a25cde7bbfa18e",
       "replacements": [
         {
-          "before": "            ParserState.TOOL_ARGS,\n            ParserState.TOOL_NAME,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_DIRECT_NAME,\n            ParserState.TOOL_DIRECT_ARGS,\n        ):\n            if self.tool_index >= 0:\n                events.append(\n",
-          "after": "            ParserState.TOOL_ARGS,\n            ParserState.TOOL_NAME,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_ARG_END_PENDING,\n            ParserState.TOOL_DIRECT_NAME,\n            ParserState.TOOL_DIRECT_ARGS,\n        ):\n            if self.tool_index >= 0:\n                events.append(\n"
+          "before": "            ParserState.TOOL_ARGS,\n            ParserState.TOOL_NAME,\n            ParserState.TOOL_BETWEEN,\n        ):\n            if self.tool_index >= 0:\n                events.append(\n",
+          "after": "            ParserState.TOOL_ARGS,\n            ParserState.TOOL_NAME,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_ARG_END_PENDING,\n        ):\n            if self.tool_index >= 0:\n                events.append(\n"
         },
         {
-          "before": "            ParserState.TOOL_NAME,\n            ParserState.TOOL_ARGS,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_DIRECT_NAME,\n            ParserState.TOOL_DIRECT_ARGS,\n        }\n    )\n\n",
-          "after": "            ParserState.TOOL_NAME,\n            ParserState.TOOL_ARGS,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_ARG_END_PENDING,\n            ParserState.TOOL_DIRECT_NAME,\n            ParserState.TOOL_DIRECT_ARGS,\n        }\n    )\n\n"
+          "before": "            ParserState.TOOL_NAME,\n            ParserState.TOOL_ARGS,\n            ParserState.TOOL_BETWEEN,\n        }\n    )\n\n",
+          "after": "            ParserState.TOOL_NAME,\n            ParserState.TOOL_ARGS,\n            ParserState.TOOL_BETWEEN,\n            ParserState.TOOL_ARG_END_PENDING,\n        }\n    )\n\n"
         },
         {
-          "before": "        return self._apply_transition(transition, value)\n\n    def _emit_for_state(self, text: str) -> list[SemanticEvent]:\n        if self.state == ParserState.MESSAGE_HEADER:\n            self._message_header_buffer += text\n",
-          "after": "        return self._apply_transition(transition, value)\n\n    def _emit_for_state(self, text: str) -> list[SemanticEvent]:\n        transition = self.config.non_whitespace_transitions.get(self.state)\n        if transition is not None and text.strip():\n            return self._apply_transition(transition, text)\n        if self.state == ParserState.MESSAGE_HEADER:\n            self._message_header_buffer += text\n"
+          "before": "        return self._apply_transition(transition, value)\n\n    def _emit_for_state(self, text: str) -> list[SemanticEvent]:\n        if self.state == ParserState.TOOL_ARGS:\n",
+          "after": "        return self._apply_transition(transition, value)\n\n    def _emit_for_state(self, text: str) -> list[SemanticEvent]:\n        transition = self.config.non_whitespace_transitions.get(self.state)\n        if transition is not None and text.strip():\n            return self._apply_transition(transition, text)\n        if self.state == ParserState.TOOL_ARGS:\n"
         }
       ]
     },
@@ -101,9 +109,9 @@
     {
       "path": "vllm/config/scheduler.py",
       "payload": "scheduler_config.py",
-      "integration_blob": "1b82b2c51283c8ab9e790c53fc88136e5a233104",
-      "before_sha256": "3cf5d41a5d662ab0eada6f3128e2538abc0a250d6aef82acab7df7dd84e498bc",
-      "after_sha256": "d70698ec13248054248aea0824ffa9661edc9150be124424d0738cc775ecbfd7",
+      "integration_blob_note": "Hunk originates in integration blob 1b82b2c51283c8ab9e790c53fc88136e5a233104; the payload is the Gilded file, which keeps its own partial-prefill configuration.",
+      "before_sha256": "a816cf79a3e74ffc0984f9bebb274275b26f46be8b28cb77a29388a0996263c8",
+      "after_sha256": "ecda4b0c12a2e40dddafa6e9c1f5328740a0bae29d7cb8dc5bc1a8d3de56021e",
       "replacements": [
         {
           "before": "    (the default) disables the watermark.\"\"\"\n\n    prefill_schedule_interval: int = Field(default=1, ge=1)\n    \"\"\"For data-parallel deployments, only admit new prefill requests\n    once every N engine steps, aligned across DP ranks, to better balance\n    per-step forward-pass times.\"\"\"\n\n    async_scheduling: bool | None = None\n    \"\"\"If set to False, disable async scheduling. Async scheduling helps to\n",
@@ -114,9 +122,9 @@
     {
       "path": "vllm/v1/core/sched/interface.py",
       "payload": "scheduler_interface.py",
-      "integration_blob": "c15296dd0516b303cb19c3410b6e05c3d3dcd51f",
-      "before_sha256": "be6c008664096c5660a8879de72b315bbe479bf1d688be9b25891063ec53a367",
-      "after_sha256": "049b1f3cb82d69295d0e642af9f8bb4c07f971168d2e8543de43c29538bd9350",
+      "integration_blob_note": "Hunks originate in integration blob c15296dd0516b303cb19c3410b6e05c3d3dcd51f; the payload is the Gilded file, which keeps its own abort/KV-event interface.",
+      "before_sha256": "2592ff4d53fa684349dd13b8d236aa918857a9f24b8fd24817fb0487deecffd6",
+      "after_sha256": "01684d9eb30820c210d4fccbda5fd2dc304fc58e04704b30d574c83edce3f8ff",
       "replacements": [
         {
           "before": "\n\nclass SchedulerInterface(ABC):\n    @abstractmethod\n    def __init__(\n        self,\n",
@@ -131,9 +139,9 @@
     {
       "path": "vllm/v1/core/sched/scheduler.py",
       "payload": "scheduler.py",
-      "integration_blob": "4627fc68c97e879877d9be8b7a7dfab28b4890e4",
-      "before_sha256": "2488d3dd87764fc04e1f4ec770528b2d5fbb0e357315b91bb125479eab9007e5",
-      "after_sha256": "8cfbb80da8420138ef291af89a96c436fdaf578b5e795a6837e32dde578a6573",
+      "integration_blob_note": "Hunks originate in integration blob 4627fc68c97e879877d9be8b7a7dfab28b4890e4; the payload is the r34 maintenance file 23a0f2ce..., which keeps hybrid external-cache invalid-block recovery.",
+      "before_sha256": "23a0f2ce9dbf2c36f5f240b3aa45d2f25cc31329bd0ac3cfd50847f8a0bd74d6",
+      "after_sha256": "f569c1e58ef6d2e1f244d488d7172f39a2017d9c5f7b7653bfdcd13d857580ab",
       "replacements": [
         {
           "before": "\n        self.kv_cache_manager.new_step_starts()\n\n        # DP prefill balancing: on a throttled (non-cadence-aligned) step, defer\n        # all prefill compute unless saturated.\n        defer_prefills = (\n            throttle_prefills and not self.prefill_capacity_bound\n        ) and any(not r.is_prefill_chunk for r in self.running)\n\n        # First, schedule the RUNNING requests.\n        req_index = 0\n",
@@ -148,10 +156,9 @@
     {
       "path": "vllm/v1/engine/core.py",
       "payload": "engine_core.py",
-      "integration_blob": "ff23e494e14beae4173f20c94c2ec2d54ce0f260",
-      "installed_base_note": "Preserves parent GLM prefix-caching participation block-size selection absent from public integration blob.",
-      "before_sha256": "e1f1892cf625db6ba5896a6d49a055e924ad94a8301cfdc3bb9d13e1d89ca9dd",
-      "after_sha256": "27b5bfe913f95c1ed9593df6210274b8a58f102ec43ae446a44c8248f49b4390",
+      "integration_blob_note": "Hunk originates in integration blob ff23e494e14beae4173f20c94c2ec2d54ce0f260; the payload is the Gilded file, which keeps GLM prefix-caching participation block-size selection and the DP step_counter cadence.",
+      "before_sha256": "a4471ea8fc4b1698af448da5be235eb274d8420e3ca4cd6ccd94ae0ffd8ea885",
+      "after_sha256": "276186db3c5a3df793594ed596974c2729b916bccae7d94a892a39c5301e183d",
       "replacements": [
         {
           "before": "            eco.scheduler_stats.iteration_details = iteration_details\n\n    def _should_throttle_prefills(self) -> bool:\n        \"\"\"Whether to defer new prefills this step (DP prefill balancing).\n        Overridden by the DP engine core; never throttles otherwise.\"\"\"\n        return False\n\n    def step(self) -> tuple[dict[int, EngineCoreOutputs], bool]:\n        \"\"\"Schedule, execute, and make output.\n",

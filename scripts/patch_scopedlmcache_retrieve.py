@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Install reviewed retrieve and layout overlays into the imported LMCache wheel.
 
-Source: local-inference-lab/LMCache tree e045d729bc5c4c63a40e13d032f42923de97812f,
-adapter git blob dd5aa0e6033292eaad06dd8f0b7961d58cf6b2f1. The complete after
-identity includes deadline consumption, device-event polling, terminal failure
-recompute and fatal timeout/query-error/health-loss ownership retention. No runtime shim.
+Base: Gilded Gnosis v20 r34 (docker.io/voipmonitor/vllm@sha256:820181fb...) with
+the reviewed r34 maintenance layer already applied, so the adapter before state is
+the 0944cccb bounded-retrieve baseline. The complete after identity adds fatal
+timeout / completion-query-error / health-loss ownership retention on top of it:
+a retrieve is only ever reported failed once a device completion query succeeded.
+No runtime shim; the installed adapter already accepts kv_connector_extra_config
+and retrieve_timeout.
 The --layout overlay isolates opaque DCP pages using the exact installed vLLM
-configuration precedence, pinned independently from LMCache.
+configuration precedence, pinned independently from LMCache. Its target is the
+external lmcache.integration.vllm.lmcache_mp_connector module, which the installed
+vllm/distributed/kv_transfer/kv_connector/v1/lmcache_mp_connector.py resolves
+LMCacheMPConnector to unless LMCACHE_USE_UPSTREAM_MP is set.
 """
 import argparse
 import hashlib
@@ -16,12 +22,12 @@ from pathlib import Path
 import tempfile
 
 MODULE = "lmcache.integration.vllm.vllm_multi_process_adapter"
-BEFORE_SHA256 = "ea580badefb9a0fad5fa2ac1bdcff4f2b36fc85138d95a5be4b180f07dd2c874"
+BEFORE_SHA256 = "0781f930e304992c75ebf596030b6a3f6d0bf697558de14168168531ee51fe21"
 AFTER_SHA256 = "c6840310b59375123416f9f91a77db19124b5b1487e22d9b4962eab1940fbd66"
 LAYOUT_MODULE = "lmcache.integration.vllm.lmcache_mp_connector"
-LAYOUT_BEFORE_SHA256 = "c52ce0807698db5899a4031e4a76a12fdbdea914404c324709bbfb7f60b1cedc"
-LAYOUT_AFTER_SHA256 = "9179f51b2dd4854641175d79722e5c0d0e4a30c776d88d39185d983fdf2c99c0"
-VLLM_CONFIG_SHA256 = "7cf467579647fceeea885d40fe069b6187baee3fd717ac2f51fe7f0ee1bf0a96"
+LAYOUT_BEFORE_SHA256 = "c6e0bf5c79e5b21a703ade532258514f4c2967626841ec1e9ca6eafa9d7ccae3"
+LAYOUT_AFTER_SHA256 = "6a5f422b7425e70605379388e7d0eae4786320e18f73e227d5d06a554c7d2e2d"
+VLLM_CONFIG_SHA256 = "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f"
 
 
 def package_source(package: str, relative: str) -> Path:
@@ -38,8 +44,8 @@ def package_source(package: str, relative: str) -> Path:
 
 
 def default_target(layout: bool = False) -> Path:
-    # The candidate builds a wheel from /opt/infernal-invocation/lmcache, but
-    # imports /opt/venv/.../site-packages/lmcache. Never patch the build checkout.
+    # Resolve the imported package (/opt/venv/.../site-packages/lmcache), never a
+    # build checkout: the wheel source tree is not what the runtime imports.
     filename = "lmcache_mp_connector.py" if layout else "vllm_multi_process_adapter.py"
     return package_source("lmcache", f"integration/vllm/{filename}")
 

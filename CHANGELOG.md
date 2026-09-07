@@ -22,7 +22,7 @@ dynamic NVFP4 KV/FP8 RoPE, 4,518,907,904 KV bytes/GPU, scheduler 2048, prefill
 arena 1024, C8, native probabilistic MTP3, online K6 and GMU 0.93 retain an
 explicit memory budget, **not a capacity result**. No 750K claim is made.
 The previous full 3.42 profile remains at its qualified 393,216-token envelope;
-Flash and GLM-5.2 are explicit alternatives, not the new default.
+GLM-5.2 is an explicit alternative, not the new default.
 
 Exact safetensors-header accounting corrects the initial lower-bit preference:
 5.3 3.42bpw adds 0.848 GiB/rank versus the live 5.2 3.42bpw tensors, largely
@@ -30,11 +30,45 @@ rotation-vector storage. Their BF16 carrier is identical. Preserve 3.42bpw
 and reduce workspace before considering the optional 3.25bpw experiment.
 The full accounting is retained in `maintenance/glm53-aibeast-500k/memory-comparison.json`.
 
-The immutable runtime parent remains
-`verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692`.
-The existing 27 overlays remain, with surgical parser #639/#640 and scheduler
-#546 backports and a fail-closed LMCache retrieve-deadline payload. These are
-candidate changes, not inherited upstream-head guarantees or live qualification.
+The runtime parent is now local-inference-lab's **Gilded Gnosis v20 r34**,
+`docker.io/voipmonitor/vllm@sha256:820181fbbc975cd5291c411cda9771d58fecee1636d916f508f47230df20592b`
+(vLLM `e2666d9a65f41fc376607531453cbd57c4c71016`, integration tree
+`4d006a43928cdee01306691a766542c1e9bebb59`; B12X/SparkInfer
+`7cecbb2c4819636ae7f05f8b116f2c45ee2cff7b`, tree
+`cd3ce190f0f1917402cdfd5773724267cc9a63f8`; LMCache `0.5.2+glm52dcp.4`;
+FlashInfer `1ac6942776b383c6b03c7a5805a22e72a3e3349f`; NCCL 2.30.4;
+ExLlamaV3 encoder `704aefd743b390af4bd0fb429d1906f9b964c7d8`; Torch
+2.12.0+cu132; CUDA 13.2.1). This replaces the third-party
+`verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692`
+parent used by the preceding candidate, and returns the appliance to the exact
+runtime family that has been serving GLM-5.2 in production. Its CUDA/Torch/NCCL
+stack is 13.2.1 / 2.12 / 2.30.4, not the Verdict candidate's 13.3 / 2.13 / 2.31.2.
+
+The 27 VerdictAI-layout runtime overlays are **deleted**: every one of their
+targets lived under `/opt/infernal-invocation` and does not exist on the Gilded
+base, whose own qualified sources already carry that work. What remains, all
+SHA-256 pinned in both the importable runtime and the base image's
+`/opt/vllm` source tree: the reviewed r34 maintenance sources (vLLM PR277
+compatibility, hybrid external-cache invalid-block recovery, bounded LMCache
+multiprocess retrieve) and the expired-L1-read-lease recovery patch
+(`67561538a08ce3db621f51f0615b67537c0c8361`, upstream draft
+LMCache/LMCache#4691) that makes the candidate's `LMCACHE_L1_READ_TTL=900` and
+`LMCACHE_SESSION_TTL_SECONDS=5400` real rather than inert; the surgical parser
+#639/#640 and scheduler #546 backports, re-derived against Gilded bytes
+(the Gilded parser has no `TOOL_DIRECT_*` states or message-header buffering,
+so those hunks were re-anchored, never back-ported from Verdict); and the
+fail-closed LMCache retrieve-deadline/cache-layout payloads, re-pinned to the
+Gilded connector `c6e0bf5c…` and adapter `0781f930…`.
+
+**GLM-5.3-Flash is no longer served by this image.** `vllm.models.glm5next`,
+`b12x.attention.glm_pooled_indexer`, `b12x.attention.gdn_decode` and
+`vllm.model_executor.warmup.glm5_kpool_warmup` are absent from the Gilded base,
+so `glm53-k6` / `glm53-k8` fail closed and name the VerdictAI-derived lineage
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:9d7ab60a3ad666edb8d38812ec6709909e6752a78fad464c842c7b17659f5d5b`
+instead of silently substituting another profile.
+
+These are candidate changes, not inherited upstream-head guarantees or live
+qualification.
 The parser repairs literal argument delimiters and stripped-stop recovery while
 preserving the installed parser ABI. The non-DP scheduler fix does not by itself
 enable prefill throttling: `prefill_schedule_interval` remains 1 (inert).

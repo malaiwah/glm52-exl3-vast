@@ -3,6 +3,7 @@
 import ast
 from dataclasses import dataclass
 import enum
+import hashlib
 import logging
 import math
 import os
@@ -18,6 +19,15 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import patch_scopedlmcache_retrieve as installer
+
+# Bytes extracted read-only from the live Gilded Gnosis v20 r34 maintenance
+# container: the exact pre-overlay state the appliance image patches.
+GILDED = Path(os.environ.get("LIL_GG_INSTALLED_BEFORE", "/tmp/lil-gg-installed-before"))
+ADAPTER = "lmcache/integration/vllm/vllm_multi_process_adapter.py"
+
+
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 class Clock:
@@ -57,10 +67,11 @@ class DeviceFuture:
         return self.value
 
 
-def load_adapter(clock):
+def load_adapter(clock, source=None):
     # AST extraction removes imports/decorators only. Execute whole production
     # classes and functions, not a copied approximation of the polling loop.
-    path = Path(os.environ.get("LMCACHE_ADAPTER_TEST_SOURCE", installer.default_payload()))
+    path = Path(source or os.environ.get(
+        "LMCACHE_ADAPTER_TEST_SOURCE", installer.default_payload()))
     tree = ast.parse(path.read_text(encoding="utf-8"))
     names = {
         "ExtraConfigDefault", "_resolve_extra_config", "ParallelStrategy",
@@ -268,6 +279,69 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(installer.patch(target, verify_only=True), "verified")
             self.assertEqual(installer.patch(target), "verified")
             self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+
+
+class GildedAdapterInstallTests(unittest.TestCase):
+    """Install the reviewed payload onto the real installed Gilded bytes."""
+
+    def gilded(self):
+        path = GILDED / ADAPTER
+        if not path.is_file():
+            raise unittest.SkipTest(
+                f"Gilded installed-before bytes unavailable: {path}")
+        return path
+
+    def test_gilded_adapter_matches_the_pinned_before_state(self):
+        self.assertEqual(digest(self.gilded()), installer.BEFORE_SHA256)
+        self.assertEqual(digest(installer.default_payload()),
+                         installer.AFTER_SHA256)
+
+    def test_install_on_gilded_bytes_is_idempotent_and_verifiable(self):
+        source = self.gilded().read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "vllm_multi_process_adapter.py"
+            target.write_bytes(source)
+            target.chmod(0o640)
+            with self.assertRaisesRegex(RuntimeError, "not applied"):
+                installer.patch(target, verify_only=True)
+            self.assertEqual(installer.patch(target), "patched")
+            self.assertEqual(digest(target), installer.AFTER_SHA256)
+            self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(installer.patch(target), "verified")
+            self.assertEqual(installer.patch(target, verify_only=True), "verified")
+            self.assertEqual(installer.main([str(target), "--verify-only"]), 0)
+
+    def test_mutated_target_is_rejected_without_a_write(self):
+        mutated = self.gilded().read_text() + "\n# local edit\n"
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "vllm_multi_process_adapter.py"
+            target.write_text(mutated)
+            with self.assertRaisesRegex(RuntimeError, "reviewed source"):
+                installer.patch(target)
+            self.assertEqual(target.read_text(), mutated)
+
+    def test_overlay_changes_health_loss_ownership_versus_gilded_base(self):
+        # The installed Gilded base drains pending retrieves into recompute on
+        # heartbeat loss; the overlay exists to stop that, so the two sources
+        # must not agree here.
+        clock = Clock()
+        namespace = load_adapter(clock, self.gilded())
+        strategy = namespace["ParallelStrategy"](True, 4, 0, 4, 1, 1, dcp_size=4)
+        adapter = namespace["LMCacheMPWorkerAdapter"](
+            "tcp://unused", None, "full-glm", 256, strategy,
+            extra_config={"lmcache.mp.retrieve_timeout": 180},
+        )
+        adapter._ensure_heartbeat_started = lambda: None
+        adapter._create_key = lambda *args, **kwargs: None
+        adapter._block_ids_per_group = lambda op: [[7, 8]]
+        adapter.transfer_ctx = SimpleNamespace(
+            submit_retrieve=lambda *args, **kwargs: DeviceFuture())
+        op = SimpleNamespace(token_ids=[1], start=0, end=256,
+                             flat_block_ids=[7, 8], skip_first_n_tokens=0)
+        adapter.submit_retrieve_request("r", op, object())
+        adapter._health_event.clear()
+        self.assertEqual(adapter.get_finished(set()), (set(), {"r"}))
+        self.assertEqual(adapter.get_block_ids_with_load_errors(), {7, 8})
 
 
 if __name__ == "__main__":

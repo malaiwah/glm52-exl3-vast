@@ -19,7 +19,7 @@
     "1111/http",
     "22/tcp"
   ],
-  "readme": "Full GLM-5.3 EXL3 3.42bpw reduced-workspace candidate using MODEL_PROFILE=glm53-3.42bpw-500k. GPU qualification of the preserved 520,192-token envelope is required before promotion. This is not Flash and does not silently lower weight precision. Use exactly 4x RTX PRO 6000 Blackwell 96 GB GPUs and at least 600 GB storage. Pin the candidate image digest during qualification. Ports 1111 and 8000 use Runpod managed HTTPS. Add DESEC_TOKEN, DESEC_DOMAIN and HF_TOKEN through Runpod Secrets as needed. The older qualified 393K profile, 3.25bpw experiment, GLM-5.2 and Flash remain explicit alternatives.",
+  "readme": "Full GLM-5.3 EXL3 3.42bpw reduced-workspace candidate using MODEL_PROFILE=glm53-3.42bpw-500k. GPU qualification of the preserved 520,192-token envelope is required before promotion. This is not Flash and does not silently lower weight precision. Use exactly 4x RTX PRO 6000 Blackwell 96 GB GPUs and at least 600 GB storage. Pin the candidate image digest during qualification. Ports 1111 and 8000 use Runpod managed HTTPS. Add DESEC_TOKEN, DESEC_DOMAIN and HF_TOKEN through Runpod Secrets as needed. The older qualified 393K profile, 3.25bpw experiment and GLM-5.2 remain explicit alternatives; GLM-5.3-Flash is not served by this image and its profiles fail closed.",
   "volumeInGb": 600,
   "volumeMountPath": "/workspace"
 }

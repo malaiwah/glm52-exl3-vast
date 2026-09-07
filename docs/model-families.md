@@ -15,8 +15,12 @@ variant `exl3-tr3-glm53-3.42bpw-500k`, in the `glm52` architecture family shared
 by full GLM-5.2 and GLM-5.3. It preserves 3.42bpw and the 520,192-token budget
 with reduced workspace; it is a candidate, not completed GPU qualification.
 The older full `glm53-3.42bpw` profile retains its separately
-qualified 393,216-token envelope. Flash `glm53-k6` / `glm53-k8` use family
-`glm53`; both Flash and `glm52-exl3` remain explicit alternatives.
+qualified 393,216-token envelope, and `glm52-exl3` remains an explicit
+alternative. The Flash `glm53` family and its `glm53-k6` / `glm53-k8` variants
+are **withdrawn from this image**: the Gilded Gnosis v20 r34 base contains no
+GLM5Next model runtime, pooled sparse indexer, GDN decode kernels or K-pool
+warmup, so selecting them fails closed and names the separately published
+VerdictAI-derived Flash image instead of remapping to another model.
 
 | | |
 |---|---|

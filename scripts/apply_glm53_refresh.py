@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Install the GLM-5.3 parser/cadence refresh without changing the runtime ABI.
 
-The eight old-source payloads contain only local-vllm #640, #639 and #546
-backports. These source fixes are not a GPU/context-capacity qualification.
-Accept only the exact complete before state or exact complete after state.
+The eight payloads are the Gilded Gnosis r34 maintenance sources plus the
+local-vllm #640, #639 and #546 backports; nothing else. These source fixes are
+not a GPU/context-capacity qualification. Accept only the exact complete before
+state or the exact complete after state.
+
+Gilded installs the runtime under site-packages and also ships a byte-identical
+debug source tree under /opt/vllm. When that mirror is present every payload is
+installed and pinned in both roots.
 """
 from __future__ import annotations
 
@@ -15,57 +20,58 @@ import shutil
 import tempfile
 from pathlib import Path
 
-DEFAULT_ROOT = Path("/opt/infernal-invocation/vllm")
-PROVENANCE_SHA256 = 'af21d8d36de85740621858e74e619dd144fc1687b188eed97a78e99a8bd4673c'
+DEFAULT_ROOT = Path("/opt/venv/lib/python3.12/site-packages")
+DEFAULT_MIRROR_ROOT = Path("/opt/vllm")
+PROVENANCE_SHA256 = '64aab6eeb6085fe22f735338c9d5371dc462a6ef101faebda31b8b982ab32346'
 
 OVERLAYS = (
     (
         'token_id_scanner.py',
-        '/opt/infernal-invocation/vllm/vllm/parser/engine/token_id_scanner.py',
+        'vllm/parser/engine/token_id_scanner.py',
         'c9db6d6a29865d65ba1adc523015488aad4d7dbef46b7539041e9efbe81bd034',
         'd478c6304cb12e084df52831977e0702ce2cc262919111a12a7ef37d38ef32f1',
     ),
     (
         'parser_engine_config.py',
-        '/opt/infernal-invocation/vllm/vllm/parser/engine/parser_engine_config.py',
-        '83460a34f86d3bb639975feea0ddaa468de2814ab18bf9984c0d836e8042120e',
-        '895af219fae67671e63d2e639e6a8e716d27ff989ac727744e8e9718f87b3fa4',
+        'vllm/parser/engine/parser_engine_config.py',
+        'f7350e0ca9124001684f1f874ee72bf6a34932d3e4b84cc84567bbccf2f3e4b9',
+        '92de004c7ca85975d940d578773b03f43de9da5a373c9a1c96f9c00dd1840d0b',
     ),
     (
         'streaming_parser_engine.py',
-        '/opt/infernal-invocation/vllm/vllm/parser/engine/streaming_parser_engine.py',
-        '0f4625066e178ea5b3fd4784812103ce3b1362fbc278700518b8ab6b8ba57074',
-        '26997d3653f1668e7f100752dbb3d4d6ee6df7c721e414b069a823187eee3b29',
+        'vllm/parser/engine/streaming_parser_engine.py',
+        '2eace718fc728b46676cd5d01eee2c893aec396a4551f05c529e83a120d07715',
+        '722051a19deda2fd54fe9e1a59af61cc987621809f69d78a76a25cde7bbfa18e',
     ),
     (
         'glm47_moe.py',
-        '/opt/infernal-invocation/vllm/vllm/parser/glm47_moe.py',
+        'vllm/parser/glm47_moe.py',
         'ce3629319e56e882d25cb75d62e3e7088a4eec1518885fc69fc696eafb4a97b2',
         'b76ea87090a1b823c272aa0d338cadf53a5aa3d845c3b3cdaed6258fa5a00ff8',
     ),
     (
         'scheduler_config.py',
-        '/opt/infernal-invocation/vllm/vllm/config/scheduler.py',
-        '3cf5d41a5d662ab0eada6f3128e2538abc0a250d6aef82acab7df7dd84e498bc',
-        'd70698ec13248054248aea0824ffa9661edc9150be124424d0738cc775ecbfd7',
+        'vllm/config/scheduler.py',
+        'a816cf79a3e74ffc0984f9bebb274275b26f46be8b28cb77a29388a0996263c8',
+        'ecda4b0c12a2e40dddafa6e9c1f5328740a0bae29d7cb8dc5bc1a8d3de56021e',
     ),
     (
         'scheduler_interface.py',
-        '/opt/infernal-invocation/vllm/vllm/v1/core/sched/interface.py',
-        'be6c008664096c5660a8879de72b315bbe479bf1d688be9b25891063ec53a367',
-        '049b1f3cb82d69295d0e642af9f8bb4c07f971168d2e8543de43c29538bd9350',
+        'vllm/v1/core/sched/interface.py',
+        '2592ff4d53fa684349dd13b8d236aa918857a9f24b8fd24817fb0487deecffd6',
+        '01684d9eb30820c210d4fccbda5fd2dc304fc58e04704b30d574c83edce3f8ff',
     ),
     (
         'scheduler.py',
-        '/opt/infernal-invocation/vllm/vllm/v1/core/sched/scheduler.py',
-        '2488d3dd87764fc04e1f4ec770528b2d5fbb0e357315b91bb125479eab9007e5',
-        '8cfbb80da8420138ef291af89a96c436fdaf578b5e795a6837e32dde578a6573',
+        'vllm/v1/core/sched/scheduler.py',
+        '23a0f2ce9dbf2c36f5f240b3aa45d2f25cc31329bd0ac3cfd50847f8a0bd74d6',
+        'f569c1e58ef6d2e1f244d488d7172f39a2017d9c5f7b7653bfdcd13d857580ab',
     ),
     (
         'engine_core.py',
-        '/opt/infernal-invocation/vllm/vllm/v1/engine/core.py',
-        'e1f1892cf625db6ba5896a6d49a055e924ad94a8301cfdc3bb9d13e1d89ca9dd',
-        '27b5bfe913f95c1ed9593df6210274b8a58f102ec43ae446a44c8248f49b4390',
+        'vllm/v1/engine/core.py',
+        'a4471ea8fc4b1698af448da5be235eb274d8420e3ca4cd6ccd94ae0ffd8ea885',
+        '276186db3c5a3df793594ed596974c2729b916bccae7d94a892a39c5301e183d',
     ),
 )
 
@@ -78,12 +84,56 @@ def file_sha256(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def resolve_targets(root: Path = DEFAULT_ROOT,
+                    mirror_root: Path | None = DEFAULT_MIRROR_ROOT,
+                    ) -> list[tuple[str, Path, str, str]]:
+    """Every install target: the runtime root, then the debug source mirror.
+
+    Pure path composition; nothing here touches the filesystem, so callers can
+    enumerate the manifest outside the image.
+    """
+    targets = [(payload, root / relative, before, after)
+               for payload, relative, before, after in OVERLAYS]
+    if mirror_root is None:
+        return targets
+    return targets + [(payload, mirror_root / relative, before, after)
+                      for payload, relative, before, after in OVERLAYS]
+
+
+def install_targets(root: Path = DEFAULT_ROOT,
+                    mirror_root: Path | None = DEFAULT_MIRROR_ROOT,
+                    ) -> list[tuple[str, Path, str, str]]:
+    """Install targets that exist in this layout.
+
+    Gilded ships the debug source tree, but an image that strips it is still a
+    valid layout. The mirror is therefore all-or-nothing: a partially present
+    mirror is an unknown layout and is refused rather than half-installed.
+    """
+    targets = resolve_targets(root, None)
+    if mirror_root is None:
+        return targets
+    mirrored = resolve_targets(root, mirror_root)[len(targets):]
+    present = [target for target in mirrored if target[1].exists()]
+    if not present:
+        return targets
+    if len(present) != len(mirrored):
+        missing = [str(target[1]) for target in mirrored if not target[1].exists()]
+        raise RuntimeError(
+            "refusing partial GLM-5.3 refresh mirror under "
+            f"{mirror_root}: missing {', '.join(missing)}"
+        )
+    return targets + mirrored
+
+
 def verify_payloads(source_dir: Path) -> None:
     ledger_path = source_dir / "provenance.json"
     if file_sha256(ledger_path) != PROVENANCE_SHA256:
         raise RuntimeError("refusing unknown GLM-5.3 refresh provenance")
     ledger = json.loads(ledger_path.read_text())
-    for source_name, target_name, before, after in OVERLAYS:
+    if (ledger["install_root"], ledger["mirror_root"]) != (
+            str(DEFAULT_ROOT), str(DEFAULT_MIRROR_ROOT)):
+        raise RuntimeError("provenance ledger roots do not match this installer")
+    for source_name, relative, before, after in OVERLAYS:
         source = source_dir / source_name
         if file_sha256(source) != after:
             raise RuntimeError(f"refusing unknown GLM-5.3 refresh payload: {source}")
@@ -93,10 +143,10 @@ def verify_payloads(source_dir: Path) -> None:
             raise RuntimeError(f"expected unique provenance record: {source_name}")
         record = records[0]
         if (record["before_sha256"], record["after_sha256"],
-                str(DEFAULT_ROOT / record["path"])) != (before, after, target_name):
+                record["path"]) != (before, after, relative):
             raise RuntimeError(f"provenance ledger mismatch: {source_name}")
         # Reverse the exact hunks to prove that payloads differ from the pinned
-        # installed base by nothing except these reviewed old-ABI backports.
+        # installed base by nothing except these reviewed backports.
         original = source.read_text()
         for replacement in reversed(record["replacements"]):
             old, new = replacement["before"], replacement["after"]
@@ -108,10 +158,10 @@ def verify_payloads(source_dir: Path) -> None:
 
 
 def install(source_dir: Path, *, verify_only: bool = False,
-            root: Path = DEFAULT_ROOT) -> None:
+            root: Path = DEFAULT_ROOT,
+            mirror_root: Path | None = DEFAULT_MIRROR_ROOT) -> None:
     verify_payloads(source_dir)
-    targets = [(source, root / Path(target).relative_to(DEFAULT_ROOT), before, after)
-               for source, target, before, after in OVERLAYS]
+    targets = install_targets(root, mirror_root)
     states = []
     for _source, target, before, after in targets:
         actual = file_sha256(target)
@@ -125,10 +175,13 @@ def install(source_dir: Path, *, verify_only: bool = False,
                 f"expected base={before} or refresh={after}, got={actual}"
             )
     if all(state == "after" for state in states):
-        print(">>> GLM-5.3 refresh already installed and verified")
+        print(f">>> GLM-5.3 refresh already installed and verified "
+              f"({len(targets)} targets)")
         return
     if not all(state == "before" for state in states):
-        raise RuntimeError("refusing mixed GLM-5.3 refresh state: " + ", ".join(states))
+        raise RuntimeError("refusing mixed GLM-5.3 refresh state: " + ", ".join(
+            f"{target}={state}"
+            for (_source, target, _before, _after), state in zip(targets, states)))
     if verify_only:
         print(">>> GLM-5.3 refresh base, payloads and unique-anchor provenance verified")
         return
@@ -153,7 +206,7 @@ def install(source_dir: Path, *, verify_only: bool = False,
     for _source, target, _before, after in targets:
         if file_sha256(target) != after:
             raise RuntimeError(f"installed refresh verification failed: {target}")
-    print(f">>> installed and verified {len(OVERLAYS)} GLM-5.3 refresh files")
+    print(f">>> installed and verified {len(targets)} GLM-5.3 refresh files")
 
 
 def main() -> int:
@@ -161,9 +214,12 @@ def main() -> int:
     parser.add_argument("source_dir", type=Path)
     parser.add_argument("--verify-only", action="store_true")
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT,
-                        help="vLLM checkout root (contains the vllm package)")
+                        help="runtime root that contains the vllm package")
+    parser.add_argument("--mirror-root", type=Path, default=DEFAULT_MIRROR_ROOT,
+                        help="debug source root mirroring the vllm package")
     args = parser.parse_args()
-    install(args.source_dir, verify_only=args.verify_only, root=args.root)
+    install(args.source_dir, verify_only=args.verify_only, root=args.root,
+            mirror_root=args.mirror_root)
     return 0
 
 

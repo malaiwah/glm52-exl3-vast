@@ -156,13 +156,6 @@ class StreamingParserEngine:
             for (state, terminal), tr in config.transitions.items()
             if tr.next_state in self._TOOL_STATES or state in self._TOOL_STATES
         )
-        # TOOL_CALL_END may close an inner call rather than its lexical wrapper,
-        # as in MiniMax, so identify exits from state transitions instead.
-        self._tool_exit_terminals: frozenset[str] = frozenset(
-            terminal
-            for (state, terminal), tr in config.transitions.items()
-            if state in self._TOOL_STATES and tr.next_state not in self._TOOL_STATES
-        )
 
         self.skip_tool_parsing = False
         self.reset(initial_state=initial_state)
@@ -192,8 +185,6 @@ class StreamingParserEngine:
         # implicit-reasoning-end (content returns None).
         self._scanner.reset()
         self._lexer.reset()
-        self._message_header_buffer = ""
-        self._in_skipped_tool_span = False
         self._reset_args_state()
 
     def feed(
@@ -265,8 +256,6 @@ class StreamingParserEngine:
             ParserState.TOOL_NAME,
             ParserState.TOOL_BETWEEN,
             ParserState.TOOL_ARG_END_PENDING,
-            ParserState.TOOL_DIRECT_NAME,
-            ParserState.TOOL_DIRECT_ARGS,
         ):
             if self.tool_index >= 0:
                 events.append(
@@ -282,15 +271,6 @@ class StreamingParserEngine:
             )
             self.state = ParserState.CONTENT
         elif self.state == ParserState.MESSAGE_HEADER:
-            if self._message_header_buffer:
-                events.append(
-                    SemanticEvent(
-                        EventType.TEXT_CHUNK,
-                        value=self._message_header_buffer,
-                        tool_index=self.tool_index,
-                    )
-                )
-                self._message_header_buffer = ""
             self.state = ParserState.CONTENT
 
         return events
@@ -318,8 +298,6 @@ class StreamingParserEngine:
             ParserState.TOOL_ARGS,
             ParserState.TOOL_BETWEEN,
             ParserState.TOOL_ARG_END_PENDING,
-            ParserState.TOOL_DIRECT_NAME,
-            ParserState.TOOL_DIRECT_ARGS,
         }
     )
 
@@ -328,63 +306,47 @@ class StreamingParserEngine:
         transition = self.config.transitions.get(key)
 
         if transition is None:
-            if self._has_drops and terminal == DROP_TERMINAL:
+            if (
+                self._has_drops
+                and terminal == DROP_TERMINAL
+                # Preserve drop tokens when skip_tool_parsing is active so
+                # the reasoning pass doesn't silently remove tokens that a
+                # later tool-call pass might need to see.
+                and not self.skip_tool_parsing
+            ):
                 return []
-            # The projected skip state may not define the wrapper closer.
-            if self.skip_tool_parsing and terminal in self._tool_exit_terminals:
-                self._in_skipped_tool_span = False
             return self._emit_for_state(value)
 
         if self.skip_tool_parsing and terminal in self._tool_terminals:
-            # Inkling reuses one terminal for tool, text, and reasoning exits.
-            # Outside a forwarded tool span, apply its normal transition.
-            is_opener = transition.next_state in self._TOOL_STATES
-            is_exit = terminal in self._tool_exit_terminals
-            used_as_plain_closer = (
-                is_exit and not is_opener and not self._in_skipped_tool_span
-            )
-            if not used_as_plain_closer:
-                if is_opener:
-                    self._in_skipped_tool_span = True
-                elif is_exit:
-                    self._in_skipped_tool_span = False
-                leaving_message_header = self.state == ParserState.MESSAGE_HEADER
-                if leaving_message_header:
-                    self._message_header_buffer = ""
-                # A tool terminal that implicitly ends reasoning must report
-                # that even from the header state, or the reasoning pass never
-                # hands the block to the tool pass.
-                if EventType.REASONING_END in transition.events:
-                    self.state = ParserState.CONTENT
-                    return [
-                        SemanticEvent(
-                            EventType.REASONING_END,
-                            value=value,
-                            tool_index=self.tool_index,
-                        ),
-                        SemanticEvent(
-                            EventType.TEXT_CHUNK,
-                            value=value,
-                            tool_index=self.tool_index,
-                        ),
-                    ]
-                elif leaving_message_header:
-                    self.state = ParserState.CONTENT
-                    return [
-                        SemanticEvent(
-                            EventType.TEXT_CHUNK,
-                            value=value,
-                            tool_index=self.tool_index,
-                        )
-                    ]
-                content_type = self.config.content_events.get(self.state)
-                if content_type is not None:
-                    return [
-                        SemanticEvent(
-                            content_type, value=value, tool_index=self.tool_index
-                        )
-                    ]
-                return []
+            if self.state == ParserState.MESSAGE_HEADER:
+                self.state = ParserState.CONTENT
+                return [
+                    SemanticEvent(
+                        EventType.TEXT_CHUNK,
+                        value=value,
+                        tool_index=self.tool_index,
+                    )
+                ]
+            if EventType.REASONING_END in transition.events:
+                self.state = ParserState.CONTENT
+                return [
+                    SemanticEvent(
+                        EventType.REASONING_END,
+                        value=value,
+                        tool_index=self.tool_index,
+                    ),
+                    SemanticEvent(
+                        EventType.TEXT_CHUNK,
+                        value=value,
+                        tool_index=self.tool_index,
+                    ),
+                ]
+            content_type = self.config.content_events.get(self.state)
+            if content_type is not None:
+                return [
+                    SemanticEvent(content_type, value=value, tool_index=self.tool_index)
+                ]
+            return []
 
         if transition.skip_in_token_id_mode and self._ever_had_token_ids:
             return self._emit_for_state(value)
@@ -395,10 +357,7 @@ class StreamingParserEngine:
         transition = self.config.non_whitespace_transitions.get(self.state)
         if transition is not None and text.strip():
             return self._apply_transition(transition, text)
-        if self.state == ParserState.MESSAGE_HEADER:
-            self._message_header_buffer += text
-            return []
-        if self.state in (ParserState.TOOL_ARGS, ParserState.TOOL_DIRECT_ARGS):
+        if self.state == ParserState.TOOL_ARGS:
             if self.config.tool_args_json:
                 return self._feed_args_text(text)
             return [
@@ -424,13 +383,10 @@ class StreamingParserEngine:
         value: str,
     ) -> list[SemanticEvent]:
         events: list[SemanticEvent] = []
-        previous_state = self.state
-        message_header = ""
 
         if (
-            self.state in (ParserState.TOOL_ARGS, ParserState.TOOL_DIRECT_ARGS)
-            and transition.next_state
-            not in (ParserState.TOOL_ARGS, ParserState.TOOL_DIRECT_ARGS)
+            self.state == ParserState.TOOL_ARGS
+            and transition.next_state != ParserState.TOOL_ARGS
             and self._args_buffer
         ):
             events.append(
@@ -442,32 +398,20 @@ class StreamingParserEngine:
             )
             self._args_buffer = ""
 
-        if previous_state == ParserState.MESSAGE_HEADER:
-            message_header = self._message_header_buffer
-            self._message_header_buffer = ""
-
         self.state = transition.next_state
 
         for event_type in transition.events:
             if event_type == EventType.TOOL_CALL_START:
                 self.tool_index += 1
-            event_value = (
-                message_header
-                if previous_state == ParserState.MESSAGE_HEADER
-                and event_type == EventType.TEXT_CHUNK
-                else value
-            )
-            if event_type == EventType.TEXT_CHUNK and not event_value:
-                continue
             events.append(
                 SemanticEvent(
                     event_type,
-                    value=event_value,
+                    value=value,
                     tool_index=self.tool_index,
                 )
             )
 
-        if self.state in (ParserState.TOOL_ARGS, ParserState.TOOL_DIRECT_ARGS):
+        if self.state == ParserState.TOOL_ARGS:
             self._args_brace_depth = 0
             self._args_in_string = False
             self._args_escape_next = False
