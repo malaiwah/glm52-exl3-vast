@@ -54,7 +54,7 @@ def module_records() -> dict:
     # distribution metadata is recorded explicitly, not assigned a fake version.
     distribution_names = importlib.metadata.packages_distributions()
     result = {}
-    for name in ("vllm", "b12x", "exllamav3", "torch", "triton", "lmcache",
+    for name in ("vllm", "b12x", "torch", "triton", "lmcache",
                  "torchao", "tilelang"):
         spec = importlib.util.find_spec(name)
         if spec is None or not spec.origin or not spec.submodule_search_locations:
@@ -69,6 +69,18 @@ def module_records() -> dict:
             "version_status": "distribution_metadata" if distributions
                               else "no_distribution_metadata; source identity recorded",
         }
+    # vLLM intentionally bypasses ExLlama's serving frontend and loads the
+    # encoder from VLLM_EXL3_ENCODER_SOURCE under a private module namespace.
+    # Top-level importability is therefore not its runtime contract.
+    encoder = Path(os.environ.get(
+        "VLLM_EXL3_ENCODER_SOURCE", glm_config.EXL3_ENCODER_SOURCE)).resolve(strict=True)
+    result["exllamav3"] = {
+        "source": file_record(encoder / "__init__.py"),
+        "encoder": file_record(encoder / "modules/quant/exl3_lib/quantize.py"),
+        "package_roots": [str(encoder)],
+        "distributions": [],
+        "version_status": "configured source encoder; frontend intentionally not imported",
+    }
     return result
 
 

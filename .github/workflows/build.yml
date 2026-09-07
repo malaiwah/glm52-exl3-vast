@@ -51,6 +51,8 @@ jobs:
         run: python3 tests/test_scopedlmcache_retrieve.py
       - name: role-invariant cache layout namespace
         run: python3 tests/test_scopedlmcache_layout.py
+      - name: dynamically loaded encoder provenance
+        run: python3 tests/test_runtime_provenance.py
       - name: supervisor configuration transactions and HTTP capabilities
         run: python3 -m unittest discover -s tests -p test_landing_transactions.py
       - name: maintenance qualification and durable rollback boundaries

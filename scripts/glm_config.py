@@ -36,6 +36,7 @@ import re
 # --------------------------------------------------------------------------
 
 MODEL_DIR = os.environ.get("MODEL_DIR", "/workspace/GLM-5.2-EXL3-TR3-3.0bpw")
+EXL3_ENCODER_SOURCE = "/opt/exllamav3-python/exllamav3"
 
 
 def state_dir() -> str:
@@ -2092,7 +2093,7 @@ def derive(cfg: dict) -> dict:
     if fam_name == "glm52" and cfg.get("ONLINE_QUANT") == "exl3-b6":
         runtime_env.update({
             "VLLM_EXL3_ONLINE_TRELLIS_BITS": "6",
-            "VLLM_EXL3_ENCODER_SOURCE": "/opt/exllamav3-python/exllamav3",
+            "VLLM_EXL3_ENCODER_SOURCE": EXL3_ENCODER_SOURCE,
             "VLLM_EXL3_ONLINE_CACHE_DIR": "/cache/exl3-online",
             "VLLM_EXL3_ONLINE_CACHE_MODE": "readwrite",
             "VLLM_B12X_ABSORB_BMM": "0",
