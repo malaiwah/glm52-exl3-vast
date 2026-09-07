@@ -731,14 +731,23 @@ chargeable storage; destroy the VM when finished.
 
 A managed-container probe was also completed rather than merely inferred from
 the catalog. Its four RTX PRO 6000 GPUs had peer reads/writes between every
-pair, and its 800 GB `/home` volume persisted, but `/workspace` lived on the
-ephemeral root filesystem. The template supplied neither Docker nor Podman,
-disabled user/mount namespaces, and blocked Enroot's OCI whiteout helpers.
-Consequently it cannot run this custom turnkey image reliably today. Use the
-VM launcher below; do not paste the appliance into a stock PyTorch container
-and assume its excellent P2P topology makes the software stack equivalent.
-The container route can become the preferred first-user path if JarvisLabs
-adds custom OCI images or a provider-supported nested runtime.
+pair, and its 1.2 TB `/home` volume persisted, but `/workspace` lived on the
+ephemeral root filesystem. The template supplies neither Docker nor Podman,
+keeps `CAP_SYS_CHROOT` and `CAP_MKNOD` but drops `CAP_SYS_ADMIN`, and blocks
+user namespaces, so no mount, no bind and no unprivileged namespace is
+available: a chroot there cannot be given `/proc` or `/dev`.
+`scripts/jarvislabs_container_rootfs.sh` therefore takes the remaining honest
+route. It fetches the published digest with `skopeo`, unpacks it with `umoci`
+(pinned by hash, so whiteouts and opaque directories are handled correctly),
+then *grafts* the image over the rented container - the appliance's `/opt`
+trees by symlink, the OS layer including its newer glibc by `rsync`, with the
+runtime-injected driver files excluded so the host driver keeps winning - and
+runs the real entrypoint in the container's own namespace, where `/proc`,
+`/sys`, `/dev/nvidia*` and a 320 GiB `/dev/shm` already exist. Before anything
+launches, it re-derives `/opt/runtime-provenance.json` in place and refuses to
+continue unless every installed source and module hashes exactly as the built
+image recorded. The graft is one-way: it mutates the rented container, so it
+demands `TURNKEY_GRAFT=1` and is only ever correct on a disposable instance.
 
 The qualified IN1 VM reported four same-NUMA `PHB` cards but no CUDA peer
 reads or writes between any pair. The unmodified pre-Jarvis image reached
@@ -801,6 +810,43 @@ The launcher always creates `/home/turnkey` before binding it to the
 container's `/workspace`. The OCI image is weights-free; the public checkpoint
 downloads into that persistent directory on first boot and is not captured in
 a VM image.
+
+</details>
+
+<details>
+<summary><b>JarvisLabs container instance (spot) without any container runtime</b></summary>
+
+Container templates are cheaper and can be rented as spot, but they cannot run
+Docker. Rent one, then unpack and graft the published digest:
+
+```bash
+jl create --gpu RTX-PRO6000 --num-gpus 4 --storage 700 --spot \
+  --region IN1 --http-ports 8000,1111 --name glm53-500k --yes
+jl list                     # take the machine id, status and public IP
+ssh -o StrictHostKeyChecking=no root@<public-ip>
+```
+
+On the instance, everything happens under the persistent `/home` volume:
+
+```bash
+export TURNKEY_IMAGE=ghcr.io/malaiwah/glm52-exl3-vast@sha256:<digest>
+export TURNKEY_ROOT=/home/turnkey TURNKEY_GRAFT=1
+curl -fsSL -o /home/turnkey/rootfs.sh --create-dirs \
+  https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_container_rootfs.sh
+bash /home/turnkey/rootfs.sh prepare   # skopeo fetch + umoci unpack
+bash /home/turnkey/rootfs.sh graft     # install over the container, then verify
+MODEL_PROFILE=glm53-3.42bpw-500k SSHD=0 \
+  bash /home/turnkey/rootfs.sh smoke   # GPU-free resolved-argv check
+HF_TOKEN=<token> MODEL_PROFILE=glm53-3.42bpw-500k SSHD=0 \
+  setsid nohup bash /home/turnkey/rootfs.sh run >/home/turnkey/serve.log 2>&1 &
+```
+
+Pass credentials through an environment file rather than the command line: a
+container's `/proc` is shared, so anything in `argv` is readable by every
+process on the instance. Spot instances can be reclaimed at any time, so copy
+each piece of evidence off the instance as it is produced, and remember that a
+paused instance still bills its storage (`$0.00014` per GB-hour, so a 1.2 TB
+volume is about `$4/day` while idle). `jl destroy <id>` is what stops that.
 
 </details>
 

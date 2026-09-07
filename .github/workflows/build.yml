@@ -27,7 +27,7 @@ jobs:
           version: "0.12.5"
           python-version: "3.12"
       - name: shellcheck boot scripts
-        run: shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh scripts/field_review_full_gate.sh
+        run: shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/jarvislabs_container_rootfs.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh scripts/field_review_full_gate.sh
       - name: validate Python
         run: python3 -m py_compile landing.py scripts/*.py patches/glm53-refresh/*.py patches/scopedlmcache/*.py maintenance/glm53-aibeast-500k/*.py
       - name: fail-closed field-review patch applicator
@@ -45,6 +45,8 @@ jobs:
         run: python3 tests/test_families.py
       - name: Gilded Gnosis base composition gate
         run: python3 tests/test_gilded_base_gate.py
+      - name: container-only rootfs runner contract
+        run: bash tests/test_container_rootfs.sh
       - name: full GLM parser and TP scheduling backports
         run: python3 tests/test_glm53_refresh.py
       - name: LMCache deadline and DMA ownership regression
