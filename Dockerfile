@@ -5,13 +5,15 @@ FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG SOURCE_REVISION=uncommitted
 USER root
+COPY --from=ghcr.io/astral-sh/uv@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1 /uv /usr/local/bin/uv
 LABEL org.opencontainers.image.title="Multi-model vLLM turnkey for Vast.ai, Runpod, and JarvisLabs" \
       org.opencontainers.image.description="Full GLM-5.3 EXL3 3.42bpw 520K reduced-workspace candidate with bounded LMCache, parser fixes, and isolated maintenance preparation." \
       ai.malaiwah.evidence="GLM-5.3-full-500K-candidate GPU-qualification-required" \
       ai.malaiwah.base="verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692" \
       ai.malaiwah.parent.license="LicenseRef-ShapleyMCG-1.0"
 ENV DEBIAN_FRONTEND=noninteractive \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_INDEX_STRATEGY=first-index
 COPY requirements-soul.lock /opt/requirements-soul.lock
 RUN set -eux; \
     echo "f10b6ee1116d71c4b61c4603d38cb257b3f0dcfde9bcc0847839e48ac9baeb1d  /opt/glm53/calibration/glm53_nvfp4_mla_outer_scales_mtp_power2_v2.json" | sha256sum -c -; \
@@ -33,8 +35,8 @@ RUN set -eux; \
     chmod +x /usr/local/bin/lego; \
     python3 -c 'import dns, hf_xet, huggingface_hub; assert dns.__version__ == "2.8.0"'; \
     python3 -c 'import importlib.metadata as m; print(*sorted((d.metadata["Name"] or "") + "==" + d.version for d in m.distributions()), sep="\n")' > /tmp/vllm-packages.before; \
-    python3 -m venv /opt/nanobot-venv; \
-    env -u PYTHONPATH /opt/nanobot-venv/bin/pip install --no-cache-dir --require-hashes -r /opt/requirements-soul.lock; \
+    uv venv --no-managed-python --python /opt/venv/bin/python /opt/nanobot-venv; \
+    env -u PYTHONPATH uv pip install --python /opt/nanobot-venv/bin/python --no-cache --require-hashes -r /opt/requirements-soul.lock; \
     env -u PYTHONPATH /opt/nanobot-venv/bin/python -c "from nanobot import Nanobot; import importlib.metadata as m; assert m.version('nanobot-ai') == '0.3.0'"; \
     python3 -c 'import importlib.metadata as m; print(*sorted((d.metadata["Name"] or "") + "==" + d.version for d in m.distributions()), sep="\n")' > /tmp/vllm-packages.after; \
     diff -u /tmp/vllm-packages.before /tmp/vllm-packages.after; \
