@@ -1,0 +1,65 @@
+{
+  "accepted": true,
+  "time": "2026-09-08T03:36:34Z",
+  "container_id": "8273cb4d544408140b87f815c5a5058bc0fc00c503c1971430feb35fa3d854b1",
+  "container_name": "glm53-turnkey-r34-parity-20260908t015846z",
+  "started_at": "2026-09-08T02:58:58.076950791Z",
+  "first_healthy_sample": "2026-09-08T03:04:50Z",
+  "last_healthy_sample": "2026-09-08T03:36:28Z",
+  "healthy_samples": 64,
+  "failed_health_samples": 0,
+  "first_external_client": "2026-09-08T03:04:54.887366000Z",
+  "client_soak_seconds": 1893.113,
+  "external_post_200_headers": 87,
+  "external_client_routes": [
+    "/v1/chat/completions",
+    "/v1/responses"
+  ],
+  "completed_engine_requests_including_probes": 96.0,
+  "engine_error_requests": 0.0,
+  "minimum_free_mib_per_gpu": {
+    "0": 215.0,
+    "1": 245.0,
+    "2": 217.0,
+    "3": 215.0
+  },
+  "latest_gpus": [
+    {
+      "index": 0.0,
+      "total_mib": 97887.0,
+      "used_mib": 97035.0,
+      "free_mib": 215.0,
+      "util_percent": 100.0,
+      "watts": 235.16
+    },
+    {
+      "index": 1.0,
+      "total_mib": 97887.0,
+      "used_mib": 97005.0,
+      "free_mib": 245.0,
+      "util_percent": 100.0,
+      "watts": 229.87
+    },
+    {
+      "index": 2.0,
+      "total_mib": 97887.0,
+      "used_mib": 97033.0,
+      "free_mib": 217.0,
+      "util_percent": 100.0,
+      "watts": 216.48
+    },
+    {
+      "index": 3.0,
+      "total_mib": 97887.0,
+      "used_mib": 97035.0,
+      "free_mib": 215.0,
+      "util_percent": 100.0,
+      "watts": 248.55
+    }
+  ],
+  "near_boundary_tokens": 501099,
+  "needle_ok": true,
+  "resource_trial": "parity",
+  "indexer_fold_cap_mib": 64,
+  "scope": "Operational acceptance with real clients and two near-boundary probes; not a formal full stress/performance/quality matrix"
+}

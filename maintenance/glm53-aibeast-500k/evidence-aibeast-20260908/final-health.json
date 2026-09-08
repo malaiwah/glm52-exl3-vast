@@ -1,0 +1,44 @@
+{
+  "time": "2026-09-08T04:10:12Z",
+  "http_health": 200,
+  "container_health": "healthy",
+  "started_at": "2026-09-08T02:58:58.076950791Z",
+  "container_id": "8273cb4d544408140b87f815c5a5058bc0fc00c503c1971430feb35fa3d854b1",
+  "restart_policy": {
+    "Name": "no",
+    "MaximumRetryCount": 0
+  },
+  "models": [
+    {
+      "id": "GLM-5.2",
+      "max_model_len": 520192,
+      "root": "/models/checkpoint-root"
+    },
+    {
+      "id": "local-primary",
+      "max_model_len": 520192,
+      "root": "/models/checkpoint-root"
+    },
+    {
+      "id": "GLM-5.3",
+      "max_model_len": 520192,
+      "root": "/models/checkpoint-root"
+    }
+  ],
+  "metrics": {
+    "vllm:num_requests_running{engine=\"0\",model_name=\"GLM-5.2\"}": 0.0,
+    "vllm:num_requests_waiting{engine=\"0\",model_name=\"GLM-5.2\"}": 0.0,
+    "vllm:external_prefix_cache_hits_total{engine=\"0\",model_name=\"GLM-5.2\"}": 223232.0,
+    "vllm:num_preemptions_total{engine=\"0\",model_name=\"GLM-5.2\"}": 0.0,
+    "vllm:request_success_total{engine=\"0\",finished_reason=\"stop\",model_name=\"GLM-5.2\"}": 154.0,
+    "vllm:request_success_total{engine=\"0\",finished_reason=\"length\",model_name=\"GLM-5.2\"}": 8.0,
+    "vllm:request_success_total{engine=\"0\",finished_reason=\"abort\",model_name=\"GLM-5.2\"}": 0.0,
+    "vllm:request_success_total{engine=\"0\",finished_reason=\"error\",model_name=\"GLM-5.2\"}": 0.0,
+    "vllm:request_success_total{engine=\"0\",finished_reason=\"repetition\",model_name=\"GLM-5.2\"}": 0.0,
+    "http_requests_total{handler=\"/v1/chat/completions\",method=\"POST\",status=\"2xx\"}": 122.0,
+    "http_requests_total{handler=\"/tokenize\",method=\"POST\",status=\"2xx\"}": 10.0,
+    "http_requests_total{handler=\"/v1/models\",method=\"GET\",status=\"2xx\"}": 3.0,
+    "http_requests_total{handler=\"/v1/responses\",method=\"POST\",status=\"2xx\"}": 46.0
+  },
+  "old_cache_paths_absent": true
+}

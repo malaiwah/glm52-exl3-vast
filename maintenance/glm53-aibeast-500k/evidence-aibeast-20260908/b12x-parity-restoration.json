@@ -1,0 +1,10 @@
+{
+  "restored_explicit_settings": {
+    "B12X_INDEXER_TWO_LEVEL_FOLD": "auto",
+    "B12X_INDEXER_TWO_LEVEL_FOLD_MAX_MIB": "64",
+    "B12X_PCIE_TP4_REMOTE_PUSH": "0",
+    "B12X_SQG_XOR_CHEB_T12_SMEM": "1",
+    "B12X_W4A16_SMALL_M_SPLITK": "0",
+    "B12X_MHC_PREFILL_TF32_TMA_CHUNK_MIN_TOKENS": "3072"
+  }
+}

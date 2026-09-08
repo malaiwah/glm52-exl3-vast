@@ -1,0 +1,130 @@
+{
+  "glm52-complete.log": {
+    "bytes": 134038560,
+    "records": 767123,
+    "sha256": "4c82f73403a9620cb84cf3a0f8d89bc5421e6a44ab5cacaed858a14626d177ee",
+    "first": "2026-08-15T01:57:47.203913000Z",
+    "last": "2026-09-08T02:10:09.370551000Z",
+    "ready_events": [
+      "2026-08-15T02:20:18.048362000Z"
+    ],
+    "severity": {
+      "ERROR_lines": 96,
+      "tracebacks": 22
+    },
+    "oom_exception_lines": 0,
+    "normal_online_quant_proxy_error_lines": 1644,
+    "inference_access_status_counts": {
+      "/v1/chat/completions 200": 68186,
+      "/v1/responses 200": 24638,
+      "/v1/chat/completions 400": 16,
+      "/v1/chat/completions 404": 49,
+      "/v1/completions 200": 36,
+      "/v1/chat/completions/batch 400": 1,
+      "/v1/completions 500": 22,
+      "/v1/completions 400": 1,
+      "/v1/messages 200": 13,
+      "/v1/messages?beta=true 200": 10
+    },
+    "positive_generation_interval_count": 98314,
+    "positive_generation_interval_median_tps": 69.7,
+    "accepted_draft_tokens": 46040261,
+    "draft_tokens": 60447316,
+    "token_weighted_draft_acceptance": 0.7616593100676298
+  },
+  "initial-parity-complete.log": {
+    "bytes": 884458,
+    "records": 3979,
+    "sha256": "ba1a6201e308961bcd1db9b5a9d046a536c56c369bdfe08c73d4c4a2af0eeea8",
+    "first": "2026-09-08T02:13:47.413188000Z",
+    "last": "2026-09-08T02:58:50.250507000Z",
+    "ready_events": [
+      "2026-09-08T02:29:15.645849000Z"
+    ],
+    "severity": {},
+    "oom_exception_lines": 0,
+    "normal_online_quant_proxy_error_lines": 1644,
+    "inference_access_status_counts": {
+      "/v1/chat/completions 200": 98,
+      "/v1/responses 200": 53
+    },
+    "positive_generation_interval_count": 136,
+    "positive_generation_interval_median_tps": 103.4,
+    "accepted_draft_tokens": 88037,
+    "draft_tokens": 122328,
+    "token_weighted_draft_acceptance": 0.7196798770518605
+  },
+  "glm53-final-complete.log": {
+    "bytes": 1061036,
+    "records": 4946,
+    "sha256": "cef2ee3f9e76969eee926980691c1d8aec630c3f5d76dce0381f9771383518ff",
+    "first": "2026-09-08T02:58:58.080073000Z",
+    "last": "2026-09-08T04:10:11.933561000Z",
+    "ready_events": [
+      "2026-09-08T03:04:21.713439000Z"
+    ],
+    "severity": {},
+    "oom_exception_lines": 0,
+    "normal_online_quant_proxy_error_lines": 1644,
+    "inference_access_status_counts": {
+      "/v1/chat/completions 200": 122,
+      "/v1/responses 200": 46
+    },
+    "positive_generation_interval_count": 278,
+    "positive_generation_interval_median_tps": 90.55,
+    "accepted_draft_tokens": 165541,
+    "draft_tokens": 226241,
+    "token_weighted_draft_acceptance": 0.7317020345560707
+  },
+  "cache_service_logs": {
+    "glm52-lmcache-complete.log": {
+      "bytes": 348202079,
+      "lines": 2078720,
+      "sha256": "83baedd19d37df2ae2c5c0195546f7c3a5c82ee0364f7dcefc08c3f14f4c8441",
+      "first": "2026-08-15 01:57:57,346",
+      "last": "2026-09-08 02:09:08,659",
+      "levels": {
+        "INFO": 1681953,
+        "WARNING": 6519,
+        "ERROR": 4756
+      },
+      "keyword_line_counts": {
+        "standalone_metrics_disabled": 1,
+        "eviction": 2467,
+        "expired": 131,
+        "failed": 4736
+      }
+    },
+    "glm53-initial-lmcache-complete.log": {
+      "bytes": 684695,
+      "lines": 3607,
+      "sha256": "6669ead357f96850d0704147a281104408270527ccea7ff701c7f913666cb3c3",
+      "first": "2026-09-08 02:13:57,204",
+      "last": "2026-09-08 02:58:47,113",
+      "levels": {
+        "INFO": 3567,
+        "WARNING": 17
+      },
+      "keyword_line_counts": {
+        "standalone_metrics_disabled": 1,
+        "eviction": 2
+      }
+    },
+    "glm53-final-lmcache-complete.log": {
+      "bytes": 966948,
+      "lines": 5127,
+      "sha256": "fd175ce210bff70eb67d184c456c8d0368b7ecbf494a806a671c9ead97644369",
+      "first": "2026-09-08 02:59:08,314",
+      "last": "2026-09-08 04:10:10,377",
+      "levels": {
+        "INFO": 5085,
+        "WARNING": 18
+      },
+      "keyword_line_counts": {
+        "standalone metrics HTTP server disabled": 1,
+        "not found, skipping touch": 15
+      }
+    }
+  },
+  "interpretation": "All records in named snapshots scanned. HTTP200 headers are not completed streaming bodies. Old request-level failures are not engine crashes. Generation interval medians and MTP rates are unmatched workload telemetry, not comparative benchmarks. Cache-service ERRORs comprise4736 object-level prefetched-read errors and20 rank retrieve failures associated withfive logical request failures, not4756 failed requests."
+}

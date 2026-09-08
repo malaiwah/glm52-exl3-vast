@@ -12,17 +12,19 @@ and the per-release `docs/glm52-rXX-*.md` files. This file records provider
 integration evidence, bug discoveries and fixes, cost tracking, and the
 decision history that explains why the codebase is the way it is.
 
-The current full **GLM-5.3 3.42bpw / 520,192-token** public profile has positive
->=500K retrieval and feature-suite evidence at the rental floor from a
-JarvisLabs spot-container rootfs graft (2026-09-08), **not a completed
-maintenance matrix or parity qualification**. AIBeast maintenance now requires
-live GLM-5.2 resource parity first. The older 393,216-token qualification below
-remains historical; neither it nor the Verdict/Flash GPU results qualify the
-refreshed Gilded image.
+**AIBeast is now serving full GLM-5.3 3.42bpw at 520,192 total tokens with
+the old GLM-5.2 resource policy restored**, on the same port 8000 endpoint and
+`GLM-5.2` / `local-primary` aliases, plus `GLM-5.3`. The authorized 2026-09-08
+cutover passed two >=500K retrieval trials and an accepted real-client soak.
+This is operational acceptance, **not a completed maintenance, performance
+or quality matrix**. The public profile's rental-floor defaults are unchanged.
+The older 393,216-token and Verdict/Flash qualifications remain historical and
+do not transfer to this Gilded image.
 
 ## Contents
 
 - [Current qualification status](#current-qualification-status)
+- [AIBeast parity cutover and accepted soak](#aibeast-parity-cutover-and-accepted-soak-2026-09-08)
 - [GLM-5.3 full-model 3.42bpw qualification](#glm-53-full-model-342bpw-qualification-jarvislabs-2026-08-29)
 - [Provider integration](#provider-integration)
 - [Qwen3.6-27B NVFP4 qualification](#qwen36-27b-nvfp4-qualification-vast-rtx-5090)
@@ -35,7 +37,7 @@ refreshed Gilded image.
 
 ## Current qualification status
 
-The primary full `glm53-3.42bpw-500k` candidate is pinned to
+The primary full `glm53-3.42bpw-500k` profile is pinned to
 `99c6f951333d2b38f1efefa533c7afadf0d376e3`. All 81 weight-file LFS identities
 match evaluated `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`; the updated
 template still changes conversational behavior. Both complete 81-shard
@@ -44,22 +46,22 @@ the BF16 carrier is identical, and 5.3 adds 0.848 GiB/rank of quantized
 payload/rotations. The 5.2 index includes headers; the 5.3 index excludes them.
 See `maintenance/glm53-aibeast-500k/memory-comparison.json` for exact bytes.
 
-AIBeast's preserved boot reports 81.73 GiB model loading and 0.75 GiB graphs
+The preserved GLM-5.2 boot reports 81.73 GiB model loading and 0.75 GiB graphs
 per rank. The older 5.3 receipt reports 82.42 GiB and 0.61 GiB on another
-runtime. The exercised 520,192-token, 4,518,907,904-byte/GPU rental-floor arm
-used scheduler/prefill workspace 2048/1024 without lowering weight precision.
-The spot proof below demonstrates two >=500K retrieval runs, post-stress
-sampling and LMCache DRAM retrieval after GPU pressure at that floor, not
-evidence that GLM-5.3 architecture requires smaller workspaces. Cold first-use,
-concurrency, disk L2/restart/recovery and remaining maintenance gates are still
-open. No 750K result or AIBeast production restart is claimed.
+runtime. The earlier spot-container arm used scheduler/prefill 2048/1024
+without lowering precision; the current AIBeast arm uses the old 3072/3072
+resource policy. Neither is evidence that GLM-5.3 architecture requires
+smaller workspaces. The two AIBeast near-boundary probes and accepted soak
+below establish operational viability at parity, not controlled performance,
+full concurrency, disk L2/recovery, KLD or broad task-quality qualification.
+No 750K result is claimed.
 
 **Current maintenance policy: parity first, explicitly requested by the user.**
 `MAINTENANCE_TRIAL` defaults to `parity`, using the
 [live GLM-5.2 `Config.Env` and serving-argv baseline](maintenance/glm53-aibeast-500k/production-baseline.json)
 from `glm52-turnkey-r34-maint-20260815-v1`.
 
-| setting | parity first trial (not yet GPU-tested) | exercised rental floor |
+| setting | current AIBeast parity deployment | exercised rental floor / public defaults |
 |---|---|---|
 | sequences / scheduler / prefill arena | 12 / 3072 / 3072 | 8 / 2048 / 1024 |
 | GMU / maximum graph capture / Trellis maximum M | 0.95 / 48 / 48 | 0.93 / 32 / 32 |
@@ -76,10 +78,12 @@ measured margin justifies explicit `MAINTENANCE_TRIAL=rental-floor`, with its
 The selector is part of stage identity. No automatic fallback, token-limit
 reduction or quantization reduction is authorized.
 
-The new policy requires a new image build: `200b1841…` rejects 3072
-scheduler/prefill settings and is GPU-exercised only at the floor. The new
-immutable digest must be recorded after build; its parity GPU gate remains
-unrun. **The AIBeast maintenance window has not opened.**
+The parity-capable image is `8006d209…`, built from source `499d34e`;
+the prior `200b1841…` image rejects 3072 scheduler/prefill settings and remains
+floor-only evidence. **The authorized AIBeast cutover completed and its soak
+was accepted at 03:36:34 UTC on 2026-09-08.** No global `latest`/`main`
+promotion, automatic reboot-policy change or restart-policy change occurred.
+The current container retains `restart=no`, as did the old service.
 
 All qualified rows below retain their original hardware/runtime scope. The
 3.42 results and older GLM-5.2/Flash measurements are not retroactively
@@ -87,6 +91,7 @@ relabelled as tests of the refreshed candidate.
 
 | profile | release | hardware | status | section |
 |---|---|---|---|---|
+| Full GLM-5.3 EXL3 TR3 3.42bpw parity | Gilded r34-derived image `8006d209…`, source `499d34e` | 4x RTX PRO 6000 (AIBeast) | **Live: two >=500K retrievals and real-client soak accepted; full matrix open** | [AIBeast cutover](#aibeast-parity-cutover-and-accepted-soak-2026-09-08) |
 | Full GLM-5.3 EXL3 TR3 3.42bpw reduced-workspace (next-release default) | Gilded r34 plus required patches, image `200b1841…` | 4x RTX PRO 6000 (JarvisLabs spot 500157, resumed from 483634) | **>=500K retrieval, features and DRAM retrieval passed; full matrix open** | [spot proof](#jarvislabs-spot-container-proof-2026-09-08) |
 | GLM-5.3 full-model EXL3 TR3 3.42bpw | 27-overlay r28 runtime | 4x RTX PRO 6000 (JarvisLabs) | Qualified | [GLM-5.3 full model](#glm-53-full-model-342bpw-qualification-jarvislabs-2026-08-29) |
 | GLM-5.2 EXL3 TR3 3.0bpw (historical default) | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
@@ -96,6 +101,89 @@ relabelled as tests of the refreshed candidate.
 | JarvisLabs VM (NCCL fallback) | GG v20-r9 | 4x RTX PRO 6000 (IN1) | Qualified | [JarvisLabs](#jarvislabs-in1-flagship-qualification-2026-07-30) |
 | Runpod 590.48.01 / CUDA 13.2 | GG v20-r9 | 1x RTX 5090 (Secure) | Qualified | [Runpod compat](#runpod-5904801--cuda-132-compatibility-2026-07-29) |
 | GLM-5.2 vision (opt-in) | GG v20 | 4x RTX PRO 6000 (AIBeast) | Short-context only | [Vision section](#v20-vision-qualification-2026-07-27) |
+
+### AIBeast parity cutover and accepted soak (2026-09-08)
+
+The [active receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/active.json)
+pins `glm53-turnkey-r34-parity-20260908t015846z`, container `8273cb4d…`, to
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`
+(source `499d34e`). It serves full non-Flash GLM-5.3, not a renamed 5.2
+checkpoint. Port **8000**, `AUTH=none`, `LANDING=0`, and the existing
+`GLM-5.2` / `local-primary` aliases are preserved; `GLM-5.3` is also served.
+This preserves the existing client contract, not the authenticated rental
+default. TP4/DCP4, C12, scheduler/EXL3 arena 3072/3072, graphs/Trellis 48,
+GMU 0.95, native probabilistic MTP3, 4,518,907,904 KV bytes/GPU
+(520,192 tokens), and LMCache 125 GiB initial RAM / 384 GiB disk remain.
+
+The [integrity receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/weight-integrity.json)
+records all **81/81 files**, **355,150,499,456 bytes**, SHA-256 verified
+against revision `99c6f951333d2b38f1efefa533c7afadf0d376e3`; the read also
+primed cachefilesd. Canonical weights were not modified. A local
+metadata-only derivative, mounted read-only for serving, reconciled the
+native-MTP ignore entry `model.layers.78.eh_proj*` in `config.json`.
+The [reconciliation receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/metadata-reconciliation.json)
+records source/derived hashes and the exact change; this is not re-quantization.
+
+The first launch exposed a host manual-NVIDIA-device driver-injection hook
+bug. It was fixed in `scripts/run-local-podman.sh`, **not by patching runtime
+sources inside the live image**. The successful initial resource-parity boot
+started **02:13:47 UTC**, ready **02:29:15 UTC**. Inspection subsequently
+found that legacy `SPARK_*` fold controls did not set the installed B12X
+policy. At **02:58:58 UTC** the service was deliberately restarted to restore
+the old explicit B12X controls through host `TUNE_` overrides
+([events](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/cutover-events.jsonl),
+[restored settings](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-parity-restoration.json)).
+The applicable changed policy is the exact-fold budget **64 MiB instead of
+the absent-setting default 256 MiB**. Other restored controls match defaults;
+the mHC 3072 threshold is likely inert for full GLM's hidden size 6144, not
+a demonstrated speed improvement. The [effective-policy receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-effective-policy.json)
+evaluates installed pure policy functions under the observed API-server
+environment and confirms `auto` / 67,108,864 bytes; it runs no GPU kernel.
+The durable source fixes in this checkout are **not inside image `8006d209…`**;
+effective host overrides restore B12X parity in the current service.
+
+| observed AIBeast gate | result | receipt |
+|---|---|---|
+| Initial resource-parity boot, before B12X restoration | **501,098 exact haystack tokens, 3/3 facts, 336.364 s**; post-stress correctness and temperature-1 **512 output tokens / 19.344 s** passed | [initial parity](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-initial-parity.json) |
+| Final boot, B12X parity restored | **501,099 exact haystack tokens, 3/3 facts, 275.874 s**; post-stress correctness and temperature-1 **512 output tokens / 7.701 s** passed | [final parity](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-final-parity.json) |
+| Accepted real-client soak, **03:36:34 UTC** | **64 healthy / 0 failed samples**, **1,893.113 s (31.55 min)** since first external client; **87 external POST 200 headers**, **96 completed engine requests including probes**, **0 engine error requests** | [soak acceptance](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/soak-accepted.json) |
+| Extended final-config monitoring | **129/129 health samples**, 03:04:50–04:09:06 UTC; lowest sampled free VRAM **215 MiB**. Final 04:10 health read: HTTP 200, container healthy, **162 completed engine requests including probes**, zero engine-error requests | [extended soak](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/final-soak-summary.json), [final health](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/final-health.json) |
+
+Both retrieval probes used depths 10/50/90% and separate trial identities;
+counts cover the **haystack body**, excluding chat template and question,
+with 4096 tokens reserved inside the 520,192 total limit. Cache regime was
+not measured. The timings are **not a causal performance A/B**: cache warmth,
+compilation and concurrent client load differ. Real clients exercised both
+`/v1/chat/completions` and `/v1/responses`. No OOM, engine crash or unexpected
+restart was observed in the accepted soak; this short interval does not
+replace the user's approximately 24-day stable GLM-5.2 service history.
+
+Minimum **raw free VRAM sampled at roughly 30-second cadence** was
+**215 / 245 / 217 / 215 MiB** on GPUs 0/1/2/3. The overall **215 MiB** minimum
+is thin headroom, not a continuous worst-case measurement or a guarantee
+against unseen allocator, sampler or workspace peaks. Earlier warmup readings
+are not the final soak minimum. No automatic resource shrink was applied.
+
+After acceptance, the [cleanup receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/old-cache-cleanup.json)
+records removal at **03:37:31 UTC** of only the old
+`/mnt/fast/build/r34-aibeast-maintenance-20260815/runtime/lmcache` and
+`/compile-cache` directories, reclaiming **370,534,412,288 bytes (345.09 GiB)**;
+health remained **HTTP 200**. The old image/container, weights, state and logs,
+new GLM-5.3 caches/state and cachefilesd filesystem cache were preserved.
+**Warm-cache/fast rollback was intentionally relinquished**: the old service
+can still be restored, but its removed caches must be regenerated.
+
+**Scope still open:** full boundary/repetition and parser/continuation matrix,
+controlled C1/C4/C12 and mixed-prefill/decode performance, cancellation and
+fault recovery, disk L2/restart persistence, and a new paired KLD/task-quality
+comparison. Independent benchmark evidence supports capability gains in some
+tasks, but does not prove their retention in this exact quantized deployment.
+The published 3.42bpw GPQA result is contrary evidence, not something to erase.
+No dominating alternative stack was demonstrated; a constrained-frontier
+interpretation remains an inference, not proof of Pareto optimality. See the
+[dated deployment and constrained-frontier research appendix](docs/glm52-prefill-optimization-research-2026-08-09.md#2026-09-08-glm-53-deployment-and-constrained-frontier-review)
+for primary sources, quality caveats and proposed investigations. No new GPU
+experiments beyond the deployment receipts are implied by that review.
 
 ### JarvisLabs spot-container proof (2026-09-08)
 
@@ -171,14 +259,16 @@ not a pure DRAM-only request or proof of complete GPU eviction. The initial
 62.4 s / 1.3 s pair alone remains native-cache evidence. These later receipts
 do not establish disk L2, restart persistence, fault recovery or concurrency.
 
-**Open gates:** exact OCI/AIBeast-stage cold boot and first-use sampling;
-full boundary/repetition matrix beyond these two three-depth seeds;
-complete parser/continuation edge cases;
-C1/C4/C8 and long-prefill/decode overlap, cancellation and memory/error audit;
-disk L2 transfers and eviction, restart and failure recovery;
-full maintenance matrix and any new KLD comparison. Historical measurements
-cannot fill these receipts. **No AIBeast production restart or cutover, final
-image promotion, or `latest` update occurred.**
+**Open gates at the time of this spot run:** exact OCI/AIBeast-stage cold boot
+and first-use sampling; full boundary/repetition matrix beyond these two
+three-depth seeds; complete parser/continuation edge cases; C1/C4/C8 and
+long-prefill/decode overlap, cancellation and memory/error audit; disk L2
+transfers and eviction, restart and failure recovery; full maintenance matrix
+and any new KLD comparison. The later
+[AIBeast deployment](#aibeast-parity-cutover-and-accepted-soak-2026-09-08)
+adds its own scoped boot, near-boundary and soak evidence; it does not
+retroactively expand the spot receipt. No global image/`latest` promotion
+was performed.
 
 ### GLM-5.3 full-model 3.42bpw qualification (JarvisLabs, 2026-08-29)
 

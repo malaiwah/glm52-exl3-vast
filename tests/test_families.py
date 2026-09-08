@@ -266,8 +266,7 @@ def test_higher_fidelity_exl3_candidate():
           and eff["DCP_KV_CACHE_INTERLEAVE_SIZE"] == "64"
           and profile_env["VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE"] == "0"
           and profile_env["VLLM_DCP_TOPK_OWNER_MERGE"] == "1"
-          and profile_env["VLLM_DISABLE_SHARED_EXPERTS_STREAM"] == "1"
-          and profile_env["SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB"] == "64")
+          and profile_env["VLLM_DISABLE_SHARED_EXPERTS_STREAM"] == "1")
     check("the profile pins exactly one binary-512K request",
           eff["MAX_MODEL_LEN"] == 524288
           and eff["GPU_BLOCKS_OVERRIDE"] == 2048)

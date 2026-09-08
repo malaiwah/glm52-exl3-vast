@@ -10,14 +10,14 @@ A **family** owns everything true about an architecture rather than about this
 deployment: which checkpoints exist, which engine flags are needed, which knobs
 mean anything, and which of the measured failure rules apply.
 
-The next-release public default is **full non-Flash `glm53-3.42bpw-500k`**,
+The PR #58 release default is **full non-Flash `glm53-3.42bpw-500k`**,
 variant `exl3-tr3-glm53-3.42bpw-500k`, in the `glm52` architecture family shared
-by full GLM-5.2 and GLM-5.3. It preserves 3.42bpw and the 520,192-token budget
-with the exercised rental-floor defaults. The spot rootfs graft passed >=500K
-retrieval (501,086 haystack tokens, 3/3 facts) and features with vision skipped,
-but not the full maintenance matrix or parity trial. The older full
-`glm53-3.42bpw` profile retains
-its historical 393,216-token limit, not refreshed-image qualification, and
+by full GLM-5.2 and GLM-5.3. It preserves 3.42bpw and the 520,192-token budget.
+Public profile defaults retain the exercised rental-floor shape; the explicit
+AIBeast parity deployment was accepted on 2026-09-08 at C12 with the old larger
+workspaces. This is not a global `latest`/`main` promotion or completion of the
+full quality/stress matrix. The older `glm53-3.42bpw` profile retains its
+historical 393,216-token limit, not refreshed-image qualification, and
 `glm52-exl3` remains an explicit
 alternative. The Flash `glm53` family and its `glm53-k6` / `glm53-k8` variants
 are **withdrawn from this image**: the Gilded Gnosis v20 r34 base contains no
@@ -29,10 +29,10 @@ Verdict's GPU qualification nor the historical 393K result transfers to the
 Gilded r34 refresh; necessary patches are re-derived, not a claim that all
 27 Verdict overlays already exist in Gilded.
 
-**Maintenance first tries current GLM-5.2 resources**, as the user explicitly
-requested; full GLM-5.3 sharing the architecture does not imply it requires
-smaller workspaces. `MAINTENANCE_TRIAL=parity` defaults to the
-[live environment and serving-argv baseline](../maintenance/glm53-aibeast-500k/production-baseline.json):
+**AIBeast successfully retained the old GLM-5.2 resources on September 8**,
+as the user requested; shared architecture did not require shrinking them.
+`MAINTENANCE_TRIAL=parity` uses the
+[old environment and serving-argv baseline](../maintenance/glm53-aibeast-500k/production-baseline.json):
 12 sequences, scheduler/prefill arena 3072/3072, GMU 0.95, maximum graph
 capture 48 (4,8,12,16,20,24,28,32,36,40,44,48), Trellis maximum M 48 and
 125 GiB initial LMCache RAM. The stage overrides, not replaces, the general
@@ -47,13 +47,26 @@ Only a recorded parity failure or insufficient measured margin permits explicit
 and isolated caches/state/stage manifest. The selector is stage identity.
 There is no automatic shrink, token reduction or lower-bit substitution.
 
-Parity needs a **new image build**: the prior `200b1841…` image validator
-rejects 3072 scheduler/prefill settings. Its GPU receipts qualify only the
-rental-floor slice; the new immutable digest must be recorded after build and
-its parity GPU qualification is not yet run. See
-[safe staging/config-smoke commands](configuration.md#aibeast-maintenance-trial-selector).
-**The AIBeast maintenance window has not opened; no production stop/restart
-is authorized.**
+The earlier `200b1841…` image rejected 3072 scheduler/prefill settings; its
+rental-floor receipts remain historical. The actual parity deployment uses
+image `8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`
+(source `499d34e`). It was restarted at 02:58:58 UTC solely to restore the old
+explicit B12X policy through `TUNE_B12X_*` overrides. The
+[installed pure-policy probe](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-effective-policy.json)
+confirms fold `auto`/64 MiB rather than the absent-override 256 MiB default.
+The checked-in B12X-name correction applies to future builds, not retroactively
+to that live image. See [configuration notes](configuration.md#effective-b12x-policy-and-cache-lifetime).
+
+The [final near-boundary receipt](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-final-parity.json)
+recovered 3/3 facts from a 501,099-token haystack in 275.874 seconds and passed
+the subsequent 512-token temperature-1 sampler. Haystack size excludes template
+and question tokens; C12 does not mean twelve simultaneous 520K requests.
+The [03:36:34 UTC accepted soak](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/soak-accepted.json)
+records 64 healthy/0 failed samples, 31.55 minutes since the first external
+client, Chat and Responses traffic, and 96 engine completions including probes.
+Minimum observed free VRAM was 215/245/217/215 MiB at 30-second cadence, not a
+continuous worst-case bound. This operational acceptance is not a quality A/B
+or a performance comparison against the user's stable 24-day GLM-5.2 service.
 
 See the [exact image/source/CI and PR #58 evidence](../TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08).
 That receipt is scoped to `200b1841…` / `e9623135…`; later helper/source
@@ -62,13 +75,42 @@ critical source, seven module-initializer and seven image-recorded native-librar
 hashes. Extra provider NCCL 2.23.4 files remained disclosed; inspected live
 processes loaded image NCCL 2.30.4. This does not establish full filesystem or
 OCI isolation/security equivalence. No AIBeast production restart or final
-promotion occurred. The reused four-GPU spot rental resumed predecessor
+promotion occurred during that earlier spot phase. The reused four-GPU rental resumed
 **483634** as **500157**, then was **confirmed Paused after evidence capture**,
 preserving the user's old storage, which remained billable while paused.
 The user subsequently explicitly requested destruction: the provider API
 succeeded, `jl list` returned `[]`, and all six resource counts were zero.
 The [separate destroy receipt](../maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json)
 records the final inventory without changing the historical pause receipt.
+
+### Checkpoint quality and template behavior (2026-09-08)
+
+The deployed model is the complete
+[`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951…`](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/tree/99c6f951333d2b38f1efefa533c7afadf0d376e3),
+with [81/81 files SHA-verified](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/weight-integrity.json).
+A [local metadata derivative](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/metadata-reconciliation.json)
+removes the obsolete native-MTP projection ignore entry; canonical weights
+are unmodified. Mixed K3/K4 projection-tier support is required: a uniform-K
+or vanilla ExLlamaV3 loader is not an equivalent serving implementation.
+
+Independent evaluations support specific original-model GLM-5.3 gains, not
+proven superiority of this exact quantized, `high`-effort local deployment.
+The user's earlier [169/198 GPQA result (85.35%)](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/discussions/2)
+and reported lower score than same-bpw GLM-5.2 are contrary evidence worth
+retaining, not a controlled paired proof. Short-window KL is a fidelity proxy,
+not coding success or 500K reasoning quality. A 3.25bpw + FP8-KV comparison is
+only a proposed separate experiment requiring demonstrated fit and matched
+task quality; it is not a fallback from the current 3.42bpw/NVFP4-KV policy.
+The [dated review](glm52-prefill-optimization-research-2026-08-09.md#2026-09-08-glm-53-deployment-and-constrained-frontier-review)
+separates independent, vendor, community and local evidence.
+
+The [pinned-template render probe](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/thinking-template-probe.json)
+also demonstrates a real version difference. GLM-5.2 clears previous reasoning
+by default and honors `enable_thinking: false`; GLM-5.3 preserves previous
+reasoning by default and still opens `<think>` with that flag false.
+`clear_thinking: true` clears old reasoning on both, without disabling new
+GLM-5.3 reasoning. Use official `low`/`high`/`max` efforts; local `high` is not
+the official card's benchmark `max`. No global template edit was made.
 
 | | |
 |---|---|

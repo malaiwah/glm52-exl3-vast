@@ -3,22 +3,75 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
-## Unreleased — full GLM-5.3 3.42bpw 520K candidate
+## Unreleased — full GLM-5.3 3.42bpw 520K, live AIBeast parity
 
-The next official release is intended to default to full non-Flash
+**2026-09-08: the authorized AIBeast cutover completed.** Full non-Flash
 `MODEL_PROFILE=glm53-3.42bpw-500k`, architecture family `glm52`, variant
-`exl3-tr3-glm53-3.42bpw-500k`. A JarvisLabs spot-container rootfs graft passed
-**501,086-token retrieval (3/3 facts, 361.42 s)**, post-stress temperature-1
-sampling (**512 output tokens, 7.76 s**) and the feature suite (vision skipped).
-The **520,192-token** total limit remains; this positive >=500K gate is not
-the full maintenance matrix. No AIBeast production restart/cutover, final image
-promotion or `latest` update occurred.
+`exl3-tr3-glm53-3.42bpw-500k`, now serves **520,192 total tokens** at the
+old GLM-5.2 resource policy on port **8000**. `GLM-5.2` and `local-primary`
+aliases are preserved, with `GLM-5.3` added; `AUTH=none` and `LANDING=0`
+remain the old local-client contract. This is not the authenticated rental
+default. Two >=500K retrieval trials and a real-client soak passed; the
+**full maintenance, performance and quality matrix remains open**.
+No global `latest`/`main` promotion or boot-policy change occurred, and
+`restart=no` remains unchanged.
+
+The [active receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/active.json)
+pins image
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`,
+source `499d34e`, container `8273cb4d…`
+(`glm53-turnkey-r34-parity-20260908t015846z`).
+The host manual-NVIDIA-device driver-injection hook was corrected in
+`scripts/run-local-podman.sh`, not by runtime-source hot patches. The first
+successful resource-parity boot started **02:13:47 UTC**, ready **02:29:15**.
+It retrieved **3/3 facts from 501,098 exact haystack tokens in 336.364 s**,
+then passed post-stress correctness and **512-token temperature-1 sampling
+in 19.344 s** ([initial receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-initial-parity.json)).
+
+At **02:58:58 UTC**, a deliberate restart restored old explicit B12X settings
+through host `TUNE_` overrides: legacy `SPARK_*` names did not control the
+installed B12X fold budget. **Auto / 64 MiB** now applies instead of the
+absent-setting default 256 MiB. Other restored controls match defaults or are
+likely inert for GLM; the mHC 3072 threshold is not a demonstrated GLM speedup
+([restoration](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-parity-restoration.json),
+[installed effective policy](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-effective-policy.json)).
+The durable source fixes in this checkout are **not inside the running
+`8006d209…` image**; host overrides make its effective B12X policy correct now.
+The final boot retrieved **3/3 facts from 501,099 exact haystack tokens in
+275.874 s**, followed by correctness checks and **512-token temperature-1
+sampling in 7.701 s** ([final receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-final-parity.json)).
+Counts exclude the chat template and question; the probes reserved 4096
+tokens. These timings are not a causal A/B: warmth, compilation and load differ.
+
+The **03:36:34 UTC accepted soak** recorded **64 healthy / 0 failed samples**,
+**31.55 minutes** since the first external client, **87 external POST 200
+headers**, **96 completed engine requests including probes**, and **0 engine
+error requests** across real Chat Completions and Responses traffic. No OOM,
+engine crash or unexpected restart was observed. Minimum sampled raw free
+VRAM was **215 / 245 / 217 / 215 MiB** on GPUs 0–3. **215 MiB is thin
+headroom**, sampled about every 30 seconds, not a continuous worst-case margin
+or safety guarantee ([soak receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/soak-accepted.json)).
+This short soak does not supersede the user's approximately 24-day stable
+GLM-5.2 service history.
+
+At **03:37:31 UTC**, accepted cleanup removed only the old
+`/mnt/fast/build/r34-aibeast-maintenance-20260815/runtime/lmcache` and
+`/compile-cache` directories, reclaiming **370,534,412,288 bytes (345.09 GiB)**;
+health remained HTTP 200. Old image/container, weights, state and logs,
+new GLM-5.3 caches/state and cachefilesd were preserved. **Fast warm-cache
+rollback was intentionally relinquished**; restoring the old service requires
+regenerating removed caches ([cleanup receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/old-cache-cleanup.json)).
 
 Checkpoint pin:
 `davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`.
 All 81 LFS weight SHA-256/size pairs match independently evaluated
 `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`; metadata and the chat template
-changed. The spot feature suite passed, but the complete parser/continuation
+changed. The AIBeast [integrity read](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/weight-integrity.json)
+verified **81/81 files / 355,150,499,456 bytes** and primed cachefilesd.
+A read-only local metadata-only derivative reconciled the native-MTP
+`model.layers.78.eh_proj*` ignore entry; canonical weights remain unmodified
+([source/derived hashes and change](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/metadata-reconciliation.json)).
+The earlier spot feature suite passed, but the complete parser/continuation
 matrix remains open. The unchanged public-profile rental floor uses TP4/DCP4,
 dynamic NVFP4 KV/FP8 RoPE, 4,518,907,904 KV bytes/GPU, scheduler 2048,
 prefill arena 1024, C8, native probabilistic MTP3, online K6 and GMU 0.93;
@@ -27,16 +80,16 @@ The previous 393,216-token full-model qualification is historical and does
 not transfer to the refreshed Gilded image. GLM-5.2 is an explicit alternative.
 
 Exact safetensors-header accounting corrects the initial lower-bit preference:
-5.3 3.42bpw adds 0.848 GiB/rank versus the live 5.2 3.42bpw tensors, largely
+5.3 3.42bpw adds 0.848 GiB/rank versus the preserved 5.2 3.42bpw tensors, largely
 rotation-vector storage. Their BF16 carrier is identical. Preserve 3.42bpw
 and 520,192 tokens; this accounting does not prove that GLM-5.3 requires
 smaller workspaces. The optional 3.25bpw experiment is not a fallback here.
 The full accounting is retained in `maintenance/glm53-aibeast-500k/memory-comparison.json`.
 
-AIBeast maintenance now follows the user's explicit **parity-first** request,
-not a conservative-floor first attempt. `MAINTENANCE_TRIAL=parity` is the
+AIBeast maintenance followed the user's explicit **parity-first** request,
+not a conservative-floor first attempt. `MAINTENANCE_TRIAL=parity` remains the
 maintenance default, overriding the unchanged public profile defaults using
-the [read-only live GLM-5.2 environment and serving argv](maintenance/glm53-aibeast-500k/production-baseline.json):
+the [preserved GLM-5.2 environment and serving argv](maintenance/glm53-aibeast-500k/production-baseline.json):
 12 sequences, scheduler/prefill 3072/3072, GMU 0.95, maximum CUDA graph capture
 48 (sizes 4,8,12,16,20,24,28,32,36,40,44,48), Trellis maximum M 48 and
 125 GiB initial LMCache RAM. Only after an operator observes and records
@@ -49,11 +102,21 @@ interleave 64, native probabilistic MTP3, KV 4,518,907,904 bytes/GPU,
 The fallback default name adds `-rental-floor`; each trial has isolated
 caches, state and stage manifest, with the selector in stage identity.
 
-Parity requires a **new image build**, since the `200b1841…` validator rejects
+Parity required a **new image build**, since the `200b1841…` validator rejects
 3072 scheduler/prefill settings. That digest's GPU evidence remains floor-only;
-record the new immutable digest after build, without transferring the old
-receipts. Parity on the new image is not yet GPU-tested. The AIBeast maintenance
-window has not opened; no production stop/restart is authorized.
+the later `8006d209…` image has its own AIBeast boot/retrieval/soak evidence
+above. The rental-floor arm was not substituted during this cutover.
+
+Read-only research found no demonstrated dominating stack under the same
+full-model, four-GPU, 520K/C12 and quality constraints; “near the practical
+constrained frontier” is an inference, not Pareto-optimality proof.
+Independent evaluations support gains on some tasks, but exact 3.42bpw
+gain retention is unproven and the published GPQA result supplies contrary
+evidence. No new KLD, paired task-quality or broad performance experiment was
+run as part of that review. The [dated deployment and constrained-frontier
+appendix](docs/glm52-prefill-optimization-research-2026-08-09.md#2026-09-08-glm-53-deployment-and-constrained-frontier-review)
+links primary evidence and distinguishes proposed investigations from
+completed deployment gates.
 
 The runtime parent is now local-inference-lab's **Gilded Gnosis v20 r34**,
 `docker.io/voipmonitor/vllm@sha256:820181fbbc975cd5291c411cda9771d58fecee1636d916f508f47230df20592b`
@@ -96,7 +159,7 @@ this build does **not** prove that Flash cannot be ported. Qualification of
 the separate Verdict reference does not qualify the refreshed Gilded image.
 
 These source changes are not inherited upstream-head guarantees. Only the
-specific image and observed gates below have live spot evidence.
+specific images and observed spot/AIBeast gates have live evidence.
 The parser repairs literal argument delimiters and stripped-stop recovery while
 preserving the installed parser ABI. The non-DP scheduler fix does not by itself
 enable prefill throttling: `prefill_schedule_interval` remains 1 (inert).
@@ -111,7 +174,8 @@ Operator fixes include full variant precedence, refusing invalid startup
 configs, warning for unqualified variants, and attempt-snapshot protection
 against stale verification/rollback state. Podman 4.9 staging uses explicit
 devices, separate state/cache/name/port, no automatic production stop and no
-restart policy. Rollback preserves the old image, environment and state.
+restart policy. Rollback preserves the old image, environment and state;
+the accepted AIBeast cleanup intentionally removed its warm caches, as above.
 LMCache gains an optional aggregate `LMCACHE_L1_MAX_GB` ceiling (0 by default;
 candidate 125 GiB; initial arena 125 GiB parity / 20 GiB rental floor);
 it does not enlarge active context.
@@ -154,7 +218,8 @@ model uses the custom GLM-5.3 license. The appliance MIT license is not an
 umbrella license. See [attribution and provenance](README.md#attribution-licenses-and-runtime-provenance).
 
 The entries below are historical release evidence. Their “default” and
-“latest” statements describe those releases, not this partially exercised candidate.
+“latest” statements describe those releases, not this operationally accepted
+AIBeast deployment or an automatic global release promotion.
 
 ## GLM-5.3 full-model 3.42bpw
 

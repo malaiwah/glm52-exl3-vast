@@ -1,0 +1,35 @@
+{
+  "772": [
+    "/opt/libnccl.so.2.30.4",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libcublas.so.13",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libcublasLt.so.13",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc-builtins.so.13.2",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc.so.13",
+    "/opt/venv/lib/python3.12/site-packages/tilelang/lib/libnvrtc_stub.so"
+  ],
+  "773": [
+    "/opt/libnccl.so.2.30.4",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libcublas.so.13",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libcublasLt.so.13",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc-builtins.so.13.2",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc.so.13",
+    "/opt/venv/lib/python3.12/site-packages/tilelang/lib/libnvrtc_stub.so"
+  ],
+  "775": [
+    "/opt/libnccl.so.2.30.4",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libcublas.so.13",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libcublasLt.so.13",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc-builtins.so.13.2",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc.so.13",
+    "/opt/venv/lib/python3.12/site-packages/tilelang/lib/libnvrtc_stub.so"
+  ],
+  "780": [
+    "/opt/libnccl.so.2.30.4",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libcublas.so.13",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libcublasLt.so.13",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc-builtins.so.13.2",
+    "/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc.so.13",
+    "/opt/venv/lib/python3.12/site-packages/tilelang/lib/libnvrtc_stub.so"
+  ]
+}
+

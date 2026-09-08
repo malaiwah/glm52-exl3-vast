@@ -1,0 +1,2 @@
+{"apiserver_pid": "344", "effective_policy": ["auto", 67108864], "plan_example": {"slices": [], "total_slices": 0, "candidate_nbytes": 67110912, "budget_nbytes": 67108864, "reason": "candidate slab exceeds the memory budget"}, "source_sha256": "b0eaded9823737d8057e890ea1eeca4a22b34bb686107ac63041af76d06b1e44", "scope": "Actual installed pure policy functions under observed API-server launch environment; no GPU kernel executed or live worker mutation"}
+

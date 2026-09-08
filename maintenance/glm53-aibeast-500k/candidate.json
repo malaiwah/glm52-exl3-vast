@@ -5,7 +5,7 @@
   "model_revision": "99c6f951333d2b38f1efefa533c7afadf0d376e3",
   "evaluated_weight_revision": "8bef807a0fcdd180e984a26b50e731cdba9a8ff2",
   "default_model_root": "/mnt/vault/llm/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw",
-  "production_container": "glm52-turnkey-r34-maint-20260815-v1",
+  "production_container": "glm53-turnkey-r34-parity-20260908t015846z",
   "default_name": "glm53-342-aibeast-500k-candidate",
   "default_root": "/mnt/fast/build/glm53-aibeast-500k",
   "environment": {
@@ -56,7 +56,13 @@
     "SOUL_AUTONOMY_MAX_LEVEL": "0",
     "PCIE_CALIBRATION": "off",
     "PCIE_DMA_MIN_BYTES": "25165824",
-    "HEALTH_START_PERIOD": "90m"
+    "HEALTH_START_PERIOD": "90m",
+    "TUNE_B12X_INDEXER_TWO_LEVEL_FOLD": "auto",
+    "TUNE_B12X_INDEXER_TWO_LEVEL_FOLD_MAX_MIB": "64",
+    "TUNE_B12X_PCIE_TP4_REMOTE_PUSH": "0",
+    "TUNE_B12X_SQG_XOR_CHEB_T12_SMEM": "1",
+    "TUNE_B12X_W4A16_SMALL_M_SPLITK": "0",
+    "TUNE_B12X_MHC_PREFILL_TF32_TMA_CHUNK_MIN_TOKENS": "3072"
   },
   "fallback_environment": {
     "GPU_MEMORY_UTILIZATION": "0.93",
@@ -69,8 +75,19 @@
     "LMCACHE_L1_INIT_GB": "20"
   },
   "required_cache_checks": [
-    "nvme_l2_hit", "l2_eviction", "cache_miss_recompute",
-    "retrieve_deadline_fail_stop", "group_failure_recovery", "restart_recovery"
+    "nvme_l2_hit",
+    "l2_eviction",
+    "cache_miss_recompute",
+    "retrieve_deadline_fail_stop",
+    "group_failure_recovery",
+    "restart_recovery"
   ],
-  "required_load_checks": ["cold_jit", "c1", "c4", "c8", "long_prefill_decode_overlap", "post_stress_health"]
+  "required_load_checks": [
+    "cold_jit",
+    "c1",
+    "c4",
+    "c8",
+    "long_prefill_decode_overlap",
+    "post_stress_health"
+  ]
 }

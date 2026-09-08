@@ -1,0 +1,13 @@
+{"time": "2026-09-08T02:10:02Z", "event": "CUTOVER_START", "trial": "parity", "old": "glm52-turnkey-r34-maint-20260815-v1", "new": "glm53-turnkey-r34-parity-20260908t015846z", "image": "ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a"}
+{"time": "2026-09-08T02:10:19Z", "event": "OLD_STOPPED", "old": "glm52-turnkey-r34-maint-20260815-v1"}
+{"time": "2026-09-08T02:10:19Z", "event": "GPU_RELEASED", "free_mib": [97249, 97249, 97249, 97249]}
+{"time": "2026-09-08T02:10:20Z", "event": "NEW_STARTED", "name": "glm53-turnkey-r34-parity-20260908t015846z", "trial": "parity", "container_id": "7d71ad45e10e70c3ff47418fdd4009154ba9f85c712742eca4f22334cbfdde0d"}
+{"time": "2026-09-08T02:13:46Z", "event": "CUTOVER_START", "trial": "parity", "old": "glm52-turnkey-r34-maint-20260815-v1", "new": "glm53-turnkey-r34-parity-20260908t015846z", "image": "ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a"}
+{"time": "2026-09-08T02:13:46Z", "event": "OLD_STOPPED", "old": "glm52-turnkey-r34-maint-20260815-v1"}
+{"time": "2026-09-08T02:13:46Z", "event": "GPU_RELEASED", "free_mib": [97249, 97249, 97249, 97249]}
+{"time": "2026-09-08T02:13:47Z", "event": "NEW_STARTED", "name": "glm53-turnkey-r34-parity-20260908t015846z", "trial": "parity", "container_id": "45be9e51c0236f0a7fa945df7a6402f029152173344b29f39a8435084c2a102a"}
+{"time": "2026-09-08T02:58:57Z", "event": "CUTOVER_START", "trial": "parity", "old": "glm52-turnkey-r34-maint-20260815-v1", "new": "glm53-turnkey-r34-parity-20260908t015846z", "image": "ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a"}
+{"time": "2026-09-08T02:58:57Z", "event": "OLD_STOPPED", "old": "glm52-turnkey-r34-maint-20260815-v1"}
+{"time": "2026-09-08T02:58:57Z", "event": "GPU_RELEASED", "free_mib": [97249, 97249, 97249, 97249]}
+{"time": "2026-09-08T02:58:58Z", "event": "NEW_STARTED", "name": "glm53-turnkey-r34-parity-20260908t015846z", "trial": "parity", "container_id": "8273cb4d544408140b87f815c5a5058bc0fc00c503c1971430feb35fa3d854b1"}
+

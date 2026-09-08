@@ -1,0 +1,86 @@
+{
+  "source_config_sha256": "8f0b3a4febb06915c206895e5a1b321fabf1f7eb8fcc17e9a153aadcc5e50d17",
+  "derived_config_sha256": "6147dab2617c0264fcfe7d33178eb2ebfab6a7d71b72469500d99504758acf0a",
+  "changes": {
+    "quantization_config": {
+      "before": {
+        "config_groups": {
+          "group_0": {
+            "input_activations": {
+              "dynamic": false,
+              "group_size": 16,
+              "num_bits": 4,
+              "type": "float"
+            },
+            "targets": [
+              "Linear"
+            ],
+            "weights": {
+              "dynamic": false,
+              "group_size": 16,
+              "num_bits": 4,
+              "type": "float"
+            }
+          }
+        },
+        "ignore": [
+          "lm_head",
+          "*embed_tokens*",
+          "model.norm*",
+          "*self_attn*",
+          "model.layers.0.mlp*",
+          "model.layers.1.mlp*",
+          "model.layers.2.mlp*",
+          "*shared_experts*",
+          "*mlp.gate*",
+          "model.layers.78.eh_proj*"
+        ],
+        "producer": {
+          "name": "b300-exl3-modelopt-dispatch-shim",
+          "version": "1"
+        },
+        "quant_algo": "NVFP4",
+        "quant_method": "modelopt"
+      },
+      "after": {
+        "config_groups": {
+          "group_0": {
+            "input_activations": {
+              "dynamic": false,
+              "group_size": 16,
+              "num_bits": 4,
+              "type": "float"
+            },
+            "targets": [
+              "Linear"
+            ],
+            "weights": {
+              "dynamic": false,
+              "group_size": 16,
+              "num_bits": 4,
+              "type": "float"
+            }
+          }
+        },
+        "ignore": [
+          "lm_head",
+          "*embed_tokens*",
+          "model.norm*",
+          "*self_attn*",
+          "model.layers.0.mlp*",
+          "model.layers.1.mlp*",
+          "model.layers.2.mlp*",
+          "*shared_experts*",
+          "*mlp.gate*"
+        ],
+        "producer": {
+          "name": "b300-exl3-modelopt-dispatch-shim",
+          "version": "1"
+        },
+        "quant_algo": "NVFP4",
+        "quant_method": "modelopt"
+      }
+    }
+  },
+  "source_weights_modified": false
+}

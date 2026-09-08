@@ -2,10 +2,12 @@
 
 Reusable qualification protocol for every release. Results are recorded in
 [TEST_RESULTS.md](TEST_RESULTS.md); per-release GLM model qualification
-details are in the `docs/glm52-rXX-*.md` files. Next release: **full non-Flash
-GLM-5.3 3.42bpw 520K candidate**. The spot-container >=500K retrieval and
-feature gates passed; the full maintenance matrix remains open. Earlier
-r26/r28 results retain their historical model and image scope.
+details are in the `docs/glm52-rXX-*.md` files. Full non-Flash GLM-5.3
+3.42bpw is now serving AIBeast at the preserved 520,192-token limit. The
+September 8 operational cutover passed near-boundary retrieval, client traffic
+and a monitored soak; see the [deployment receipts](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/).
+This is not the complete experimental matrix below. Earlier r26/r28 and spot
+results retain their historical model, runtime and hardware scope.
 
 This plan has two cost tiers. A sub-1B Qwen representative validates provider,
 UI and OpenAI-API plumbing on one GPU. A separate authorized four-GPU full-model
@@ -52,11 +54,14 @@ The fallback default name adds `-rental-floor`, with distinct caches, state
 and stage manifest. Preserve the selector for every command; it is stage
 identity, and an existing stage must never silently change trials.
 
-The parity policy needs a **new image build** because the prior image validator
-rejects 3072 scheduler/prefill settings. The `200b1841…` receipts below qualify
-only the exercised rental-floor slice. Record the new immutable digest after
-build; parity on that image is not yet GPU-tested. **No maintenance window
-has opened and no production stop/restart is authorized.**
+The parity-capable image is
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`.
+It was deployed in the explicitly authorized September 8 window. The older
+`200b1841…` receipts remain scoped to the spot rental-floor experiment.
+Operational acceptance did not promote a global `latest` image or change the
+host's restart policy. The maintenance recipe now identifies the live GLM-5.3
+container as production, so a future trial cannot treat retired GLM-5.2 as the
+GPU co-residency guard.
 
 The candidate image is now rooted on local-inference-lab's Gilded Gnosis v20
 r34 (`docker.io/voipmonitor/vllm@sha256:820181fb…`, CUDA 13.2.1 / Torch
@@ -88,16 +93,18 @@ cache only. A second 501,098-token pressure probe passed 3/3 facts in 360.891 s;
 replaying the original prefix then took 3.115 s, with 115,200 external-prefix
 hit tokens and 15,872 native-hit tokens added. **LMCache DRAM retrieval after
 GPU pressure is measured**, with some native reuse, not complete GPU eviction.
-Cold first-use, full parser edges and boundary matrix, C1/C4/C8 overlap,
-disk L2 eviction, restart/fault recovery and any new KLD comparison remain
-separate gates. **No AIBeast production restart,
-final image promotion or `latest` update occurred.**
+The complete parser, quality, concurrency and fault-injection matrix remains
+broader than those spot receipts or the later operational acceptance. The
+AIBeast cutover did include a cold start, a warm restart to restore the old
+effective B12X indexer policy, real client traffic, two >500K probes and a soak;
+it did not establish every disk-eviction, failure-recovery or new KLD result.
+No global `latest` promotion occurred.
 
-The steps below describe the still-required exact AIBeast maintenance stage,
-not actions authorized or completed by the spot run. Gilded r34 plus necessary
-patches does not imply that all 27 removed Verdict overlays were already in
-the base. Flash is omitted for missing runtime support, not proven unportable;
-the separate Verdict qualification cannot substitute for this matrix.
+The steps below are the reusable full qualification protocol for future
+authorized windows, not a claim they all ran in the September 8 cutover.
+Gilded r34 plus necessary patches does not imply all 27 removed Verdict
+overlays were already in the base. Flash is omitted for missing runtime
+support, not proven unportable; its separate qualification cannot fill this matrix.
 
 Use [maintenance/glm53-aibeast-500k](maintenance/glm53-aibeast-500k/) to stage
 an immutable candidate independently. Podman 4.9 uses inventoried manual

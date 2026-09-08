@@ -72,12 +72,34 @@ CONFIG_SMOKE=1 launch
 test ! -e "$tmp/gpu-log"
 grep -Fxq -- '--pull=never' "$tmp/args"
 if grep -Eq -- '^--(gpus|device|replace|privileged)(=|$)' "$tmp/args"; then exit 1; fi
+grep -Fxq 'NVIDIA_VISIBLE_DEVICES=void' "$tmp/args"
+grep -q '^--hooks-dir=' "$tmp/args"
 # Podman 4.9-compatible CDI selection preserves physical TP rank order.
 reset_log
 CONFIG_SMOKE=0 GPU_DEVICE_MODE=cdi GPU_DEVICES=2,1,0,3 launch
 grep -Fxq 'CUDA_VISIBLE_DEVICES=2,1,0,3' "$tmp/args"
 for gpu in 2 1 0 3; do grep -Fxq "nvidia.com/gpu=$gpu" "$tmp/args"; done
 if grep -Eq -- '^--(gpus|replace|privileged)(=|$)' "$tmp/args"; then exit 1; fi
+grep -Fxq 'NVIDIA_VISIBLE_DEVICES=void' "$tmp/args"
+grep -q '^--hooks-dir=' "$tmp/args"
+# Manual mappings need the driver-injection hook, not just /dev nodes. This
+# failed the actual AIBeast startup with "no usable GPU detected".
+reset_log
+(
+  # Exported below and invoked by the launcher's child Bash process.
+  # shellcheck disable=SC2329
+  function [() {
+    if [[ "${1:-}" == -c && "${2:-}" == /dev/nvidia* ]]; then return 0; fi
+    builtin [ "$@"
+  }
+  export -f [
+  CONFIG_SMOKE=0 GPU_DEVICE_MODE=manual GPU_DEVICES=2,1,0,3 launch
+)
+grep -Fxq 'NVIDIA_VISIBLE_DEVICES=2,1,0,3' "$tmp/args"
+if grep -q '^--hooks-dir=' "$tmp/args"; then
+  echo 'manual GPU mapping disabled host driver injection' >&2
+  exit 1
+fi
 # A preflight checks dependencies without changing any container.
 reset_log
 LAUNCH_PREFLIGHT=1 GPU_DEVICE_MODE=cdi launch

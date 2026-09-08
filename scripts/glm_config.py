@@ -569,7 +569,7 @@ VARIANTS["exl3-tr3-3.25bpw"]["runtime_env"].update({
     # exact streaming-carry path above 64 MiB passed two 128K requests and
     # 520,001/524,012-token boundary prefills with 125 GiB LMCache DRAM and a
     # bounded 512 GiB filesystem tier.
-    "SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB": "64",
+    "B12X_INDEXER_TWO_LEVEL_FOLD_MAX_MIB": "64",
 })
 
 # r26-qualified high-fidelity profile. The checkpoint's mixed K3/K4/K5/K6

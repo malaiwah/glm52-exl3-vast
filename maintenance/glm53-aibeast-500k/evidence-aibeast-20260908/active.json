@@ -1,0 +1,8 @@
+{
+  "trial": "parity",
+  "name": "glm53-turnkey-r34-parity-20260908t015846z",
+  "image": "ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a",
+  "container_id": "8273cb4d544408140b87f815c5a5058bc0fc00c503c1971430feb35fa3d854b1",
+  "root": "/mnt/fast/build/glm53-cutover-20260908T015846Z",
+  "started_at": "2026-09-08T02:58:58.076950791Z"
+}

@@ -353,11 +353,16 @@ if [ "$existing" = 1 ]; then
   podman rename "$NAME" "$ROLLBACK_NAME"
   echo "Preserved rollback container: $ROLLBACK_NAME" >&2
 fi
-# An empty real directory disables legacy NVIDIA OCI hooks, including for
-# config smoke. /dev/null is not a directory and Podman rejects it.
-hooks_dir="$(mktemp -d)"
-trap 'rmdir "$hooks_dir"' EXIT
-gpu_args+=(--hooks-dir="$hooks_dir")
+# CDI supplies driver libraries itself. Config smoke must not invoke GPU hooks.
+# Manual device mapping still needs the legacy NVIDIA hook to inject the host
+# driver libraries and nvidia-smi, just as the existing AIBeast launch does.
+nvidia_visible_devices="$GPU_DEVICES"
+if [ "${CONFIG_SMOKE:-0}" = "1" ] || [ "$GPU_DEVICE_MODE" = cdi ]; then
+  hooks_dir="$(mktemp -d)"
+  trap 'rmdir "$hooks_dir"' EXIT
+  gpu_args+=(--hooks-dir="$hooks_dir")
+  nvidia_visible_devices=void
+fi
 podman run -d --pull=never --restart="$restart_policy" \
   --name "$NAME" \
   --health-cmd "curl -sf http://localhost:${PORT}/health || exit 1" \
@@ -366,7 +371,7 @@ podman run -d --pull=never --restart="$restart_policy" \
   ${gpu_args[@]+"${gpu_args[@]}"} --ipc=host --network host \
   --init --ulimit memlock=-1 --ulimit stack=67108864 \
   --ulimit nofile=1048576:1048576 \
-  -e CUDA_VISIBLE_DEVICES="$GPU_DEVICES" -e NVIDIA_VISIBLE_DEVICES=void \
+  -e CUDA_VISIBLE_DEVICES="$GPU_DEVICES" -e NVIDIA_VISIBLE_DEVICES="$nvidia_visible_devices" \
   "${profile_env[@]}" \
   -e MODEL_DIR="$MODEL_DIR_CONTAINER" \
   -e MODEL_READ_ONLY=1 \
