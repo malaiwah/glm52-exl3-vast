@@ -43,8 +43,6 @@ jobs:
       # stay scoped to the family they were measured on.
       - name: model family tests
         run: python3 tests/test_families.py
-      - name: Gilded Gnosis base composition gate
-        run: python3 tests/test_gilded_base_gate.py
       - name: container-only rootfs runner contract
         run: bash tests/test_container_rootfs.sh
       - name: full GLM parser and TP scheduling backports

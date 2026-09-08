@@ -9,12 +9,12 @@ as `defaults < family < variant < startup env < state file`; see
 
 | env | default | why you'd change it |
 |---|---|---|
-| `MODEL_PROFILE` | `glm53-3.42bpw-500k` | full 3.42bpw reduced-workspace **candidate** preserving 520,192 tokens; not GPU-qualified. The older full `glm53-3.42bpw` retains 393,216; 3.25bpw, GLM-5.2 and custom are explicit alternatives. Flash `glm53-k6`/`glm53-k8` are refused on this base |
+| `MODEL_PROFILE` | `glm53-3.42bpw-500k` | full 3.42bpw reduced-workspace **candidate** preserving 520,192 tokens; >=500K spot retrieval passed, full matrix open. The older full `glm53-3.42bpw` retains its historical 393,216 limit, not refreshed-image qualification; 3.25bpw, GLM-5.2 and custom are explicit alternatives. Flash `glm53-k6`/`glm53-k8` are refused on this base |
 | `MODEL_ID` | custom profile only | select a checkpoint for `MODEL_PROFILE=custom`; named GLM profiles own their immutable model revisions and cannot safely be changed by substituting only a model ID |
 | `MODEL_DIR` | profile-specific path under `/workspace` | point at complete weights; the completion marker must match the pinned model repository and revision |
 | `SERVED_MODEL_NAME` | profile name | whitespace-separated aliases, so existing clients keep working; this is also the name every dashboard page displays |
 | `TENSOR_PARALLEL_SIZE` | 4 GLM / 1 Qwen | match a supported profile topology |
-| `MAX_MODEL_LEN` | profile-specific | primary full 3.42bpw candidate 520192 total tokens; older qualified full 3.42 393216; optional 3.25 experiment 524288. Include templating/output and require exact-image boundary retrieval |
+| `MAX_MODEL_LEN` | profile-specific | primary full 3.42bpw candidate 520192 total tokens; historical full 3.42 393216; optional 3.25 experiment 524288. Include templating/output; one 501086-token haystack retrieval does not complete the boundary matrix |
 | `MULTIMODAL` | n/a GLM / 1 Qwen | Qwen `0` saves vision VRAM with `--language-model-only`; GLM vision remains controlled by `VISION` (default 0) |
 | `MM_MAX_PIXELS` | n/a GLM / 8388608 Qwen | cap native image processing near a 4K working image; the 5K detail gate passed at this value |
 | `QUANTIZATION` | custom profile only | vLLM quantizer name such as `modelopt` |
@@ -27,8 +27,8 @@ as `defaults < family < variant < startup env < state file`; see
 | `MIN_NVIDIA_CUDA_VERSION` | `13.2` | reported CUDA capability paired with the driver floor; prevents an r590/CUDA 13.1 host from passing |
 | `ALLOW_UNSUPPORTED_NVIDIA_DRIVER` | `0` | bypass both admission floors only for a separately qualified compatibility stack |
 | `GPU_BLOCKS_OVERRIDE` | 0 | auto-profile the largest safe KV pool; a positive value pins vLLM blocks, not tokens. On this MLA stack the reported logical capacity is `blocks × 64 × DCP` (for example, DCP4 needs 2,048 blocks—not 8,192—for exactly 524,288 tokens). Re-verify this relationship after an engine/topology change. |
-| `KV_CACHE_MEMORY_BYTES` | primary full 3.42 candidate 4518907904 / older qualified full 3.42 3415867392 / otherwise profile-specific | per-GPU fixed KV pool, not free VRAM; supersedes GMU for KV sizing. Do not combine with `GPU_BLOCKS_OVERRIDE`; first-use sampler/workspace needs separate headroom |
-| `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host DRAM used as an aggregate L2 prefix cache (not active-context capacity); `0.5` is the measured agentic-workload setting on a 256 GiB host and native vLLM derives the TP worker slices |
+| `KV_CACHE_MEMORY_BYTES` | primary full 3.42 candidate 4518907904 / historical full 3.42 3415867392 / otherwise profile-specific | per-GPU fixed KV pool, not free VRAM; supersedes GMU for KV sizing. Do not combine with `GPU_BLOCKS_OVERRIDE`; first-use sampler/workspace needs separate headroom |
+| `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | aggregate host-DRAM prefix-cache budget (not active-context capacity); `0.5` was measured historically on a 256 GiB host; native vLLM derives the TP worker slices. Refreshed GLM-5.3 LMCache DRAM retrieval after GPU pressure is measured below, not disk L2/restart qualification |
 | `OFFLOAD_IGNORE_MEMLOCK` | `1` | proceed when the memlock ulimit is below the tier size (see below); `0` disables offload instead |
 | `PREFIX_CACHE_BACKEND` | `lmcache` GLM / `native` other profiles | `lmcache` is the r13-qualified supervised DCP-aware process; `native` keeps the in-process OffloadingConnector rollback control. Both use `OFFLOAD_FRACTION` for aggregate DRAM and neither enlarges active context. |
 | `LMCACHE_L1_MAX_GB` | `0` (no extra ceiling) | optional aggregate LMCache DRAM ceiling in GiB, applied to the fraction-derived budget before memlock handling; AIBeast candidate caps at 125 GiB. It never increases the fraction budget |
@@ -71,6 +71,19 @@ and preserve the old deployment for rollback. Known-invalid startup
 configurations are refused before launch; an untested variant warning is not
 qualification. `CONFIG_SMOKE=1` resolves the CPU-side contract only.
 
+The [current spot receipts](../TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08)
+belong to image `200b1841…` / source `e9623135…`, not later checkout changes.
+Gilded r34 plus necessary patches does not inherit all 27 Verdict fixes.
+Flash is omitted because its runtime is missing, not because a port is proven
+impossible; separate Verdict and historical 393K qualifications do not transfer.
+The spot rootfs graft matched 19 critical source, seven module-initializer and
+seven image-recorded native-library hashes. Provider NCCL 2.23.4 files remained
+disclosed; inspected live processes loaded image NCCL 2.30.4. This is not full
+filesystem or OCI isolation/security equivalence. No AIBeast production restart
+or image promotion was performed. Predecessor 483634 resumed as **500157**,
+which was **confirmed Paused after evidence capture**, preserving old storage;
+that storage remains billable.
+
 Operator compatibility corrections ([issue 47](https://github.com/malaiwah/glm52-exl3-vast/issues/47)):
 `MODEL_DISPLAY_NAME`, `MODEL_DOWNLOAD_WORKERS` and `ALLOW_UNSUPPORTED_GPU`
 are not consumed configuration knobs. Use `SERVED_MODEL_NAME` for dashboard
@@ -109,7 +122,8 @@ derives each worker's physical slice; dividing the value by TP again makes the
 real cache four times smaller on TP4. The appliance passes the aggregate value
 and reports both the total and estimated per-worker slice at boot.
 
-The corrected TP4 implementation was exercised on a 251 GiB AIBeast host with
+Historical GLM-5.2 evidence, **not refreshed GLM-5.3 qualification**:
+the corrected TP4 implementation was exercised on a 251 GiB AIBeast host with
 `OFFLOAD_FRACTION=0.5` (125 GiB aggregate). A cold 133,731-token prefix took
 52.47 seconds. After five different ~133K prompts forced it completely out of
 GPU cache, the same prefix returned from DRAM in 0.69 seconds: 133,504 external
@@ -119,6 +133,15 @@ this agentic-prefix shape. The preallocated tier left about 51 GiB of host RAM
 available. Although the configurator permits larger fractions, 50% is the
 recommended ceiling on a 256 GiB host; 70% would leave too little operating
 margin on this machine.
+
+The refreshed spot run's 131,409-token prefix took 62.4 s then 1.3 s with
+native GPU prefix reuse only. After an independent 501,098-token pressure
+probe, the original prefix returned correctly in **3.115 s**, with **115,200
+external-cache hit tokens** and 15,872 native-hit tokens added. This measures
+**LMCache DRAM retrieval after GPU pressure**, with some GPU-resident reuse,
+not a pure DRAM-only request or complete GPU eviction. Disk L2, restart
+persistence and fault recovery remain unproved; see the
+[cache receipts](../TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08).
 
 ## Checkpoint downloads
 
@@ -131,3 +154,9 @@ authenticates the request and can avoid anonymous rate limits, but does not by
 itself guarantee that a particular host-to-CAS route will be fast. See Hugging
 Face's [model-download guidance](https://huggingface.co/docs/hub/models-downloading)
 and [Hub environment variables](https://huggingface.co/docs/huggingface_hub/en/package_reference/environment_variables).
+
+Supply `HF_TOKEN` using a silent prompt (for example,
+`read -rsp "HF token: " HF_TOKEN; export HF_TOKEN; echo`) or a
+permission-restricted credential file. Pass the environment variable name,
+not its value, to container launchers. Never include literal token values in
+command arguments, shell history, documentation or captured evidence.

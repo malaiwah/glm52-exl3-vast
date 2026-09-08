@@ -8,26 +8,32 @@ supervision, and an opt-in embedded diagnostic [SOUL](docs/soul.md).
 
 The next-release default is **`MODEL_PROFILE=glm53-3.42bpw-500k`**, the full 755B
 `glm_moe_dsa` model, not Flash. It retains 3.42bpw and AIBeast's **520,192-token**
-request limit as a reduced-workspace candidate, not a completed capacity
-test. The intended official release follows the exact-image AIBeast maintenance
-gate below; until then publish only a candidate SHA/digest, **not `latest`**.
-Changing this repository's bare-launch default does not switch a running
-production service or its persisted configuration.
+total request limit with reduced workspace. The spot-container run retrieved
+3/3 facts from a **501,086-token haystack**; this is positive >=500K evidence,
+not the full maintenance matrix or exact OCI-runtime qualification. See
+[current results](TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08).
+**No AIBeast production restart, final image promotion or `latest` update
+was performed.** Changing the bare-launch default does not switch production.
 
 The runtime base is local-inference-lab's **Gilded Gnosis v20 r34**
 (`docker.io/voipmonitor/vllm@sha256:820181fb…`: vLLM `e2666d9a65` integration
 tree `4d006a43`, B12X/SparkInfer `cd3ce190`, LMCache `0.5.2+glm52dcp.4`,
 FlashInfer `1ac69427`, NCCL 2.30.4, Torch 2.12.0+cu132, CUDA 13.2.1), plus the
 reviewed r34 maintenance sources and this repository's fail-closed overlays.
-Every parent state and every installed file is SHA-256 pinned.
+The base and selected runtime files are hash-pinned; this is not a complete
+filesystem or supply-chain equivalence claim. The Gilded refresh uses necessary
+patches re-derived for that base, not proof that all 27 Verdict overlays were
+already present.
 
-The full `glm53-3.42bpw` profile retains its separately qualified 393,216-token
-safe envelope, and `glm52-exl3` remains an explicit alternative. **GLM-5.3-Flash
-is not served by this image**: the Gilded Gnosis base does not contain the
-GLM5Next pooled-indexer runtime Flash needs, so Flash stays on the separately
-published VerdictAI-derived lineage
-(`ghcr.io/malaiwah/glm52-exl3-vast@sha256:9d7ab60a…`). Existing hosted provider
-links may still select their historical profiles; inspect the profile and image
+The full `glm53-3.42bpw` profile keeps its historical 393,216-token envelope;
+that older qualification does not transfer to the refreshed Gilded image.
+`glm52-exl3` remains an explicit alternative. **GLM-5.3-Flash is omitted from
+this build** because the base lacks its GLM5Next pooled-indexer runtime, not
+because a port has been proved impossible. The separate
+[VerdictAI-derived reference](https://github.com/malaiwah/glm52-exl3-vast/pkgs/container/glm52-exl3-vast)
+is `ghcr.io/malaiwah/glm52-exl3-vast@sha256:9d7ab60a3ad666edb8d38812ec6709909e6752a78fad464c842c7b17659f5d5b`;
+its GPU qualification does not transfer here.
+Existing hosted provider links may still select their historical profiles; inspect the profile and image
 pin before renting. Exact runtime and checkpoint pins are in the
 [changelog](CHANGELOG.md).
 
@@ -76,8 +82,8 @@ answers only to you.
 
 | profile | provider | launch | hardware | disk | first-boot budget |
 |---|---|---|---|---|---|
-| GLM-5.3 full 3.42bpw **500K+ candidate** | own host / separately authorized maintenance | [docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB**, extra space for optional L2 | unmeasured; full-context qualification required |
-| GLM-5.3 full 3.42bpw | self-serve / JarvisLabs VM | [▶ docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | up to 90 min cold; ~9 min with warm runtime cache |
+| GLM-5.3 full 3.42bpw **500K+ candidate** | spot container / own host / authorized maintenance | [spot rootfs guide](#launch-on-jarvislabs) / [docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB**, extra space for optional L2 | >=500K spot retrieval passed; cold-start budget not measured |
+| GLM-5.3 full 3.42bpw, historical 393K profile | self-serve / JarvisLabs VM | [docker/podman](#self-serve-with-docker-or-podman) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | historical image: up to 90 min cold; ~9 min with warm runtime cache |
 | GLM-5.2 flagship (3.42bpw) | Vast.ai | [▶ Launch](https://cloud.vast.ai/?ref_id=386667&template_id=6d2679c1ebae36d54274c98123473405) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | 60–90 min |
 | GLM-5.2 flagship (3.42bpw) | Runpod | [▶ Launch](https://console.runpod.io/deploy?template=f8sgtc6orf&ref=4ahycj93) | 4x RTX PRO 6000 Blackwell 96 GB | **600 GB** | ~30 min (Secure) |
 | GLM-5.2 flagship (3.42bpw) | JarvisLabs | [▶ VM guide](#launch-on-jarvislabs) | 4x RTX-PRO6000 VM | **650 GB** | ~30 min |
@@ -114,12 +120,15 @@ sudo docker run -d --name glm53-342-candidate \
   "$IMAGE"
 ```
 
-This is the same container shape used on JarvisLabs. Select
-`MODEL_PROFILE=glm53-3.42bpw` for the qualified full 755B GLM-5.3 model,
+This Docker shape was used in the historical JarvisLabs VM qualification,
+not the current spot-container rootfs graft. Select
+`MODEL_PROFILE=glm53-3.42bpw` for the historical 393K full-model profile,
 `MODEL_PROFILE=glm52-exl3` for the legacy four-GPU profile, or
-`MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU profile; add
-`-e HF_TOKEN=...` for authenticated downloads. Follow first boot with
-`sudo docker logs -f glm53-342-candidate`. This example's endpoint is
+`MODEL_PROFILE=qwen36-27b-nvfp4` for the one-GPU profile. For authenticated
+downloads, read `HF_TOKEN` with a silent prompt, export it and pass only
+`-e HF_TOKEN`, or use a permission-restricted environment file; never put
+the token value in command arguments or shell history.
+Follow first boot with `sudo docker logs -f glm53-342-candidate`. This example's endpoint is
 `http://localhost:8001/v1` and the tokenized dashboard is on `:1111`; keep
 both behind your LAN or an SSH tunnel, or configure TLS as described in
 [Security](#security).
@@ -167,8 +176,8 @@ services:
     environment:
       - MODEL_PROFILE=glm53-3.42bpw-500k
       - PORT=8001
-      # - MODEL_PROFILE=glm53-3.42bpw  # previous qualified 393216-token full model
-      # - HF_TOKEN=hf_your_token_here     # faster authenticated downloads
+      # - MODEL_PROFILE=glm53-3.42bpw  # historical 393216-token full-model profile
+      # - HF_TOKEN                       # inherit a silently supplied environment value
       # - PREFIX_CACHE_DISK_GB=32         # LMCache L2 disk tier (GiB)
       # - PREFIX_CACHE_DISK_FRACTION=0.5  # ...or fraction of free disk
     volumes:
@@ -210,10 +219,10 @@ backend, parsers, speculation, vision handling, and KV sizing also differ.
 
 | `MODEL_PROFILE` | intended use | default hardware | download / context |
 |---|---|---|---|
-| **`glm53-3.42bpw-500k`** | **next-release default; reduced-workspace full-quality candidate, NOT GPU-qualified** | 4x RTX PRO 6000 Blackwell 96 GB | ~331 GiB / planned 520,192 total tokens |
+| **`glm53-3.42bpw-500k`** | **next-release default; >=500K spot retrieval passed, full maintenance matrix open** | 4x RTX PRO 6000 Blackwell 96 GB | ~331 GiB / 520,192 total-token limit |
 | `glm53-3.25bpw` | optional lower-bit capacity experiment, NOT GPU-qualified | 4x RTX PRO 6000 Blackwell 96 GB | ~317 GiB / planned 524,288 total tokens |
 | ~~`glm53-k6`~~ / ~~`glm53-k8`~~ | GLM-5.3-Flash: **refused** on this base; served by the VerdictAI-derived lineage `ghcr.io/malaiwah/glm52-exl3-vast@sha256:9d7ab60a…` | 4x RTX PRO 6000 Blackwell 96 GB | n/a here |
-| `glm53-3.42bpw` | validated GLM-5.3 full-model mixed K3/K4 EXL3 stack | 4x RTX PRO 6000 Blackwell 96 GB | ~331 GiB / 393,216 |
+| `glm53-3.42bpw` | historical full-model mixed K3/K4 EXL3 qualification; not transferred to refreshed GG image | 4x RTX PRO 6000 Blackwell 96 GB | ~331 GiB / 393,216 |
 | `glm52-exl3` | validated GLM-5.2 production stack | 4x RTX PRO 6000 Blackwell 96 GB | ~309 GiB / 512K |
 | `qwen36-27b-nvfp4` | vision-enabled, lower-cost production/development | 1x RTX 5090 32 GB | ~21 GiB / 192K |
 | `custom` | another conventional vLLM checkpoint | configurable | conservative 32K defaults |
@@ -226,9 +235,10 @@ reflects the unchanged full-model architecture, not the checkpoint version.
 It pins
 [`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/tree/99c6f951333d2b38f1efefa533c7afadf0d376e3).
 All 81 weight-file LFS SHA-256/size pairs match evaluated revision
-`8bef807a0fcdd180e984a26b50e731cdba9a8ff2`. The newer chat template still
-requires tool/continuation qualification. Validate metadata against pinned HF
-Git object IDs; do not bypass stale manifest entries indiscriminately.
+`8bef807a0fcdd180e984a26b50e731cdba9a8ff2`. The newer chat template passed
+the spot feature suite; the full parser/continuation maintenance matrix remains
+open. Validate metadata against pinned HF Git object IDs; do not bypass stale
+manifest entries indiscriminately.
 
 The [header accounting](maintenance/glm53-aibeast-500k/memory-comparison.json)
 compares every tensor in the live willfalco 5.2 and davidsyoung 5.3 3.42bpw
@@ -248,9 +258,33 @@ establish that a smaller-workspace 3.42bpw arm cannot fit.
 Therefore preserve weight precision and the existing **520,192 total-token**
 budget first: TP4/DCP4, native probabilistic MTP3, online K6, dynamic NVFP4 KV
 with FP8 RoPE, `KV_CACHE_MEMORY_BYTES=4518907904` per GPU, scheduler 2048,
-prefill arena 1024, C8, GMU 0.93. This is a planned budget, **not GPU capacity
-proof**. The optional 3.25bpw profile is not a silent substitute. DRAM/NVMe
-prefix caching does not enlarge active GPU context; no 750K claim is made.
+prefill arena 1024, C8, GMU 0.93. The spot result below establishes one >=500K
+retrieval run, not concurrency capacity or the full cold-start gate. The optional
+3.25bpw profile is not a silent substitute. DRAM/NVMe prefix caching does not
+enlarge active GPU context; no 750K claim is made.
+
+The exercised image is
+[`ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9`](https://github.com/malaiwah/glm52-exl3-vast/pkgs/container/glm52-exl3-vast),
+built from [`e96231359fc5dca2df9d4a397d7a814ba9deae30`](https://github.com/malaiwah/glm52-exl3-vast/commit/e96231359fc5dca2df9d4a397d7a814ba9deae30)
+by [CI 34168581945](https://github.com/malaiwah/glm52-exl3-vast/actions/runs/34168581945);
+the release work is [PR #58](https://github.com/malaiwah/glm52-exl3-vast/pull/58).
+On resumed JarvisLabs spot container **500157** (predecessor **483634**), four GPUs served a
+501,086-token haystack with 3/3 facts in 361.42 s, followed by 512
+temperature-1 output tokens in 7.76 s and a passing feature suite (vision
+skipped). A 131,409-token repeated prefix fell from 62.4 s to 1.3 s using
+native GPU cache only. An independent **501,098-token** pressure probe then
+retrieved 3/3 facts in 360.891 s; replaying the original prefix took **3.115 s**
+with **115,200 new external-cache hit tokens** and 15,872 new native-hit
+tokens. This positively measures **LMCache DRAM retrieval after GPU pressure**,
+not a pure DRAM-only request, L2/disk persistence, restart or fault recovery.
+The image was unpacked and grafted into the provider container. Final
+verification matched **19 critical sources, seven module initializers and seven
+image-recorded native libraries**. Provider NCCL 2.23.4 files remained on disk;
+live process maps showed the image's **NCCL 2.30.4** loaded. These are scoped
+hash/load observations, not complete filesystem or OCI isolation/security
+equivalence. Later source changes are not retroactively GPU-qualified.
+The resumed instance **500157 was paused after evidence capture**; its
+1200 GB user storage was preserved and remains billable.
 
 The [maintenance assets](maintenance/glm53-aibeast-500k/) stage a separate
 name, port, state and cache using Podman 4.9-compatible device mappings.
@@ -278,8 +312,10 @@ cuts over production or promotes `latest`.
 
 `MODEL_PROFILE=glm53-3.42bpw` pins
 `davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@8bef807a0fcdd180e984a26b50e731cdba9a8ff2`.
-The current live-qualified appliance pin is
+The **historical** live-qualified appliance pin is
 `ghcr.io/malaiwah/glm52-exl3-vast@sha256:6e2475d0568fd110eeaa1193157c7662747e096b476b05ed71ab247e081e9b82`.
+The measurements in this subsection belong to that lineage, not the refreshed
+Gilded r34 candidate.
 This is the 755B `glm_moe_dsa` GLM-5.3 model, not GLM-5.3-Flash. Its complete
 structural configuration matches GLM-5.2, so it reuses the qualified GLM-5.2
 B12X sparse-MLA, DCP4, native MTP-3, mixed-K EXL3 and online-K6 runtime family.
@@ -721,13 +757,16 @@ JarvisLabs documents the current
 is the source of truth for stock because availability differs between VM and
 container workloads.
 
-At qualification time, region `IN1` offered a four-card VM and a four-card
-managed container shape. Each RTX PRO 6000 Blackwell has 96 GB VRAM and cost
-`$1.89/GPU-hour` on demand, so the flagship VM was `$7.56/hour`; pricing and
-stock are live values, not promises. Use the VM shape: it provides root-capable
-Docker and a public IP, while the catalog containers do not accept this custom
-image. Jarvis bills by the minute. A pause releases GPU compute but retains
-chargeable storage; destroy the VM when finished.
+The historical on-demand VM quote was `$1.89/GPU-hour`, or `$7.56/hour`
+for four cards. The 2026-09-08 proof instead resumed the pre-existing
+**483634** container as **500157**, with **four spot RTX PRO 6000 GPUs**, at an approximate
+**$3.96/hour GPU quote**, retaining its 1200 GB `/home` storage. Stock and
+pricing remain live values, not promises. A VM supports Docker; the spot
+container path below unpacks a custom image without a container runtime.
+**500157 was paused after evidence capture, preserving the user's existing
+storage.** Resume changed the machine ID: confirm the current ID with `jl list`
+before lifecycle actions rather than using predecessor 483634.
+Pausing releases GPU compute but storage remains billable.
 
 A managed-container probe was also completed rather than merely inferred from
 the catalog. Its four RTX PRO 6000 GPUs had peer reads/writes between every
@@ -744,10 +783,27 @@ trees by symlink, the OS layer including its newer glibc by `rsync`, with the
 runtime-injected driver files excluded so the host driver keeps winning - and
 runs the real entrypoint in the container's own namespace, where `/proc`,
 `/sys`, `/dev/nvidia*` and a 320 GiB `/dev/shm` already exist. Before anything
-launches, it re-derives `/opt/runtime-provenance.json` in place and refuses to
-continue unless every installed source and module hashes exactly as the built
-image recorded. The graft is one-way: it mutates the rented container, so it
-demands `TURNKEY_GRAFT=1` and is only ever correct on a disposable instance.
+launches, the helper checks the scoped installed runtime provenance. In the
+exercised graft, final verification matched 19 critical source hashes, seven
+module-initializer hashes and ten recorded native-library hashes. Extra
+provider NCCL 2.23.4 files were retained and disclosed; live process maps showed
+image NCCL 2.30.4 in use. This is **not** exact OCI-runtime, filesystem or
+security qualification: provider namespace, mounts and host driver remain.
+The graft irreversibly mutates the provider OS, so it demands `TURNKEY_GRAFT=1`;
+use only a specifically authorized container and preserve persistent user data.
+The current source helper additionally checks recorded NCCL/ExLlama native
+libraries; that check passed against the running graft before pause, not as
+proof of a fresh GPU boot with every later helper change.
+It requires a container marker and canonical dedicated `TURNKEY_ROOT` and
+`TURNKEY_WORKSPACE` paths without symlink components, below `/home`, `/mnt`,
+`/srv`, `/tmp` or `/var/tmp`. The workspace cannot be inside the root's
+`bundle` or `oci` directories. `/opt` runtime targets plus `/workspace`,
+`/cache` and `/state` must be absent or already matching links. Conflicting
+directories or links are
+refused rather than deleted. Repeating the same-image graft verifies without
+rewriting; do not remove provider/user paths to force admission.
+Its `stop` command refuses to shut down a grafted provider container: stop the
+launch supervisor/process group deliberately, then pause the reused instance.
 
 The qualified IN1 VM reported four same-NUMA `PHB` cards but no CUDA peer
 reads or writes between any pair. The unmodified pre-Jarvis image reached
@@ -816,8 +872,9 @@ a VM image.
 <details>
 <summary><b>JarvisLabs container instance (spot) without any container runtime</b></summary>
 
-Container templates are cheaper and can be rented as spot, but they cannot run
-Docker. Rent one, then unpack and graft the published digest:
+The exercised path resumed predecessor **483634** as **500157**, not a new rental.
+Do not create a second instance for that workflow. For a separately authorized
+new disposable rental, the creation shape is:
 
 ```bash
 jl create --gpu RTX-PRO6000 --num-gpus 4 --storage 700 --spot \
@@ -826,27 +883,35 @@ jl list                     # take the machine id, status and public IP
 ssh -o StrictHostKeyChecking=no root@<public-ip>
 ```
 
-On the instance, everything happens under the persistent `/home` volume:
+On the instance, downloads and state live under persistent `/home`; grafting
+also changes the ephemeral provider OS. The helper in this checkout includes
+source changes newer than the exercised `e9623135` image; record its revision
+separately and do not treat the image receipt as proof of those later changes.
+Use a reviewed checkout of PR #58 to supply the helper rather than a moving
+`main` script:
 
 ```bash
-export TURNKEY_IMAGE=ghcr.io/malaiwah/glm52-exl3-vast@sha256:<digest>
+export TURNKEY_IMAGE=ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9
 export TURNKEY_ROOT=/home/turnkey TURNKEY_GRAFT=1
-curl -fsSL -o /home/turnkey/rootfs.sh --create-dirs \
-  https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_container_rootfs.sh
+# Copy scripts/jarvislabs_container_rootfs.sh from the reviewed checkout
+# to /home/turnkey/rootfs.sh before running these commands.
 bash /home/turnkey/rootfs.sh prepare   # skopeo fetch + umoci unpack
 bash /home/turnkey/rootfs.sh graft     # install over the container, then verify
 MODEL_PROFILE=glm53-3.42bpw-500k SSHD=0 \
   bash /home/turnkey/rootfs.sh smoke   # GPU-free resolved-argv check
-HF_TOKEN=<token> MODEL_PROFILE=glm53-3.42bpw-500k SSHD=0 \
+read -rsp "Hugging Face token (optional): " HF_TOKEN; export HF_TOKEN; echo
+MODEL_PROFILE=glm53-3.42bpw-500k SSHD=0 \
   setsid nohup bash /home/turnkey/rootfs.sh run >/home/turnkey/serve.log 2>&1 &
 ```
 
-Pass credentials through an environment file rather than the command line: a
-container's `/proc` is shared, so anything in `argv` is readable by every
-process on the instance. Spot instances can be reclaimed at any time, so copy
-each piece of evidence off the instance as it is produced, and remember that a
-paused instance still bills its storage (`$0.00014` per GB-hour, so a 1.2 TB
-volume is about `$4/day` while idle). `jl destroy <id>` is what stops that.
+Use a silent prompt as above or a permission-restricted credential file, never
+literal token values in command arguments, examples, logs or shell history.
+Environment values are still visible to privileged processes and the provider.
+Spot instances can be reclaimed at any time, so copy evidence off-host as it is
+produced. **The resumed 500157 is now paused, with its old storage preserved.**
+Storage continues while paused (the recorded `$0.00014/GB-hour` rate is about
+`$4/day` for 1.2 TB; check current billing). Destroy only a separately created
+disposable rental after explicit authorization to delete its data.
 
 </details>
 
@@ -1126,9 +1191,11 @@ evidence, and the experimental separate-draft override are in
 - **GPU filter**: 4x RTX PRO 6000 Blackwell (96 GB) for GLM; one RTX PRO 6000
   Blackwell or RTX 5090 for Qwen.
 - **Env (all optional)**: `HF_TOKEN` (authenticated download and higher
-  applicable Hub rate limits), `OFFLOAD_FRACTION`
-  3; Qwen 0), `MAX_NUM_SEQS`, `MAX_MODEL_LEN` (full 3.42 candidate
-  520192; qualified full 3.42 393216; optional 3.25 experiment 524288; Qwen 196608),
+  applicable Hub rate limits; supply via silent prompt or protected file),
+  `OFFLOAD_FRACTION` (aggregate host-DRAM prefix cache; GLM 0.5, Qwen 0),
+  `MTP_TOKENS` (full GLM-5.3 3; Qwen 0), `MAX_NUM_SEQS`,
+  `MAX_MODEL_LEN` (full 3.42 candidate 520192; historical full 3.42 393216;
+  optional 3.25 experiment 524288; Qwen 196608),
   `VLLM_EXL3_PREFILL_CAPACITY` (GLM-only reusable EXL3 arena; the mixed
   3.25-bpw profile selects 1024 rows inside its 2048-token scheduler chunk;
   the r20/3.36-bpw K6 profile selects its qualified 3072/3072 PP-first shape),
@@ -1157,7 +1224,7 @@ The most common first-launch knobs:
 | `HF_TOKEN` | (unset) | authenticated downloads and higher Hub rate limits |
 | `DESEC_TOKEN` / `DESEC_DOMAIN` | (unset) | turnkey TLS via deSEC DNS-01 (see [Security](#security)) |
 | `OPEN_BUTTON_TOKEN` | provider-specific | exposes the `:1111` landing page and config editor |
-| `MAX_MODEL_LEN` | profile-specific | full 3.42 candidate 520192 (unqualified); qualified full 3.42 393216; 3.25 experiment 524288; Qwen 196608 |
+| `MAX_MODEL_LEN` | profile-specific | full 3.42 candidate 520192 (>=500K spot retrieval passed; matrix open); historical full 3.42 393216; 3.25 experiment 524288; Qwen 196608 |
 | `MTP_TOKENS` | full GLM-5.3 3 / Qwen 0 | speculation depth; GLM-5.2 variant-specific |
 | `OFFLOAD_FRACTION` | 0.5 GLM / 0 Qwen | host-DRAM prefix cache (not active-context capacity) |
 | `TERMINATE_ENABLED` | `0` | expose the in-container terminate control |

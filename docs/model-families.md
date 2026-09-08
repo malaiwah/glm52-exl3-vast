@@ -13,14 +13,31 @@ mean anything, and which of the measured failure rules apply.
 The next-release public default is **full non-Flash `glm53-3.42bpw-500k`**,
 variant `exl3-tr3-glm53-3.42bpw-500k`, in the `glm52` architecture family shared
 by full GLM-5.2 and GLM-5.3. It preserves 3.42bpw and the 520,192-token budget
-with reduced workspace; it is a candidate, not completed GPU qualification.
-The older full `glm53-3.42bpw` profile retains its separately
-qualified 393,216-token envelope, and `glm52-exl3` remains an explicit
+with reduced workspace. The spot rootfs graft passed >=500K retrieval
+(501,086 haystack tokens, 3/3 facts) and features with vision skipped, but not
+the full maintenance matrix. The older full `glm53-3.42bpw` profile retains
+its historical 393,216-token limit, not refreshed-image qualification, and
+`glm52-exl3` remains an explicit
 alternative. The Flash `glm53` family and its `glm53-k6` / `glm53-k8` variants
 are **withdrawn from this image**: the Gilded Gnosis v20 r34 base contains no
 GLM5Next model runtime, pooled sparse indexer, GDN decode kernels or K-pool
 warmup, so selecting them fails closed and names the separately published
-VerdictAI-derived Flash image instead of remapping to another model.
+VerdictAI-derived Flash image instead of remapping to another model. This is
+missing support in this build, not proof that a port is impossible. Neither
+Verdict's GPU qualification nor the historical 393K result transfers to the
+Gilded r34 refresh; necessary patches are re-derived, not a claim that all
+27 Verdict overlays already exist in Gilded.
+
+See the [exact image/source/CI and PR #58 evidence](../TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08).
+That receipt is scoped to `200b1841…` / `e9623135…`; later helper/source
+changes are not retroactively exercised. The provider OS graft matched 19
+critical source, seven module-initializer and seven image-recorded native-library
+hashes. Extra provider NCCL 2.23.4 files remained disclosed; inspected live
+processes loaded image NCCL 2.30.4. This does not establish full filesystem or
+OCI isolation/security equivalence. No AIBeast production restart or final
+promotion occurred. The reused four-GPU spot rental resumed predecessor
+**483634** as **500157**, then was **confirmed Paused after evidence capture**,
+preserving the user's old storage, which remains billable paused.
 
 | | |
 |---|---|
@@ -318,7 +335,15 @@ The generic one-GPU provider path remains cheaply smoke-tested with a small
 Qwen3.5 checkpoint. The exact Qwen3.6-27B NVFP4 checkpoint is now qualified on
 one RTX 5090 at the 192K vision-enabled profile. A Runpod repetition of the
 full 27B performance rows remains useful for provider comparison, but is not a
-model-profile blocker. Full GLM-5.3 3.25bpw is the next-release four-GPU
-candidate and still needs its own >=500K maintenance gate; GLM-5.2 remains an
-explicit measured alternative. Custom checkpoints remain compatibility-by-vLLM
-rather than a blanket support claim.
+model-profile blocker. Full GLM-5.3 **3.42bpw / 520,192 tokens** is the primary
+four-GPU candidate; 3.25bpw is an optional experiment. The >=500K spot result
+does not close cold first-use, full parser edges and boundary matrix,
+concurrency/overlap, disk L2 eviction, restart/fault recovery or any new KLD
+comparison. The initial 131,409-token repeat (62.4 s then 1.3 s) used native
+GPU cache. After a second 501,098-token pressure probe passed 3/3 facts, the
+original prefix returned in 3.115 s with 115,200 external-prefix hit tokens
+and 15,872 native-hit tokens added: **LMCache DRAM retrieval after GPU pressure
+is measured**, not complete GPU eviction or a pure DRAM-only request.
+GLM-5.2 remains an explicit measured
+alternative. Custom checkpoints remain compatibility-by-vLLM rather than a
+blanket support claim.

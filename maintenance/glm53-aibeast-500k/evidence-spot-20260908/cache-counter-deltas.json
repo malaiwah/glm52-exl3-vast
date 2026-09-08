@@ -1,0 +1,22 @@
+{
+  "vllm:external_prefix_cache_hits_total": {
+    "before": 0.0,
+    "after": 115200.0,
+    "delta": 115200.0
+  },
+  "vllm:external_prefix_cache_queries_total": {
+    "before": 1173064.0,
+    "after": 1289696.0,
+    "delta": 116632.0
+  },
+  "vllm:prefix_cache_hits_total": {
+    "before": 131072.0,
+    "after": 146944.0,
+    "delta": 15872.0
+  },
+  "vllm:prefix_cache_queries_total": {
+    "before": 1304136.0,
+    "after": 1436640.0,
+    "delta": 132504.0
+  }
+}

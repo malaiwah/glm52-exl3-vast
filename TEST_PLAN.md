@@ -3,16 +3,20 @@
 Reusable qualification protocol for every release. Results are recorded in
 [TEST_RESULTS.md](TEST_RESULTS.md); per-release GLM model qualification
 details are in the `docs/glm52-rXX-*.md` files. Next release: **full non-Flash
-GLM-5.3 3.42bpw 520K candidate**, not yet GPU-qualified. Earlier r26/r28
-results retain their historical model and image scope.
+GLM-5.3 3.42bpw 520K candidate**. The spot-container >=500K retrieval and
+feature gates passed; the full maintenance matrix remains open. Earlier
+r26/r28 results retain their historical model and image scope.
 
 This plan has two cost tiers. A sub-1B Qwen representative validates provider,
 UI and OpenAI-API plumbing on one GPU. A separate authorized four-GPU full-model
 pass validates the immutable candidate image, loader, preserved 520,192-token
 total envelope, performance and power. Do not substitute Flash or GLM-5.2
-evidence for the full GLM-5.3 gate. Rentals are sequential and deleted only
-after their evidence is copied; existing owned-host production is not a rental
-to stop or destroy.
+evidence for the full GLM-5.3 gate. Rentals are sequential. Delete only newly
+created disposable resources after evidence capture and authorization to erase
+their data. The current run resumed predecessor **483634** as **500157**, then
+**paused 500157** after evidence, retaining old user storage (still billable).
+Always resolve the current provider ID before lifecycle actions. AIBeast production
+must not be stopped or restarted by this spot workflow.
 
 ## Full GLM-5.3 candidate maintenance gate
 
@@ -20,7 +24,7 @@ The release intent is `MODEL_PROFILE=glm53-3.42bpw-500k`, variant
 `exl3-tr3-glm53-3.42bpw-500k`, family `glm52`, checkpoint
 `davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`.
 Its 81 weight LFS identities match evaluated `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`;
-the changed template still needs the parser/continuation gate.
+the changed template passed the spot feature suite, not every parser edge case.
 
 The candidate image is now rooted on local-inference-lab's Gilded Gnosis v20
 r34 (`docker.io/voipmonitor/vllm@sha256:820181fb…`, CUDA 13.2.1 / Torch
@@ -30,6 +34,38 @@ serving production, so its cold-boot, cache and recovery evidence must still be
 re-measured for GLM-5.3 weights, but a CUDA/Torch/NCCL platform change is no
 longer part of this gate. The earlier VerdictAI-based candidate is superseded;
 its published digest remains the GLM-5.3-Flash lineage only.
+
+The completed spot slice used the
+[exact published `200b1841…` image, source `e9623135…`, CI and PR #58](TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08).
+It resumed predecessor JarvisLabs **483634** as **500157**, with four spot
+RTX PRO 6000 GPUs at an approximate **$3.96/hour GPU quote**, retained its
+1200 GB home, and was **confirmed Paused after evidence capture**.
+`skopeo`/`umoci` unpack plus OS graft was necessary because mounts/user
+namespaces are blocked. Final verification matched 19 critical sources, seven
+module initializers and seven image-recorded native libraries. Provider NCCL 2.23.4
+files remained disclosed; live process maps showed image NCCL 2.30.4 loaded.
+This is not exact OCI-runtime/security/filesystem qualification. The newer
+verification helper passed on the running graft, not a fresh GPU boot proving
+all later source changes.
+
+Completed receipts show 501,086 exact haystack-body tokens (excluding template
+and question), 3/3 facts at three depths in 361.42 s, post-stress 512-token
+temperature-1 sampling in 7.76 s, and features passed with vision skipped.
+The initial 131,409-token prefix's 62.4 s / 1.3 s repetition is native GPU
+cache only. A second 501,098-token pressure probe passed 3/3 facts in 360.891 s;
+replaying the original prefix then took 3.115 s, with 115,200 external-prefix
+hit tokens and 15,872 native-hit tokens added. **LMCache DRAM retrieval after
+GPU pressure is measured**, with some native reuse, not complete GPU eviction.
+Cold first-use, full parser edges and boundary matrix, C1/C4/C8 overlap,
+disk L2 eviction, restart/fault recovery and any new KLD comparison remain
+separate gates. **No AIBeast production restart,
+final image promotion or `latest` update occurred.**
+
+The steps below describe the still-required exact AIBeast maintenance stage,
+not actions authorized or completed by the spot run. Gilded r34 plus necessary
+patches does not imply that all 27 removed Verdict overlays were already in
+the base. Flash is omitted for missing runtime support, not proven unportable;
+the separate Verdict qualification cannot substitute for this matrix.
 
 Use [maintenance/glm53-aibeast-500k](maintenance/glm53-aibeast-500k/) to stage
 an immutable candidate independently. Podman 4.9 uses inventoried manual
@@ -105,12 +141,13 @@ different KV formats require a separately scoped measured ladder.
 
 - Publish the test image under its Git commit SHA; never replace `latest` from
   a manual workflow dispatch.
-- Use one on-demand GPU for provider/UI smoke tests and exactly four cards only
-  for the final GLM profile. Record the hourly price before accepting either.
+- Use one GPU for provider/UI smoke tests and exactly four cards for the full
+  GLM profile. Prefer the authorized spot container for this workflow; record
+  the live hourly quote before creation or resume.
 - Require an RTX 5090 or RTX PRO 6000 Blackwell because the pinned CUDA image
   and custom kernels target `sm120+`. Do not substitute an RTX 4090/Ada GPU
   merely because the smoke-test model fits. Set an automatic provider
-  termination deadline where supported.
+  shutdown deadline where supported; use pause for reused persistent storage.
 - Use a 60 GB local disk on Vast and a 50 GB container disk plus 20 GB
   `/workspace` volume on Runpod for the smoke profile. Allocate at least
   600 GB for the full GLM checkpoint, image and compile caches; use at least
@@ -119,10 +156,13 @@ different KV formats require a separately scoped measured ladder.
 - Use `Qwen/Qwen3.5-0.8B` through the `custom` profile with an 8K context. Its
   small download keeps the live test short while exercising the Qwen3.5
   architecture supported by the pinned vLLM runtime.
-- Store API keys only in process environment variables. Never put credentials
-  in manifests, logs, test artifacts, commits, or shell history.
-- Record every created instance/Pod/VM ID immediately. Terminate or destroy
-  rather than stop/pause after the final check so storage billing also ends.
+- Read credentials with silent prompts or protected files into the environment.
+  Never put credential values in command arguments, manifests, logs, test
+  artifacts, commits or shell history.
+- Record every created or reused instance/Pod/VM ID and ownership immediately.
+  Destroy only authorized disposable rentals; the resumed **500157** (predecessor
+  483634) was paused with data retained. Confirm current identity on resume.
+  Explain that pause ends GPU use, not storage billing.
 - For the SOUL composite test, launch with `SOUL_AUTONOMY_MAX_LEVEL=3` and
   `TERMINATE_ENABLED=1`. Exercise levels 1, 2, then 3 early; leave level 3
   selected for the remaining workload and through the start of teardown.

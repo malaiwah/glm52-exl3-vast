@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "ts": "2026-09-08T00:59:52Z",
+  "base_url": "http://127.0.0.1:8000",
+  "model": "GLM-5.3",
+  "max_model_len": 520192,
+  "reserve_tokens": 4096,
+  "requested_sizes": [
+    500000
+  ],
+  "tested_sizes": [
+    500000
+  ],
+  "requested_sizes_fit": true,
+  "depths": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "seeds": [
+    2
+  ],
+  "prompt_identity": "f92e5bb52ee5475a999d8ce651860782",
+  "prompt_identity_policy": "fresh-uuid",
+  "cache_regime": "not measured; unique trial prefixes, repeat identity may reuse cache",
+  "token_count_scope": "tokenized haystack body, excludes chat template and retrieval question",
+  "probes": [
+    {
+      "attempted": true,
+      "seed": 1616323521139597264,
+      "target_tokens": 500000,
+      "tokens": 501098,
+      "tokens_exact": true,
+      "depths": [
+        0.1,
+        0.5,
+        0.9
+      ],
+      "found": 3,
+      "total": 3,
+      "degenerate": "",
+      "answer_head": "Kyoto: HSX-5654, Reykjavik: HPT-1514, Valparaiso: NVR-4619.Kyoto: HSX-5654\nReykjavik: HPT-1514\nValparaiso: NVR-4619",
+      "ok": true,
+      "duration_s": 360.891,
+      "length_verified": true,
+      "matrix_seed": 2
+    }
+  ],
+  "post_stress": {
+    "short_prompt": {
+      "ok": true,
+      "checks": [
+        {
+          "name": "arithmetic",
+          "ok": true,
+          "detail": "answered '391'"
+        },
+        {
+          "name": "factual",
+          "ok": true,
+          "detail": "answered 'Paris'"
+        },
+        {
+          "name": "instruction",
+          "ok": true,
+          "detail": "answered 'BANANA'"
+        }
+      ]
+    },
+    "stochastic_sampling": {
+      "attempted": true,
+      "ok": true,
+      "detail": "temperature-1 sampling produced 512 tokens and the engine remained healthy",
+      "prompt_target_tokens": 1024,
+      "prompt_tokens": 961,
+      "prompt_tokens_exact": true,
+      "max_tokens": 512,
+      "completion_tokens": 512,
+      "temperature": 1.0,
+      "seed": 42,
+      "ignore_eos": true,
+      "health_after": true,
+      "duration_s": 7.719
+    }
+  },
+  "measured_max_tokens": 501098,
+  "complete": true,
+  "ok": true
+}

@@ -1,0 +1,14 @@
+{
+  "image": "ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9",
+  "amd64_manifest": "sha256:9757d7d4814ed3e4bca49586b41db95e0ccaf44af2793d4dfadfa56d60342eae",
+  "source_revision": "e96231359fc5dca2df9d4a397d7a814ba9deae30",
+  "ci": "https://github.com/malaiwah/glm52-exl3-vast/actions/runs/34168581945",
+  "parent": "docker.io/voipmonitor/vllm@sha256:820181fbbc975cd5291c411cda9771d58fecee1636d916f508f47230df20592b",
+  "execution": "skopeo OCI copy, umoci unpack, image OS/runtime graft into JarvisLabs framework container; not an OCI container launch",
+  "provenance_check": "19 critical source files and seven module initializer hashes matched after path normalization; not comprehensive filesystem equivalence",
+  "instance": 500157,
+  "instance_lifecycle": "Resumed pre-existing storage from483634 as500157 with four spot GPUs; pause500157 succeeded and was confirmed by jl list; retained1200GB storage remains billable.",
+  "qualification": "Partial: see behavioral receipts. No promotion to latest or AIBeast production cutover.",
+  "predecessor_instance": 483634,
+  "instance_status": "Paused"
+}

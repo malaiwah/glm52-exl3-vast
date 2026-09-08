@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "ts": "2026-09-08T00:45:04Z",
+  "base_url": "http://127.0.0.1:8000",
+  "model": "GLM-5.3",
+  "vision_requested": false,
+  "checks": [
+    {
+      "name": "auth-rejects-bad-key",
+      "ok": true,
+      "required": true,
+      "detail": "HTTP 401; authentication configured=True"
+    },
+    {
+      "name": "tokenize",
+      "ok": true,
+      "required": true,
+      "detail": "count=3"
+    },
+    {
+      "name": "chat-no-thinking",
+      "ok": true,
+      "required": true,
+      "detail": "The user wants me to reply with exactly \"BANANA-OK\" and nothing else. This is a simple, harmless request - just a specific text output. There's nothing problematic about it. I should comply.BANANA-OK"
+    },
+    {
+      "name": "chat-thinking-visible",
+      "ok": true,
+      "required": true,
+      "detail": "437",
+      "reasoning_field": true
+    },
+    {
+      "name": "streaming-with-usage",
+      "ok": true,
+      "required": true,
+      "detail": "The user wants me to reply with exactly \"STREAM-OK\" and nothing else.STREAM-OK",
+      "completion_tokens": 22
+    },
+    {
+      "name": "multi-turn-preserve-thinking",
+      "ok": true,
+      "required": true,
+      "detail": "Simple recall question.You asked me to remember the code **COBALT-731**.",
+      "preserved_reasoning": true
+    },
+    {
+      "name": "structured-json",
+      "ok": true,
+      "required": true,
+      "detail": "{\"answer\": 42}"
+    },
+    {
+      "name": "structured-json-thinking",
+      "ok": true,
+      "required": true,
+      "detail": "{\"answer\": 42}",
+      "reasoning_field": true
+    },
+    {
+      "name": "tool-call",
+      "ok": true,
+      "required": true,
+      "detail": "[{\"id\": \"chatcmpl-tool-909db6c84acf752b\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"{\\\"city\\\": \\\"Montreal\\\"}\"}}]"
+    },
+    {
+      "name": "tool-call-single",
+      "ok": true,
+      "required": true,
+      "detail": "calls=1, unique=1"
+    },
+    {
+      "name": "tool-choice-required",
+      "ok": true,
+      "required": false,
+      "detail": "calls=1"
+    },
+    {
+      "name": "tool-result-round-trip",
+      "ok": true,
+      "required": true,
+      "detail": "The result is odd: \"QUALIFICATION-WEATHER-17C\". It seems like the weather is 17\u00b0C. I'll report that.</think>The current weather in Montreal is 17\u00b0C."
+    },
+    {
+      "name": "vision-red-image",
+      "ok": true,
+      "required": true,
+      "detail": "skipped: vision disabled",
+      "skipped": true
+    }
+  ],
+  "complete": true,
+  "ok": true
+}

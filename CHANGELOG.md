@@ -7,22 +7,24 @@ lineage and exact pins that used to open the README.
 
 The next official release is intended to default to full non-Flash
 `MODEL_PROFILE=glm53-3.42bpw-500k`, architecture family `glm52`, variant
-`exl3-tr3-glm53-3.42bpw-500k`. It is **not GPU-qualified**. Candidate builds must
-publish only a commit SHA/digest until an authorized AIBeast maintenance
-window demonstrates at least 500,000 real input tokens plus useful output
-inside the preserved 520,192-token total envelope. No production stop, cutover,
-reboot enablement or `latest` promotion follows from staging alone.
+`exl3-tr3-glm53-3.42bpw-500k`. A JarvisLabs spot-container rootfs graft passed
+**501,086-token retrieval (3/3 facts, 361.42 s)**, post-stress temperature-1
+sampling (**512 output tokens, 7.76 s**) and the feature suite (vision skipped).
+The **520,192-token** total limit remains; this positive >=500K gate is not
+the full maintenance matrix. No AIBeast production restart/cutover, final image
+promotion or `latest` update occurred.
 
 Checkpoint pin:
 `davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`.
 All 81 LFS weight SHA-256/size pairs match independently evaluated
 `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`; metadata and the chat template
-changed, so parser/tool continuation must be requalified. Planned TP4/DCP4,
-dynamic NVFP4 KV/FP8 RoPE, 4,518,907,904 KV bytes/GPU, scheduler 2048, prefill
-arena 1024, C8, native probabilistic MTP3, online K6 and GMU 0.93 retain an
-explicit memory budget, **not a capacity result**. No 750K claim is made.
-The previous full 3.42 profile remains at its qualified 393,216-token envelope;
-GLM-5.2 is an explicit alternative, not the new default.
+changed. The spot feature suite passed, but the complete parser/continuation
+matrix remains open. TP4/DCP4, dynamic NVFP4 KV/FP8 RoPE,
+4,518,907,904 KV bytes/GPU, scheduler 2048, prefill arena 1024, C8, native
+probabilistic MTP3, online K6 and GMU 0.93 define the candidate budget;
+one successful retrieval is not C8 capacity proof. No 750K claim is made.
+The previous 393,216-token full-model qualification is historical and does
+not transfer to the refreshed Gilded image. GLM-5.2 is an explicit alternative.
 
 Exact safetensors-header accounting corrects the initial lower-bit preference:
 5.3 3.42bpw adds 0.848 GiB/rank versus the live 5.2 3.42bpw tensors, largely
@@ -44,11 +46,12 @@ parent used by the preceding candidate, and returns the appliance to the exact
 runtime family that has been serving GLM-5.2 in production. Its CUDA/Torch/NCCL
 stack is 13.2.1 / 2.12 / 2.30.4, not the Verdict candidate's 13.3 / 2.13 / 2.31.2.
 
-The 27 VerdictAI-layout runtime overlays are **deleted**: every one of their
-targets lived under `/opt/infernal-invocation` and does not exist on the Gilded
-base, whose own qualified sources already carry that work. What remains, all
-SHA-256 pinned in both the importable runtime and the base image's
-`/opt/vllm` source tree: the reviewed r34 maintenance sources (vLLM PR277
+The 27 VerdictAI-layout overlays are deleted from this build because their
+targets and runtime layout differ. **The Gilded base does not already contain
+all 27 fixes.** Required maintenance work is re-derived for its installed
+sources, rather than treating overlay removal as equivalent qualification.
+The selected SHA-256-pinned payloads in the importable runtime and `/opt/vllm`
+source tree include the reviewed r34 maintenance sources (vLLM PR277
 compatibility, hybrid external-cache invalid-block recovery, bounded LMCache
 multiprocess retrieve) and the expired-L1-read-lease recovery patch
 (`67561538a08ce3db621f51f0615b67537c0c8361`, upstream draft
@@ -65,10 +68,12 @@ Gilded connector `c6e0bf5c…` and adapter `0781f930…`.
 `vllm.model_executor.warmup.glm5_kpool_warmup` are absent from the Gilded base,
 so `glm53-k6` / `glm53-k8` fail closed and name the VerdictAI-derived lineage
 `ghcr.io/malaiwah/glm52-exl3-vast@sha256:9d7ab60a3ad666edb8d38812ec6709909e6752a78fad464c842c7b17659f5d5b`
-instead of silently substituting another profile.
+instead of silently substituting another profile. Missing runtime support in
+this build does **not** prove that Flash cannot be ported. Qualification of
+the separate Verdict reference does not qualify the refreshed Gilded image.
 
-These are candidate changes, not inherited upstream-head guarantees or live
-qualification.
+These source changes are not inherited upstream-head guarantees. Only the
+specific image and observed gates below have live spot evidence.
 The parser repairs literal argument delimiters and stripped-stop recovery while
 preserving the installed parser ABI. The non-DP scheduler fix does not by itself
 enable prefill throttling: `prefill_schedule_interval` remains 1 (inert).
@@ -87,6 +92,32 @@ restart policy. Rollback preserves the old image, environment and state.
 LMCache gains an optional aggregate `LMCACHE_L1_MAX_GB` ceiling (0 by default;
 candidate 125 GiB, lazy initial arena 20 GiB); it does not enlarge active context.
 
+Spot evidence is tied to
+[`ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9`](https://github.com/malaiwah/glm52-exl3-vast/pkgs/container/glm52-exl3-vast),
+source [`e96231359fc5dca2df9d4a397d7a814ba9deae30`](https://github.com/malaiwah/glm52-exl3-vast/commit/e96231359fc5dca2df9d4a397d7a814ba9deae30),
+[CI 34168581945](https://github.com/malaiwah/glm52-exl3-vast/actions/runs/34168581945)
+and [PR #58](https://github.com/malaiwah/glm52-exl3-vast/pull/58).
+`skopeo` + verified `umoci` unpacked the rootfs; the provider blocks
+mount/user namespaces, so this was an OS graft, **not an exact OCI launch**.
+Final verification matched 19 critical sources, seven module initializers and
+seven image-recorded native libraries. Additional provider NCCL 2.23.4 files remained
+and were disclosed; live process maps showed image NCCL 2.30.4 loaded. These
+are scoped observations, not comprehensive filesystem/security equivalence.
+Later helper/source changes are not retroactively GPU-qualified.
+
+Predecessor **483634** resumed as **500157**, with four spot GPUs (approximately
+**$3.96/hour GPU quote**), 320 GiB shared memory and 1200 GB persistent home.
+**500157 was paused after evidence capture**, confirmed by a fresh provider
+listing, preserving old user storage; storage billing continues paused.
+The 131,409-token prefix took 62.4 s then 1.3 s with native
+GPU cache only. A second 501,098-token pressure probe retrieved 3/3 facts in
+360.891 s; the original prefix then returned correctly in **3.115 s**, adding
+**115,200 external-prefix hit tokens** and 15,872 native-hit tokens. This
+measures **LMCache DRAM retrieval after GPU pressure**, not complete GPU
+eviction or a DRAM-only request. Disk L2, restart, concurrency, fault recovery
+and a new KLD comparison remain unproved by these receipts. See
+[spot results and remaining gates](TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08).
+
 Root/non-root (#20), host/bridge networking (#21), parent dependency index
 selection (#24), and complete core-runtime hash locks (#25) remain open
 hardening boundaries; scoped SOUL locks and loopback cache restrictions do
@@ -95,7 +126,7 @@ model uses the custom GLM-5.3 license. The appliance MIT license is not an
 umbrella license. See [attribution and provenance](README.md#attribution-licenses-and-runtime-provenance).
 
 The entries below are historical release evidence. Their “default” and
-“latest” statements describe those releases, not this unqualified candidate.
+“latest” statements describe those releases, not this partially exercised candidate.
 
 ## GLM-5.3 full-model 3.42bpw
 

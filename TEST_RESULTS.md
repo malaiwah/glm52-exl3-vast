@@ -1,7 +1,7 @@
 # Appliance test results
 
 Cost-controlled execution of [TEST_PLAN.md](TEST_PLAN.md) from 2026-07-26
-through 2026-08-29. Provider credentials and generated appliance tokens were
+through 2026-09-08. Provider credentials and generated appliance tokens were
 kept in process-local environment variables and are not included here.
 
 Per-release GLM-5.2 model qualification details (throughput tables, KLD
@@ -12,10 +12,11 @@ and the per-release `docs/glm52-rXX-*.md` files. This file records provider
 integration evidence, bug discoveries and fixes, cost tracking, and the
 decision history that explains why the codebase is the way it is.
 
-Latest completed full-model qualification: **GLM-5.3 mixed 3.42bpw at 393,216
-tokens** (2026-08-29 on JarvisLabs). The new default full 3.25bpw 512K
-candidate is **not GPU-qualified**; no historical result below is evidence
-that it serves 500K on AIBeast.
+The current full **GLM-5.3 3.42bpw / 520,192-token** candidate has positive
+>=500K retrieval and feature-suite evidence from a JarvisLabs spot-container
+rootfs graft (2026-09-08), **not a completed maintenance matrix**. The older
+393,216-token qualification below remains historical; neither it nor the
+Verdict/Flash GPU results qualify the refreshed Gilded image.
 
 ## Contents
 
@@ -45,8 +46,10 @@ AIBeast's preserved boot reports 81.73 GiB model loading and 0.75 GiB graphs
 per rank. The older 5.3 receipt reports 82.42 GiB and 0.61 GiB on another
 runtime. The new 520,192-token, 4,518,907,904-byte/GPU arm reduces
 scheduler/prefill workspace to 2048/1024 without lowering weight precision.
-This is not GPU qualification. First-use sampling, >=500K retrieval,
-concurrency and cache/restart gates remain required. No 750K result is claimed.
+The spot proof below demonstrates two >=500K retrieval runs, post-stress
+sampling and LMCache DRAM retrieval after GPU pressure. Cold first-use,
+concurrency, disk L2/restart/recovery and remaining maintenance gates are still
+open. No 750K result or AIBeast production restart is claimed.
 
 All qualified rows below retain their original hardware/runtime scope. The
 3.42 results and older GLM-5.2/Flash measurements are not retroactively
@@ -54,7 +57,7 @@ relabelled as tests of the refreshed candidate.
 
 | profile | release | hardware | status | section |
 |---|---|---|---|---|
-| Full GLM-5.3 EXL3 TR3 3.42bpw reduced-workspace (next-release default) | refreshed candidate | target: 4x RTX PRO 6000 (AIBeast) | **Unqualified: preserved 520,192 total tokens** | [maintenance gate](TEST_PLAN.md#full-glm-53-candidate-maintenance-gate) |
+| Full GLM-5.3 EXL3 TR3 3.42bpw reduced-workspace (next-release default) | Gilded r34 plus required patches, image `200b1841…` | 4x RTX PRO 6000 (JarvisLabs spot 500157, resumed from 483634) | **>=500K retrieval, features and DRAM retrieval passed; full matrix open** | [spot proof](#jarvislabs-spot-container-proof-2026-09-08) |
 | GLM-5.3 full-model EXL3 TR3 3.42bpw | 27-overlay r28 runtime | 4x RTX PRO 6000 (JarvisLabs) | Qualified | [GLM-5.3 full model](#glm-53-full-model-342bpw-qualification-jarvislabs-2026-08-29) |
 | GLM-5.2 EXL3 TR3 3.0bpw (historical default) | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
 | GLM-5.2 EXL3 TR3 3.36bpw | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
@@ -63,6 +66,81 @@ relabelled as tests of the refreshed candidate.
 | JarvisLabs VM (NCCL fallback) | GG v20-r9 | 4x RTX PRO 6000 (IN1) | Qualified | [JarvisLabs](#jarvislabs-in1-flagship-qualification-2026-07-30) |
 | Runpod 590.48.01 / CUDA 13.2 | GG v20-r9 | 1x RTX 5090 (Secure) | Qualified | [Runpod compat](#runpod-5904801--cuda-132-compatibility-2026-07-29) |
 | GLM-5.2 vision (opt-in) | GG v20 | 4x RTX PRO 6000 (AIBeast) | Short-context only | [Vision section](#v20-vision-qualification-2026-07-27) |
+
+### JarvisLabs spot-container proof (2026-09-08)
+
+Exercised image:
+[`ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9`](https://github.com/malaiwah/glm52-exl3-vast/pkgs/container/glm52-exl3-vast),
+source [`e96231359fc5dca2df9d4a397d7a814ba9deae30`](https://github.com/malaiwah/glm52-exl3-vast/commit/e96231359fc5dca2df9d4a397d7a814ba9deae30),
+[CI 34168581945](https://github.com/malaiwah/glm52-exl3-vast/actions/runs/34168581945),
+release work [PR #58](https://github.com/malaiwah/glm52-exl3-vast/pull/58).
+Newer checkout/helper changes are source changes, not exercised-image evidence.
+The runtime is Gilded Gnosis r34 plus necessary patches re-derived for that
+base; the removed 27 Verdict-layout overlays were **not all already present**
+in Gilded.
+
+This resumed **pre-existing container 483634 as machine 500157** with four spot RTX PRO
+6000 Blackwell GPUs, driver 595.58.03, 320 GiB shared memory and 1200 GB
+persistent `/home`; the GPU quote was approximately **$3.96/hour**.
+[Hardware receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/hardware.json).
+After evidence capture, **500157 was successfully paused**, and a fresh
+`jl list` confirmed Paused, four GPUs, spot and 1200 GB storage. The initial
+pause call using predecessor 483634 returned missing; the current machine was
+identified by the same name and IP (`151.185.34.24`). No storage was destroyed.
+Storage billing continues while paused; always resolve the current machine ID.
+
+`skopeo` copied 11.77 GiB compressed and `umoci` 0.6 unpacked the image
+(verified umoci SHA-256:
+`b51c267ec394499e42c6fde47f240b7b7dba57ea49df0b5acd304378b82a3b71`).
+Because the provider container blocks mounts/user namespaces, the image OS was
+grafted into that container instead of launched by an OCI runtime.
+Final [rootfs verification](maintenance/glm53-aibeast-500k/evidence-spot-20260908/rootfs-verify.json)
+matched **19 critical source hashes, seven module-initializer hashes and seven
+image-recorded native-library hashes**. Three additional provider NCCL names
+(`libnccl.so.2.23.4`, `libnccl.so.2`, `libnccl.so`) remained under
+`/usr/lib/x86_64-linux-gnu` and were disclosed, not removed. The
+[live process-map receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/loaded-nccl.json)
+showed image `/opt/libnccl.so.2.30.4` loaded in the inspected processes.
+These scoped hashes and load observations do not establish comprehensive
+filesystem equivalence, exact OCI isolation, container security or supply-chain
+qualification. Provider mounts, namespace and driver remain in use. The newer
+verification helper passed against the running graft, not a fresh full GPU
+qualification of every subsequent source change.
+
+| observed gate | result | receipt |
+|---|---|---|
+| Unique-prefix long retrieval | **501,086 tokenizer-exact haystack tokens**, 3/3 facts at depths 10/50/90%, one seed, **361.42 s** | [needle-500k.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/needle-500k.json) |
+| Post-stress correctness | Arithmetic, factual and instruction checks passed | same needle receipt |
+| Post-stress stochastic sampling | Temperature 1, 960 exact prompt tokens, **512/512 output tokens in 7.76 s**; engine healthy afterward | same needle receipt |
+| OpenAI feature suite | All exercised checks passed: bad-key rejection, tokenize, chat/reasoning, streaming usage, preserved-thinking multi-turn, structured JSON, tools and tool-result round trip; **vision skipped** | [feature-suite.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/feature-suite.json) |
+| Repeated 131,409-token prefix | **62.4 s then 1.3 s**, native GPU cache only; not external-cache proof | [pass 1](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-pass1.json), [pass 2](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-pass2.json) |
+| Independent GPU-pressure retrieval | **501,098 tokenizer-exact haystack tokens**, 3/3 facts at depths 10/50/90%, second seed, **360.891 s**; post-stress correctness and 512-token sampling passed | [cache-eviction-500k.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-eviction-500k.json) |
+| Original prefix after GPU pressure | Same **131,409-token** prefix correct in **3.115 s**; **115,200 external-cache hit tokens** plus 15,872 native-hit tokens added | [cache-pass3-after-eviction.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-pass3-after-eviction.json), [cache-counter-deltas.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-counter-deltas.json) |
+
+The 501,086 count covers the **haystack body**, excluding the chat template
+and retrieval question; the configured total request limit was 520,192 and
+the probe reserved 4096 tokens. The receipt does not report an exact total
+API prompt-token count. Its cache regime was not measured; it used a fresh
+trial identity. The feature runner passed its declared checks, not a claim
+that every response is perfectly clean (the recorded tool-result reply
+contains a literal `</think>`). Vision was disabled, not qualified.
+
+The post-pressure replay positively measures **LMCache DRAM retrieval**, rather
+than inferring offload from a warm latency alone. External-prefix hits rose
+from 0 to 115,200, external queries from 1,173,064 to 1,289,696, and native
+hits from 131,072 to 146,944. Some prefix remained GPU-resident, so this is
+not a pure DRAM-only request or proof of complete GPU eviction. The initial
+62.4 s / 1.3 s pair alone remains native-cache evidence. These later receipts
+do not establish disk L2, restart persistence, fault recovery or concurrency.
+
+**Open gates:** exact OCI/AIBeast-stage cold boot and first-use sampling;
+full boundary/repetition matrix beyond these two three-depth seeds;
+complete parser/continuation edge cases;
+C1/C4/C8 and long-prefill/decode overlap, cancellation and memory/error audit;
+disk L2 transfers and eviction, restart and failure recovery;
+full maintenance matrix and any new KLD comparison. Historical measurements
+cannot fill these receipts. **No AIBeast production restart or cutover, final
+image promotion, or `latest` update occurred.**
 
 ### GLM-5.3 full-model 3.42bpw qualification (JarvisLabs, 2026-08-29)
 
