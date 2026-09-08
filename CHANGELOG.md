@@ -19,18 +19,41 @@ Checkpoint pin:
 All 81 LFS weight SHA-256/size pairs match independently evaluated
 `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`; metadata and the chat template
 changed. The spot feature suite passed, but the complete parser/continuation
-matrix remains open. TP4/DCP4, dynamic NVFP4 KV/FP8 RoPE,
-4,518,907,904 KV bytes/GPU, scheduler 2048, prefill arena 1024, C8, native
-probabilistic MTP3, online K6 and GMU 0.93 define the candidate budget;
-one successful retrieval is not C8 capacity proof. No 750K claim is made.
+matrix remains open. The unchanged public-profile rental floor uses TP4/DCP4,
+dynamic NVFP4 KV/FP8 RoPE, 4,518,907,904 KV bytes/GPU, scheduler 2048,
+prefill arena 1024, C8, native probabilistic MTP3, online K6 and GMU 0.93;
+successful retrieval is not C8 capacity proof. No 750K claim is made.
 The previous 393,216-token full-model qualification is historical and does
 not transfer to the refreshed Gilded image. GLM-5.2 is an explicit alternative.
 
 Exact safetensors-header accounting corrects the initial lower-bit preference:
 5.3 3.42bpw adds 0.848 GiB/rank versus the live 5.2 3.42bpw tensors, largely
 rotation-vector storage. Their BF16 carrier is identical. Preserve 3.42bpw
-and reduce workspace before considering the optional 3.25bpw experiment.
+and 520,192 tokens; this accounting does not prove that GLM-5.3 requires
+smaller workspaces. The optional 3.25bpw experiment is not a fallback here.
 The full accounting is retained in `maintenance/glm53-aibeast-500k/memory-comparison.json`.
+
+AIBeast maintenance now follows the user's explicit **parity-first** request,
+not a conservative-floor first attempt. `MAINTENANCE_TRIAL=parity` is the
+maintenance default, overriding the unchanged public profile defaults using
+the [read-only live GLM-5.2 environment and serving argv](maintenance/glm53-aibeast-500k/production-baseline.json):
+12 sequences, scheduler/prefill 3072/3072, GMU 0.95, maximum CUDA graph capture
+48 (sizes 4,8,12,16,20,24,28,32,36,40,44,48), Trellis maximum M 48 and
+125 GiB initial LMCache RAM. Only after an operator observes and records
+failure or insufficient margin may `MAINTENANCE_TRIAL=rental-floor` select
+8 sequences, 2048/1024, GMU 0.93, graphs 32 (sizes 4,8,12,16,20,24,28,32),
+Trellis 32 and 20 GiB initial RAM. There is no automatic shrink.
+Both preserve the same checkpoint/3.42bpw, 520,192 context, TP4/DCP4,
+interleave 64, native probabilistic MTP3, KV 4,518,907,904 bytes/GPU,
+125 GiB RAM ceiling and 384 GiB disk tier. No token or precision reduction.
+The fallback default name adds `-rental-floor`; each trial has isolated
+caches, state and stage manifest, with the selector in stage identity.
+
+Parity requires a **new image build**, since the `200b1841…` validator rejects
+3072 scheduler/prefill settings. That digest's GPU evidence remains floor-only;
+record the new immutable digest after build, without transferring the old
+receipts. Parity on the new image is not yet GPU-tested. The AIBeast maintenance
+window has not opened; no production stop/restart is authorized.
 
 The runtime parent is now local-inference-lab's **Gilded Gnosis v20 r34**,
 `docker.io/voipmonitor/vllm@sha256:820181fbbc975cd5291c411cda9771d58fecee1636d916f508f47230df20592b`
@@ -90,7 +113,8 @@ against stale verification/rollback state. Podman 4.9 staging uses explicit
 devices, separate state/cache/name/port, no automatic production stop and no
 restart policy. Rollback preserves the old image, environment and state.
 LMCache gains an optional aggregate `LMCACHE_L1_MAX_GB` ceiling (0 by default;
-candidate 125 GiB, lazy initial arena 20 GiB); it does not enlarge active context.
+candidate 125 GiB; initial arena 125 GiB parity / 20 GiB rental floor);
+it does not enlarge active context.
 
 Spot evidence is tied to
 [`ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9`](https://github.com/malaiwah/glm52-exl3-vast/pkgs/container/glm52-exl3-vast),
@@ -108,7 +132,11 @@ Later helper/source changes are not retroactively GPU-qualified.
 Predecessor **483634** resumed as **500157**, with four spot GPUs (approximately
 **$3.96/hour GPU quote**), 320 GiB shared memory and 1200 GB persistent home.
 **500157 was paused after evidence capture**, confirmed by a fresh provider
-listing, preserving old user storage; storage billing continues paused.
+listing, preserving old user storage that remained billable while paused.
+Subsequently the user explicitly requested destruction: the destroy API
+succeeded, `jl list` returned `[]`, and all six resource counts were zero.
+The [new destroy receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json)
+is separate from the unchanged historical pause receipt.
 The 131,409-token prefix took 62.4 s then 1.3 s with native
 GPU cache only. A second 501,098-token pressure probe retrieved 3/3 facts in
 360.891 s; the original prefix then returned correctly in **3.115 s**, adding

@@ -1,0 +1,22 @@
+{
+  "observed_at": "2026-09-08T01:38:41.390762+00:00",
+  "action": "destroy",
+  "machine_id": 500157,
+  "authorized_by": "User requested clearing recurring JarvisLabs charges",
+  "response": {
+    "success": true,
+    "machine_id": 500157
+  },
+  "verified_instance_list": [],
+  "verified_resources": {
+    "running_instances": 0,
+    "paused_instances": 0,
+    "running_vms": 0,
+    "paused_vms": 0,
+    "deployments": 0,
+    "filesystems": 0
+  },
+  "remaining_balance_usd": 79.3082,
+  "storage_deleted_gb": 1200,
+  "evidence_preserved": "Existing public spot qualification receipts and local redacted serving log; historical lifecycle.json pause record is unchanged"
+}

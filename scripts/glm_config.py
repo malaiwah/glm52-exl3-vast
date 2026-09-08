@@ -2379,21 +2379,32 @@ def validate(cfg: dict, context=None):
     elif cfg["MODEL_VARIANT"] in (
             "exl3-tr3-glm53-3.25bpw", "exl3-tr3-glm53-3.42bpw-500k"):
         envelope = variant["defaults"]
+        parity_candidate = cfg["MODEL_VARIANT"] == "exl3-tr3-glm53-3.42bpw-500k"
+        scheduler_max = 3072 if parity_candidate else 2048
+        prefill_max = 3072 if parity_candidate else 1024
         if (cfg["TENSOR_PARALLEL_SIZE"] != 4 or cfg["DCP"] != "4"
                 or cfg["KV_CACHE_DTYPE"] != "nvfp4_ds_mla"
                 or cfg["KV_SCALE_MODE"] != "dynamic-token"
                 or cfg["MAX_MODEL_LEN"] > envelope["MAX_MODEL_LEN"]
                 or fixed_kv != envelope["KV_CACHE_MEMORY_BYTES"]
-                or cfg["MAX_NUM_BATCHED_TOKENS"] > 2048
-                or cfg["VLLM_EXL3_PREFILL_CAPACITY"] > 1024):
+                or cfg["MAX_NUM_BATCHED_TOKENS"] > scheduler_max
+                or cfg["VLLM_EXL3_PREFILL_CAPACITY"] > prefill_max
+                or (parity_candidate and (
+                    seqs > 12 or cap_max > 48 or trellis_max > 48 or cap_max > trellis_max
+                    or not sizes or max(sizes) != cap_max))):
             err("glm53-candidate-envelope",
                 ["MODEL_VARIANT", "MAX_MODEL_LEN", "KV_CACHE_MEMORY_BYTES",
                  "TENSOR_PARALLEL_SIZE", "DCP", "KV_CACHE_DTYPE", "KV_SCALE_MODE",
-                 "MAX_NUM_BATCHED_TOKENS", "VLLM_EXL3_PREFILL_CAPACITY"],
+                 "MAX_NUM_BATCHED_TOKENS", "VLLM_EXL3_PREFILL_CAPACITY",
+                 "MAX_NUM_SEQS", "MAX_CUDAGRAPH_CAPTURE_SIZE",
+                 "CUDAGRAPH_CAPTURE_SIZES", "VLLM_EXL3_TRELLIS_MAX_M"],
                 "the full GLM-5.3 release candidate is bounded to TP4/DCP4, "
                 f"dynamic-token NVFP4 KV, MAX_MODEL_LEN<={envelope['MAX_MODEL_LEN']}, "
                 f"KV_CACHE_MEMORY_BYTES={envelope['KV_CACHE_MEMORY_BYTES']}, "
-                "scheduler<=2048 and prefill workspace<=1024 rows. This planned envelope requires "
+                f"scheduler<={scheduler_max} and prefill workspace<={prefill_max} rows. "
+                + ("The 3.42bpw parity trial additionally bounds sequences<=12 and "
+                   "coherent capture/Trellis windows<=48. " if parity_candidate else "")
+                + "This planned envelope requires "
                 "GPU qualification; do not infer a larger supported context "
                 "from a profiler's logical pool size.")
     elif fixed_kv:

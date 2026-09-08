@@ -12,11 +12,13 @@ and the per-release `docs/glm52-rXX-*.md` files. This file records provider
 integration evidence, bug discoveries and fixes, cost tracking, and the
 decision history that explains why the codebase is the way it is.
 
-The current full **GLM-5.3 3.42bpw / 520,192-token** candidate has positive
->=500K retrieval and feature-suite evidence from a JarvisLabs spot-container
-rootfs graft (2026-09-08), **not a completed maintenance matrix**. The older
-393,216-token qualification below remains historical; neither it nor the
-Verdict/Flash GPU results qualify the refreshed Gilded image.
+The current full **GLM-5.3 3.42bpw / 520,192-token** public profile has positive
+>=500K retrieval and feature-suite evidence at the rental floor from a
+JarvisLabs spot-container rootfs graft (2026-09-08), **not a completed
+maintenance matrix or parity qualification**. AIBeast maintenance now requires
+live GLM-5.2 resource parity first. The older 393,216-token qualification below
+remains historical; neither it nor the Verdict/Flash GPU results qualify the
+refreshed Gilded image.
 
 ## Contents
 
@@ -44,12 +46,40 @@ See `maintenance/glm53-aibeast-500k/memory-comparison.json` for exact bytes.
 
 AIBeast's preserved boot reports 81.73 GiB model loading and 0.75 GiB graphs
 per rank. The older 5.3 receipt reports 82.42 GiB and 0.61 GiB on another
-runtime. The new 520,192-token, 4,518,907,904-byte/GPU arm reduces
-scheduler/prefill workspace to 2048/1024 without lowering weight precision.
+runtime. The exercised 520,192-token, 4,518,907,904-byte/GPU rental-floor arm
+used scheduler/prefill workspace 2048/1024 without lowering weight precision.
 The spot proof below demonstrates two >=500K retrieval runs, post-stress
-sampling and LMCache DRAM retrieval after GPU pressure. Cold first-use,
+sampling and LMCache DRAM retrieval after GPU pressure at that floor, not
+evidence that GLM-5.3 architecture requires smaller workspaces. Cold first-use,
 concurrency, disk L2/restart/recovery and remaining maintenance gates are still
 open. No 750K result or AIBeast production restart is claimed.
+
+**Current maintenance policy: parity first, explicitly requested by the user.**
+`MAINTENANCE_TRIAL` defaults to `parity`, using the
+[live GLM-5.2 `Config.Env` and serving-argv baseline](maintenance/glm53-aibeast-500k/production-baseline.json)
+from `glm52-turnkey-r34-maint-20260815-v1`.
+
+| setting | parity first trial (not yet GPU-tested) | exercised rental floor |
+|---|---|---|
+| sequences / scheduler / prefill arena | 12 / 3072 / 3072 | 8 / 2048 / 1024 |
+| GMU / maximum graph capture / Trellis maximum M | 0.95 / 48 / 48 | 0.93 / 32 / 32 |
+| graph capture sizes | 4,8,12,16,20,24,28,32,36,40,44,48 | 4,8,12,16,20,24,28,32 |
+| LMCache initial RAM | 125 GiB | 20 GiB |
+
+Both retain full 3.42bpw at the same revision, 520,192 context, TP4/DCP4,
+interleave 64, native probabilistic MTP3, online K6, dynamic NVFP4/FP8 RoPE,
+KV 4,518,907,904 bytes/GPU, RAM ceiling 125 GiB and disk tier 384 GiB.
+The public profile defaults remain the rental floor; the maintenance stage
+overrides them for parity. Only a recorded parity failure or insufficient
+measured margin justifies explicit `MAINTENANCE_TRIAL=rental-floor`, with its
+`-rental-floor` default-name suffix and isolated caches/state/stage manifest.
+The selector is part of stage identity. No automatic fallback, token-limit
+reduction or quantization reduction is authorized.
+
+The new policy requires a new image build: `200b1841…` rejects 3072
+scheduler/prefill settings and is GPU-exercised only at the floor. The new
+immutable digest must be recorded after build; its parity GPU gate remains
+unrun. **The AIBeast maintenance window has not opened.**
 
 All qualified rows below retain their original hardware/runtime scope. The
 3.42 results and older GLM-5.2/Flash measurements are not retroactively
@@ -88,6 +118,14 @@ After evidence capture, **500157 was successfully paused**, and a fresh
 pause call using predecessor 483634 returned missing; the current machine was
 identified by the same name and IP (`151.185.34.24`). No storage was destroyed.
 Storage billing continues while paused; always resolve the current machine ID.
+
+**Subsequent lifecycle update, separate from the unchanged pause receipt:**
+the user explicitly requested destruction of paused 500157. The destroy API
+returned success; `jl list` then returned `[]`, and all six provider resource
+counts were zero. The remaining account balance was **$79.3082 USD**.
+See the [new destroy receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json).
+The retained historical pause receipt describes the earlier billable-storage
+state, not the final inventory.
 
 `skopeo` copied 11.77 GiB compressed and `umoci` 0.6 unpacked the image
 (verified umoci SHA-256:

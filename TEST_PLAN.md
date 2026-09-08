@@ -13,8 +13,11 @@ pass validates the immutable candidate image, loader, preserved 520,192-token
 total envelope, performance and power. Do not substitute Flash or GLM-5.2
 evidence for the full GLM-5.3 gate. Rentals are sequential. Delete only newly
 created disposable resources after evidence capture and authorization to erase
-their data. The current run resumed predecessor **483634** as **500157**, then
-**paused 500157** after evidence, retaining old user storage (still billable).
+their data. The run resumed predecessor **483634** as **500157**, then
+**paused 500157** after evidence, retaining billable old user storage. The user
+subsequently explicitly requested destruction: the provider API succeeded,
+`jl list` returned `[]`, and all six resource counts were zero
+([separate destroy receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json)).
 Always resolve the current provider ID before lifecycle actions. AIBeast production
 must not be stopped or restarted by this spot workflow.
 
@@ -25,6 +28,35 @@ The release intent is `MODEL_PROFILE=glm53-3.42bpw-500k`, variant
 `davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`.
 Its 81 weight LFS identities match evaluated `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`;
 the changed template passed the spot feature suite, not every parser edge case.
+
+**First try current GLM-5.2 resources, not the conservative rental floor.**
+`MAINTENANCE_TRIAL=parity` is the maintenance default, overriding the unchanged
+public profile's rental-floor defaults. The
+[read-only live baseline](maintenance/glm53-aibeast-500k/production-baseline.json)
+captures production `Config.Env` and actual serving argv.
+
+| setting | parity first trial | explicit `rental-floor` fallback |
+|---|---|---|
+| sequences / scheduler tokens / prefill arena | 12 / 3072 / 3072 | 8 / 2048 / 1024 |
+| GMU / maximum graph capture / Trellis maximum M | 0.95 / 48 / 48 | 0.93 / 32 / 32 |
+| graph capture sizes | 4,8,12,16,20,24,28,32,36,40,44,48 | 4,8,12,16,20,24,28,32 |
+| LMCache initial RAM | 125 GiB | 20 GiB |
+
+Both preserve 3.42bpw, context 520,192, KV 4,518,907,904 bytes/GPU, TP4/DCP4,
+interleave 64, native probabilistic MTP3, online K6, dynamic NVFP4/FP8 RoPE,
+125 GiB RAM ceiling and 384 GiB disk tier. No token or precision reduction.
+The old failure is not evidence that GLM-5.3 architecture needs smaller
+workspaces. Only an operator-observed parity failure or insufficient measured
+margin justifies explicit `MAINTENANCE_TRIAL=rental-floor`; no automatic shrink.
+The fallback default name adds `-rental-floor`, with distinct caches, state
+and stage manifest. Preserve the selector for every command; it is stage
+identity, and an existing stage must never silently change trials.
+
+The parity policy needs a **new image build** because the prior image validator
+rejects 3072 scheduler/prefill settings. The `200b1841…` receipts below qualify
+only the exercised rental-floor slice. Record the new immutable digest after
+build; parity on that image is not yet GPU-tested. **No maintenance window
+has opened and no production stop/restart is authorized.**
 
 The candidate image is now rooted on local-inference-lab's Gilded Gnosis v20
 r34 (`docker.io/voipmonitor/vllm@sha256:820181fb…`, CUDA 13.2.1 / Torch
@@ -75,9 +107,25 @@ The runner must refuse to start while production occupies the GPUs. Preserve
 the old image digest, launch environment, state and cache; rollback starts
 that preserved service rather than rewriting it to the new defaults.
 
-The runnable sequence is `candidate.py stage`, `verify-model`, `preflight`
-and `config-smoke`; `start` is permitted only after an operator has deliberately
-stopped production in the authorized window. Then run:
+The safe staging/CPU sequence is below. Set `IMAGE` to the newly built,
+published immutable digest first; the old floor-only image cannot admit parity.
+These commands do not stop production or start GPU serving:
+
+```bash
+: "${IMAGE:?Set IMAGE to the new parity-capable image digest}"
+export IMAGE
+export MAINTENANCE_TRIAL=parity
+uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py stage
+uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py verify-model
+uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py preflight
+uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py config-smoke
+```
+
+After a justified parity failure only, explicitly export
+`MAINTENANCE_TRIAL=rental-floor` and repeat the sequence into its separate
+default stage. Do not reuse the parity name or cache/state roots.
+`start` is permitted only after an operator has deliberately stopped production
+in a separately authorized window. Then, retaining the selected trial, run:
 
 ```bash
 RUN_GPU_QUALIFICATION=1 uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py run-qualification
@@ -95,10 +143,14 @@ observed eviction fails rather than silently skipping that gate.
    compare critical hashes with the files actually inside the image, and record
    the separately obtained pushed digest. Missing required critical source,
    NCCL or ExLlama native files fail admission. No source bind mounts in the gate.
-2. Confirm TP4/DCP4, native MTP3, online K6, dynamic NVFP4/FP8 RoPE,
-   4,518,907,904 KV bytes/GPU, scheduler 2048, prefill arena 1024, C8 and GMU 0.93.
-   Confirm fraction-derived LMCache RAM is capped at 125 GiB with 20 GiB lazy
-   initialization. DRAM/NVMe cache sizes do not count as active-context capacity.
+2. Confirm the selected trial matches its saved stage: **parity first** uses
+   sequences 12, scheduler/prefill 3072/3072, GMU 0.95, graphs/Trellis 48 and
+   125 GiB initial RAM. Only explicitly justified rental-floor uses
+   8, 2048/1024, 0.93, 32 and 20 GiB initial RAM.
+   Confirm unchanged TP4/DCP4, native probabilistic MTP3, online K6,
+   dynamic NVFP4/FP8 RoPE, interleave 64, 4,518,907,904 KV bytes/GPU,
+   520,192 total tokens, 125 GiB RAM ceiling and 384 GiB disk.
+   DRAM/NVMe cache sizes do not count as active-context capacity.
 3. Record cold-boot and first-use physical memory/allocator data, including
    top-p temperature-1 sampling, all 512 requested output tokens, strict JSON
    and tool paths. Require healthy API and zero engine restarts.
@@ -160,9 +212,10 @@ different KV formats require a separately scoped measured ladder.
   Never put credential values in command arguments, manifests, logs, test
   artifacts, commits or shell history.
 - Record every created or reused instance/Pod/VM ID and ownership immediately.
-  Destroy only authorized disposable rentals; the resumed **500157** (predecessor
-  483634) was paused with data retained. Confirm current identity on resume.
-  Explain that pause ends GPU use, not storage billing.
+  Destroy reused user storage only with explicit authorization: **500157**
+  (predecessor 483634) was initially paused, then destroyed at the user's
+  request, with empty inventory and zero resource counts recorded separately.
+  Pause alone ends GPU use, not storage billing; resolve current identity.
 - For the SOUL composite test, launch with `SOUL_AUTONOMY_MAX_LEVEL=3` and
   `TERMINATE_ENABLED=1`. Exercise levels 1, 2, then 3 early; leave level 3
   selected for the remaining workload and through the start of teardown.

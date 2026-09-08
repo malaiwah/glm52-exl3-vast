@@ -252,16 +252,43 @@ larger model architecture.
 The live 5.2 boot recorded 81.73 GiB model loading and 0.75 GiB graphs/rank;
 the older 5.3 qualification recorded 82.42 GiB and 0.61 GiB on a different
 runtime. Those are not a controlled same-runtime A/B. The historical 5.3
-520K failure used a 3072-row scheduler and prefill workspace; it does not
-establish that a smaller-workspace 3.42bpw arm cannot fit.
+520K failure does not establish that GLM-5.3 requires smaller workspaces on
+the current runtime.
 
-Therefore preserve weight precision and the existing **520,192 total-token**
-budget first: TP4/DCP4, native probabilistic MTP3, online K6, dynamic NVFP4 KV
-with FP8 RoPE, `KV_CACHE_MEMORY_BYTES=4518907904` per GPU, scheduler 2048,
-prefill arena 1024, C8, GMU 0.93. The spot result below establishes one >=500K
-retrieval run, not concurrency capacity or the full cold-start gate. The optional
-3.25bpw profile is not a silent substitute. DRAM/NVMe prefix caching does not
-enlarge active GPU context; no 750K claim is made.
+**AIBeast maintenance is parity-first, as explicitly requested by the user:**
+try the live GLM-5.2 resource/tuning settings before reducing to the exercised
+rental floor. The read-only baseline comes from production `Config.Env` and
+the actual serving argv of `glm52-turnkey-r34-maint-20260815-v1`
+([production baseline](maintenance/glm53-aibeast-500k/production-baseline.json)).
+
+| resource | first trial: `MAINTENANCE_TRIAL=parity` (default) | explicit fallback: `MAINTENANCE_TRIAL=rental-floor` |
+|---|---|---|
+| sequences / scheduler tokens / EXL3 prefill arena | 12 / 3072 / 3072 | 8 / 2048 / 1024 |
+| GPU memory utilization | 0.95 | 0.93 |
+| maximum CUDA graph capture / Trellis maximum M | 48 / 48 | 32 / 32 |
+| graph capture sizes | 4,8,12,16,20,24,28,32,36,40,44,48 | 4,8,12,16,20,24,28,32 |
+| LMCache initial RAM arena | 125 GiB | 20 GiB |
+
+Both trials preserve full **3.42bpw**, the pinned checkpoint, **520,192
+total tokens**, TP4/DCP4, interleave 64, native probabilistic MTP3, online K6,
+dynamic NVFP4 KV with FP8 RoPE, and `KV_CACHE_MEMORY_BYTES=4518907904` per GPU.
+Both retain a 125 GiB LMCache RAM ceiling and 384 GiB disk tier; external
+prefix caching does not enlarge active GPU context. No token-limit or precision
+reduction, optional 3.25bpw substitution, or 750K claim is part of this policy.
+
+The general `MODEL_PROFILE=glm53-3.42bpw-500k` defaults remain the exercised
+rental floor; the maintenance stage overrides them for the parity first trial.
+Only after the operator records a parity failure or insufficient measured
+margin may they explicitly select `rental-floor`. There is **no automatic
+shrink or fallback**. Each trial has its own default name, caches, state and
+stage manifest; fallback appends `-rental-floor` to the parity name. The selector
+is part of stage identity, not a way to silently retune an existing stage.
+
+This policy **requires a new image build**: the prior image validator rejects
+3072 scheduler/prefill settings. Image `200b1841…` below is GPU-exercised only
+at the rental floor, not at parity. A newly built image needs its own recorded
+immutable digest and parity GPU qualification; neither is supplied by the old
+receipts. **The AIBeast maintenance window has not opened.**
 
 The exercised image is
 [`ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9`](https://github.com/malaiwah/glm52-exl3-vast/pkgs/container/glm52-exl3-vast),
@@ -283,12 +310,31 @@ image-recorded native libraries**. Provider NCCL 2.23.4 files remained on disk;
 live process maps showed the image's **NCCL 2.30.4** loaded. These are scoped
 hash/load observations, not complete filesystem or OCI isolation/security
 equivalence. Later source changes are not retroactively GPU-qualified.
-The resumed instance **500157 was paused after evidence capture**; its
-1200 GB user storage was preserved and remains billable.
+The resumed instance **500157 was paused after evidence capture**, preserving
+1200 GB of user storage (billable while paused). Subsequently, on the user's
+explicit destruction request, the provider destroy API returned success for
+500157. A subsequent `jl list` returned `[]` and all six resource counts were
+zero ([separate destroy receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json));
+the historical pause evidence remains unchanged.
 
 The [maintenance assets](maintenance/glm53-aibeast-500k/) stage a separate
 name, port, state and cache using Podman 4.9-compatible device mappings.
-`start` refuses while production is running. An authorized window must prove:
+`start` refuses while production is running. Safe staging/CPU inspection uses
+the newly built image's recorded `IMAGE=repository@sha256:…`, not the old
+floor-only digest:
+
+```bash
+# Set IMAGE to the new published immutable digest before these commands.
+: "${IMAGE:?Set IMAGE to the new parity-capable image digest}"
+export IMAGE
+MAINTENANCE_TRIAL=parity uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py stage
+MAINTENANCE_TRIAL=parity uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py config-smoke
+```
+
+These commands do not stop production or open a GPU window. After a justified
+parity failure only, use `MAINTENANCE_TRIAL=rental-floor` consistently for a
+new isolated stage and its subsequent commands; never reuse parity state.
+An authorized window must prove:
 
 - exact published image without runtime-source mounts and all pinned model
   files verified;
@@ -764,9 +810,12 @@ for four cards. The 2026-09-08 proof instead resumed the pre-existing
 pricing remain live values, not promises. A VM supports Docker; the spot
 container path below unpacks a custom image without a container runtime.
 **500157 was paused after evidence capture, preserving the user's existing
-storage.** Resume changed the machine ID: confirm the current ID with `jl list`
-before lifecycle actions rather than using predecessor 483634.
-Pausing releases GPU compute but storage remains billable.
+storage, then explicitly authorized for destruction; its destroy API returned
+success; `jl list` then returned `[]` and all six resource counts were zero
+([destroy receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json)).** The pause
+receipt remains historical: pausing released GPU compute but retained billable
+storage. Resume changed the machine ID; always resolve the current ID with
+`jl list` before lifecycle actions rather than using predecessor 483634.
 
 A managed-container probe was also completed rather than merely inferred from
 the catalog. Its four RTX PRO 6000 GPUs had peer reads/writes between every

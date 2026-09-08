@@ -1,0 +1,54 @@
+{
+  "container": "glm52-turnkey-r34-maint-20260815-v1",
+  "started": "2026-08-15T01:57:47.20070047Z",
+  "health": "healthy",
+  "environment": {
+    "MAX_MODEL_LEN": "520192",
+    "KV_CACHE_MEMORY_BYTES": "4518907904",
+    "MAX_NUM_SEQS": "12",
+    "MAX_NUM_BATCHED_TOKENS": "3072",
+    "VLLM_EXL3_PREFILL_CAPACITY": "3072",
+    "GPU_MEMORY_UTILIZATION": "0.95",
+    "DCP": "4",
+    "LMCACHE_L1_INIT_GB": "125",
+    "LMCACHE_RETRIEVE_TIMEOUT_SECONDS": "180",
+    "PREFIX_CACHE_DISK_GB": "384",
+    "OFFLOAD_FRACTION": "0.5",
+    "MTP_TOKENS": "3",
+    "MAX_CUDAGRAPH_CAPTURE_SIZE": "48",
+    "CUDAGRAPH_CAPTURE_SIZES": "4,8,12,16,20,24,28,32,36,40,44,48",
+    "VLLM_EXL3_TRELLIS_MAX_M": "48",
+    "PCIE_DMA_MIN_BYTES": "25165824",
+    "PCIE_CALIBRATION": "off",
+    "MODEL_VARIANT": "exl3-tr3-3.42bpw"
+  },
+  "serve_parameters": [
+    {
+      "--max-num-seqs": "12",
+      "--max-num-batched-tokens": "3072",
+      "--max-model-len": "520192",
+      "--kv-cache-memory-bytes": "4518907904",
+      "--gpu-memory-utilization": "0.95",
+      "--max-cudagraph-capture-size": "48",
+      "--compilation-config": "{cudagraph_mode:FULL_AND_PIECEWISE,cudagraph_capture_sizes:[4,8,12,16,20,24,28,32,36,40,44,48],custom_ops:[all],pass_config:{fuse_allreduce_rms:true}}",
+      "--speculative-config": "{method:mtp,num_speculative_tokens:3,moe_backend:triton,draft_sample_method:probabilistic,rejection_sample_method:standard}",
+      "--dcp-kv-cache-interleave-size": "64",
+      "--tensor-parallel-size": "4",
+      "--decode-context-parallel-size": "4"
+    },
+    {
+      "--max-num-seqs": "12",
+      "--max-num-batched-tokens": "3072",
+      "--max-model-len": "520192",
+      "--kv-cache-memory-bytes": "4518907904",
+      "--gpu-memory-utilization": "0.95",
+      "--max-cudagraph-capture-size": "48",
+      "--compilation-config": "{cudagraph_mode:FULL_AND_PIECEWISE,cudagraph_capture_sizes:[4,8,12,16,20,24,28,32,36,40,44,48],custom_ops:[all],pass_config:{fuse_allreduce_rms:true}}",
+      "--speculative-config": "{method:mtp,num_speculative_tokens:3,moe_backend:triton,draft_sample_method:probabilistic,rejection_sample_method:standard}",
+      "--dcp-kv-cache-interleave-size": "64",
+      "--tensor-parallel-size": "4",
+      "--decode-context-parallel-size": "4"
+    }
+  ],
+  "captured_at": "2026-09-08T01:38:41.410213+00:00"
+}

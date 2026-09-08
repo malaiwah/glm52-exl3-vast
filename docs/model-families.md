@@ -13,9 +13,10 @@ mean anything, and which of the measured failure rules apply.
 The next-release public default is **full non-Flash `glm53-3.42bpw-500k`**,
 variant `exl3-tr3-glm53-3.42bpw-500k`, in the `glm52` architecture family shared
 by full GLM-5.2 and GLM-5.3. It preserves 3.42bpw and the 520,192-token budget
-with reduced workspace. The spot rootfs graft passed >=500K retrieval
-(501,086 haystack tokens, 3/3 facts) and features with vision skipped, but not
-the full maintenance matrix. The older full `glm53-3.42bpw` profile retains
+with the exercised rental-floor defaults. The spot rootfs graft passed >=500K
+retrieval (501,086 haystack tokens, 3/3 facts) and features with vision skipped,
+but not the full maintenance matrix or parity trial. The older full
+`glm53-3.42bpw` profile retains
 its historical 393,216-token limit, not refreshed-image qualification, and
 `glm52-exl3` remains an explicit
 alternative. The Flash `glm53` family and its `glm53-k6` / `glm53-k8` variants
@@ -28,6 +29,32 @@ Verdict's GPU qualification nor the historical 393K result transfers to the
 Gilded r34 refresh; necessary patches are re-derived, not a claim that all
 27 Verdict overlays already exist in Gilded.
 
+**Maintenance first tries current GLM-5.2 resources**, as the user explicitly
+requested; full GLM-5.3 sharing the architecture does not imply it requires
+smaller workspaces. `MAINTENANCE_TRIAL=parity` defaults to the
+[live environment and serving-argv baseline](../maintenance/glm53-aibeast-500k/production-baseline.json):
+12 sequences, scheduler/prefill arena 3072/3072, GMU 0.95, maximum graph
+capture 48 (4,8,12,16,20,24,28,32,36,40,44,48), Trellis maximum M 48 and
+125 GiB initial LMCache RAM. The stage overrides, not replaces, the general
+profile's rental-floor defaults: 8 sequences, 2048/1024, GMU 0.93, graphs 32
+(4,8,12,16,20,24,28,32), Trellis 32 and 20 GiB initial RAM.
+
+Both trials keep the pinned full 3.42bpw weights, context 520,192,
+KV 4,518,907,904 bytes/GPU, TP4/DCP4, interleave 64, native probabilistic MTP3,
+online K6, dynamic NVFP4/FP8 RoPE, RAM ceiling 125 GiB and disk tier 384 GiB.
+Only a recorded parity failure or insufficient measured margin permits explicit
+`MAINTENANCE_TRIAL=rental-floor`, with a `-rental-floor` default-name suffix
+and isolated caches/state/stage manifest. The selector is stage identity.
+There is no automatic shrink, token reduction or lower-bit substitution.
+
+Parity needs a **new image build**: the prior `200b1841…` image validator
+rejects 3072 scheduler/prefill settings. Its GPU receipts qualify only the
+rental-floor slice; the new immutable digest must be recorded after build and
+its parity GPU qualification is not yet run. See
+[safe staging/config-smoke commands](configuration.md#aibeast-maintenance-trial-selector).
+**The AIBeast maintenance window has not opened; no production stop/restart
+is authorized.**
+
 See the [exact image/source/CI and PR #58 evidence](../TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08).
 That receipt is scoped to `200b1841…` / `e9623135…`; later helper/source
 changes are not retroactively exercised. The provider OS graft matched 19
@@ -37,7 +64,11 @@ processes loaded image NCCL 2.30.4. This does not establish full filesystem or
 OCI isolation/security equivalence. No AIBeast production restart or final
 promotion occurred. The reused four-GPU spot rental resumed predecessor
 **483634** as **500157**, then was **confirmed Paused after evidence capture**,
-preserving the user's old storage, which remains billable paused.
+preserving the user's old storage, which remained billable while paused.
+The user subsequently explicitly requested destruction: the provider API
+succeeded, `jl list` returned `[]`, and all six resource counts were zero.
+The [separate destroy receipt](../maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json)
+records the final inventory without changing the historical pause receipt.
 
 | | |
 |---|---|

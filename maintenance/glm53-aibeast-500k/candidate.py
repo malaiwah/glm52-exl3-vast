@@ -58,8 +58,17 @@ def inspect(name):
     return json.loads(podman("inspect", name, capture=True))[0]
 
 
+def maintenance_trial():
+    trial = os.environ.get("MAINTENANCE_TRIAL", "parity")
+    require(trial in ("parity", "rental-floor"),
+            "MAINTENANCE_TRIAL must be parity or rental-floor")
+    return trial
+
+
 def location():
-    name = os.environ.get("NAME", SPEC["default_name"])
+    trial = maintenance_trial()
+    default_name = SPEC["default_name"] + ("-rental-floor" if trial == "rental-floor" else "")
+    name = os.environ.get("NAME", default_name)
     require(re.fullmatch(re.escape(SPEC["default_name"]) + r"(?:-[a-zA-Z0-9_-]+)?", name),
             "NAME must use the isolated candidate prefix")
     root = (Path(os.environ.get("STAGE_ROOT", SPEC["default_root"])) / name).resolve()
@@ -68,10 +77,10 @@ def location():
 
 
 def settings():
+    root, name = location()
     image = os.environ.get("IMAGE", "")
     require(re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", image),
             "IMAGE must be an explicit repository@sha256:<64 hex>; no tag/default/pull")
-    root, name = location()
     default_model = Path(SPEC["default_model_root"]) / "snapshots" / SPEC["model_revision"]
     model = Path(os.environ.get("MODEL_DIR_HOST", str(default_model)))
     require(model.is_absolute() and model.is_dir(), "MODEL_DIR_HOST must be a prepared absolute HF snapshot")
@@ -96,6 +105,10 @@ def settings():
         require(path.is_file() and path.stat().st_size == item["size"],
                 f"missing/incomplete pinned runtime file: {item['path']}")
     env = dict(SPEC["environment"])
+    trial = maintenance_trial()
+    if trial == "rental-floor":
+        env.update(SPEC["fallback_environment"])
+    env["MAINTENANCE_TRIAL"] = trial
     require(int(env["MAX_MODEL_LEN"]) >= 520192, "refusing to shrink AIBeast's 520192-token envelope")
     require(cfg.get("max_position_embeddings", 0) >= int(env["MAX_MODEL_LEN"]),
             "checkpoint positional limit is smaller than the candidate envelope")
@@ -122,6 +135,8 @@ def manifest(env):
 
 
 def staged(root, env):
+    require(env.get("MAINTENANCE_TRIAL") == maintenance_trial(),
+            "stage maintenance trial differs from MAINTENANCE_TRIAL")
     path = root / "stage.json"
     require(path.is_file(), "run stage first; no implicit staging during start")
     require(json.loads(path.read_text()) == manifest(env),
@@ -243,6 +258,7 @@ def main():
                                            "prepare-reboot", "boot-check"])
     parser.add_argument("--evidence", help="actual qualification evidence manifest JSON")
     args = parser.parse_args()
+    trial = maintenance_trial()
     if args.command == "boot-check":
         root, name = location()
         require(not (root / "boot-disabled").exists(),
@@ -264,6 +280,8 @@ def main():
         saved = json.loads((root / "stage.json").read_text())
         env = saved["environment"]
         require(env["NAME"] == name, "stage container identity does not match requested rollback")
+        require(env.get("MAINTENANCE_TRIAL") == trial,
+                "stage maintenance trial differs from MAINTENANCE_TRIAL")
         production = SPEC["production_container"]
         require(saved["production_container"] == production, "unexpected production rollback identity")
         require(exists(production), "preserved production rollback container is missing")
@@ -333,13 +351,16 @@ def main():
             print("Preflight passed; production was not stopped. Start requires a separate maintenance decision.")
     elif args.command == "qualification-commands":
         print("RUN_GPU_QUALIFICATION=1 " + shlex.join([
+            "MAINTENANCE_TRIAL=" + env["MAINTENANCE_TRIAL"],
+            "NAME=" + env["NAME"], "STAGE_ROOT=" + str(root.parent),
             sys.executable, str(HERE / "candidate.py"), "run-qualification"]))
         print("# Runs real GPU context/features/C1C4C8/cache pressure/restarts/service fault injection.")
         print("# Produces all receipts automatically and runs the promotion gate; no cutover.")
         print("# Deadline ownership is tested on the installed adapter with CPU-controlled futures.")
         print("# This does not inject or claim a 180-second GPU DMA hang.")
     elif args.command == "run-qualification":
-        subprocess.run([sys.executable, str(HERE / "run_qualification.py")], check=True)
+        subprocess.run([sys.executable, str(HERE / "run_qualification.py")],
+                       env={**os.environ, **env, "STAGE_ROOT": str(root.parent)}, check=True)
     elif args.command == "qualify":
         require(args.evidence, "qualify requires --evidence; health/config smoke cannot promote")
         qualify(root, env, args.evidence)
@@ -360,7 +381,8 @@ def main():
         unit = unit.replace("[Unit]\n", "[Unit]\nRequiresMountsFor=" +
                             shlex.join([str(root), env["MODEL_DIR_HOST"], env["DOWNLOAD_MARKER_HOST"]]) + "\n", 1)
         boot_env = " ".join(json.dumps(value) for value in
-                            ("NAME=" + env["NAME"], "STAGE_ROOT=" + str(root.parent)))
+                            ("NAME=" + env["NAME"], "STAGE_ROOT=" + str(root.parent),
+                             "MAINTENANCE_TRIAL=" + env["MAINTENANCE_TRIAL"]))
         unit = unit.replace("[Service]\n", "[Service]\nEnvironment=" + boot_env + "\nExecStartPre=" +
                             shlex.join([sys.executable, str(HERE / "candidate.py"), "boot-check"]) + "\n", 1)
         unit_path = root / ("container-" + env["NAME"] + ".service")

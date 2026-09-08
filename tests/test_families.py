@@ -962,6 +962,36 @@ def test_full_glm53_candidate_boundaries():
           "davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw"
           and eff["MAX_MODEL_LEN"] == 520192
           and eff["SERVED_MODEL_NAME"] == "GLM-5.3")
+    check("the generic profile retains the exercised rental floor",
+          eff["MAX_NUM_SEQS"] == 8
+          and eff["MAX_NUM_BATCHED_TOKENS"] == 2048
+          and eff["VLLM_EXL3_PREFILL_CAPACITY"] == 1024
+          and eff["GPU_MEMORY_UTILIZATION"] == 0.93
+          and eff["MAX_CUDAGRAPH_CAPTURE_SIZE"] == 32
+          and eff["VLLM_EXL3_TRELLIS_MAX_M"] == 32)
+    parity, _, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.42bpw-500k",
+        MAX_NUM_SEQS=12, MAX_NUM_BATCHED_TOKENS=3072,
+        VLLM_EXL3_PREFILL_CAPACITY=3072, GPU_MEMORY_UTILIZATION=0.95,
+        MAX_CUDAGRAPH_CAPTURE_SIZE=48,
+        CUDAGRAPH_CAPTURE_SIZES="4,8,12,16,20,24,28,32,36,40,44,48",
+        VLLM_EXL3_TRELLIS_MAX_M=48)
+    findings = gc.validate(parity, {"gpu_count": 4})
+    check("live GLM-5.2 resource parity is admissible, not GPU-qualified",
+          not errs(findings) and "variant-untested" in ids(findings), findings)
+    for key, value in {
+        "MAX_NUM_SEQS": 13, "MAX_NUM_BATCHED_TOKENS": 3073,
+        "VLLM_EXL3_PREFILL_CAPACITY": 3073,
+        "MAX_CUDAGRAPH_CAPTURE_SIZE": 52, "VLLM_EXL3_TRELLIS_MAX_M": 52,
+        "CUDAGRAPH_CAPTURE_SIZES": "4,8,12,16,20,24,28,32",
+    }.items():
+        check(f"parity rejects an oversized or incoherent {key}",
+              "glm53-candidate-envelope" in errs(gc.validate({**parity, key: value})))
+    smaller, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.25bpw")
+    for key, value in {"MAX_NUM_BATCHED_TOKENS": 3072,
+                       "VLLM_EXL3_PREFILL_CAPACITY": 3072}.items():
+        check(f"the 3.25bpw candidate retains its original {key} ceiling",
+              "glm53-candidate-envelope" in errs(gc.validate({**smaller, key: value})))
     check("a larger unmeasured envelope is not silently accepted",
           "glm53-candidate-envelope" in errs(gc.validate(
               {**eff, "MAX_MODEL_LEN": 655360}, {"gpu_count": 4})))

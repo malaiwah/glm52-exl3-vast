@@ -71,6 +71,58 @@ and preserve the old deployment for rollback. Known-invalid startup
 configurations are refused before launch; an untested variant warning is not
 qualification. `CONFIG_SMOKE=1` resolves the CPU-side contract only.
 
+### AIBeast maintenance trial selector
+
+The public `MODEL_PROFILE=glm53-3.42bpw-500k` keeps the exercised rental-floor
+defaults. The separate maintenance entry overrides those defaults:
+**`MAINTENANCE_TRIAL=parity` is the default first trial**, at the user's
+explicit request to try current GLM-5.2 resources first. This is not a change
+to production configuration. The
+[live baseline](../maintenance/glm53-aibeast-500k/production-baseline.json)
+records both production `Config.Env` and actual serving argv.
+
+| environment | parity first trial | explicit `rental-floor` |
+|---|---|---|
+| `MAX_NUM_SEQS` | 12 | 8 |
+| `MAX_NUM_BATCHED_TOKENS` | 3072 | 2048 |
+| `VLLM_EXL3_PREFILL_CAPACITY` | 3072 | 1024 |
+| `GPU_MEMORY_UTILIZATION` | 0.95 | 0.93 |
+| `MAX_CUDAGRAPH_CAPTURE_SIZE` | 48 | 32 |
+| `CUDAGRAPH_CAPTURE_SIZES` | 4,8,12,16,20,24,28,32,36,40,44,48 | 4,8,12,16,20,24,28,32 |
+| `VLLM_EXL3_TRELLIS_MAX_M` | 48 | 32 |
+| `LMCACHE_L1_INIT_GB` | 125 | 20 |
+
+Both trials retain full 3.42bpw at the pinned revision, 520,192 total tokens,
+KV 4,518,907,904 bytes/GPU, TP4/DCP4, interleave 64, native probabilistic MTP3,
+online K6, dynamic NVFP4/FP8 RoPE, LMCache RAM ceiling 125 GiB and disk 384 GiB.
+No architecture claim requires reduced workspaces; no token/precision reduction
+or lower-bit substitution is authorized.
+
+Only after a recorded parity failure or insufficient measured margin may the
+operator select `MAINTENANCE_TRIAL=rental-floor`. Unknown selectors are rejected;
+there is no automatic fallback. The parity default name is retained, while
+rental-floor adds `-rental-floor`, separating stage manifest, state and caches.
+The selector is recorded in stage identity/environment; do not reuse a stage
+to change trials. Retain the selected trial for subsequent qualification
+commands; boot-check and rollback use the saved stage.
+
+The old `200b1841…` image rejects 3072 scheduler/prefill values. **Build and
+record a new immutable image digest before parity staging**; the prior digest's
+GPU evidence is floor-only, and the new image's parity GPU gate is not yet run.
+Safe staging/CPU inspection, after setting `IMAGE` to that new digest:
+
+```bash
+: "${IMAGE:?Set IMAGE to the new parity-capable image digest}"
+export IMAGE
+MAINTENANCE_TRIAL=parity uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py stage
+MAINTENANCE_TRIAL=parity uv run --no-project --python 3.12 maintenance/glm53-aibeast-500k/candidate.py config-smoke
+```
+
+Run from the repository root. After a justified failure only, use explicit
+`MAINTENANCE_TRIAL=rental-floor` for a fresh, separately named stage and smoke.
+These commands do not stop production. **The maintenance window has not
+opened; no production stop/restart is authorized.**
+
 The [current spot receipts](../TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08)
 belong to image `200b1841…` / source `e9623135…`, not later checkout changes.
 Gilded r34 plus necessary patches does not inherit all 27 Verdict fixes.
@@ -81,8 +133,11 @@ seven image-recorded native-library hashes. Provider NCCL 2.23.4 files remained
 disclosed; inspected live processes loaded image NCCL 2.30.4. This is not full
 filesystem or OCI isolation/security equivalence. No AIBeast production restart
 or image promotion was performed. Predecessor 483634 resumed as **500157**,
-which was **confirmed Paused after evidence capture**, preserving old storage;
-that storage remains billable.
+which was **confirmed Paused after evidence capture**, preserving old storage
+that remained billable while paused. Subsequently, at the user's explicit
+request, destruction succeeded; `jl list` returned `[]` and all six resource
+counts were zero. The [new destroy receipt](../maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json)
+does not rewrite the historical pause evidence.
 
 Operator compatibility corrections ([issue 47](https://github.com/malaiwah/glm52-exl3-vast/issues/47)):
 `MODEL_DISPLAY_NAME`, `MODEL_DOWNLOAD_WORKERS` and `ALLOW_UNSUPPORTED_GPU`
