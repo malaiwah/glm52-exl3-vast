@@ -74,6 +74,13 @@ qualification. `CONFIG_SMOKE=1` resolves the CPU-side contract only.
 
 ### AIBeast maintenance trial selector
 
+The later [selected optimization](../TEST_RESULTS.md#controlled-aibeast-optimization-2026-09-08)
+uses a separate source-locked image and explicit host overrides: 2048 EXL3
+arena rows, 3072 scheduler tokens, 0.6 measured prefill-service share, and
+`GLM-5.3 local-primary` names. All other declared model/resource invariants stay
+unchanged. The original parity/rental-floor presets described below remain
+historical baseline/reproduction options, not an implicit optimization update.
+
 The public `MODEL_PROFILE=glm53-3.42bpw-500k` keeps the exercised rental-floor
 defaults. The separate maintenance entry overrides those defaults:
 **`MAINTENANCE_TRIAL=parity` was deployed and accepted on 2026-09-08**, preserving
@@ -109,9 +116,9 @@ to change trials. Retain the selected trial for subsequent qualification
 commands; boot-check and rollback use the saved stage.
 
 The old `200b1841…` image rejects 3072 scheduler/prefill values and its GPU
-evidence remains floor-only. AIBeast instead runs parity-capable image
+evidence remains floor-only. The initial AIBeast parity cutover used image
 `8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`
-(source `499d34e`), with [immutable active identity](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/active.json).
+(source `499d34e`), with [immutable initial identity](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/active.json).
 For a future separately authorized stage, set `IMAGE` to its intended immutable
 digest before these non-disruptive staging/CPU-inspection commands:
 

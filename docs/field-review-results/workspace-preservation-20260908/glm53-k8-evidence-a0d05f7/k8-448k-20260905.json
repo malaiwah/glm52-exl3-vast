@@ -1,0 +1,52 @@
+{
+ "ts": "2026-08-29T14:37:05Z",
+ "base_url": "http://127.0.0.1:8000",
+ "health": true,
+ "short_prompt": {
+  "ok": true,
+  "checks": [
+   {
+    "name": "arithmetic",
+    "ok": true,
+    "detail": "answered '391'"
+   },
+   {
+    "name": "factual",
+    "ok": true,
+    "detail": "answered 'Paris'"
+   },
+   {
+    "name": "instruction",
+    "ok": true,
+    "detail": "answered 'BANANA'"
+   }
+  ]
+ },
+ "structured_output": {
+  "ok": true,
+  "detail": "thinking + strict JSON schema passed",
+  "reasoning_field": true
+ },
+ "long_context": {
+  "attempted": true,
+  "seed": 20260905,
+  "target_tokens": 448000,
+  "tokens": 449461,
+  "tokens_exact": true,
+  "depths": [
+   0.15,
+   0.55,
+   0.9
+  ],
+  "found": 3,
+  "total": 3,
+  "degenerate": "",
+  "answer_head": "The user wants me to find the access codes for three cities: Kyoto, Reykjavik, and Valparaiso from the document.\n\nLet me search through the document:\n\n1. Kyoto: \"IMPORTANT: the access code for Kyoto is UJC-9407.\" - found around shift 4257 area.\n\n2. Reykjavik: \"IMPORTANT: the access code for Reykjavik is LRD-4736.\" - found around shift 15611 area.\n\n3. Valparaiso: \"IMPORTANT: the access code for Val",
+  "ok": true,
+  "duration_s": 175.086
+ },
+ "long_context_verified": true,
+ "ok": true,
+ "reason": "serving; long-context retrieval verified",
+ "duration_s": 228.5
+}

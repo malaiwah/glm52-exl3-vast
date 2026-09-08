@@ -1,0 +1,39 @@
+{
+ "ts": "2026-08-29T14:40:54Z",
+ "base_url": "http://127.0.0.1:8000",
+ "health": true,
+ "short_prompt": {
+  "ok": true,
+  "checks": [
+   {
+    "name": "arithmetic",
+    "ok": true,
+    "detail": "answered '391'"
+   },
+   {
+    "name": "factual",
+    "ok": true,
+    "detail": "answered 'Paris'"
+   },
+   {
+    "name": "instruction",
+    "ok": true,
+    "detail": "answered 'BANANA'"
+   }
+  ]
+ },
+ "structured_output": {
+  "ok": true,
+  "detail": "thinking + strict JSON schema passed",
+  "reasoning_field": true
+ },
+ "long_context": {
+  "attempted": false,
+  "ok": false,
+  "detail": "long-context probe disabled by configuration"
+ },
+ "long_context_verified": false,
+ "ok": true,
+ "reason": "serving; SHORT PROMPTS ONLY \u2014 long-context correctness is NOT verified",
+ "duration_s": 71.6
+}

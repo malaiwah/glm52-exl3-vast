@@ -12,12 +12,13 @@ and the per-release `docs/glm52-rXX-*.md` files. This file records provider
 integration evidence, bug discoveries and fixes, cost tracking, and the
 decision history that explains why the codebase is the way it is.
 
-**AIBeast is now serving full GLM-5.3 3.42bpw at 520,192 total tokens with
-the old GLM-5.2 resource policy restored**, on the same port 8000 endpoint and
-`GLM-5.2` / `local-primary` aliases, plus `GLM-5.3`. The authorized 2026-09-08
-cutover passed two >=500K retrieval trials and an accepted real-client soak.
-This is operational acceptance, **not a completed maintenance, performance
-or quality matrix**. The public profile's rental-floor defaults are unchanged.
+**AIBeast serves full GLM-5.3 3.42bpw at 520,192 total tokens** as
+`GLM-5.3` and `local-primary` on port 8000. Its selected optimization uses
+the B12X route/teardown fixes, 60% measured prefill-service fairness, and a
+2048-row EXL3 arena with the 3072-token scheduler. The
+[controlled optimization record](#controlled-aibeast-optimization-2026-09-08)
+preserves every arm and its limits. This is not a completed broad task-quality
+or long-term stability matrix; public rental-floor defaults remain unchanged.
 The older 393,216-token and Verdict/Flash qualifications remain historical and
 do not transfer to this Gilded image.
 
@@ -49,33 +50,34 @@ See `maintenance/glm53-aibeast-500k/memory-comparison.json` for exact bytes.
 The preserved GLM-5.2 boot reports 81.73 GiB model loading and 0.75 GiB graphs
 per rank. The older 5.3 receipt reports 82.42 GiB and 0.61 GiB on another
 runtime. The earlier spot-container arm used scheduler/prefill 2048/1024
-without lowering precision; the current AIBeast arm uses the old 3072/3072
-resource policy. Neither is evidence that GLM-5.3 architecture requires
-smaller workspaces. The two AIBeast near-boundary probes and accepted soak
+without lowering precision; AIBeast initially used 3072/3072 and subsequently
+selected 3072/2048 after a controlled margin/latency comparison. Neither
+observation establishes that the architecture requires smaller workspaces.
+The two initial AIBeast near-boundary probes and accepted soak
 below establish operational viability at parity, not controlled performance,
 full concurrency, disk L2/recovery, KLD or broad task-quality qualification.
 No 750K result is claimed.
 
-**Current maintenance policy: parity first, explicitly requested by the user.**
-`MAINTENANCE_TRIAL` defaults to `parity`, using the
-[live GLM-5.2 `Config.Env` and serving-argv baseline](maintenance/glm53-aibeast-500k/production-baseline.json)
-from `glm52-turnkey-r34-maint-20260815-v1`.
+**The original maintenance policy was parity first**, using the
+[GLM-5.2 environment/argv baseline](maintenance/glm53-aibeast-500k/production-baseline.json).
+The later optimization changed only explicitly measured host settings; the
+original `MAINTENANCE_TRIAL` presets remain available and unchanged.
 
-| setting | current AIBeast parity deployment | exercised rental floor / public defaults |
+| setting | selected AIBeast optimization | exercised rental floor / public defaults |
 |---|---|---|
-| sequences / scheduler / prefill arena | 12 / 3072 / 3072 | 8 / 2048 / 1024 |
+| sequences / scheduler / prefill arena | 12 / 3072 / 2048 | 8 / 2048 / 1024 |
 | GMU / maximum graph capture / Trellis maximum M | 0.95 / 48 / 48 | 0.93 / 32 / 32 |
 | graph capture sizes | 4,8,12,16,20,24,28,32,36,40,44,48 | 4,8,12,16,20,24,28,32 |
 | LMCache initial RAM | 125 GiB | 20 GiB |
+| measured prefill-service share | 0.6 (model-service wallclock) | disabled |
 
 Both retain full 3.42bpw at the same revision, 520,192 context, TP4/DCP4,
 interleave 64, native probabilistic MTP3, online K6, dynamic NVFP4/FP8 RoPE,
 KV 4,518,907,904 bytes/GPU, RAM ceiling 125 GiB and disk tier 384 GiB.
-The public profile defaults remain the rental floor; the maintenance stage
-overrides them for parity. Only a recorded parity failure or insufficient
-measured margin justifies explicit `MAINTENANCE_TRIAL=rental-floor`, with its
-`-rental-floor` default-name suffix and isolated caches/state/stage manifest.
-The selector is part of stage identity. No automatic fallback, token-limit
+The public profile defaults remain the rental floor. The original parity and
+explicit rental-floor presets retain their isolated stage identities; the
+selected optimization uses a separate source-locked image and host overrides.
+No automatic fallback, token-limit
 reduction or quantization reduction is authorized.
 
 The parity-capable image is `8006d209…`, built from source `499d34e`;
@@ -91,7 +93,8 @@ relabelled as tests of the refreshed candidate.
 
 | profile | release | hardware | status | section |
 |---|---|---|---|---|
-| Full GLM-5.3 EXL3 TR3 3.42bpw parity | Gilded r34-derived image `8006d209…`, source `499d34e` | 4x RTX PRO 6000 (AIBeast) | **Live: two >=500K retrievals and real-client soak accepted; full matrix open** | [AIBeast cutover](#aibeast-parity-cutover-and-accepted-soak-2026-09-08) |
+| Full GLM-5.3 EXL3 TR3 3.42bpw optimized host | Local image `56f7a345…`, exact `8006d209…` parent plus verified overlays | 4x RTX PRO 6000 (AIBeast) | **Selected: 500K and concurrency gates passed; scoped soak/evidence below** | [Optimization](#controlled-aibeast-optimization-2026-09-08) |
+| Full GLM-5.3 EXL3 TR3 3.42bpw initial parity | Gilded r34-derived image `8006d209…`, source `499d34e` | 4x RTX PRO 6000 (AIBeast) | **Historical cutover: two >=500K retrievals and real-client soak accepted; full matrix open** | [AIBeast cutover](#aibeast-parity-cutover-and-accepted-soak-2026-09-08) |
 | Full GLM-5.3 EXL3 TR3 3.42bpw reduced-workspace (next-release default) | Gilded r34 plus required patches, image `200b1841…` | 4x RTX PRO 6000 (JarvisLabs spot 500157, resumed from 483634) | **>=500K retrieval, features and DRAM retrieval passed; full matrix open** | [spot proof](#jarvislabs-spot-container-proof-2026-09-08) |
 | GLM-5.3 full-model EXL3 TR3 3.42bpw | 27-overlay r28 runtime | 4x RTX PRO 6000 (JarvisLabs) | Qualified | [GLM-5.3 full model](#glm-53-full-model-342bpw-qualification-jarvislabs-2026-08-29) |
 | GLM-5.2 EXL3 TR3 3.0bpw (historical default) | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
@@ -434,6 +437,157 @@ During that workload all GPUs were at 100% utilization with at least 943 MiB
 free in the sampled snapshot. To avoid disrupting live use, the 389,959-token
 matrix was not rerun against the hardening-only image; the exact runtime/profile
 matrix above remains the long-context qualification evidence.
+
+#### Memory-accounting postmortem and GLM-5.2 control (2026-08-30)
+
+**Historical scope, preserved 2026-09-08:** this postmortem records the August 30
+Brandon-derived image and control, not the refreshed Gilded Gnosis deployment.
+Its 393,216-token envelope and recommendations apply only to that experiment;
+they do not supersede the [September 8 AIBeast qualification](#aibeast-parity-cutover-and-accepted-soak-2026-09-08).
+Preservation adds no new runtime qualification, raw rental evidence, or completed
+GPQA result. The source-trace findings and original evidence limitations below
+remain part of the historical record.
+
+Three superficially similar events had different failure semantics and must not
+be aggregated as one OOM count:
+
+| event | memory policy | observed failure |
+|---|---|---|
+| GLM-5.2 3.42bpw natural 524,800-token arm | vLLM profiling at GMU 0.95 | startup completed with about 2.3 GiB/GPU free, but the first 131,070-token prefill died when Trellis requested 48 MiB with 32.81 MiB physically free; pinning 2,032 blocks / 520,192 tokens returned 18 blocks and the same workload passed |
+| GLM-5.3 inherited 520,192-token arm | fixed 4,518,907,904 B/GPU | deterministic startup and 32K retrieval passed, but the first seeded temperature-1 request OOMed in top-p sampling and hung the workers with 3–169 MiB free/rank |
+| GLM-5.2 control at the GLM-5.3 envelope | fixed 3,415,867,392 B/GPU | 4,275 recoverable allocator-attempt warnings occurred during cold model loading; startup, stochastic verification, and 3/3 long probes still passed with zero restarts |
+
+The first event remains detailed in
+[the GLM-5.2 3.42bpw qualification plan](docs/AIBEAST_GLM52_342_QUALIFICATION_PLAN.md#first-342-capacity-result).
+The rejected GLM-5.3 arm's free-memory minima were transcribed during live
+diagnosis, but its raw server and `nvidia-smi` traces were not retained.
+Consequently, the exact allocation that finally failed cannot be reconstructed;
+the top-p location, request shape, worker hang, and insufficient physical
+headroom are established, but a more specific allocation-size claim is not.
+
+The controlled GLM-5.2 boot used the same hardening image and the immutable
+`willfalco/GLM-5.2-EXL3-TR3-3.42bpw@a350292cb2038f2c31732569a711a89e5d72fd46`
+checkpoint. Its allocator warnings ran from 11:38:27 through 11:39:51 UTC while
+online EXL3 mixed-Trellis loading advanced through layers 45–77. Counts by rank
+were 1,512 / 920 / 919 / 924. The attempted segment sizes were:
+
+- 20 MiB: 3,876;
+- 162 / 168 / 324 / 334 MiB: 89 / 90 / 92 / 92;
+- 2 / 16 / 24 / 48 / 144 / 454 MiB: 3 / 29 / 1 / 1 / 1 / 1.
+
+The minimum CUDA-reported free values in those warning records were 2,228,224 B
+on rank 0 and 2,555,904 B on ranks 1–3. The final rank-0 attempts overlapped
+direct symmetric-memory DCP, LMCache initialization, and B12X MLA construction.
+Model loading nevertheless finished at 81.69 GiB/rank, the API became ready,
+the authoritative verifier passed, and the container remained running with
+`RestartCount=0` and `OOMKilled=false`.
+
+These warnings are failed `cudaMalloc` *attempts*, not one thrown
+`torch.OutOfMemoryError` each. The pinned allocator source logs at every failed
+attempt, clears CUDA's error state, then tries an overflow pool, releases
+suitable cached blocks, and finally releases all non-split cached blocks before
+throwing. It also obtains a 20 MiB segment for an original request between 1
+and 10 MiB when no suitable block exists. Therefore, the 3,876 20 MiB records
+do not establish that callers each requested a 20 MiB tensor. This behavior
+matches PyTorch's documented
+[segment and fragmentation model](https://docs.pytorch.org/devlogs/eager/2026-06-01-cuda-caching-allocator/).
+
+The GLM-5.2 control generated all 1,644 online-K6 entries from scratch under
+its model-identity-isolated namespace: zero hits and 11,897,961,792 bytes of
+fresh cache data. The GLM-5.3 baseline reused its warm cache. That cold/warm
+difference is strongly associated with 4,275 versus 123 load-phase warnings
+and makes the raw warning counts unsuitable as a model-to-model runtime-memory
+comparison. It does not affect the frozen inference settings.
+
+Source inspection identified why the inherited KV envelope was admitted before
+the later allocation appeared:
+
+1. `GPUWorker` takes `init_snapshot` after NCCL initialization but **before**
+   model-runner construction and weight loading. The fixed-mode log's
+   92.28–93.56 GiB “Initial free memory” values are that pre-model snapshot.
+   They are not post-load or pre-KV headroom; prior notes interpreting them as
+   free memory after the allocator warnings were incorrect.
+2. When `kv_cache_memory_bytes` is set, `determine_available_memory()` runs a
+   compile/profile-shaped forward and partial kernel warmup, but explicitly
+   skips the accounting profile and returns the manual KV byte count unchanged.
+   It does not deduct measured non-KV consumption or a CUDA-graph estimate.
+   This is consistent with vLLM's
+   [`kv_cache_memory_bytes` API](https://docs.vllm.ai/en/stable/api/vllm/config/cache/)
+   and
+   [startup-optimization warning](https://docs.vllm.ai/en/latest/configuration/optimization/):
+   fixed KV ignores `gpu_memory_utilization`, skips memory profiling and graph
+   estimation, and is valid only for the same GPU and initial occupancy.
+3. The engine initializes the fixed KV pool first, then performs
+   runtime-dependent kernel warmup and CUDA-graph capture. The control's graph
+   capture added 0.61 GiB/rank after the 3.18 GiB/rank KV decision. Sampler
+   warmup follows graph capture. These operations can prove that the selected
+   pool happens to fit, but they were not inputs to fixed-pool admissibility.
+4. V2 sampler warmup uses `SamplingParams.for_sampler_warmup()`, which exercises
+   temperature, top-p, and top-k but supplies no explicit seed. The active
+   sampler uses FlashInfer in that case. Any explicit per-request seed disables
+   FlashInfer and selects native top-k/top-p plus Gumbel; native batches below
+   eight logits rows use a full PyTorch vocabulary sort. The rejected arm's
+   first failing request was seeded. On the control, `_gumbel_sample_kernel`
+   first JIT-compiled at 11:42:33, after API application startup, proving that
+   engine warmup had not exercised that exact path.
+5. Later C8 activity first compiled sparse-DCP empty-row sanitation and
+   correction at 11:58:17 and `_topk_topp_kernel` at 11:58:19. Startup warmup
+   cannot enumerate every prompt length, DCP occupancy, sampler backend, and
+   batch shape. Physical residual headroom remains necessary even after all
+   declared startup phases pass.
+
+The appliance now closes the most dangerous operational gap: its authoritative
+gate sends a seeded temperature-1 request with an exact 512-token output, then
+checks engine health before `mark-good` and `phase=serving`. That gate caught
+the class of failure, but it is intentionally after API-process readiness and
+does not make vLLM's earlier fixed-KV calculation predictive.
+
+The upstream findings corroborate the source trace:
+
+- [vLLM issue 26300](https://github.com/vllm-project/vllm/issues/26300)
+  calls CUDA-graph/compile allocation versus KV sizing a general problem and
+  proposes profiling before final physical KV mapping; it was closed as not
+  scheduled.
+- [vLLM issue 30637](https://github.com/vllm-project/vllm/issues/30637)
+  records a sampler-warmup full-vocabulary-sort OOM near physical capacity and
+  a later serving-shape 100 MiB OOM with only 43.75 MiB free.
+- [vLLM issue 33920](https://github.com/vllm-project/vllm/issues/33920)
+  records the analogous GLM sampler-warmup sort requesting 304 MiB with only
+  about 200 MiB free; it closed stale without a fix.
+- PyTorch's
+  [CUDA-memory tooling](https://docs.pytorch.org/docs/2.13/torch_cuda_memory.html)
+  sees only allocator-managed memory. Direct CUDA allocations require
+  device-level/NVML comparison, so an allocator snapshot alone is insufficient.
+
+The operational conclusions are:
+
+- Keep the controlled 393,216-token / 3,415,867,392-byte envelope unchanged.
+  It is empirically qualified for this image, hardware, and first-use workload;
+  it is not a general admission proof.
+- Scope every fixed KV value to the exact checkpoint, image, GPU, initial
+  occupancy, online/JIT cache state, graph mode, speculation settings, and
+  declared workload. Lowering `gpu_memory_utilization` does nothing while fixed
+  KV is active.
+- Preserve both the seeded stochastic gate and per-rank physical free-memory
+  sampling after first use and at maximum declared concurrency.
+- Extend engine warmup to cover unseeded FlashInfer and explicitly seeded native
+  small-batch sampling, plus sparse-DCP long-prefill shapes, before readiness
+  where practical.
+- A durable allocator design must profile/capture persistent graph and kernel
+  resources before committing the final physical KV pool, or shrink/remap KV
+  from measured residual memory. Expandable segments may reduce fragmentation;
+  they do not create missing headroom or repair fixed-KV accounting.
+- Future negative arms must retain raw per-rank server logs, `nvidia-smi`
+  traces, and bounded allocator snapshots. Report allocator-attempt warnings,
+  thrown OOMs, EngineCore deaths, and recoverable KV preemption separately.
+- Report cold and warm online-quant starts separately. Their allocator-warning
+  counts are not directly comparable.
+
+The rental retains the machine-readable analysis, parsed distributions, exact
+runtime source excerpts, redacted boot log, and control manifest under
+`qualification/gpqa-glm52-control-20260830/`. At the analysis boundary the
+single owner-controlled GPQA run was still active; no second run or completion
+probe was sent.
 
 ## Provider integration
 
@@ -2104,3 +2258,124 @@ GPU and yields about 14.4 GiB less KV/GPU. K6 is 5.3–7.3× faster at short
 context and 8.3–24.4× faster when the measured 32K/128K prefill cost is
 included. K8 is qualified as a fidelity-first alternative. K6 remains the
 production default.
+
+## Workspace preservation and runtime-capacity audit (2026-09-08)
+
+The [archive manifest](docs/field-review-results/workspace-preservation-20260908/manifest.json)
+records four historical workspace notes and eleven GLM-5.3 Flash K8 JSON receipts
+that previously lived outside Git. Each entry includes the original and archived
+SHA-256 and whether redaction changed the copy. The original files remain in
+place; a verified private archive outside this repository also preserves their
+exact bytes. The Git copy of `SESSION-NOTES.md` redacts its historical HF token.
+Archived commands, relative paths, plans, and profile recommendations are
+historical context, not current operating instructions or new qualification.
+
+The [read-only runtime audit](docs/field-review-results/workspace-preservation-20260908/runtime-capacity-audit.json)
+inspected installed B12X source in the active AIBeast container `8273cb4d…`,
+image `8006d209…`. Its route-count, post-prefix, and sort kernels still use plain
+`triton.jit`, and the post-prefix workspace bounds remain `tl.constexpr`.
+The runtime-capacity candidate `64db087c` is therefore **not present in this
+deployment**. It is preserved on the contributor branch and submitted as
+[B12X PR #256](https://github.com/local-inference-lab/b12x/pull/256), open and
+mergeable with a successful CodeRabbit status at inspection time. This inspection
+did not import GPU kernels, issue model requests, alter production, or benchmark
+whether the current deployment needs the patch.
+
+Local profile smoke passed with `CONFIG_SMOKE=1 SCRIPTS_DIR=scripts
+MODEL_PROFILE=glm53-3.42bpw-500k bash entrypoint.sh`: it resolved the 520,192-token
+public profile and exited without downloading weights or touching a GPU.
+This is configuration-resolution evidence, not a new live qualification.
+
+## Controlled AIBeast optimization (2026-09-08)
+
+The [source and evidence manifest](maintenance/glm53-optimization-20260908/manifest.json)
+records the exact parent image, selected overlays, benchmark identity,
+corrections, and validation boundaries. Experiments retained the checkpoint,
+520,192-token limit, TP4/DCP4, native probabilistic MTP3, fixed KV bytes,
+3072-token scheduler, sequence limit 12, capture maximum 48, and 375 W/GPU.
+The selected image contains B12X #226/#256/#257 and a narrow measured-service
+fairness port. It does **not** adopt the experimental MTP sampling-constraint
+prototype.
+
+### Measurement and interpretation
+
+- The pinned `llm-inference-bench` v0.6.2 workload used three repetitions of
+  eight requests each at synthetic C1 and C4, fixed seeds, temperature 1,
+  top-p 0.95, and a 2048-token output budget. Hotel Lights frequently exhausted
+  that budget; retained scores are not a model-quality verdict.
+- Its `aggregate_gen_tok_s` divides tokens by summed request generation time;
+  it is a request-time-weighted rate, not total concurrent server throughput.
+  Client contention was measured, not assumed absent. The fresh original-code
+  control's median C1 rate was 66.15 tok/s versus 68.30 for B12X and 76.97 for
+  the initial long-running baseline; no causal B12X speedup or slowdown is claimed.
+- Engine V1 does not mean model runner V1. The actual DCP indexer needs V2.
+  A forced-V1 fairness arm failed before serving and triggered rollback.
+  The first V1 proposer edit was inactive under V2 and is retained only as a
+  control. The subsequent native V2 prototype passed 25 real CUDA cases,
+  including rotating-UVA graph replay and native rejection-q checks, but did
+  not establish a reliable serving-rate benefit under mixed traffic.
+- Synthetic text was removed from exported benchmark rows. Aggregate client
+  counters contain no request bodies; private inspect/env and container logs
+  are not published.
+
+### Fairness tradeoff
+
+The same corrected V2 image was exercised with fairness off, 40%, and 60%
+prefill-service share. These are **model-service wallclock** measurements,
+including executor/host effects, not GPU-only timing. Each mode passed the
+8/12-concurrent-request completion gate.
+
+| share | fresh 64K request-to-first-text range | decode text chunks during prefill |
+|---|---:|---:|
+| off | 23.84–26.85 s | 24–25 |
+| 0.4 | 46.24–56.20 s | 675–747 |
+| **0.6** | **36.55–38.15 s** | **347–469** |
+
+The 40% setting exceeded the chosen two-times prefill-delay bound at the median.
+The 60% setting retained substantial decode progress with a smaller prefill
+delay. Chunks are SSE text chunks, not individual tokens. These shared-traffic
+observations are not an isolated throughput or universal latency guarantee.
+
+### Memory-margin tradeoff
+
+All rows below use the same selected B12X + fairness image, baseline native MTP
+behavior, and 60% share. Each arm passed a fresh 500K retrieval gate followed by
+three fresh 64K prefill/decode overlap trials. KV bytes and context limit stayed
+fixed; a fresh-process memory snapshot was not substituted for this warm state.
+
+| EXL3 arena | free VRAM after standardized workload | median 64K prefill wait | versus 3072 |
+|---|---:|---:|---:|
+| 3072 | 101 MiB/GPU | 39.58 s | reference |
+| **2048** | **613–669 MiB/GPU** | **42.25 s** | **+6.7%** |
+| 1024 | 1275–1301 MiB/GPU | 43.92 s | +11.0% |
+
+**2048 was selected:** 512–568 MiB/rank additional observed headroom while
+remaining within the declared 10% prefill-cost target. This is headroom under
+the exercised workload, not an allocation-admission proof for every request.
+The selected container's separate final 500K, C8/C12, model-alias and real-client
+soak receipts are included under the manifest's evidence directory.
+
+### Final selected-stack acceptance
+
+After restarting the selected 2048-row arm, a separate
+[500K verification](maintenance/glm53-optimization-20260908/evidence/memory-2048/final-verify-500k.json)
+and [C8/C12 completion gate](maintenance/glm53-optimization-20260908/evidence/memory-2048/final-concurrency-gate.json)
+passed. The [model list](maintenance/glm53-optimization-20260908/evidence/memory-2048/final-models.json)
+contains exactly `GLM-5.3` and `local-primary`.
+
+The [30-minute soak](maintenance/glm53-optimization-20260908/evidence/memory-2048/soak.json)
+recorded **60/60 healthy samples**, no restart-count increase, no OOM-killed
+state, and **727 MiB minimum free VRAM on every GPU**. Global counters recorded
+65 engine completions, 66 successful Chat Completions POSTs and 3 successful
+Responses POSTs; these are interval counters, not isolated benchmark throughput.
+Invalid-route/client 4xx responses are retained in the receipt rather than
+silently counted as engine failures or omitted.
+
+The [live source check](maintenance/glm53-optimization-20260908/evidence/final-source-check.json)
+matched all 19 checked paths, including selected overlays, preserved parser
+backports and the baseline native MTP implementation. The
+[runtime settings](maintenance/glm53-optimization-20260908/evidence/selected-runtime-settings.json)
+verify the live 0.6 fairness gauge, selected capacity, unchanged context/KV
+settings, read-only checkpoint mount and unchanged restart policy. The
+[active deployment identity](maintenance/glm53-optimization-20260908/evidence/active-deployment.json)
+and original stopped rollback container are preserved.

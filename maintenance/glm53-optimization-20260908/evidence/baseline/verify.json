@@ -1,0 +1,67 @@
+{
+  "ts": "2026-09-08T14:05:05Z",
+  "base_url": "http://127.0.0.1:8000",
+  "health": true,
+  "short_prompt": {
+    "ok": true,
+    "checks": [
+      {
+        "name": "arithmetic",
+        "ok": true,
+        "detail": "answered '391'"
+      },
+      {
+        "name": "factual",
+        "ok": true,
+        "detail": "answered 'Paris'"
+      },
+      {
+        "name": "instruction",
+        "ok": true,
+        "detail": "answered 'BANANA'"
+      }
+    ]
+  },
+  "structured_output": {
+    "ok": true,
+    "detail": "thinking + strict JSON schema passed",
+    "reasoning_field": true
+  },
+  "stochastic_sampling": {
+    "attempted": true,
+    "ok": true,
+    "detail": "temperature-1 sampling produced 512 tokens and the engine remained healthy",
+    "prompt_target_tokens": 1024,
+    "prompt_tokens": 960,
+    "prompt_tokens_exact": true,
+    "max_tokens": 512,
+    "completion_tokens": 512,
+    "temperature": 1.0,
+    "seed": 42,
+    "ignore_eos": true,
+    "health_after": true,
+    "duration_s": 8.664
+  },
+  "long_context": {
+    "attempted": true,
+    "seed": 202609081,
+    "target_tokens": 32768,
+    "tokens": 32854,
+    "tokens_exact": true,
+    "depths": [
+      0.15,
+      0.55,
+      0.9
+    ],
+    "found": 3,
+    "total": 3,
+    "degenerate": "",
+    "answer_head": "We need answer exact codes. Need obey. Need identify:\nKyoto JTG-4341\nReykjavik GLM-9300\nValparaiso BCU-8937\nNeed output one per line nothing else. Ensure no extra.Kyoto: JTG-4341\nReykjavik: GLM-9300\nValparaiso: BCU-8937We need answer exact. Need parse. User says independent retrieval trial, don't use another trial's codes. Document contains access codes. Need list each city. We have:\nKyoto JTG-434",
+    "ok": true,
+    "duration_s": 17.408
+  },
+  "long_context_verified": true,
+  "ok": true,
+  "reason": "serving; long-context retrieval verified",
+  "duration_s": 27.5
+}

@@ -1,0 +1,52 @@
+{
+ "ts": "2026-08-29T14:33:37Z",
+ "base_url": "http://127.0.0.1:8000",
+ "health": true,
+ "short_prompt": {
+  "ok": true,
+  "checks": [
+   {
+    "name": "arithmetic",
+    "ok": true,
+    "detail": "answered '391'"
+   },
+   {
+    "name": "factual",
+    "ok": true,
+    "detail": "answered 'Paris'"
+   },
+   {
+    "name": "instruction",
+    "ok": true,
+    "detail": "answered 'BANANA'"
+   }
+  ]
+ },
+ "structured_output": {
+  "ok": true,
+  "detail": "thinking + strict JSON schema passed",
+  "reasoning_field": true
+ },
+ "long_context": {
+  "attempted": true,
+  "seed": 20260904,
+  "target_tokens": 448000,
+  "tokens": 449461,
+  "tokens_exact": true,
+  "depths": [
+   0.15,
+   0.55,
+   0.9
+  ],
+  "found": 3,
+  "total": 3,
+  "degenerate": "",
+  "answer_head": "We need answer extraction. Need list codes for Kyoto, Reykjavik, Valparaiso. Document huge repetitive, contains three IMPORTANT lines. Need ensure no other trial codes. We saw:\nKyoto DGN-5603 around after inventory pass 4257.\nReykjavik SHH-9004 around after inventory pass 15611.\nValparaiso EAJ-6982 around after inventory pass 25547.\nNeed output exactly one pair per line and nothing else. Order req",
+  "ok": true,
+  "duration_s": 170.775
+ },
+ "long_context_verified": true,
+ "ok": true,
+ "reason": "serving; long-context retrieval verified",
+ "duration_s": 208.3
+}

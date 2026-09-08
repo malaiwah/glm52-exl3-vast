@@ -1,0 +1,67 @@
+{
+  "ts": "2026-09-08T18:56:08Z",
+  "base_url": "http://127.0.0.1:8000",
+  "health": true,
+  "short_prompt": {
+    "ok": true,
+    "checks": [
+      {
+        "name": "arithmetic",
+        "ok": true,
+        "detail": "answered '391'"
+      },
+      {
+        "name": "factual",
+        "ok": true,
+        "detail": "answered 'Paris'"
+      },
+      {
+        "name": "instruction",
+        "ok": true,
+        "detail": "answered 'BANANA'"
+      }
+    ]
+  },
+  "structured_output": {
+    "ok": true,
+    "detail": "thinking + strict JSON schema passed",
+    "reasoning_field": true
+  },
+  "stochastic_sampling": {
+    "attempted": true,
+    "ok": true,
+    "detail": "temperature-1 sampling produced 512 tokens and the engine remained healthy",
+    "prompt_target_tokens": 1024,
+    "prompt_tokens": 960,
+    "prompt_tokens_exact": true,
+    "max_tokens": 512,
+    "completion_tokens": 512,
+    "temperature": 1.0,
+    "seed": 42,
+    "ignore_eos": true,
+    "health_after": true,
+    "duration_s": 8.525
+  },
+  "long_context": {
+    "attempted": true,
+    "seed": 202609110,
+    "target_tokens": 500000,
+    "tokens": 501093,
+    "tokens_exact": true,
+    "depths": [
+      0.15,
+      0.55,
+      0.9
+    ],
+    "found": 3,
+    "total": 3,
+    "degenerate": "",
+    "answer_head": "Kyoto: TMS-2218, Reykjavik: VTB-9805, Valparaiso: MEX-5735.Kyoto: TMS-2218\nReykjavik: VTB-9805\nValparaiso: MEX-5735",
+    "ok": true,
+    "duration_s": 298.85
+  },
+  "long_context_verified": true,
+  "ok": true,
+  "reason": "serving; long-context retrieval verified",
+  "duration_s": 316.3
+}

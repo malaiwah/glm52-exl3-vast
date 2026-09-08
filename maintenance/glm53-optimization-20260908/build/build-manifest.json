@@ -1,0 +1,84 @@
+{
+  "arm": "b12x-fairness",
+  "files": [
+    {
+      "path": "b12x/moe/_shared/kernels/w4a16/route_pack.py",
+      "source": "b12x/b12x/moe/_shared/kernels/w4a16/route_pack.py",
+      "baseline_sha256": "ad7ee1b0a86e5af43587051fb82aa182fcb4f3b50a51575476f6eefe271caafe",
+      "candidate_sha256": "a31fe50488145da58fb875ddad6fb6fecc724f76ae6880b0d69f09af78f8c298"
+    },
+    {
+      "path": "b12x/comm/pcie/pcie_oneshot.py",
+      "source": "b12x/b12x/comm/pcie/pcie_oneshot.py",
+      "baseline_sha256": "d8be62ce5330b92cf8fb73dc36384f7268494fff1b3795496a1ee4898dfc312e",
+      "candidate_sha256": "c4614bc6f3a2fea80e72ce087af2e76e94dc1737025b37a3ce07e79a0a37bcf9"
+    },
+    {
+      "path": "vllm/config/scheduler.py",
+      "source": "fairness/vllm/config/scheduler.py",
+      "baseline_sha256": "ecda4b0c12a2e40dddafa6e9c1f5328740a0bae29d7cb8dc5bc1a8d3de56021e",
+      "candidate_sha256": "aae93351af40efbdb28d75e82cb91b6948c703fc18b7a1bd2a6d7714b5ba7a4f"
+    },
+    {
+      "path": "vllm/config/vllm.py",
+      "source": "fairness/vllm/config/vllm.py",
+      "baseline_sha256": "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f",
+      "candidate_sha256": "b40fc3b5d131851d15f2e88d550a02abd11f043d998ec927c60ba299e424b853"
+    },
+    {
+      "path": "vllm/engine/arg_utils.py",
+      "source": "fairness/vllm/engine/arg_utils.py",
+      "baseline_sha256": "8449722b2285fd17271be4123d70b9c9c84b550e6107f00cfe53c6274e2c41be",
+      "candidate_sha256": "64d56a589b71f3cabe38de9b786ae7ffb26995ebc9df8e126ba0d41eadaf1233"
+    },
+    {
+      "path": "vllm/v1/core/sched/compute_fairness.py",
+      "source": "fairness/vllm/v1/core/sched/compute_fairness.py",
+      "baseline_sha256": null,
+      "candidate_sha256": "e46de15e31a1d1a52fa63c8d9ebec7867365132d07fe258c7a25aa2a972dc10a"
+    },
+    {
+      "path": "vllm/v1/core/sched/interface.py",
+      "source": "fairness/vllm/v1/core/sched/interface.py",
+      "baseline_sha256": "01684d9eb30820c210d4fccbda5fd2dc304fc58e04704b30d574c83edce3f8ff",
+      "candidate_sha256": "1cad843c243dc6447e23365859c2a81d58098c2b69790582374ed062bf98110a"
+    },
+    {
+      "path": "vllm/v1/core/sched/output.py",
+      "source": "fairness/vllm/v1/core/sched/output.py",
+      "baseline_sha256": "91fcedcc9fa478b5e5bf718c8fc50052c52bf418193c02cd471ca20e7f7518c6",
+      "candidate_sha256": "eb1d522c1dcd050bcf3668957063db31940a299692c1a349fe404728e79c6df5"
+    },
+    {
+      "path": "vllm/v1/core/sched/scheduler.py",
+      "source": "fairness/vllm/v1/core/sched/scheduler.py",
+      "baseline_sha256": "f569c1e58ef6d2e1f244d488d7172f39a2017d9c5f7b7653bfdcd13d857580ab",
+      "candidate_sha256": "072f9bd18b98d2d6189d34d55742cf6c14bdb940d012951618ce16323948d83e"
+    },
+    {
+      "path": "vllm/v1/engine/core.py",
+      "source": "fairness/vllm/v1/engine/core.py",
+      "baseline_sha256": "276186db3c5a3df793594ed596974c2729b916bccae7d94a892a39c5301e183d",
+      "candidate_sha256": "142b645bdd125806b6af9af1b501ef03fc7df25d104a6565add86a3f9cb3717b"
+    },
+    {
+      "path": "vllm/v1/metrics/stats.py",
+      "source": "fairness/vllm/v1/metrics/stats.py",
+      "baseline_sha256": "9ec1157ff57ab65e7b71ef79c10523f9d5aaef5ea2de60d8f63ed1e3c489a923",
+      "candidate_sha256": "dd2ee1676db2aaa707a2e46361cdedddcfe6e2be0c309c74da85faefb963319e"
+    },
+    {
+      "path": "vllm/v1/metrics/loggers.py",
+      "source": "fairness/vllm/v1/metrics/loggers.py",
+      "baseline_sha256": "114edcb850ea3c21234ae04c3bde5bb1b2f7d3b40a72f707b3288e7d608ee637",
+      "candidate_sha256": "1532c87d3b31fda21aa130b9c664718e1338f1a2600fd9dfe919d4755c823b3f"
+    },
+    {
+      "path": "appliance/model-turnkey-entry.sh",
+      "source": "fairness/appliance/model-turnkey-entry.sh",
+      "baseline_sha256": "4f016cf359ab324347aca2dd389af3e4858088fbe17faf76e37870f21eb6a07d",
+      "candidate_sha256": "3672539888409f46450558f2ead86ae0ab60ec1234687cc803547ebd7a83e45f",
+      "install_target": "/usr/local/bin/model-turnkey-entry.sh"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{"time": 1788876260.7165143, "event": "STAGED", "arm": "b12x", "name": "glm53-opt-b12x-20260908t133955z", "image": "localhost/glm53-experiment:b12x-20260908", "prefill": 3072}
+{"time": 1788876539.473375, "event": "STOPPING", "previous": {"arm": "baseline", "name": "glm53-turnkey-r34-parity-20260908t015846z"}, "arm": "b12x"}
+{"time": 1788876540.1146674, "event": "LAUNCHED", "arm": "b12x", "name": "glm53-opt-b12x-20260908t133955z"}
+{"time": 1788876946.4688609, "event": "SERVING", "arm": "b12x"}
+{"time": 1788877587.7233734, "event": "STAGED", "arm": "b12x-mtp", "name": "glm53-opt-b12x-mtp-20260908t133955z", "image": "localhost/glm53-experiment:b12x-mtp-v2-20260908", "prefill": 3072}
+{"time": 1788877843.3074245, "event": "STAGED", "arm": "b12x-mtp", "name": "glm53-opt-b12x-mtp-20260908t133955z", "image": "1968d5106cbb2307781d974356545c46df050940f6b0ad5985987752c925f4de", "prefill": 3072}
+{"time": 1788877843.4748235, "event": "STAGED", "arm": "fairness40", "name": "glm53-opt-fairness40-20260908t133955z", "image": "445c36ab72cb32799ec9d2d9979db5ecc02871896e8a34734feed7cac30c6056", "prefill": 3072}
+{"time": 1788878408.5339255, "event": "STOPPING", "previous": {"arm": "b12x", "name": "glm53-opt-b12x-20260908t133955z"}, "arm": "b12x-mtp"}
+{"time": 1788878409.0718522, "event": "LAUNCHED", "arm": "b12x-mtp", "name": "glm53-opt-b12x-mtp-20260908t133955z"}
+{"time": 1788878723.7977269, "event": "SERVING", "arm": "b12x-mtp"}
+{"time": 1788879744.0999074, "event": "STAGED", "arm": "baseline-return", "name": "glm53-opt-baseline-return-20260908t133955z", "image": "2ac47282d489889ba26522eb92c08b5a57bc20f90e70ecb934fb315b1ed79534", "prefill": 3072}
+{"time": 1788880019.5406206, "event": "STAGED", "arm": "fairness-off", "name": "glm53-opt-fairness-off-20260908t133955z", "image": "445c36ab72cb32799ec9d2d9979db5ecc02871896e8a34734feed7cac30c6056", "prefill": 3072}
+{"time": 1788880397.1073842, "event": "STOPPING", "previous": {"arm": "b12x-mtp", "name": "glm53-opt-b12x-mtp-20260908t133955z"}, "arm": "fairness-off"}
+{"time": 1788880407.4225736, "event": "LAUNCHED", "arm": "fairness-off", "name": "glm53-opt-fairness-off-20260908t133955z"}
+{"time": 1788880759.4444299, "event": "ARM_FAILED", "arm": "fairness-off", "error": "RuntimeError('candidate container exited')"}
+{"time": 1788880760.0886648, "event": "PREVIOUS_RESTORED", "previous": {"arm": "b12x-mtp", "name": "glm53-opt-b12x-mtp-20260908t133955z"}}
+{"time": 1788881929.1631467, "event": "STOPPING", "previous": {"arm": "b12x-mtp", "name": "glm53-opt-b12x-mtp-20260908t133955z"}, "arm": "baseline-return"}
+{"time": 1788881938.3364267, "event": "LAUNCHED", "arm": "baseline-return", "name": "glm53-opt-baseline-return-20260908t133955z"}
+{"time": 1788882233.9436378, "event": "SERVING", "arm": "baseline-return"}
+{"time": 1788885572.0325904, "event": "STAGED", "arm": "mtp-v2-active", "name": "glm53-opt-mtp-v2-active-20260908t133955z", "image": "043a5fed1926b0a7ea3123edc786d2a69cf4ece518533cd143e42614a0c0df18", "prefill": 3072}
+{"time": 1788885572.1868632, "event": "STAGED", "arm": "fairness-v2-off", "name": "glm53-opt-fairness-v2-off-20260908t133955z", "image": "e177de5c3336d93a98bf3c0303a077408516184dbc1e28d97a64e9c0e0b36956", "prefill": 3072}
+{"time": 1788885572.3342679, "event": "STAGED", "arm": "fairness-v2-40", "name": "glm53-opt-fairness-v2-40-20260908t133955z", "image": "e177de5c3336d93a98bf3c0303a077408516184dbc1e28d97a64e9c0e0b36956", "prefill": 3072}
+{"time": 1788885752.1633146, "event": "STOPPING", "previous": {"arm": "baseline-return", "name": "glm53-opt-baseline-return-20260908t133955z"}, "arm": "mtp-v2-active"}
+{"time": 1788885752.7789552, "event": "LAUNCHED", "arm": "mtp-v2-active", "name": "glm53-opt-mtp-v2-active-20260908t133955z"}
+{"time": 1788886076.1327682, "event": "SERVING", "arm": "mtp-v2-active"}
+{"time": 1788889206.3465462, "event": "STOPPING", "previous": {"arm": "mtp-v2-active", "name": "glm53-opt-mtp-v2-active-20260908t133955z"}, "arm": "fairness-v2-off"}
+{"time": 1788889216.9554176, "event": "LAUNCHED", "arm": "fairness-v2-off", "name": "glm53-opt-fairness-v2-off-20260908t133955z"}
+{"time": 1788889502.6296299, "event": "SERVING", "arm": "fairness-v2-off"}
+{"time": 1788890374.606907, "event": "STOPPING", "previous": {"arm": "fairness-v2-off", "name": "glm53-opt-fairness-v2-off-20260908t133955z"}, "arm": "fairness-v2-40"}
+{"time": 1788890393.0171502, "event": "LAUNCHED", "arm": "fairness-v2-40", "name": "glm53-opt-fairness-v2-40-20260908t133955z"}
+{"time": 1788890726.4998214, "event": "SERVING", "arm": "fairness-v2-40"}
+{"time": 1788891757.707885, "event": "STAGED", "arm": "fairness-v2-60", "name": "glm53-opt-fairness-v2-60-20260908t133955z", "image": "e177de5c3336d93a98bf3c0303a077408516184dbc1e28d97a64e9c0e0b36956", "prefill": 3072}
+{"time": 1788891788.5141556, "event": "STOPPING", "previous": {"arm": "fairness-v2-40", "name": "glm53-opt-fairness-v2-40-20260908t133955z"}, "arm": "fairness-v2-60"}
+{"time": 1788891804.6849897, "event": "LAUNCHED", "arm": "fairness-v2-60", "name": "glm53-opt-fairness-v2-60-20260908t133955z"}
+{"time": 1788892097.2925837, "event": "SERVING", "arm": "fairness-v2-60"}
+{"time": 1788893391.4978323, "event": "STAGED", "arm": "memory-3072", "name": "glm53-opt-memory-3072-20260908t133955z", "image": "56f7a34516009f0405564ec7dfad7380fc5f123ff94252b50ba5e92b80137282", "prefill": 3072}
+{"time": 1788893391.650197, "event": "STAGED", "arm": "memory-2048", "name": "glm53-opt-memory-2048-20260908t133955z", "image": "56f7a34516009f0405564ec7dfad7380fc5f123ff94252b50ba5e92b80137282", "prefill": 2048}
+{"time": 1788893391.8117914, "event": "STAGED", "arm": "memory-1024", "name": "glm53-opt-memory-1024-20260908t133955z", "image": "56f7a34516009f0405564ec7dfad7380fc5f123ff94252b50ba5e92b80137282", "prefill": 1024}
+{"time": 1788893430.9487524, "event": "STOPPING", "previous": {"arm": "fairness-v2-60", "name": "glm53-opt-fairness-v2-60-20260908t133955z"}, "arm": "memory-3072"}
+{"time": 1788893445.1721752, "event": "LAUNCHED", "arm": "memory-3072", "name": "glm53-opt-memory-3072-20260908t133955z"}
+{"time": 1788893768.692186, "event": "SERVING", "arm": "memory-3072"}
+{"time": 1788894251.5249422, "event": "STOPPING", "previous": {"arm": "memory-3072", "name": "glm53-opt-memory-3072-20260908t133955z"}, "arm": "memory-2048"}
+{"time": 1788894261.8328743, "event": "LAUNCHED", "arm": "memory-2048", "name": "glm53-opt-memory-2048-20260908t133955z"}
+{"time": 1788894697.2726517, "event": "SERVING", "arm": "memory-2048"}
+{"time": 1788895165.4595916, "event": "STOPPING", "previous": {"arm": "memory-2048", "name": "glm53-opt-memory-2048-20260908t133955z"}, "arm": "memory-1024"}
+{"time": 1788895175.3811321, "event": "LAUNCHED", "arm": "memory-1024", "name": "glm53-opt-memory-1024-20260908t133955z"}
+{"time": 1788895520.9180257, "event": "SERVING", "arm": "memory-1024"}

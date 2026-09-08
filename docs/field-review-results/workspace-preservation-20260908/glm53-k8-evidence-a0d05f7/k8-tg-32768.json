@@ -1,0 +1,380 @@
+{
+ "schema": 1,
+ "ts": "2026-08-29T13:55:59Z",
+ "base_url": "http://127.0.0.1:8000",
+ "model": "GLM-5.3-Flash-K8",
+ "settings": {
+  "input_tokens": 32768,
+  "output_tokens": 512,
+  "concurrency": [
+   1,
+   4,
+   8
+  ],
+  "requests_per_level": 8,
+  "prefill_tokens": [],
+  "warmup": 1,
+  "temperature": 0.0,
+  "seed": null,
+  "prompt_seed": "k8-tg-32768-20260831"
+ },
+ "metadata": {
+  "checkpoint_revision": "b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae",
+  "image_digest": "ae717cf3c3cc848a344662eef2c2178f5e7b81a8ac5f4c884168a7e496d5e074",
+  "host": "4x-rtx-pro-6000-blackwell-96g",
+  "mtp_tokens": "0"
+ },
+ "prefill": [],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 486.7468,
+   "request_throughput_rps": 0.0164,
+   "prompt_tokens": 262248,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 538.777,
+   "output_throughput_tok_s": 8.415,
+   "mean_ttft_ms": 11606.045,
+   "p50_ttft_ms": 11607.959,
+   "p95_ttft_ms": 11627.353,
+   "mean_tpot_ms": 96.354,
+   "p50_tpot_ms": 96.352,
+   "p95_tpot_ms": 96.506,
+   "mean_inter_chunk_ms": 96.496,
+   "metric_prompt_tokens": 262248,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "prefix_cache_query_tokens": 262248,
+   "gpu_prefix_cache_hit_tokens": 0,
+   "external_prefix_cache_query_tokens": 0,
+   "external_prefix_cache_hit_tokens": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 60.79875,
+     "ttft_ms": 11576.596,
+     "tpot_ms": 96.325,
+     "mean_inter_chunk_ms": 96.325,
+     "output_head": "The user has provided a long document with telemetry batch records, and asks to \"Continue with a deterministic sequence "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 60.858316,
+     "ttft_ms": 11590.644,
+     "tpot_ms": 96.414,
+     "mean_inter_chunk_ms": 96.603,
+     "output_head": "The user has provided a benchmark document with telemetry batch records from 0 to 1374, all saying the same thing. They "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 60.903193,
+     "ttft_ms": 11603.309,
+     "tpot_ms": 96.477,
+     "mean_inter_chunk_ms": 96.666,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks to \"Continue with a determin"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 60.804413,
+     "ttft_ms": 11632.573,
+     "tpot_ms": 96.227,
+     "mean_inter_chunk_ms": 96.227,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks to \"Continue with a determin"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 60.823103,
+     "ttft_ms": 11611.664,
+     "tpot_ms": 96.304,
+     "mean_inter_chunk_ms": 96.304,
+     "output_head": "The user has provided a benchmark document with telemetry batch records from 0 to 1374, all saying the same thing. The i"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 60.769253,
+     "ttft_ms": 11617.658,
+     "tpot_ms": 96.187,
+     "mean_inter_chunk_ms": 96.187,
+     "output_head": "The user has provided a benchmark document with telemetry batch records. The pattern is clear: \"Telemetry batch N stayed"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 60.927697,
+     "ttft_ms": 11605.69,
+     "tpot_ms": 96.521,
+     "mean_inter_chunk_ms": 96.71,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks to \"Continue with a determin"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 60.860046,
+     "ttft_ms": 11610.227,
+     "tpot_ms": 96.379,
+     "mean_inter_chunk_ms": 96.948,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks to \"Continue with a determin"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 174.7958,
+   "request_throughput_rps": 0.0458,
+   "prompt_tokens": 262248,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 1500.31,
+   "output_throughput_tok_s": 23.433,
+   "mean_ttft_ms": 20900.788,
+   "p50_ttft_ms": 13523.085,
+   "p95_ttft_ms": 41644.423,
+   "mean_tpot_ms": 120.246,
+   "p50_tpot_ms": 126.089,
+   "p95_tpot_ms": 127.598,
+   "mean_inter_chunk_ms": 120.362,
+   "metric_prompt_tokens": 262248,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "prefix_cache_query_tokens": 262248,
+   "gpu_prefix_cache_hit_tokens": 0,
+   "external_prefix_cache_query_tokens": 0,
+   "external_prefix_cache_hit_tokens": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 77.349031,
+     "ttft_ms": 12234.458,
+     "tpot_ms": 127.426,
+     "mean_inter_chunk_ms": 127.426,
+     "output_head": "The user has provided a long document with telemetry batch records, and asks to \"Continue with a deterministic sequence "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 88.224118,
+     "ttft_ms": 23463.534,
+     "tpot_ms": 126.733,
+     "mean_inter_chunk_ms": 126.733,
+     "output_head": "The user has provided a long document with telemetry batch records, and asks to \"Continue with a deterministic sequence "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 99.014622,
+     "ttft_ms": 34638.668,
+     "tpot_ms": 125.98,
+     "mean_inter_chunk_ms": 125.98,
+     "output_head": "The user has provided a long document with telemetry batch records, and asks to \"Continue with a deterministic sequence "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 109.903474,
+     "ttft_ms": 45416.753,
+     "tpot_ms": 126.197,
+     "mean_inter_chunk_ms": 126.444,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks me to \"Continue with a deter"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 77.118148,
+     "ttft_ms": 11868.688,
+     "tpot_ms": 127.69,
+     "mean_inter_chunk_ms": 127.94,
+     "output_head": "The user has provided a benchmark document with telemetry batch records from 0 to 1374, all saying the same thing. They "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 73.143474,
+     "ttft_ms": 12538.036,
+     "tpot_ms": 118.602,
+     "mean_inter_chunk_ms": 118.834,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks me to \"Continue with a deter"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 69.131227,
+     "ttft_ms": 13264.809,
+     "tpot_ms": 109.328,
+     "mean_inter_chunk_ms": 109.328,
+     "output_head": "The user has provided a long document with telemetry batch records, and asks to \"Continue with a deterministic sequence "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 64.888261,
+     "ttft_ms": 13781.36,
+     "tpot_ms": 100.014,
+     "mean_inter_chunk_ms": 100.21,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks me to \"Continue with a deter"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 143.9398,
+   "request_throughput_rps": 0.0556,
+   "prompt_tokens": 262248,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 1821.929,
+   "output_throughput_tok_s": 28.456,
+   "mean_ttft_ms": 52139.838,
+   "p50_ttft_ms": 51494.073,
+   "p95_ttft_ms": 88821.181,
+   "mean_tpot_ms": 135.647,
+   "p50_tpot_ms": 136.962,
+   "p95_tpot_ms": 166.589,
+   "mean_inter_chunk_ms": 135.858,
+   "metric_prompt_tokens": 262248,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "prefix_cache_query_tokens": 262248,
+   "gpu_prefix_cache_hit_tokens": 0,
+   "external_prefix_cache_query_tokens": 0,
+   "external_prefix_cache_hit_tokens": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 98.827091,
+     "ttft_ms": 12091.057,
+     "tpot_ms": 169.738,
+     "mean_inter_chunk_ms": 170.07,
+     "output_head": "The user has provided a benchmark document with telemetry batch records from 0 to 1374, all saying the same thing. The i"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 105.375751,
+     "ttft_ms": 23236.746,
+     "tpot_ms": 160.742,
+     "mean_inter_chunk_ms": 160.742,
+     "output_head": "The user has provided a long document with telemetry batch records, and asks to \"Continue with a deterministic sequence "
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 111.810139,
+     "ttft_ms": 34482.305,
+     "tpot_ms": 151.326,
+     "mean_inter_chunk_ms": 151.623,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks me to \"Continue with a deter"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 118.229227,
+     "ttft_ms": 45743.834,
+     "tpot_ms": 141.85,
+     "mean_inter_chunk_ms": 141.85,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks me to \"Continue with a deter"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 124.733954,
+     "ttft_ms": 57244.312,
+     "tpot_ms": 132.074,
+     "mean_inter_chunk_ms": 132.332,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks me to \"Continue with a deter"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 131.13587,
+     "ttft_ms": 70015.611,
+     "tpot_ms": 119.609,
+     "mean_inter_chunk_ms": 119.609,
+     "output_head": "The user has provided a long document with telemetry batch records, and asks me to \"Continue with a deterministic sequen"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 137.60094,
+     "ttft_ms": 81589.885,
+     "tpot_ms": 109.611,
+     "mean_inter_chunk_ms": 109.825,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 1374, and asks to \"Continue with a determin"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 32781,
+     "output_tokens": 512,
+     "elapsed_s": 143.928799,
+     "ttft_ms": 92714.955,
+     "tpot_ms": 100.223,
+     "mean_inter_chunk_ms": 100.815,
+     "output_head": "The user has provided a long document with telemetry batch records, and asks me to \"Continue with a deterministic sequen"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

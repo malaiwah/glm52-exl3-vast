@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "name": "mtp-v2-active-position-local-topk-topp",
+  "runner": "V2 native model runner: vllm/v1/worker/gpu/model_runner.py",
+  "baseline_source": "/home/mbelleau/code/turnkey-experiments/20260908T133955Z/baseline",
+  "inactive_prior_candidate": {
+    "path": "/home/mbelleau/code/turnkey-experiments/20260908T133955Z/candidates/mtp",
+    "status": "preserved_unchanged_inactive_under_V2",
+    "reason": "Native V2 MTP does not invoke llm_base_proposer.py; prior V2 serving arms with that layer must be interpreted as inactive-patch/control."
+  },
+  "files": [
+    {
+      "path": "vllm/v1/worker/gpu/model_runner.py",
+      "baseline_sha256": "e8f13cbabadc6c591bc644874abbfcca5a0c935396993e1046ace173f227b0d0",
+      "candidate_sha256": "ca0d02860ac2da3610c046c10d0012176cfde050a2336b31427f6e8da713a17f",
+      "upstream_commit": "e358cf85fb01d178387e7c9e842070ca75c512d2",
+      "upstream_url": "https://github.com/local-inference-lab/vllm/commit/e358cf85fb01d178387e7c9e842070ca75c512d2",
+      "port_type": "behavioral adaptation to active native V2 MTP, not direct V1 cherry-pick"
+    },
+    {
+      "path": "vllm/v1/worker/gpu/spec_decode/mtp/speculator.py",
+      "baseline_sha256": "431517c1f397433b488a2cba6d28fe99ca9ef33d8ed47aebc2c71ef860d486a8",
+      "candidate_sha256": "b0c1df6333cf81997284e382b4478ddc83fc1cb91a0cdc4ce8b2eb642b8d1bc7",
+      "upstream_commit": "e358cf85fb01d178387e7c9e842070ca75c512d2",
+      "upstream_url": "https://github.com/local-inference-lab/vllm/commit/e358cf85fb01d178387e7c9e842070ca75c512d2",
+      "port_type": "behavioral adaptation to active native V2 MTP, not direct V1 cherry-pick"
+    }
+  ],
+  "port_deviations": [
+    "Only MTPSpeculator overrides the native probabilistic helper; shared and non-MTP speculators are unchanged.",
+    "Runner binds final SamplingStates owner after sampler/custom-sampler initialization, before warmup/capture.",
+    "Persistent device top-k/top-p vectors refresh from rotating UVA views in _copy_request_inputs outside replay; captured code never reads rotating UVA filter pointers.",
+    "FP32 promotion occurs before temperature division, preserving actual native V2 Gumbel numerical semantics for BF16/FP16 heads.",
+    "Greedy temperature==0 and padded -1 rows use neutral filters; request-state indices support reordering/repetition and top-k is bounded by actual draft vocabulary.",
+    "Native seeded Gumbel stream and stored filtered-logit q cache are preserved; apply_temperature=False prevents double scaling."
+  ],
+  "baseline_dependencies": [
+    {
+      "path": "vllm/v1/worker/gpu/spec_decode/__init__.py",
+      "sha256": "5d53a1730458019f3f08b628194bd78ba09ecd697b40ba80d7b6f8f5f83a1879",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py",
+      "sha256": "a4e2c807ed0cfa8305d5724765c185cea3786d254648710e2cb9bdb5b9d1ce13",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/worker/gpu/spec_decode/speculator.py",
+      "sha256": "db3b948cb500076e6a3c15251b5cc1b60dfc591f75ff4e7bcb8e8ae4b31fbc4a",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/worker/gpu/spec_decode/utils.py",
+      "sha256": "93238971796d4d73a3ddcc23dc18b67c5ce611c80b668648312cf581ba82dd3a",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/worker/gpu/spec_decode/rejection_sampler.py",
+      "sha256": "bbdfd056721b78c760456a23540c9c23aeff4520897d939c54e4c46e7c39daca",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/worker/gpu/spec_decode/rejection_sampler_utils.py",
+      "sha256": "4467c39a7ccb873fea71867f5d28435d68fdad9e289be36b78c898c4296a98c2",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/worker/gpu/sample/gumbel.py",
+      "sha256": "261c04f7273494cbd2671297c418df1f34aea4e969170928fd821a6788885f6b",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/worker/gpu/sample/sampler.py",
+      "sha256": "619326e6a55d2ac9b6b82de0ef5864898921857c9df18ede85fa8c0147dd0a4c",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/worker/gpu/sample/states.py",
+      "sha256": "5614dbda80f7eafcbd76f0fa6b092aa0389949c93c5c0a0f691a4cf84dab1efc",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/worker/gpu/buffer_utils.py",
+      "sha256": "51d37bde4f2f17d5aa9354faf35269ca1adde0eb16e73ae0d8b9860353ce57b7",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/sample/ops/topk_topp_sampler.py",
+      "sha256": "35b9a1ffeb1e50b73b0ddd1ffc0f968910ee21cf9cc5455dd879fde547b6ddc1",
+      "modified": false
+    },
+    {
+      "path": "vllm/v1/sample/ops/topk_topp_triton.py",
+      "sha256": "58f7bc2ab7ae0c18f79c41672134b574b7aa8c654ecccaa46655a6962375c68e",
+      "modified": false
+    }
+  ],
+  "excluded_upstream": [
+    {
+      "commit": "f5d6e70b3180093054016cc492b49c33de0d4cff",
+      "url": "https://github.com/local-inference-lab/vllm/commit/f5d6e70b3180093054016cc492b49c33de0d4cff",
+      "reason": "Baseline lacks apply_top_k_top_p_probs insertion API; native V2 rejection reconstructs q from cached logits, so extra probability-helper refactoring is unnecessary."
+    }
+  ],
+  "unchanged_contracts": [
+    "Existing probabilistic draft enablement and MTP depth, sampler defaults, backend feature gates, model/quantization and parser/cache contracts.",
+    "Per-request/position-keyed native draft Gumbel seeds, draft_gumbel_pos separation, FP32/FP64 noise choice and rejection RNG keys.",
+    "Cached processed logits are stored before noise, with original scalar/per-row draft columns and active/invalid-row guards.",
+    "History-dependent processors and min_p remain target-only; target sampler and rejection kernels are unchanged.",
+    "Non-probabilistic MTP allocates no new filter vectors and retains its original greedy sampling route."
+  ],
+  "validation": {
+    "status": "prepared_not_executed",
+    "owner": "Main",
+    "scripts": [
+      {
+        "path": "smoke_mtp_v2.py",
+        "sha256": "e8da51cfa9b8d06782cef19f60e24cc9d6398aeb0482e243e65d625f95047536"
+      }
+    ],
+    "commands_from_candidate_directory": [
+      "python smoke_mtp_v2.py --device cpu --dependency-root ../../baseline",
+      "python smoke_mtp_v2.py --device cuda"
+    ],
+    "default_vocabulary": 8193,
+    "cuda_minimum_vocabulary": 8193,
+    "coverage": [
+      "Exact installed candidate/dependency hashes and required CUDA/Triton dispatch.",
+      "FP32/BF16/FP16 logits with FP32/FP64 native seeded noise; small and >=8-row batches.",
+      "Independent constrained-probability oracle, original greedy tied argmax and native seeded replay.",
+      "Request-major repeated slots, reordered indices, padded -1 and stale-valid inactive rows, unaddressed cache cells.",
+      "Real CUDA graph replay across four rotating-UVA/filter updates, reused request-state temperature/seed, reordered rows and changed active-row count.",
+      "Native rejection q reconstruction across multiple 8192-wide tiles, explicitly including all--inf q tiles for top-k1 and tiny nucleus.",
+      "Native p=q acceptance and deterministic disjoint-support rejection/recovery."
+    ],
+    "limitations": [
+      "CPU mode validates exact preprocessing/copy logic and probabilities only, returning at the CUDA Gumbel boundary; not native kernel proof.",
+      "CUDA mode exercises real native kernels and sampling graphs but loads no model/engine; full runner binding, DCP and serving behavior require Main runtime experiments.",
+      "No runtime execution, build, formatter, linter, tests, performance or memory-margin measurements performed by this worker."
+    ],
+    "main_note": "Removed a redundant sum(softmax(logits)) normalization assertion that failed on ordinary FP32 reduction rounding at8193 vocabulary; independent support/probability oracle and finite checks remain. Production source unchanged."
+  },
+  "explanation": {
+    "path": "provenance.txt",
+    "sha256": "d10c166d421ba0cd718986d74d665c2ef0c25326a8e4214c9c90034d3dca5e61"
+  }
+}

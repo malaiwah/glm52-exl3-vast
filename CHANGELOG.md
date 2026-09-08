@@ -3,7 +3,38 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
-## Unreleased — full GLM-5.3 3.42bpw 520K, live AIBeast parity
+## Unreleased — full GLM-5.3 3.42bpw 520K, measured AIBeast optimization
+
+### Selected optimization (2026-09-08)
+
+The authorized controlled campaign selected a local image built from immutable
+`8006d209…` with B12X #226/#256/#257 and V2-compatible measured prefill-service
+fairness. The host uses a **0.6 prefill-service share**, a **2048-row EXL3 arena**,
+the unchanged **3072-token scheduler**, TP4/DCP4, native probabilistic MTP3,
+fixed KV bytes and **520,192-token limit**. It advertises **`GLM-5.3` and
+`local-primary`**, not the obsolete GLM-5.2 alias. Public rental defaults,
+weights, precision, power cap and reboot/restart policy are unchanged.
+
+Matched 500K-plus-overlap arms measured **613–669 MiB free/GPU** at 2048 versus
+101 MiB at 3072, for **6.7%** median 64K prefill-delay cost. The 1024 arm gained
+more margin but cost **11.0%**, exceeding the chosen 10% target. The active V2
+MTP proposal-constraint prototype passed native CUDA graph/rejection checks but
+was not adopted because a reliable rate improvement was not established.
+The first V1 proposer edit was inactive on this V2 runtime; a forced-V1 fairness
+startup failed and rolled back. These corrections and all measured arms remain
+in the [optimization evidence](TEST_RESULTS.md#controlled-aibeast-optimization-2026-09-08)
+and [source-locked recipe](maintenance/glm53-optimization-20260908/manifest.json).
+
+### Initial cutover and preservation (historical)
+
+**Repository preservation (2026-09-08):** reconciled the August 30 memory
+postmortem and August 4 r26 research plan as explicitly historical documents
+on the published AIBeast release line. Archived four workspace notes and eleven
+K8 receipts with hashes and credential redaction; see the
+[preservation and runtime audit](TEST_RESULTS.md#workspace-preservation-and-runtime-capacity-audit-2026-09-08).
+The local runtime-capacity candidate remains preserved as open B12X PR #256;
+read-only inspection found it absent from the running r34 image. This
+documentation integration changes no runtime source or production settings.
 
 **2026-09-08: the authorized AIBeast cutover completed.** Full non-Flash
 `MODEL_PROFILE=glm53-3.42bpw-500k`, architecture family `glm52`, variant

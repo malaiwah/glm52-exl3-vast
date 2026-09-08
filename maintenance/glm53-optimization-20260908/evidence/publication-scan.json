@@ -1,0 +1,10 @@
+{
+  "scanner": "gitleaks8.16.0 default rules plus verified HF rule",
+  "findings": 0,
+  "scope": [
+    "source/evidence directory",
+    "decompressed complete monitor JSONL"
+  ],
+  "known_credential_exact_match_check": "passed",
+  "client_output_text_exported": false
+}

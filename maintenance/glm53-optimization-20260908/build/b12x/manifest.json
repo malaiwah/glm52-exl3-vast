@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "candidate": "b12x-pr226-pr256-pr257-narrow-port",
+  "baseline_root": "/home/mbelleau/code/turnkey-experiments/20260908T133955Z/baseline",
+  "baseline_kind": "actual installed live Python source snapshot; not the git checkout",
+  "files": [
+    {
+      "target": "b12x/moe/_shared/kernels/w4a16/route_pack.py",
+      "source": "b12x/moe/_shared/kernels/w4a16/route_pack.py",
+      "baseline_sha256": "ad7ee1b0a86e5af43587051fb82aa182fcb4f3b50a51575476f6eefe271caafe",
+      "candidate_sha256": "a31fe50488145da58fb875ddad6fb6fecc724f76ae6880b0d69f09af78f8c298",
+      "upstream_prs": [
+        226,
+        256
+      ]
+    },
+    {
+      "target": "b12x/comm/pcie/pcie_oneshot.py",
+      "source": "b12x/comm/pcie/pcie_oneshot.py",
+      "baseline_sha256": "d8be62ce5330b92cf8fb73dc36384f7268494fff1b3795496a1ee4898dfc312e",
+      "candidate_sha256": "c4614bc6f3a2fea80e72ce087af2e76e94dc1737025b37a3ce07e79a0a37bcf9",
+      "upstream_prs": [
+        257
+      ]
+    }
+  ],
+  "upstream": [
+    {
+      "pr": 226,
+      "url": "https://github.com/local-inference-lab/b12x/pull/226",
+      "commit": "56ab5f4a99be3f2e456f80f5fd534b6b4c69ae91",
+      "commit_kind": "merged",
+      "head": "8c6f5a38fbbfea918df977f1e1f549f21fc5294a",
+      "parent": "e68f812f15e6b06420cc649eb9caccfa42d1b9c4",
+      "behavior": "If both caller arenas are below the compile bucket yet cover exact live requirements, retain their full sizes and recover stable NUMEL_CAPACITY from their minimum usable padded capacity; preserve genuinely undersized errors."
+    },
+    {
+      "pr": 256,
+      "url": "https://github.com/local-inference-lab/b12x/pull/256",
+      "commit": "64db087cea1a20de243e4e6c31dcaf364fb1016e",
+      "commit_kind": "requested exact head",
+      "parent": "2fcf23a0ce269be27b2e03fece73d46e90e6aeea",
+      "behavior": "do_not_specialize live_numel on count, post-prefix and sort kernels; change only post-prefix max_packed_routes/max_route_blocks to runtime arguments and mark them do_not_specialize."
+    },
+    {
+      "pr": 257,
+      "url": "https://github.com/local-inference-lab/b12x/pull/257",
+      "commit": "3bbad14ce7ed6a30a3b330ea2fb159c17aac4068",
+      "commit_kind": "requested exact merged commit",
+      "behavior": "Bind every coordinated-close barrier to the owning CUDA device; preserve CPU/no-group paths, explicit owner synchronization, strict unmap/status/barrier/free/status/barrier sequence and retry completion."
+    }
+  ],
+  "port_deviations": [
+    "PR226 selection and inverse-capacity helper were ported verbatim. Baseline already defined provided_routes/provided_blocks later for workspace errors; those bindings were moved before selection rather than duplicated.",
+    "PR256 upstream post-prefix code has a binary-search expert lookup and SEARCH_STEPS not present in the installed baseline. Only runtime-bound declarations, masks, do_not_specialize decorators and launch keywords were ported onto the baseline linear expert scan. No newer sorting, prefix, counting or numerical algorithm was imported.",
+    "The baseline graph-only _pack_topk_routes_prefix_kernel and small-prefix live_numel specialization remain unchanged. PR256 does not modify those kernels; this layer does not claim all route kernels or all serving JIT paths are specialization-free.",
+    "PR257 source change is the exact local barrier helper plus replacement of existing barrier calls in _coordinated_close_channels. No additional device guards or IPC setup/cleanup changes were added.",
+    "Upstream pytest files were not layered into the image. Standalone CUDA scripts exercise actual route output, graph execution, actual two-rank IPC rollback/retained-channel reuse/close and fail before unbound teardown barriers enter NCCL. They are unexecuted handoff artifacts, not verification results."
+  ],
+  "dependencies_and_conflicts": [
+    "PR226 and PR256 both edit route_pack.py and are combined in this layer. Layer both files only onto baseline hashes listed here; fail closed on mismatch.",
+    "No dependency on modern B12X whole modules, host.py changes, modern binary-search post-prefix code, or newer route ordering algorithms. Installed torch/triton/CuTe/NCCL and CUDA device support remain required.",
+    "Fixed full-arena reuse is conditional on the power-of-two bucket exceeding the caller arena while exact live requirements fit. Calls whose buckets fit still use existing bucket-sized views.",
+    "Existing caller-owned expert_counts fast path, eager allocation fast path, captured prefix fallback, graph workspace validation and sentinel conventions are retained.",
+    "The existing _broadcast_gather_object still selects object-collective device from current_device, as before; PR257 binds teardown barriers only. The supplied two-GPU wrong-current-device script must qualify this installed runtime rather than assume upstream GPU results transfer.",
+    "Changes are disjoint from vLLM MTP and scheduler/engine/config layers. No parser, cache, model weights, quantization or production changes are included."
+  ],
+  "source_patch": {
+    "path": "source.patch",
+    "sha256": "b11e6d70c3d5044946ad469ffaa0a50c82d9f058da5248856f2ce82ebcfef8a9"
+  },
+  "validation": {
+    "status": "not_run_per_assignment",
+    "scripts": [
+      {
+        "path": "validation/route_tail_cuda.py",
+        "sha256": "81ddcc75171b4a5ac3040e710e8feceb004aee3e8615fd7fe386e5d84c1b4cb5",
+        "executed": false
+      },
+      {
+        "path": "validation/pcie_teardown_cuda.py",
+        "sha256": "878964239c103e44b7e88134aea1969cac3fed39264a505bffbd263c78d6b2e6",
+        "executed": false
+      }
+    ],
+    "additional_route_coverage": {
+      "geometry": "GLM production E256/topk8, prefill capacity 3072",
+      "tail_rows": [2049, 2303, 3071, 3072],
+      "block_size": 64,
+      "expert_map_modes": [false, true],
+      "fixed_route_slots": 40704,
+      "fixed_block_slots": 636,
+      "executed": false,
+      "note": "Added after Main reported the prior route and teardown checks passing. These eight added deterministic cases are not yet executed. The largest route arena is now 40704 int32 slots, superseding the older instructions' approximately 31k-slot bound. Package source and source.patch are unchanged."
+    },
+    "instructions": "validation/instructions.json",
+    "performance_claims": null
+  }
+}
