@@ -30,6 +30,8 @@ jobs:
         run: shellcheck entrypoint.sh scripts/run-local-podman.sh scripts/bench-glm52-kld-tp4.sh scripts/recover_torch_extension_lock.sh scripts/jarvislabs_vm_bootstrap.sh scripts/jarvislabs_container_rootfs.sh scripts/glm52_lmcache_wrapper.sh scripts/acme_retry.sh scripts/field_review_full_gate.sh
       - name: validate Python
         run: python3 -m py_compile landing.py scripts/*.py patches/glm53-refresh/*.py patches/scopedlmcache/*.py maintenance/glm53-aibeast-500k/*.py
+      - name: validate selected runtime Python
+        run: python3 -m compileall -q patches/glm53-selected
       - name: fail-closed field-review patch applicator
         run: python3 tests/test_field_review_patches.py
       # Guards the destructive path: provider detection, the terminate
@@ -47,6 +49,8 @@ jobs:
         run: bash tests/test_container_rootfs.sh
       - name: full GLM parser and TP scheduling backports
         run: python3 tests/test_glm53_refresh.py
+      - name: selected B12X and fairness fail-closed installation
+        run: python3 tests/test_glm53_selected.py
       - name: LMCache deadline and DMA ownership regression
         run: python3 tests/test_scopedlmcache_retrieve.py
       - name: role-invariant cache layout namespace

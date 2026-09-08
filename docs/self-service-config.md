@@ -83,6 +83,9 @@ applied in that container.
 values and explanatory notes for malformed values; that display is not
 permission to launch a known-invalid configuration. Startup validation refuses
 known-invalid effective configurations before the engine starts.
+The fairness controls fail closed on malformed applicable input instead of
+falling back to their defaults. A valid state-file value still supersedes an
+invalid lower-precedence startup value.
 
 `known-good.json` stores `{ts, values, effective, sources, verify}`. Rollback
 re-minimizes the saved effective configuration against the current startup
@@ -90,6 +93,28 @@ environment and requires exact applicable-knob reproduction plus valid host
 topology. It does not blindly copy an old diff into a different baseline.
 Verification and rollback are tied to the attempt's configuration snapshot:
 a stale attempt cannot mark a newer user's configuration good or roll it back.
+
+For general-build prefill fairness, set these `values` through the editor or
+import them in the state-file schema above:
+
+```json
+{
+  "PREFILL_FAIRNESS_ENGINE": "compute_share",
+  "PREFILL_COMPUTE_SHARE": 0.6,
+  "PREFILL_SCHEDULE_INTERVAL": 1
+}
+```
+
+This adds `--fairness-engine compute_share --prefill-compute-share 0.6` to the
+resolved serve argv. Setting the selector to `off` removes both flags; merely
+changing the share does not enable it. Defaults remain off on every profile.
+These are GLM (`glm52` family) engine-only knobs with normal state-over-env
+precedence, not `TUNE_VLLM_*` aliases. Shares must be finite and strictly between
+zero and one; cadence greater than one conflicts with enabled fairness. The
+engine definitively rejects unsupported DP/PP/PCP, DBO, custom scheduler and
+non-MTP speculation configurations. Baseline TP/DCP and V2 selection remain
+unchanged. See [the enablement, accounting and metrics reference](configuration.md#opt-in-prefill-fairness-in-the-general-build)
+before interpreting wallclock share as a performance result.
 
 ---
 
@@ -108,6 +133,8 @@ knobs to the model. Summary of the trade each one makes:
 | `DCP` | The balanced Brandon default uses DCP2 for ordinary prefill/decode while retaining a verified ~522K request. DCP4 serves the measured maximum-context and mixed 3.25-bpw variants; DCP1 prioritizes low-concurrency decode but cannot expose the same context envelope. |
 | `DCP_CKV_PREFETCH_DEPTH`, `DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS` | Topology overlap and the context crossover for query splitting. `auto`/`-1` retain calibration; the MadeBy561 profile pins the measured 0/8,192 shape. |
 | `F8_DMA`, `PCIE_DMA_MIN_BYTES`, `PCIE_CALIBRATION` | Collective wire format and byte crossover. The family stays lossless/automatic; the MadeBy561 profile pins the 521K-qualified FP8 ring/393,216-byte shape. |
+| `PREFILL_FAIRNESS_ENGINE` | `off` preserves legacy scheduling; `compute_share` opts the GLM family into measured model-service fairness. Requires cadence 1 and an engine restart; never changes the selected model runner. |
+| `PREFILL_COMPUTE_SHARE` | Default `0.6`, strictly `0 < share < 1`. Only emitted when fairness is enabled. Targets contended host-observed model-service wallclock, not GPU-only time or token throughput; mixed batches are charged entirely to prefill. |
 | `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM default; cross-provider-qualified on v31 and re-gated at each base refresh) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
 | `MAX_MODEL_LEN` | Longest request, and a hard startup gate against available KV. |
 | `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool. The final r11 safetensors/DCP2/LMCache/GMU-0.957, batch-3,072, gather-140K shape exposed 542,208 logical tokens on its cold AIBeast boot and 553,472 on the same-stack warm restart; the value varies with usable VRAM, graphs, driver and loader. A positive value pins a reproducible smaller pool. On the measured MLA stack logical capacity is `blocks × 64 × DCP`; DCP4 therefore needs 2,048 blocks—not 8,192—for exactly 524,288 tokens. |

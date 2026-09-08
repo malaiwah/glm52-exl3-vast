@@ -5,6 +5,22 @@ lineage and exact pins that used to open the README.
 
 ## Unreleased — full GLM-5.3 3.42bpw 520K, measured AIBeast optimization
 
+### General-build integration
+
+The normal Dockerfile installs the selected B12X #226/#256/#257 and
+V2-compatible fairness Python sources after the existing GLM refresh, with
+fail-closed source hashes and final-stack provenance. Historical experiment
+payloads remain immutable; the archived host entrypoint and experimental MTP
+constraint changes are not installed.
+
+Registered `PREFILL_FAIRNESS_ENGINE` (`off` / `compute_share`) and
+`PREFILL_COMPUTE_SHARE` controls use the existing configuration precedence and
+serving-argument path. Fairness remains off by default; explicitly enabled
+fairness requires cadence 1 and a valid strictly-between-zero-and-one share.
+Public rental defaults and AIBeast's running deployment are not changed by
+this source integration. The earlier GPU receipts qualify the selected
+experimental image, not automatically every newly built appliance image.
+
 ### Selected optimization (2026-09-08)
 
 The authorized controlled campaign selected a local image built from immutable

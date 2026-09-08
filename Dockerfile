@@ -105,16 +105,25 @@ COPY sshd_config /etc/ssh/sshd_config.d/99-model-turnkey.conf
 COPY landing.py /opt/landing.py
 COPY scripts/ /opt/scripts/
 COPY patches/glm53-refresh/ /opt/glm53-refresh/
+# Narrow selected PR59 runtime sources only; the historical experiment and its
+# launcher/MTP prototype are not part of the production overlay.
+COPY patches/glm53-selected/ /opt/glm53-selected/
 COPY patches/scopedlmcache/ /opt/scopedlmcache/
 COPY soul/ /opt/soul/
 COPY entrypoint.sh /usr/local/bin/model-turnkey-entry.sh
 # The public Vast template may still call glm52-entry.sh from its onstart field.
+# The selected scheduler/core baseline is the refresh AFTER state. Keep both
+# installers ordered here, and write provenance only after all final overlays.
 RUN set -eux; \
     python3 /opt/scripts/patch_lmcache_admin_api.py; \
     python3 /opt/scripts/patch_lmcache_admin_api.py --verify-only; \
     python3 -m py_compile /opt/glm53-refresh/*.py /opt/scopedlmcache/*.py; \
     python3 /opt/scripts/apply_glm53_refresh.py /opt/glm53-refresh; \
     python3 /opt/scripts/apply_glm53_refresh.py /opt/glm53-refresh --verify-only; \
+    python3 -m compileall -q /opt/glm53-selected; \
+    python3 /opt/scripts/apply_glm53_selected.py /opt/glm53-selected --verify-only; \
+    python3 /opt/scripts/apply_glm53_selected.py /opt/glm53-selected; \
+    python3 /opt/scripts/apply_glm53_selected.py /opt/glm53-selected --verify-only; \
     python3 /opt/scripts/patch_scopedlmcache_retrieve.py; \
     python3 /opt/scripts/patch_scopedlmcache_retrieve.py --verify-only; \
     python3 /opt/scripts/patch_scopedlmcache_retrieve.py --layout; \
@@ -125,7 +134,7 @@ RUN set -eux; \
     chmod +x /usr/local/bin/model-turnkey-entry.sh /opt/scripts/soul_launcher.py \
       /opt/scripts/soul_controller.py /opt/scripts/soul_config.py \
       /opt/scripts/glm52_lmcache_wrapper.sh /opt/scripts/acme_retry.sh; \
-    chmod -R a-w /opt/soul /opt/glm53-refresh /opt/scopedlmcache; \
+    chmod -R a-w /opt/soul /opt/glm53-refresh /opt/glm53-selected /opt/scopedlmcache; \
     ln -sf model-turnkey-entry.sh /usr/local/bin/glm52-entry.sh
 EXPOSE 22 8000 8443 1111
 ENTRYPOINT ["/usr/local/bin/model-turnkey-entry.sh"]

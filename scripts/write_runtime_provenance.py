@@ -21,6 +21,7 @@ import sys
 import tempfile
 
 import apply_glm53_refresh
+import apply_glm53_selected
 import glm_config
 import patch_lmcache_admin_api
 import patch_scopedlmcache_retrieve
@@ -82,34 +83,48 @@ def module_records() -> dict:
     return result
 
 
-def installed_sources(modules: dict) -> list[dict]:
-    result = []
-    seen = set()
-    for installer in (apply_glm53_refresh,):
+def installed_overlay_sources(modules: dict) -> list[dict]:
+    """Compose reviewed layers, then hash each final target exactly once."""
+    targets = {}
+    for installer in (apply_glm53_refresh, apply_glm53_selected):
         if not installer.OVERLAYS:
             raise RuntimeError(f"empty critical installer manifest: {installer.__name__}")
-        mirror_root = Path(installer.DEFAULT_MIRROR_ROOT).resolve(strict=True)
-        for payload, destination, _before, expected in installer.resolve_targets():
+        runtime_paths = {Path(path) for _, path, _, _ in
+                         installer.resolve_targets(mirror_root=None)}
+        mirror_paths = {Path(path) for _, path, _, _ in installer.resolve_targets(
+            mirror_root=installer.DEFAULT_MIRROR_ROOT)} - runtime_paths
+        for payload, destination, before, expected in installer.install_targets():
             path = Path(destination)
-            if path in seen:
-                raise RuntimeError(f"overlapping critical installer targets: {path}")
-            seen.add(path)
-            record = file_record(path, expected)
-            installed = Path(record["resolved_path"])
-            owners = [name for name, info in modules.items()
-                      if any(installed.is_relative_to(Path(root))
-                             for root in info["package_roots"])]
-            if len(owners) == 1:
-                record.update(module=owners[0], role="imported_runtime")
-            elif not owners and installed.is_relative_to(mirror_root):
-                # The base image also ships a source tree for its own debug
-                # tooling. It is not importable, so it has no owning package,
-                # but it must never drift from the installed runtime.
-                record.update(module=None, role="base_image_source_tree")
-            else:
-                raise RuntimeError(f"critical target not in one resolved runtime package: {path}")
-            record.update(installer=installer.__name__, payload=payload)
-            result.append(record)
+            previous = targets.get(path)
+            if previous is not None and previous["expected"] != before:
+                raise RuntimeError(f"discontinuous critical source layers: {path}")
+            layers = [] if previous is None else previous["layers"]
+            layers.append({"installer": installer.__name__, "payload": payload,
+                           "before_sha256": before, "after_sha256": expected})
+            targets[path] = {"expected": expected, "layers": layers,
+                             "is_mirror": path in mirror_paths}
+    result = []
+    for path, target in targets.items():
+        record = file_record(path, target["expected"])
+        installed = Path(record["resolved_path"])
+        owners = [name for name, info in modules.items()
+                  if any(installed.is_relative_to(Path(root))
+                         for root in info["package_roots"])]
+        if len(owners) == 1:
+            record.update(module=owners[0], role="imported_runtime")
+        elif not owners and target["is_mirror"] and installed == path.absolute():
+            record.update(module=None, role="base_image_source_tree")
+        else:
+            raise RuntimeError(f"critical target not in one resolved runtime package: {path}")
+        final_layer = target["layers"][-1]
+        record.update(installer=final_layer["installer"], payload=final_layer["payload"],
+                      source_layers=target["layers"])
+        result.append(record)
+    return result
+
+
+def installed_sources(modules: dict) -> list[dict]:
+    result = installed_overlay_sources(modules)
     cache_path = patch_scopedlmcache_retrieve.default_target()
     record = file_record(cache_path, patch_scopedlmcache_retrieve.AFTER_SHA256)
     record.update(installer="patch_scopedlmcache_retrieve",
@@ -178,7 +193,7 @@ def collect(parent_image: str, source_revision: str | None) -> dict:
     if not re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", parent_image):
         raise ValueError("parent image must be an immutable repository@sha256:digest reference")
     modules = module_records()
-    scripts = (apply_glm53_refresh, glm_config,
+    scripts = (apply_glm53_refresh, apply_glm53_selected, glm_config,
                patch_lmcache_admin_api, patch_scopedlmcache_retrieve)
     return {
         "schema_version": 1,
