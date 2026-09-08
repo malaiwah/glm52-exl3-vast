@@ -27,7 +27,12 @@ AFTER_SHA256 = "c6840310b59375123416f9f91a77db19124b5b1487e22d9b4962eab1940fbd66
 LAYOUT_MODULE = "lmcache.integration.vllm.lmcache_mp_connector"
 LAYOUT_BEFORE_SHA256 = "c6e0bf5c79e5b21a703ade532258514f4c2967626841ec1e9ca6eafa9d7ccae3"
 LAYOUT_AFTER_SHA256 = "6a5f422b7425e70605379388e7d0eae4786320e18f73e227d5d06a554c7d2e2d"
-VLLM_CONFIG_SHA256 = "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f"
+# Both exact compositions retain the same validate_block_size implementation.
+# The selected fairness layer changes other configuration code, not KV layout.
+VLLM_CONFIG_SHA256S = frozenset({
+    "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f",
+    "b40fc3b5d131851d15f2e88d550a02abd11f043d998ec927c60ba299e424b853",
+})
 
 
 def package_source(package: str, relative: str) -> Path:
@@ -66,7 +71,7 @@ def patch(
     if layout:
         if vllm_config_path is None:
             vllm_config_path = package_source("vllm", "config/vllm.py")
-        if hashlib.sha256(vllm_config_path.read_bytes()).hexdigest() != VLLM_CONFIG_SHA256:
+        if hashlib.sha256(vllm_config_path.read_bytes()).hexdigest() not in VLLM_CONFIG_SHA256S:
             raise RuntimeError("Unreviewed vLLM interleave normalization; refusing layout patch")
     before_hash = LAYOUT_BEFORE_SHA256 if layout else BEFORE_SHA256
     after_hash = LAYOUT_AFTER_SHA256 if layout else AFTER_SHA256
