@@ -1,0 +1,44 @@
+ACTIVE V2 NATIVE MTP CANDIDATE -- independent of the inactive V1 candidate
+
+Scope correction and experimental interpretation
+Main reported that live GLM DCP4 uses VLLM_USE_V2_MODEL_RUNNER=true. The installed baseline source confirms that this is a V2 model runner despite the V1 engine/module namespace. The earlier candidates/mtp layer modifies vllm/v1/spec_decode/llm_base_proposer.py, which this native V2 MTP path does not call. That older directory is preserved without modification as an inactive V1 artifact. Its V2 serving arms cannot establish an MTP-constraint effect and must be labeled inactive-patch/control. This NEW directory layers only the two V2 files in manifest.json; no inactive V1 helper is included.
+
+Evidence-backed active path
+1. vllm/v1/worker/gpu/model_runner.py constructs the speculator via init_speculator, and calls speculator.propose with request temperature/seeds.
+2. vllm/v1/worker/gpu/spec_decode/__init__.py chooses MTPSpeculator for method == 'mtp' (the separate Gemma4 branch remains separate).
+3. MTPSpeculator inherits AutoRegressiveSpeculator. Its sample_draft invokes self._sample_probabilistic_draft when draft_logits is enabled.
+4. The baseline shared DraftModelSpeculator._sample_probabilistic_draft calls native V2 gumbel_sample with apply_temperature=True and an output_processed_logits cache. Its _copy_request_inputs explicitly copies only temperature/seeds and ignores top-k/top-p.
+5. Native gumbel_block_argmax stores processed logits before adding noise. It masks invalid request-state indices and rows beyond active_rows. Native rejection_sampler_utils reconstructs q using each cached draft logit minus its global logsumexp, including all--inf vocabulary tiles. Greedy temperature==0 takes a separate verification branch.
+
+Changes
+Only native MTPSpeculator receives the new probabilistic proposal override. The shared DraftModelSpeculator, AutoRegressiveSpeculator, other speculators, native Gumbel kernels, rejection kernels, and target sampler remain unchanged. The runner binds its final SamplingStates owner to MTPSpeculator immediately after sampler/custom-sampler initialization, before later warmup/capture.
+
+The override gathers temperature/top-k/top-p in request-state order, including repeated/reordered row mappings. Invalid -1 rows gather a safe address and receive neutral constraints. Zero-temperature greedy rows also receive neutral top-k=vocabulary and top-p=1, retaining original argmax ties. Non-greedy logits are temperature-scaled in FP32, matching native Gumbel's existing promotion-before-division contract for FP32/BF16/FP16 heads. Requested top-k is bounded by the actual draft-logit vocabulary, so a target-vocabulary no-filter sentinel cannot index beyond the draft vocabulary. Existing apply_top_k_top_p supplies the same position-local filtering implementation used by native target constraint processing. History-dependent processors and min_p remain target-only; no defaults or MTP depth are changed.
+
+Matching q and seeded state
+The SAME filtered FP32 logits are passed to native gumbel_sample and stored in the existing draft_logits cache. apply_temperature=False avoids double scaling. The existing draft_gumbel_pos transform, per-request seeds, FP32/FP64 noise mode, scalar/per-row cache columns and active-row write guard are preserved. Native rejection therefore reconstructs the proposal q actually used for the draw. Unlike the inactive V1 helper, the active V2 path already has per-request/position-keyed seeded Gumbel sampling; this candidate retains that policy and does not consume a new global RNG stream or alter rejection RNG keys.
+
+CUDA graph lifetime correction
+Independent source review found that SamplingStates.top_k/top_p.gpu are NOT stable addresses: UvaBackedTensor.copy_to_uva rotates through UvaBufferPool and rebinds .gpu. Reading those views directly from a captured proposal would retain a stale pointer. The final candidate instead allocates two persistent device vectors when probabilistic draft_logits is enabled. MTPSpeculator._copy_request_inputs first runs the inherited temperature/seed/index copy, then copies the CURRENT UVA top-k/top-p views into those persistent vectors. AutoRegressiveSpeculator calls this copy before its prefill and decode graph replays. The captured helper gathers only the persistent vectors; no .item(), CPU synchronization, or host-data-dependent request branch is added inside replay. Greedy draft mode allocates no new filter vectors.
+
+Upstream provenance
+Behavioral source: local-inference-lab/vllm e358cf85fb01d178387e7c9e842070ca75c512d2, 'fix(spec-decode): match draft top-k and top-p constraints'.
+https://github.com/local-inference-lab/vllm/commit/e358cf85fb01d178387e7c9e842070ca75c512d2
+This is a port of position-local constraint behavior to the actual native V2 implementation, NOT a claim that the upstream V1 diff directly reaches V2. Meaningful deviations are the MTP-only override, persistent device filter transport across rotating UVA sources, native FP32 scaling, native seeded Gumbel/cache contract, and greedy/padding-neutral masks.
+
+Considered but excluded: f5d6e70b3180093054016cc492b49c33de0d4cff, 'perf(spec-decode): reuse FlashInfer top-p probabilities'.
+https://github.com/local-inference-lab/vllm/commit/f5d6e70b3180093054016cc492b49c33de0d4cff
+The baseline lacks its apply_top_k_top_p_probs insertion API; native V2 verification consumes cached logits and computes q in its own kernels. Importing a separate probability-helper refactor would expand the correctness surface and is not needed here. No backend gates, sampler defaults, parser/cache/backport contracts, or checkpoint/quantization settings are changed.
+
+Validation supplied -- NOT executed by this worker
+From this candidate directory, CPU logical/probability stage:
+python smoke_mtp_v2.py --device cpu --dependency-root ../../baseline
+
+Inside the exact image with this layer installed, actual CUDA sampling/graph/rejection validation:
+python smoke_mtp_v2.py --device cuda
+
+Both modes fail closed on source hash mismatch. CPU mode extracts the exact candidate and inherited request-copy logic and existing portable PyTorch filtering helpers; its explicit Gumbel boundary returns pre-noise logits for independent probability comparison. CPU mode does NOT emulate or qualify native seeded Gumbel, UVA CUDA graph lifetime, or rejection kernels. CUDA mode imports the actual installed native MTP class and uses actual SamplingStates, UVA pool rotation, native Gumbel and rejection kernels; CUDA/Triton availability is required rather than silently skipped.
+
+Smoke includes FP32/BF16/FP16 proposal logits, FP32/FP64 noise, three-row and >=8-row filtering, repeated request-major slots with distinct cache columns, seeded replay, greedy tied maxima, -1 padding and stale valid rows beyond active_rows, and checks that unaddressed q-cache cells remain untouched. Graph validation changes top-k/top-p, seed/temperature for a reused request-state slot, request row order and active row count across four real UVA rotations/replays. The default vocabulary is 8193; CUDA refuses smaller values so native rejection's 8192-wide vocabulary statistics span multiple blocks. Both top-k=1 and tiny-nucleus cases require an all--inf cached-q tile, then exercise real p=q acceptance and deterministic rejection/recovery when target mass is disjoint from proposal support.
+
+No tests, smoke, builds, formatting, candidate imports, GPU work, or deployment operations were executed by this worker. Main owns runtime verification and serving measurements. This source layer is unmeasured; no acceptance-rate, throughput, latency, memory-margin, or final service-quality claim is made. Two persistent request-sized filter vectors and filtering scratch/FP32 conversion are added to probabilistic native MTP, and their actual memory/performance costs require measurement.

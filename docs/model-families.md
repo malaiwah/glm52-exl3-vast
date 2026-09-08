@@ -39,6 +39,12 @@ capture 48 (4,8,12,16,20,24,28,32,36,40,44,48), Trellis maximum M 48 and
 profile's rental-floor defaults: 8 sequences, 2048/1024, GMU 0.93, graphs 32
 (4,8,12,16,20,24,28,32), Trellis 32 and 20 GiB initial RAM.
 
+The subsequent [controlled optimization](../TEST_RESULTS.md#controlled-aibeast-optimization-2026-09-08)
+selected a 2048-row arena, retained the 3072-token scheduler, and enabled
+60% measured prefill-service fairness in a separate verified image. It serves
+`GLM-5.3` and `local-primary`. This measured host tradeoff does not alter the
+general profile defaults or the original parity/rental-floor presets above.
+
 Both trials keep the pinned full 3.42bpw weights, context 520,192,
 KV 4,518,907,904 bytes/GPU, TP4/DCP4, interleave 64, native probabilistic MTP3,
 online K6, dynamic NVFP4/FP8 RoPE, RAM ceiling 125 GiB and disk tier 384 GiB.

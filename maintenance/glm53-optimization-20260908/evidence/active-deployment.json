@@ -1,0 +1,9 @@
+{
+  "trial": "optimized",
+  "name": "glm53-opt-memory-2048-20260908t133955z",
+  "image": "56f7a34516009f0405564ec7dfad7380fc5f123ff94252b50ba5e92b80137282",
+  "container_id": "7f031470ee14bc5a7fc43cfb8244cb2c97d047a2df81cc1773bb266e5d37c566",
+  "root": "/mnt/fast/build/glm53-optimization-20260908T133955Z",
+  "started_at": "2026-09-08T19:37:51.968130953Z",
+  "evidence": "/mnt/fast/build/glm53-optimization-20260908T133955Z/memory-2048"
+}

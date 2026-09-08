@@ -6,14 +6,15 @@ OpenAI-compatible endpoint, persistent model downloads and compile caches, a
 live dashboard, key-only SSH, provider-aware URLs, optional TLS, crash
 supervision, and an opt-in embedded diagnostic [SOUL](docs/soul.md).
 
-**AIBeast now serves full GLM-5.3 3.42bpw at 520,192 total tokens**, retaining
-the old GLM-5.2 resource policy and the same port 8000 client endpoint with
-`GLM-5.2` / `local-primary` aliases, plus `GLM-5.3`. The full 755B
-`glm_moe_dsa` model is **not Flash**. The authorized 2026-09-08 cutover passed
-two >=500K retrieval probes and an accepted real-client soak at parity.
+**AIBeast serves full GLM-5.3 3.42bpw at 520,192 total tokens**, on port 8000
+as **`GLM-5.3` and `local-primary`**. The full 755B `glm_moe_dsa` model is
+**not Flash**. The selected host optimization retains TP4/DCP4 and native
+probabilistic MTP3, adds qualified B12X route/teardown fixes and 60% measured
+prefill-service fairness, and uses a 2048-row EXL3 arena with a 3072-token
+scheduler. See [controlled optimization evidence](TEST_RESULTS.md#controlled-aibeast-optimization-2026-09-08).
 The next-release default remains **`MODEL_PROFILE=glm53-3.42bpw-500k`**;
 its general rental-floor defaults are distinct from AIBeast's maintenance
-overrides. See [live cutover evidence](TEST_RESULTS.md#aibeast-parity-cutover-and-accepted-soak-2026-09-08).
+overrides. See [initial cutover evidence](TEST_RESULTS.md#aibeast-parity-cutover-and-accepted-soak-2026-09-08).
 This is operational acceptance, not the full maintenance/performance/quality
 matrix. **No global `latest`/`main` promotion or reboot-policy change occurred**;
 the service retains `restart=no`, as before.
@@ -258,21 +259,23 @@ runtime. Those are not a controlled same-runtime A/B. The historical 5.3
 520K failure does not establish that GLM-5.3 requires smaller workspaces on
 the current runtime.
 
-**AIBeast completed the user's parity-first maintenance cutover:** it retained
-the old GLM-5.2 resource/tuning policy rather than reducing to the exercised
-rental floor. The read-only baseline comes from production `Config.Env` and
-the actual serving argv of `glm52-turnkey-r34-maint-20260815-v1`
-([production baseline](maintenance/glm53-aibeast-500k/production-baseline.json)).
+**AIBeast first completed the user's parity-first cutover**, preserving the
+old GLM-5.2 policy rather than substituting the rental floor
+([original baseline](maintenance/glm53-aibeast-500k/production-baseline.json)).
+The subsequent authorized, measured optimization selected the host overrides
+below. Its [source-locked build and evidence](maintenance/glm53-optimization-20260908/manifest.json)
+are separate from the unchanged original `MAINTENANCE_TRIAL` presets.
 
-| resource | live AIBeast: `MAINTENANCE_TRIAL=parity` (default) | explicit fallback: `MAINTENANCE_TRIAL=rental-floor` |
+| resource | selected AIBeast optimization | explicit fallback: `MAINTENANCE_TRIAL=rental-floor` |
 |---|---|---|
-| sequences / scheduler tokens / EXL3 prefill arena | 12 / 3072 / 3072 | 8 / 2048 / 1024 |
+| sequences / scheduler tokens / EXL3 prefill arena | 12 / 3072 / 2048 | 8 / 2048 / 1024 |
 | GPU memory utilization | 0.95 | 0.93 |
 | maximum CUDA graph capture / Trellis maximum M | 48 / 48 | 32 / 32 |
 | graph capture sizes | 4,8,12,16,20,24,28,32,36,40,44,48 | 4,8,12,16,20,24,28,32 |
 | LMCache initial RAM arena | 125 GiB | 20 GiB |
+| measured prefill-service share | 0.6 (model-service wallclock) | disabled |
 
-Both trials preserve full **3.42bpw**, the pinned checkpoint, **520,192
+Both configurations preserve full **3.42bpw**, the pinned checkpoint, **520,192
 total tokens**, TP4/DCP4, interleave 64, native probabilistic MTP3, online K6,
 dynamic NVFP4 KV with FP8 RoPE, and `KV_CACHE_MEMORY_BYTES=4518907904` per GPU.
 Both retain a 125 GiB LMCache RAM ceiling and 384 GiB disk tier; external
@@ -280,14 +283,13 @@ prefix caching does not enlarge active GPU context. No token-limit or precision
 reduction, optional 3.25bpw substitution, or 750K claim is part of this policy.
 
 The general `MODEL_PROFILE=glm53-3.42bpw-500k` defaults remain the exercised
-rental floor; the maintenance stage overrides them for the live parity deployment.
-Only after the operator records a parity failure or insufficient measured
-margin may they explicitly select `rental-floor`. There is **no automatic
-shrink or fallback**. Each trial has its own default name, caches, state and
-stage manifest; fallback appends `-rental-floor` to the parity name. The selector
-is part of stage identity, not a way to silently retune an existing stage.
+rental floor. The original parity/rental-floor maintenance presets are unchanged;
+the selected optimization uses its own explicit host configuration and image.
+There is no automatic token-limit or precision reduction. The 2048-row arena
+was selected after matched 500K retrieval and prefill/overlap measurements,
+not inferred from a newer release number or a different model's benchmark.
 
-The [active AIBeast receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/active.json)
+The [initial AIBeast cutover receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/active.json)
 pins image **`8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`**,
 source `499d34e`, container `glm53-turnkey-r34-parity-20260908t015846z`.
 The initial successful boot started 02:13:47 UTC and was ready 02:29:15.

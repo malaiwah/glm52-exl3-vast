@@ -1,0 +1,5 @@
+{
+  "start": 1788894697.3743365,
+  "end": 1788895165.2003744,
+  "standardized_warmup": "fresh 500K retrieval followed by 3x64K overlap"
+}

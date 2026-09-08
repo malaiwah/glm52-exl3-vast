@@ -1,0 +1,97 @@
+[
+  {
+    "path": "b12x/moe/_shared/kernels/w4a16/route_pack.py",
+    "sha256": "a31fe50488145da58fb875ddad6fb6fecc724f76ae6880b0d69f09af78f8c298",
+    "matches": true
+  },
+  {
+    "path": "b12x/comm/pcie/pcie_oneshot.py",
+    "sha256": "c4614bc6f3a2fea80e72ce087af2e76e94dc1737025b37a3ce07e79a0a37bcf9",
+    "matches": true
+  },
+  {
+    "path": "vllm/config/scheduler.py",
+    "sha256": "aae93351af40efbdb28d75e82cb91b6948c703fc18b7a1bd2a6d7714b5ba7a4f",
+    "matches": true
+  },
+  {
+    "path": "vllm/config/vllm.py",
+    "sha256": "b40fc3b5d131851d15f2e88d550a02abd11f043d998ec927c60ba299e424b853",
+    "matches": true
+  },
+  {
+    "path": "vllm/engine/arg_utils.py",
+    "sha256": "64d56a589b71f3cabe38de9b786ae7ffb26995ebc9df8e126ba0d41eadaf1233",
+    "matches": true
+  },
+  {
+    "path": "vllm/v1/core/sched/compute_fairness.py",
+    "sha256": "e46de15e31a1d1a52fa63c8d9ebec7867365132d07fe258c7a25aa2a972dc10a",
+    "matches": true
+  },
+  {
+    "path": "vllm/v1/core/sched/interface.py",
+    "sha256": "1cad843c243dc6447e23365859c2a81d58098c2b69790582374ed062bf98110a",
+    "matches": true
+  },
+  {
+    "path": "vllm/v1/core/sched/output.py",
+    "sha256": "eb1d522c1dcd050bcf3668957063db31940a299692c1a349fe404728e79c6df5",
+    "matches": true
+  },
+  {
+    "path": "vllm/v1/core/sched/scheduler.py",
+    "sha256": "072f9bd18b98d2d6189d34d55742cf6c14bdb940d012951618ce16323948d83e",
+    "matches": true
+  },
+  {
+    "path": "vllm/v1/engine/core.py",
+    "sha256": "142b645bdd125806b6af9af1b501ef03fc7df25d104a6565add86a3f9cb3717b",
+    "matches": true
+  },
+  {
+    "path": "vllm/v1/metrics/stats.py",
+    "sha256": "dd2ee1676db2aaa707a2e46361cdedddcfe6e2be0c309c74da85faefb963319e",
+    "matches": true
+  },
+  {
+    "path": "vllm/v1/metrics/loggers.py",
+    "sha256": "1532c87d3b31fda21aa130b9c664718e1338f1a2600fd9dfe919d4755c823b3f",
+    "matches": true
+  },
+  {
+    "path": "appliance/model-turnkey-entry.sh",
+    "sha256": "3672539888409f46450558f2ead86ae0ab60ec1234687cc803547ebd7a83e45f",
+    "matches": true
+  },
+  {
+    "path": "vllm/parser/engine/token_id_scanner.py",
+    "sha256": "d478c6304cb12e084df52831977e0702ce2cc262919111a12a7ef37d38ef32f1",
+    "matches": true
+  },
+  {
+    "path": "vllm/parser/engine/parser_engine_config.py",
+    "sha256": "92de004c7ca85975d940d578773b03f43de9da5a373c9a1c96f9c00dd1840d0b",
+    "matches": true
+  },
+  {
+    "path": "vllm/parser/engine/streaming_parser_engine.py",
+    "sha256": "722051a19deda2fd54fe9e1a59af61cc987621809f69d78a76a25cde7bbfa18e",
+    "matches": true
+  },
+  {
+    "path": "vllm/parser/glm47_moe.py",
+    "sha256": "b76ea87090a1b823c272aa0d338cadf53a5aa3d845c3b3cdaed6258fa5a00ff8",
+    "matches": true
+  },
+  {
+    "path": "vllm/v1/worker/gpu/model_runner.py",
+    "sha256": "e8f13cbabadc6c591bc644874abbfcca5a0c935396993e1046ace173f227b0d0",
+    "matches": true
+  },
+  {
+    "path": "vllm/v1/worker/gpu/spec_decode/mtp/speculator.py",
+    "sha256": "431517c1f397433b488a2cba6d28fe99ca9ef33d8ed47aebc2c71ef860d486a8",
+    "matches": true
+  }
+]

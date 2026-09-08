@@ -1,0 +1,68 @@
+{
+  "baseline_image": "ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a",
+  "model": "unchanged full GLM5.3 EXL3 3.42bpw checkpoint",
+  "invariants": {
+    "max_model_len": 520192,
+    "kv_cache_bytes": 4518907904,
+    "scheduler_tokens": 3072,
+    "max_num_seqs": 12,
+    "capture_max": 48,
+    "mtp_tokens": 3,
+    "tp": 4,
+    "dcp": 4,
+    "power_watts": 375
+  },
+  "sequence": [
+    "baseline synthetic+overlap+passive clients",
+    "B12X226/256/257 candidate",
+    "B12X plus MTP constraints",
+    "selected code plus fairness off/compute_share0.4",
+    "selected code/policy prefill arena3072/2048/1024",
+    "selected final full-context/cache/correctness and client soak"
+  ],
+  "measurement": "3 repetitions each; fixed request count/seeds; unique synthetic prefill prefixes; global counters explicitly include clients; no client prompt/content capture",
+  "hard_gates": [
+    "authoritative serving verifier incl seeded512 output and health",
+    "no candidate-caused OOM/worker death/device assertion",
+    "preserve all existing parser/cache fixes and model/checkpoint identity",
+    "final >=500K retrieval and warm cache correctness",
+    "no stalled client service left unattended"
+  ],
+  "selection": {
+    "image": "56f7a34516009f0405564ec7dfad7380fc5f123ff94252b50ba5e92b80137282",
+    "arm": "memory-2048",
+    "B12X": [
+      226,
+      256,
+      257
+    ],
+    "fairness_prefill_share": 0.6,
+    "MTP_constraints": "not adopted; performance gain unproven",
+    "prefill_capacity": 2048,
+    "scheduler_tokens": 3072,
+    "max_model_len": 520192,
+    "reason": "512\u2013568MiB extra free VRAM after matched500K+overlap; median prefill cost6.7%;1024 costs11.0%, beyond chosen10% target."
+  },
+  "rollback": "Original container retained stopped, exact image and private inspect saved; restore original with podman start if candidate fails. No checkpoint/cache deletion.",
+  "external_publication": "Only redacted source hashes, commands, synthetic evidence and aggregate client counters; no client request bodies or secrets.",
+  "baseline_calibration_note": "First baseline C1/C4 batches showed many hotel-lights outputs truncated at2048. Retain all results; score is budget-confounded, not a full model quality judgment. Use workload for request-local generation/latency and separate authoritative verifier for correctness. Do not infer candidate quality from truncation score alone.",
+  "rate_definition": "Completion-stats aggregate_gen_tok_s is sum(output tokens)/sum(per-request generation seconds), a request-time-weighted generation rate, NOT total concurrent server throughput. Comparisons will label it accordingly. Passive server token counters include clients.",
+  "memory_comparison_note": "Fresh-process free VRAM is not comparable with an 11-hour baseline warmed by long prompts. For each memory-capacity arm, measure after the same >=500K retrieval gate, then overlap workload. Do not attribute initial ~200MiB post-restart difference to B12X patches.",
+  "concurrency_gate": "Before accepting MTP/fairness or final memory selection, exercise 8 and12 concurrent seeded requests with 1K unique inputs and128 outputs, requiring complete streams and no engine errors. This covers production max-sequence dispatch beyond C4 workload.",
+  "fairness_comparison": "Use identical fairness-capable image with selector OFF versus compute_share0.4. Three fresh64K-prefill/2048-output overlap trials plus C8/C12 completeness gate per mode. This is the targeted fairness endpoint; do not infer fairness from mostly pure-decode hotel workload. Prefer >=20% improvement in request-local decode progress/TPOT across >=2/3 trials with long-prefill TTFT <=2x off control, no correctness or engine failures; otherwise keep off.",
+  "runner_correction": "Live startup proved this is a V2 MODEL runner inside V1 ENGINE. Initial fairness-off forcing V1 failed before serving and automatic rollback ran. Original candidates/mtp patches inactive V1 helper; b12x-mtp result MUST be treated as an inactive-patch/control, not an evaluation of active MTP constraints. New mtp-v2-active will target actual native V2 path. V2 default must remain unchanged.",
+  "decisions": [
+    {
+      "at": "2026-09-08T15:39:56.014273+00:00",
+      "decision": "Run original-code fresh-process return control while adapting MTP/fairness to the required V2 runner. Prior MTP performance attribution withdrawn; retained as control evidence. No weakened DCP indexer guard."
+    },
+    {
+      "at": "2026-09-08T18:22:37.715399+00:00",
+      "decision": "40% fairness improved decode progress during prefills but median prefill TTFT exceeded2x off control; evaluate60% share as declared new arm, retain40% results."
+    },
+    {
+      "at": "2026-09-08T18:49:51.835674+00:00",
+      "decision": "60% prefill share meets declared delay/progress tradeoff; memory sweep selects B12X+fairness image without MTP matching because no reliable rate benefit established. Final-stack fairness rechecked during each standardized memory arm."
+    }
+  ]
+}

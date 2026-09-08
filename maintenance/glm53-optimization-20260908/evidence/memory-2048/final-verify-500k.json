@@ -1,0 +1,67 @@
+{
+  "ts": "2026-09-08T19:42:40Z",
+  "base_url": "http://127.0.0.1:8000",
+  "health": true,
+  "short_prompt": {
+    "ok": true,
+    "checks": [
+      {
+        "name": "arithmetic",
+        "ok": true,
+        "detail": "answered '391'"
+      },
+      {
+        "name": "factual",
+        "ok": true,
+        "detail": "answered 'Paris'"
+      },
+      {
+        "name": "instruction",
+        "ok": true,
+        "detail": "answered 'BANANA'"
+      }
+    ]
+  },
+  "structured_output": {
+    "ok": true,
+    "detail": "thinking + strict JSON schema passed",
+    "reasoning_field": true
+  },
+  "stochastic_sampling": {
+    "attempted": true,
+    "ok": true,
+    "detail": "temperature-1 sampling produced 512 tokens and the engine remained healthy",
+    "prompt_target_tokens": 1024,
+    "prompt_tokens": 959,
+    "prompt_tokens_exact": true,
+    "max_tokens": 512,
+    "completion_tokens": 512,
+    "temperature": 1.0,
+    "seed": 42,
+    "ignore_eos": true,
+    "health_after": true,
+    "duration_s": 6.319
+  },
+  "long_context": {
+    "attempted": true,
+    "seed": 202609099,
+    "target_tokens": 500000,
+    "tokens": 501093,
+    "tokens_exact": true,
+    "depths": [
+      0.15,
+      0.55,
+      0.9
+    ],
+    "found": 3,
+    "total": 3,
+    "degenerate": "",
+    "answer_head": "The document contains three access codes:\n- Kyoto: NLG-4066\n- Reykjavik: ASE-5758\n- Valparaiso: GNR-8057Kyoto: NLG-4066\nReykjavik: ASE-5758\nValparaiso: GNR-8057",
+    "ok": true,
+    "duration_s": 237.341
+  },
+  "long_context_verified": true,
+  "ok": true,
+  "reason": "serving; long-context retrieval verified",
+  "duration_s": 245.4
+}

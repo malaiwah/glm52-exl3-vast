@@ -1,0 +1,55 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "GLM-5.3",
+      "object": "model",
+      "created": 1788896844,
+      "owned_by": "vllm",
+      "root": "/models/checkpoint-root",
+      "parent": null,
+      "max_model_len": 520192,
+      "permission": [
+        {
+          "id": "modelperm-adfa126d8ab137e7",
+          "object": "model_permission",
+          "created": 1788896844,
+          "allow_create_engine": false,
+          "allow_sampling": true,
+          "allow_logprobs": true,
+          "allow_search_indices": false,
+          "allow_view": true,
+          "allow_fine_tuning": false,
+          "organization": "*",
+          "group": null,
+          "is_blocking": false
+        }
+      ]
+    },
+    {
+      "id": "local-primary",
+      "object": "model",
+      "created": 1788896844,
+      "owned_by": "vllm",
+      "root": "/models/checkpoint-root",
+      "parent": null,
+      "max_model_len": 520192,
+      "permission": [
+        {
+          "id": "modelperm-984665526e4a84d3",
+          "object": "model_permission",
+          "created": 1788896844,
+          "allow_create_engine": false,
+          "allow_sampling": true,
+          "allow_logprobs": true,
+          "allow_search_indices": false,
+          "allow_view": true,
+          "allow_fine_tuning": false,
+          "organization": "*",
+          "group": null,
+          "is_blocking": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "baseline": "original running baseline",
+  "b12x": "active B12X route+teardown patch",
+  "b12x-mtp": "B12X with INACTIVE V1 proposer edit; not active MTP test",
+  "fairness-off": "failed startup: forced unsupported V1 model runner; no serving result",
+  "baseline-return": "original-code fresh-process control",
+  "mtp-v2-active": "active native V2 MTP constraint prototype; not selected",
+  "fairness-v2-off": "same-image fairness-off control, active V2 MTP prototype present",
+  "fairness-v2-40": "same image,40% fairness, active V2 MTP prototype present",
+  "fairness-v2-60": "same image,60% fairness, active V2 MTP prototype present",
+  "memory-3072": "selected B12X+fairness stack, baseline native MTP,3072 arena",
+  "memory-2048": "selected B12X+fairness stack, baseline native MTP,2048 arena; final choice",
+  "memory-1024": "selected B12X+fairness stack, baseline native MTP,1024 arena"
+}
