@@ -435,6 +435,157 @@ free in the sampled snapshot. To avoid disrupting live use, the 389,959-token
 matrix was not rerun against the hardening-only image; the exact runtime/profile
 matrix above remains the long-context qualification evidence.
 
+#### Memory-accounting postmortem and GLM-5.2 control (2026-08-30)
+
+**Historical scope, preserved 2026-09-08:** this postmortem records the August 30
+Brandon-derived image and control, not the refreshed Gilded Gnosis deployment.
+Its 393,216-token envelope and recommendations apply only to that experiment;
+they do not supersede the [September 8 AIBeast qualification](#aibeast-parity-cutover-and-accepted-soak-2026-09-08).
+Preservation adds no new runtime qualification, raw rental evidence, or completed
+GPQA result. The source-trace findings and original evidence limitations below
+remain part of the historical record.
+
+Three superficially similar events had different failure semantics and must not
+be aggregated as one OOM count:
+
+| event | memory policy | observed failure |
+|---|---|---|
+| GLM-5.2 3.42bpw natural 524,800-token arm | vLLM profiling at GMU 0.95 | startup completed with about 2.3 GiB/GPU free, but the first 131,070-token prefill died when Trellis requested 48 MiB with 32.81 MiB physically free; pinning 2,032 blocks / 520,192 tokens returned 18 blocks and the same workload passed |
+| GLM-5.3 inherited 520,192-token arm | fixed 4,518,907,904 B/GPU | deterministic startup and 32K retrieval passed, but the first seeded temperature-1 request OOMed in top-p sampling and hung the workers with 3–169 MiB free/rank |
+| GLM-5.2 control at the GLM-5.3 envelope | fixed 3,415,867,392 B/GPU | 4,275 recoverable allocator-attempt warnings occurred during cold model loading; startup, stochastic verification, and 3/3 long probes still passed with zero restarts |
+
+The first event remains detailed in
+[the GLM-5.2 3.42bpw qualification plan](docs/AIBEAST_GLM52_342_QUALIFICATION_PLAN.md#first-342-capacity-result).
+The rejected GLM-5.3 arm's free-memory minima were transcribed during live
+diagnosis, but its raw server and `nvidia-smi` traces were not retained.
+Consequently, the exact allocation that finally failed cannot be reconstructed;
+the top-p location, request shape, worker hang, and insufficient physical
+headroom are established, but a more specific allocation-size claim is not.
+
+The controlled GLM-5.2 boot used the same hardening image and the immutable
+`willfalco/GLM-5.2-EXL3-TR3-3.42bpw@a350292cb2038f2c31732569a711a89e5d72fd46`
+checkpoint. Its allocator warnings ran from 11:38:27 through 11:39:51 UTC while
+online EXL3 mixed-Trellis loading advanced through layers 45–77. Counts by rank
+were 1,512 / 920 / 919 / 924. The attempted segment sizes were:
+
+- 20 MiB: 3,876;
+- 162 / 168 / 324 / 334 MiB: 89 / 90 / 92 / 92;
+- 2 / 16 / 24 / 48 / 144 / 454 MiB: 3 / 29 / 1 / 1 / 1 / 1.
+
+The minimum CUDA-reported free values in those warning records were 2,228,224 B
+on rank 0 and 2,555,904 B on ranks 1–3. The final rank-0 attempts overlapped
+direct symmetric-memory DCP, LMCache initialization, and B12X MLA construction.
+Model loading nevertheless finished at 81.69 GiB/rank, the API became ready,
+the authoritative verifier passed, and the container remained running with
+`RestartCount=0` and `OOMKilled=false`.
+
+These warnings are failed `cudaMalloc` *attempts*, not one thrown
+`torch.OutOfMemoryError` each. The pinned allocator source logs at every failed
+attempt, clears CUDA's error state, then tries an overflow pool, releases
+suitable cached blocks, and finally releases all non-split cached blocks before
+throwing. It also obtains a 20 MiB segment for an original request between 1
+and 10 MiB when no suitable block exists. Therefore, the 3,876 20 MiB records
+do not establish that callers each requested a 20 MiB tensor. This behavior
+matches PyTorch's documented
+[segment and fragmentation model](https://docs.pytorch.org/devlogs/eager/2026-06-01-cuda-caching-allocator/).
+
+The GLM-5.2 control generated all 1,644 online-K6 entries from scratch under
+its model-identity-isolated namespace: zero hits and 11,897,961,792 bytes of
+fresh cache data. The GLM-5.3 baseline reused its warm cache. That cold/warm
+difference is strongly associated with 4,275 versus 123 load-phase warnings
+and makes the raw warning counts unsuitable as a model-to-model runtime-memory
+comparison. It does not affect the frozen inference settings.
+
+Source inspection identified why the inherited KV envelope was admitted before
+the later allocation appeared:
+
+1. `GPUWorker` takes `init_snapshot` after NCCL initialization but **before**
+   model-runner construction and weight loading. The fixed-mode log's
+   92.28–93.56 GiB “Initial free memory” values are that pre-model snapshot.
+   They are not post-load or pre-KV headroom; prior notes interpreting them as
+   free memory after the allocator warnings were incorrect.
+2. When `kv_cache_memory_bytes` is set, `determine_available_memory()` runs a
+   compile/profile-shaped forward and partial kernel warmup, but explicitly
+   skips the accounting profile and returns the manual KV byte count unchanged.
+   It does not deduct measured non-KV consumption or a CUDA-graph estimate.
+   This is consistent with vLLM's
+   [`kv_cache_memory_bytes` API](https://docs.vllm.ai/en/stable/api/vllm/config/cache/)
+   and
+   [startup-optimization warning](https://docs.vllm.ai/en/latest/configuration/optimization/):
+   fixed KV ignores `gpu_memory_utilization`, skips memory profiling and graph
+   estimation, and is valid only for the same GPU and initial occupancy.
+3. The engine initializes the fixed KV pool first, then performs
+   runtime-dependent kernel warmup and CUDA-graph capture. The control's graph
+   capture added 0.61 GiB/rank after the 3.18 GiB/rank KV decision. Sampler
+   warmup follows graph capture. These operations can prove that the selected
+   pool happens to fit, but they were not inputs to fixed-pool admissibility.
+4. V2 sampler warmup uses `SamplingParams.for_sampler_warmup()`, which exercises
+   temperature, top-p, and top-k but supplies no explicit seed. The active
+   sampler uses FlashInfer in that case. Any explicit per-request seed disables
+   FlashInfer and selects native top-k/top-p plus Gumbel; native batches below
+   eight logits rows use a full PyTorch vocabulary sort. The rejected arm's
+   first failing request was seeded. On the control, `_gumbel_sample_kernel`
+   first JIT-compiled at 11:42:33, after API application startup, proving that
+   engine warmup had not exercised that exact path.
+5. Later C8 activity first compiled sparse-DCP empty-row sanitation and
+   correction at 11:58:17 and `_topk_topp_kernel` at 11:58:19. Startup warmup
+   cannot enumerate every prompt length, DCP occupancy, sampler backend, and
+   batch shape. Physical residual headroom remains necessary even after all
+   declared startup phases pass.
+
+The appliance now closes the most dangerous operational gap: its authoritative
+gate sends a seeded temperature-1 request with an exact 512-token output, then
+checks engine health before `mark-good` and `phase=serving`. That gate caught
+the class of failure, but it is intentionally after API-process readiness and
+does not make vLLM's earlier fixed-KV calculation predictive.
+
+The upstream findings corroborate the source trace:
+
+- [vLLM issue 26300](https://github.com/vllm-project/vllm/issues/26300)
+  calls CUDA-graph/compile allocation versus KV sizing a general problem and
+  proposes profiling before final physical KV mapping; it was closed as not
+  scheduled.
+- [vLLM issue 30637](https://github.com/vllm-project/vllm/issues/30637)
+  records a sampler-warmup full-vocabulary-sort OOM near physical capacity and
+  a later serving-shape 100 MiB OOM with only 43.75 MiB free.
+- [vLLM issue 33920](https://github.com/vllm-project/vllm/issues/33920)
+  records the analogous GLM sampler-warmup sort requesting 304 MiB with only
+  about 200 MiB free; it closed stale without a fix.
+- PyTorch's
+  [CUDA-memory tooling](https://docs.pytorch.org/docs/2.13/torch_cuda_memory.html)
+  sees only allocator-managed memory. Direct CUDA allocations require
+  device-level/NVML comparison, so an allocator snapshot alone is insufficient.
+
+The operational conclusions are:
+
+- Keep the controlled 393,216-token / 3,415,867,392-byte envelope unchanged.
+  It is empirically qualified for this image, hardware, and first-use workload;
+  it is not a general admission proof.
+- Scope every fixed KV value to the exact checkpoint, image, GPU, initial
+  occupancy, online/JIT cache state, graph mode, speculation settings, and
+  declared workload. Lowering `gpu_memory_utilization` does nothing while fixed
+  KV is active.
+- Preserve both the seeded stochastic gate and per-rank physical free-memory
+  sampling after first use and at maximum declared concurrency.
+- Extend engine warmup to cover unseeded FlashInfer and explicitly seeded native
+  small-batch sampling, plus sparse-DCP long-prefill shapes, before readiness
+  where practical.
+- A durable allocator design must profile/capture persistent graph and kernel
+  resources before committing the final physical KV pool, or shrink/remap KV
+  from measured residual memory. Expandable segments may reduce fragmentation;
+  they do not create missing headroom or repair fixed-KV accounting.
+- Future negative arms must retain raw per-rank server logs, `nvidia-smi`
+  traces, and bounded allocator snapshots. Report allocator-attempt warnings,
+  thrown OOMs, EngineCore deaths, and recoverable KV preemption separately.
+- Report cold and warm online-quant starts separately. Their allocator-warning
+  counts are not directly comparable.
+
+The rental retains the machine-readable analysis, parsed distributions, exact
+runtime source excerpts, redacted boot log, and control manifest under
+`qualification/gpqa-glm52-control-20260830/`. At the analysis boundary the
+single owner-controlled GPQA run was still active; no second run or completion
+probe was sent.
+
 ## Provider integration
 
 ### Secure Vast composite retest (2026-07-29)
@@ -2104,3 +2255,30 @@ GPU and yields about 14.4 GiB less KV/GPU. K6 is 5.3–7.3× faster at short
 context and 8.3–24.4× faster when the measured 32K/128K prefill cost is
 included. K8 is qualified as a fidelity-first alternative. K6 remains the
 production default.
+
+## Workspace preservation and runtime-capacity audit (2026-09-08)
+
+The [archive manifest](docs/field-review-results/workspace-preservation-20260908/manifest.json)
+records four historical workspace notes and eleven GLM-5.3 Flash K8 JSON receipts
+that previously lived outside Git. Each entry includes the original and archived
+SHA-256 and whether redaction changed the copy. The original files remain in
+place; a verified private archive outside this repository also preserves their
+exact bytes. The Git copy of `SESSION-NOTES.md` redacts its historical HF token.
+Archived commands, relative paths, plans, and profile recommendations are
+historical context, not current operating instructions or new qualification.
+
+The [read-only runtime audit](docs/field-review-results/workspace-preservation-20260908/runtime-capacity-audit.json)
+inspected installed B12X source in the active AIBeast container `8273cb4d…`,
+image `8006d209…`. Its route-count, post-prefix, and sort kernels still use plain
+`triton.jit`, and the post-prefix workspace bounds remain `tl.constexpr`.
+The runtime-capacity candidate `64db087c` is therefore **not present in this
+deployment**. It is preserved on the contributor branch and submitted as
+[B12X PR #256](https://github.com/local-inference-lab/b12x/pull/256), open and
+mergeable with a successful CodeRabbit status at inspection time. This inspection
+did not import GPU kernels, issue model requests, alter production, or benchmark
+whether the current deployment needs the patch.
+
+Local profile smoke passed with `CONFIG_SMOKE=1 SCRIPTS_DIR=scripts
+MODEL_PROFILE=glm53-3.42bpw-500k bash entrypoint.sh`: it resolved the 520,192-token
+public profile and exited without downloading weights or touching a GPU.
+This is configuration-resolution evidence, not a new live qualification.

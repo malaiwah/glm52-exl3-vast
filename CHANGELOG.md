@@ -5,6 +5,15 @@ lineage and exact pins that used to open the README.
 
 ## Unreleased — full GLM-5.3 3.42bpw 520K, live AIBeast parity
 
+**Repository preservation (2026-09-08):** reconciled the August 30 memory
+postmortem and August 4 r26 research plan as explicitly historical documents
+on the published AIBeast release line. Archived four workspace notes and eleven
+K8 receipts with hashes and credential redaction; see the
+[preservation and runtime audit](TEST_RESULTS.md#workspace-preservation-and-runtime-capacity-audit-2026-09-08).
+The local runtime-capacity candidate remains preserved as open B12X PR #256;
+read-only inspection found it absent from the running r34 image. This
+documentation integration changes no runtime source or production settings.
+
 **2026-09-08: the authorized AIBeast cutover completed.** Full non-Flash
 `MODEL_PROFILE=glm53-3.42bpw-500k`, architecture family `glm52`, variant
 `exl3-tr3-glm53-3.42bpw-500k`, now serves **520,192 total tokens** at the
