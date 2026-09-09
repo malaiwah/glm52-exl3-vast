@@ -113,6 +113,7 @@ launch_and_wait() {
   export TURNKEY_WORKSPACE="${TURNKEY_WORKSPACE:-/home/turnkey/workspace}"
   export TURNKEY_GRAFT=1
 
+  require_fresh_container
   log "stage 1/4: fetching and unpacking the image (a few minutes)"
   bash "$RUNNER" prepare
   relocate_conflicting_opt_trees
@@ -143,6 +144,14 @@ launch_and_wait() {
   [[ "$health" == "200" ]] || fatal "endpoint did not become healthy within 60 minutes; inspect $log_file."
 
   print_summary
+}
+
+require_fresh_container() {
+  # A graft is one-way: the container's OS layer is replaced. After an image
+  # update there is no in-place upgrade path; say so in plain words.
+  if [[ -f /.turnkey-grafted || -f /.turnkey-graft-rootfs ]]; then
+    fatal "this container already carries an appliance graft (possibly of an older image). Create a fresh instance (jl destroy + jl create) and re-run."
+  fi
 }
 
 relocate_conflicting_opt_trees() {
