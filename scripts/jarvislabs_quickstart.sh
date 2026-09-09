@@ -191,6 +191,4 @@ main() {
   launch_and_wait
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  main "$@"
-fi
+main "$@"
