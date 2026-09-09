@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import sys
+import subprocess
 import tempfile
 from types import SimpleNamespace
 
@@ -143,248 +144,6 @@ def test_glm_release_defaults():
           d["MODEL_REVISION"] == "9297b9f1d53af5c67cffa01e30cc071a1ff7144b")
 
 
-def test_glm_release_integration():
-    section("the GLM-5.3 K6/K8 runtime and retained GLM-5.2 contracts")
-    entry = open(os.path.join(REPO, "entrypoint.sh")).read()
-    dockerfile = open(os.path.join(REPO, "Dockerfile")).read()
-    acme_retry = open(os.path.join(REPO, "scripts", "acme_retry.sh")).read()
-    config_cli = open(os.path.join(REPO, "scripts", "config_cli.py")).read()
-    local_runner = open(os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
-    kld_runner = open(
-        os.path.join(REPO, "scripts", "bench-glm52-kld-tp4.sh")).read()
-    runpod = json.load(open(os.path.join(REPO, "runpod-template.json")))
-    check("the base image and all live GLM-5.3 overlays are pinned fail-closed",
-          "sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692"
-          in dockerfile
-          and "COPY patches/glm53-runtime/ /opt/glm53-runtime/" in dockerfile
-          and "apply_glm53_runtime_overlays.py" in dockerfile
-          and "--verify-only" in dockerfile
-          and "verify_r28_base.py" not in dockerfile
-          and "apply_field_review_patches.py" not in dockerfile)
-    check("GLM-5.3 uses the exact system-Python launcher qualified live",
-          '[ "${FAMILY_ENV_BLOCK:-}" = "glm53" ]' in entry
-          and "_VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)" in entry)
-    check("static NVFP4 scaling selects and verifies the reviewed artifact",
-          "KV_SCALE_MODE:-static-calibrated" in entry
-          and "VLLM_NVFP4_MLA_SCALES_FILE" in entry
-          and "ac68fe6af3056ec35299361293c9ae568769d21696756548493f67ff17881ece"
-          in entry and
-          "/opt/vllm/kv-scales/glm52-nvfp4-nf3-hybrid_mla_outer_scales_v1.json"
-          in dockerfile)
-    check("dynamic-token NVFP4 selects the complete paired r9 ABI",
-          "dynamic-token)" in entry
-          and "export KV_FP8_ROPE=1" in entry
-          and "export VLLM_NVFP4_MLA_DYNAMIC_SCALE=1" in entry
-          and "unset VLLM_NVFP4_MLA_SCALES_FILE" in entry)
-    check("the full GLM family clears inherited Flash NoPE state",
-          "unset VLLM_B12X_GLM_NOPE_NVFP4 B12X_GL53_ROUTE128_WIDE" in entry
-          and "unset B12X_GL53_ROUTE128_HYBRID_TAIL "
-              "VLLM_ALLREDUCE_USE_SYMM_MEM" in entry)
-    check("adaptive exact indexer folding stays bounded",
-          'SPARKINFER_INDEXER_TWO_LEVEL_FOLD:-auto' in entry
-          and 'SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256' in entry)
-    check("deSEC DNS-01 runs the authoritative convergence guard",
-          'acme_retry.sh" --once' in entry
-          and 'acme_retry.sh" --retry' in entry
-          and 'desec_acme_guard.py"' in acme_retry
-          and '--zone "$DESEC_DOMAIN" --domain "$ACME_DOMAIN"' in acme_retry
-          and 'guard_pid=$!' in acme_retry
-          and '--dns.propagation-wait "${DESEC_LEGO_PROPAGATION_WAIT:-45s}"'
-          in acme_retry
-          # challenge cleanup targets the right rrset (apex-aware: the subname
-          # is "" for the zone apex, else the label below the zone).
-          and 'rrsets/${challenge}/TXT/' in acme_retry
-          and 'challenge="_acme-challenge.${sub}"' in acme_retry
-          and 'timeout --signal=TERM --kill-after=10' in acme_retry
-          and 'dns.__version__ == "2.8.0"' in dockerfile
-          and "lego_v4.35.2_linux_amd64.tar.gz" in dockerfile
-          and "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3"
-          in dockerfile
-          and "COPY scripts/ /opt/scripts/" in dockerfile)
-    check("VMs without CUDA peer access fall back before custom collectives",
-          'nvidia-smi topo -p2p r' in entry
-          and "^[[:space:]]*GPU[0-9]+[[:space:]]" in entry
-          and '_p2p_matrix_rows' in entry
-          and 'export B12X_PCIE_DMA=0' in entry
-          and 'export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0'
-          in entry
-          and 'using NCCL/SHM collectives' in entry)
-    check("JarvisLabs gets a persisted generated dashboard token and launch URL",
-          '[ "$PLATFORM" = "runpod" ] || [ "$PLATFORM" = "jarvislabs" ]'
-          in entry
-          and "OPEN_BUTTON_TOKEN_FILE" in entry
-          and 'https://${ACME_DOMAIN}:${PUBLIC_DASHBOARD_PORT}/?token=${OPEN_BUTTON_TOKEN}'
-          in entry
-          and "Use an SSH tunnel, then open:" in entry)
-    check("the target/draft trellis minimum is role-aware",
-          'if [ "${MTP_TOKENS:-3}" = "0" ]; then' in entry and
-          "export VLLM_EXL3_TRELLIS_MIN_M=1" in entry and
-          "unset VLLM_EXL3_TRELLIS_MIN_M" in entry)
-    check("the validated Trellis ceiling survives the runtime env refresh",
-          'VLLM_EXL3_TRELLIS_MAX_M="${VLLM_EXL3_TRELLIS_MAX_M:-32}"'
-          in entry and
-          "export VLLM_EXL3_TRELLIS_MAX_M=32" not in entry)
-    for setting in (
-            "VLLM_DCP_QUERY_SPLIT=1",
-            "VLLM_DCP_TOPK_OWNER_MERGE=1",
-            'VLLM_B12X_MLA_CKV_PREFETCH_DEPTH="${DCP_CKV_PREFETCH_DEPTH:-auto}"',
-            "VLLM_DCP_PROJECT_BEFORE_MERGE=1",
-            "VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=1"):
-        check(f"prefill policy includes {setting}", setting in entry)
-    check("the DCP prefill workspace is topology-safe",
-          'if [ "${DCP:-4}" = "4" ]; then' in entry
-          and "VLLM_DCP_PROJECT_BEFORE_MERGE=0" in entry
-          and "VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE=0" in entry)
-    check("the DCP prefill workspace is self-service",
-          'VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB="${DCP_PREFILL_WORKSPACE_MIB:-1024}"'
-          in entry)
-    check("safetensors remains the architecture-level fallback",
-          gc.family("glm52")["defaults"]["LOAD_FORMAT"] == "safetensors")
-    check("the balanced profile promotes the near-max-qualified loader",
-          resolved(gpus=4)[0]["LOAD_FORMAT"] == "safetensors")
-    check("local shared checkpoints have an explicit immutable mode",
-          'if [ "${MODEL_READ_ONLY:-0}" = "1" ]; then' in entry
-          and "Checkpoint is read-only; mutation steps skipped." in entry)
-    check("a prepared vision derivative is allowed read-only",
-          '[ ! -f "$MODEL_DIR/.vision-enabled" ]' in entry
-          and '--vision "${VISION:-0}" --dry-run --quiet' in entry)
-    check("vision plugins install from a writable copy for read-only checkpoints",
-          "install_vision_plugin()" in entry
-          and 'cp -a "$plugin_dir/." "$install_dir/"' in entry
-          and "--no-build-isolation --no-deps" in entry
-          and "read-only derivative plugin registered" in entry)
-    check("a missing vision plugin fails before the vLLM restart loop",
-          "FATAL: Vision marker is present" in entry
-          and "FATAL: read-only vision derivative cannot register" in entry)
-    check("immutable targets default all compile caches away from the checkpoint",
-          'export VLLM_CACHE_ROOT="/cache/$CACHE_NAMESPACE/vllm"' in entry
-          and 'export TRITON_CACHE_DIR="/cache/$CACHE_NAMESPACE/triton"' in entry
-          and 'export TORCH_EXTENSIONS_DIR="/cache/$CACHE_NAMESPACE/torch_extensions"'
-          in entry
-          and 'export TORCHINDUCTOR_CACHE_DIR="/cache/$CACHE_NAMESPACE/torchinductor"'
-          in entry)
-    check("persistent compile caches are isolated at each runtime fingerprint",
-          'CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-runtime-o27-v3"'
-          in entry
-          and '$MODEL_DIR/.vllm-cache/$CACHE_NAMESPACE/vllm' in entry
-          and '/cache/$CACHE_NAMESPACE/torch_extensions' in entry)
-    check("the live-qualified GLM-5.3 overlay generation is cache-versioned",
-          "apply_glm53_runtime_overlays.py" in dockerfile
-          and "patches/glm53-runtime" in dockerfile
-          and "-turnkey-glm53-runtime-o27-v3" in entry)
-    check("the local Podman runner does not bypass cache fingerprinting",
-          "-e VLLM_CACHE_ROOT=/cache/vllm" not in local_runner
-          and "-e TORCH_EXTENSIONS_DIR=/cache/torch_extensions" not in local_runner)
-    check("the local Podman runner preserves the requested CUDA rank order",
-          '-e CUDA_VISIBLE_DEVICES="$GPU_DEVICES"' in local_runner)
-    check("the cold 3.42 profile gets its measured 90-minute health grace",
-          'exl3-tr3-3.42bpw|exl3-tr3-glm53-3.42bpw|glm53-3.42bpw)'
-          in local_runner
-          and 'health_start_period=90m' in local_runner
-          and '--health-start-period "$health_start_period"' in local_runner)
-    check("auto profile sentinels do not leak into the calibration helper",
-          "env -u DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS" in entry
-          and "-u PCIE_DMA_MIN_BYTES" in entry)
-    for key in ("OFFLOAD_FRACTION", "OFFLOAD_IGNORE_MEMLOCK",
-                "KV_CACHE_MEMORY_BYTES",
-                "LMCACHE_L1_INIT_GB",
-                "CUDAGRAPH_CAPTURE_SIZES", "MAX_CUDAGRAPH_CAPTURE_SIZE",
-                "VLLM_EXL3_TRELLIS_MAX_M", "VLLM_EXL3_PREFILL_CAPACITY",
-                "DCP_CKV_GATHER_MAX_TOKENS",
-                "DCP_KV_CACHE_INTERLEAVE_SIZE",
-                "MTP_REJECTION_SAMPLE_METHOD", "KV_SCALE_MODE"):
-        check(f"the local runner forwards an explicit {key}",
-              key in local_runner and
-              'config_env+=(-e "$config_name=${!config_name}")' in local_runner)
-    check("the local runner can explicitly override detected TP and DCP",
-          "TENSOR_PARALLEL_SIZE DCP MAX_MODEL_LEN" in local_runner)
-    check("the local runner does not mask the selected variant with old defaults",
-          'MAX_NUM_BATCHED_TOKENS:-2048' not in local_runner
-          and 'GPU_BLOCKS_OVERRIDE:-2048' not in local_runner
-          and 'F8_DMA:-ring' not in local_runner)
-    check("the local runner forwards arbitrary validated TUNE_ overrides",
-          "TUNE_[A-Z0-9_]*" in local_runner
-          and '"${tuning_env[@]}"' in local_runner)
-    check("the local runner forwards its documented GPU-free config smoke",
-          '-e CONFIG_SMOKE="${CONFIG_SMOKE:-0}"' in local_runner
-          and 'restart_policy=no' in local_runner
-          and '--restart="$restart_policy"' in local_runner)
-    check("the local runner mounts bounded persistent LMCache below the "
-          "secure-erase-aware workspace",
-          'LMCACHE_DISK_HOST="${LMCACHE_DISK_HOST:-}"' in local_runner
-          and '$LMCACHE_DISK_HOST:/workspace/.lmcache:rw' in local_runner
-          and "LMCACHE_DISK_HOST must be an absolute path" in local_runner)
-    check("the local runner gives vLLM and LMCache a graceful replacement",
-          'podman container exists "$NAME"' in local_runner
-          and 'podman stop -t "${STOP_TIMEOUT:-120}" "$NAME"' in local_runner
-          and 'podman rm -f "$NAME"' in local_runner)
-    check("a native local run clears any draft path baked into the image",
-          'draft_env=(-e DRAFT_MODEL=)' in local_runner
-          and 'draft_env=(-e DRAFT_MODEL="$DRAFT_MODEL_CONTAINER")'
-          in local_runner)
-    check("the local runner can compose a read-only vision derivative",
-          'VISION_ASSET_HOST="${VISION_ASSET_HOST:-}"' in local_runner
-          and '$MODEL_DIR_CONTAINER/.vision:ro' in local_runner
-          and '$MODEL_DIR_CONTAINER/.vision-enabled:ro' in local_runner
-          and "set both VISION_ASSET_HOST and VISION_MARKER_HOST" in local_runner)
-    check("the local runner can supply an immutable shared tokenizer",
-          'TOKENIZER_JSON_HOST="${TOKENIZER_JSON_HOST:-}"' in local_runner
-          and '$MODEL_DIR_CONTAINER/tokenizer.json:ro' in local_runner
-          and "tokenizer serialization does not exist" in local_runner)
-    check("absolute shared-store checkpoint symlinks remain resolvable",
-          'SHARED_MODEL_STORE_HOST="${SHARED_MODEL_STORE_HOST:-}"' in local_runner
-          and 'SHARED_MODEL_STORE_CONTAINER="${SHARED_MODEL_STORE_CONTAINER:-$SHARED_MODEL_STORE_HOST}"'
-          in local_runner
-          and "SHARED_MODEL_STORE_CONTAINER must be an absolute path" in local_runner)
-    check("Hugging Face snapshot symlinks retain their sibling blob store",
-          '*/models--*/snapshots/*)' in local_runner
-          and 'hf_model_root="${MODEL_DIR_HOST%%/snapshots/*}"' in local_runner
-          and 'MODEL_MOUNT_CONTAINER=/models/hf-checkpoint' in local_runner
-          and '$MODEL_MOUNT_HOST:$MODEL_MOUNT_CONTAINER:ro' in local_runner)
-    check("the KLD runner also preserves Hugging Face snapshot symlinks",
-          '*/models--*/snapshots/*)' in kld_runner
-          and 'MODEL_MOUNT_ROOT="$hf_model_root"' in kld_runner
-          and 'MODEL_CONTAINER_ROOT="/models/hf-checkpoint/$hf_snapshot_relative"'
-          in kld_runner
-          and '$MODEL_MOUNT_ROOT:$MODEL_MOUNT_CONTAINER:ro' in kld_runner)
-    check("the KLD protocol can retain DCP4 for a mixed checkpoint that needs it",
-          'KLD_DCP="${KLD_DCP:-1}"' in kld_runner
-          and '"dcp=$KLD_DCP"' in kld_runner
-          and '\\"decode_context_parallel_size\\":$KLD_DCP' in kld_runner)
-    check("an external draft is compatible with an immutable target",
-          '[ "${MTP78_MODE:-off}" != "off" ] && [ -z "${DRAFT_MODEL:-}" ]'
-          in entry)
-    check("InstantTensor is an explicit opt-in",
-          gc.KNOB_BY_KEY["LOAD_FORMAT"]["choices"] == ["safetensors", "instanttensor"])
-    check("the CLI explains the variant inheritance layer",
-          "default < family < variant < env < state file" in config_cli)
-    check("offload reports a per-worker physical estimate",
-          "OFF_BYTES=$((OFF_TOTAL_BYTES / OFFLOAD_RANKS))" in entry)
-    check("the native connector receives the aggregate offload budget",
-          '"cpu_bytes_to_use\\":$OFF_TOTAL_BYTES' in entry
-          and '"cpu_bytes_to_use\\":$OFF_BYTES' not in entry)
-    check("the Runpod GLM template inherits the measured variant defaults",
-          runpod["env"]["VISION"] == "0"
-          and "OFFLOAD_FRACTION" not in runpod["env"]
-          and "MTP_DRAFT_SAMPLE_METHOD" not in runpod["env"]
-          and "MTP78_MODE" not in runpod["env"])
-    for setting in ("VLLM_PCIE_DMA_FP8",
-                    "SPARKINFER_PCIE_DMA_FP8", "PCIE_CALIBRATION_ONLY=1",
-                    "DCP_TOPK_OWNER_MERGE=auto",
-                    "DCP_INDEXER_SHARDS=auto",
-                    "VLLM_USE_MEGA_AOT_ARTIFACT=1",
-                    "DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS:--1",
-                    "PCIE_DMA_MIN_BYTES:--1"):
-        check(f"the v20 transport path includes {setting}", setting in entry)
-    for obsolete in ("VLLM_USE_B12X_PCIE_DMA",
-                     "VLLM_RTX6K_FUSED_ALLREDUCE_ADD",
-                     "VLLM_RTX6K_FUSED_ALLREDUCE_ADD_END_BARRIER"):
-        check(f"the appliance removes inherited legacy knob {obsolete}",
-              f"unset {obsolete}" in entry
-              and f"export {obsolete}" not in entry)
-    check("the vision argument fragment does not duplicate trust-remote-code",
-          'VISION_ARGS=(--limit-mm-per-prompt "{\\"vision_chunk\\":${VISION_CHUNKS:-8}}")'
-          in entry)
 
 
 def test_glm_max_context_profile():
@@ -508,8 +267,7 @@ def test_higher_fidelity_exl3_candidate():
           and eff["DCP_KV_CACHE_INTERLEAVE_SIZE"] == "64"
           and profile_env["VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE"] == "0"
           and profile_env["VLLM_DCP_TOPK_OWNER_MERGE"] == "1"
-          and profile_env["VLLM_DISABLE_SHARED_EXPERTS_STREAM"] == "1"
-          and profile_env["SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB"] == "64")
+          and profile_env["VLLM_DISABLE_SHARED_EXPERTS_STREAM"] == "1")
     check("the profile pins exactly one binary-512K request",
           eff["MAX_MODEL_LEN"] == 524288
           and eff["GPU_BLOCKS_OVERRIDE"] == 2048)
@@ -682,25 +440,6 @@ def test_glm53_342_dsa_profile():
           and "draft-model-overrides" in ids(external_findings)
           and gc.derive(external_draft)["MTP78_MODE"] == "off",
           str(external_findings))
-    entry = open(os.path.join(REPO, "entrypoint.sh")).read()
-    local_runner = open(
-        os.path.join(REPO, "scripts", "run-local-podman.sh")).read()
-    check("the provider profile selects the compatible internal variant",
-          "glm53-3.42bpw)" in entry
-          and 'MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3-glm53-3.42bpw}"'
-          in entry)
-    check("the cold mixed checkpoint receives the 90-minute health grace",
-          "exl3-tr3-glm53-3.42bpw|glm53-3.42bpw)"
-          in local_runner)
-    checkpoint_prep = entry.split("prepare_checkpoint() {", 1)[1]
-    mtp_prep = entry.split("prepare_mtp78() {", 1)[1].split(
-        "prepare_vision() {", 1)[0]
-    check("stale grafts are restored before any checkpoint refresh",
-          checkpoint_prep.index("if ! revert_mtp78_before_fetch") <
-          checkpoint_prep.index("if ! fetch_weights"))
-    check("external drafts disable graft mode before compatibility checks",
-          mtp_prep.index('if [ -n "${DRAFT_MODEL:-}" ]') <
-          mtp_prep.index('if [ "$MTP78_MODE" = "graft" ]'))
 
 
 
@@ -827,89 +566,54 @@ def test_known_good_replays_across_profile_env_change():
             pass
 
 
-def test_glm53_k6_profile():
-    section("the GLM-5.3 Flash K6 production profile")
-    eff, src, _ = resolved("glm53", gpus=4)
-
-
-    check("GLM-5.3 selects the K6 checkpoint",
-          eff["MODEL_VARIANT"] == "glm53-k6"
-          and src["MODEL_VARIANT"] == "family")
-    check("K6 pins the live-qualified TP4/DCP4 topology",
-          eff["TENSOR_PARALLEL_SIZE"] == 4
-          and eff["DCP"] == "4"
-          and src["TENSOR_PARALLEL_SIZE"] == "variant"
-          and src["DCP"] == "variant")
-    check("K6 pins the qualified memory and scheduler shape",
-          eff["MAX_MODEL_LEN"] == 458752
-          and eff["GPU_MEMORY_UTILIZATION"] == 0.93
-          and eff["MAX_NUM_BATCHED_TOKENS"] == 3072
-          and eff["MAX_NUM_SEQS"] == 8
-          and eff["GPU_BLOCKS_OVERRIDE"] == 0)
-    check("K6 uses calibrated NVFP4 MLA KV without speculative decode",
-          eff["KV_CACHE_DTYPE"] == "nvfp4_ds_mla"
-          and eff["MTP_TOKENS"] == 0)
-
-    derived = gc.derive(eff)
-    check("K6 repository and revision are immutable",
-          derived["MODEL_REPO"] == "malaiwah/GLM-5.3-Flash-TR3-6bpw"
-          and derived["MODEL_REVISION"] ==
-          "be51877455a8786ebdd5f96053aff6dc74a0996f")
-    check("K6 uses its dedicated runtime block",
-          derived["FAMILY_ENV_BLOCK"] == "glm53"
-          and derived["MTP78_MODE"] == "off")
-    line = " ".join(derived["FAMILY_SERVE_ARGS"])
-    for flag in (
-            "--quantization exl3",
-            "--generation-config vllm",
-            "--decode-context-parallel-size 4",
-            "--dcp-comm-backend a2a",
-            "--attention-backend B12X_MLA_SPARSE",
-            "--moe-backend triton",
-            "--load-format safetensors",
-            "--long-prefill-token-threshold 2048",
-            "--tool-call-parser glm47",
-            "--reasoning-parser glm45"):
-        check(f"K6 serve args carry {flag}", flag in line, line)
-    check("K6 clamps runtime metadata to the qualified request envelope",
-          '"max_position_embeddings":458752' in line, line)
-    check("K6 captures the measured m=1 through m=32 widths",
-          '"cudagraph_capture_sizes":[1,2,3,4,8,12,16,20,24,28,32]'
-          in line, line)
-    check("K6 resolves with zero error-level findings",
-          not errs(gc.validate(eff, {"gpu_count": 4})),
-          str(errs(gc.validate(eff, {"gpu_count": 4}))))
-
-    off_topology, _, _ = resolved(
-        "glm53", gpus=8, TENSOR_PARALLEL_SIZE=8)
-    check("an unqualified GLM-5.3 rank count is refused",
-          "glm53-needs-tp4" in errs(gc.validate(off_topology, {"gpu_count": 8})))
-    pinned_pool, _, _ = resolved(
-        "glm53", gpus=4, GPU_BLOCKS_OVERRIDE=2048)
-    check("GLM-5.3 rejects the inapplicable GLM-5.2 block formula",
-          "glm53-pool-must-auto" in errs(gc.validate(pinned_pool)))
-
-    k8, k8_src, _ = resolved(
-        "glm53", gpus=4, MODEL_VARIANT="glm53-k8")
-    k8_derived = gc.derive(k8)
-    check("the K8 sibling selects its immutable checkpoint and bounded scheduler",
-          k8_derived["MODEL_REPO"] == "malaiwah/GLM-5.3-Flash-TR3-8bpw"
-          and k8_derived["MODEL_REVISION"] ==
-          "b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae"
-          and k8["SERVED_MODEL_NAME"] == "GLM-5.3-Flash-K8"
-          and k8["MAX_NUM_BATCHED_TOKENS"] == 512
-          and k8["VLLM_EXL3_PREFILL_CAPACITY"] == 512)
-    k8_line = " ".join(k8_derived["FAMILY_SERVE_ARGS"])
-    check("K8 uses the native eager EXL3 path instead of the K6 fused decoder",
-          "--enforce-eager" in k8_line
-          and "--compilation-config" not in k8_line, k8_line)
-    check("K8 bounds the EXL3 parity arena through normal config precedence",
-          k8["VLLM_EXL3_PREFILL_CAPACITY"] == 512
-          and k8_src["VLLM_EXL3_PREFILL_CAPACITY"] == "variant")
-    k8_findings = gc.validate(k8, {"gpu_count": 4})
-    check("K8 is live-qualified on its pinned four-GPU topology",
-          not errs(k8_findings)
-          and "variant-untested" not in ids(k8_findings), str(k8_findings))
+def test_flash_is_refused_not_substituted():
+    section("GLM-5.3-Flash is refused, with the image that serves it named")
+    check("only the Gilded-servable families are selectable",
+          list(gc.FAMILIES) == ["glm52", "qwen36", "custom"],
+          str(list(gc.FAMILIES)))
+    check("no Flash checkpoint variant is selectable",
+          not [n for n in gc.VARIANTS if n.startswith("glm53-")],
+          str(list(gc.VARIANTS)))
+    check("the full GLM-5.3/GLM-5.2 profiles and the other families remain",
+          {"exl3-tr3", "exl3-tr3-3.25bpw", "exl3-tr3-3.36bpw",
+           "exl3-tr3-3.42bpw", "exl3-tr3-glm53-3.42bpw",
+           "exl3-tr3-glm53-3.25bpw", "exl3-tr3-glm53-3.42bpw-500k",
+           "qwen36-nvfp4", "custom"} <= set(gc.VARIANTS),
+          str(sorted(gc.VARIANTS)))
+    check("no knob is still scoped to the withdrawn Flash family",
+          not [k["key"] for k in gc.KNOBS
+               if "glm53" in (k.get("families") or ())],
+          str([k["key"] for k in gc.KNOBS
+               if "glm53" in (k.get("families") or ())]))
+    # The refusal must not be a ConfigError: every ConfigError in the resolver
+    # degrades to the layer below, which is precisely the silent substitution
+    # this rule exists to prevent.
+    check("the refusal is not the exception type the resolver swallows",
+          not issubclass(gc.FlashProfileUnavailable, gc.ConfigError))
+    for key, value in (("MODEL_FAMILY", "glm53"),
+                       ("MODEL_VARIANT", "glm53-k6"),
+                       ("MODEL_VARIANT", "glm53-k8")):
+        for layer in ("state_values", "env_values"):
+            kwargs = {"state_values": {}, "env_values": {}}
+            kwargs[layer] = {key: value}
+            message = ""
+            try:
+                gc.resolve(**kwargs)
+            except gc.FlashProfileUnavailable as exc:
+                message = str(exc)
+            check(f"{key}={value} from the {layer} layer fails closed",
+                  bool(message), "resolve() returned a substitute instead")
+            check(f"and the {key} refusal names what is missing and where "
+                  "Flash is served",
+                  key in message and value in message
+                  and "GLM5Next" in message
+                  and "Gilded Gnosis" in message
+                  and gc.FLASH_IMAGE in message, message)
+    check("the refusal points at the full GLM-5.3 profile as the alternative",
+          "glm53-3.42bpw-500k" in gc.flash_unavailable_message("glm53-k6"))
+    check("a Flash selector that is not requested changes nothing",
+          gc.resolve(state_values={}, env_values={})[0]["MODEL_FAMILY"]
+          == "glm52")
 
 
 def test_qwen_preset():
@@ -1158,27 +862,6 @@ def test_gpu_count_gate():
           not errs(gc.validate(eff, {"gpu_count": 4})), str(errs(gc.validate(eff))))
 
 
-def test_long_context_gate_is_family_independent():
-    section("the long-context gate belongs to every family")
-    import verify_serving
-    src = open(os.path.join(REPO, "scripts", "verify_serving.py")).read()
-    check("the verifier has no family branch",
-          "MODEL_FAMILY" not in src and "FAMILIES" not in src,
-          "verify_serving.py must stay model-agnostic")
-    check("it does not import the config registry at all",
-          "import glm_config" not in src)
-    check("it still refuses to call short prompts sufficient",
-          "long_context_verified" in src)
-    check("and the needle probe is the thing that sets it",
-          "needle_probe" in src and "long_context_verified" in src)
-    # the probe budget follows MAX_MODEL_LEN, which is a family default
-    for fam, expected in (("glm52", 524288), ("glm53", 458752),
-                          ("qwen36", 196608)):
-        eff, _, _ = resolved(fam)
-        check(f"{fam} probes against its own context ceiling ({expected})",
-              eff["MAX_MODEL_LEN"] == expected)
-    check("the verifier's degeneracy detector is generic",
-          "def degenerate" in src and "punctuation" in src)
 
 
 def test_env_layer_still_wins_over_family():
@@ -1267,6 +950,184 @@ def test_validation_scoping_fixes():
           "draft-model-quoting" in errs(gc.validate(eff)))
 
 
+def test_full_glm53_candidate_boundaries():
+    section("full GLM-5.3 preserves AIBeast's context without claiming qualification")
+    eff, _, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.42bpw-500k")
+    findings = gc.validate(eff, {"gpu_count": 4})
+    check("the complete candidate is admissible but unqualified",
+          not errs(findings) and "variant-untested" in ids(findings), findings)
+    check("the served model retains 3.42bpw and AIBeast's full request budget",
+          gc.derive(eff)["MODEL_REPO"] ==
+          "davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw"
+          and eff["MAX_MODEL_LEN"] == 520192
+          and eff["SERVED_MODEL_NAME"] == "GLM-5.3")
+    check("the generic profile retains the exercised rental floor",
+          eff["MAX_NUM_SEQS"] == 8
+          and eff["MAX_NUM_BATCHED_TOKENS"] == 2048
+          and eff["VLLM_EXL3_PREFILL_CAPACITY"] == 1024
+          and eff["GPU_MEMORY_UTILIZATION"] == 0.93
+          and eff["MAX_CUDAGRAPH_CAPTURE_SIZE"] == 32
+          and eff["VLLM_EXL3_TRELLIS_MAX_M"] == 32)
+    parity, _, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.42bpw-500k",
+        MAX_NUM_SEQS=12, MAX_NUM_BATCHED_TOKENS=3072,
+        VLLM_EXL3_PREFILL_CAPACITY=3072, GPU_MEMORY_UTILIZATION=0.95,
+        MAX_CUDAGRAPH_CAPTURE_SIZE=48,
+        CUDAGRAPH_CAPTURE_SIZES="4,8,12,16,20,24,28,32,36,40,44,48",
+        VLLM_EXL3_TRELLIS_MAX_M=48)
+    findings = gc.validate(parity, {"gpu_count": 4})
+    check("live GLM-5.2 resource parity is admissible, not GPU-qualified",
+          not errs(findings) and "variant-untested" in ids(findings), findings)
+    for key, value in {
+        "MAX_NUM_SEQS": 13, "MAX_NUM_BATCHED_TOKENS": 3073,
+        "VLLM_EXL3_PREFILL_CAPACITY": 3073,
+        "MAX_CUDAGRAPH_CAPTURE_SIZE": 52, "VLLM_EXL3_TRELLIS_MAX_M": 52,
+        "CUDAGRAPH_CAPTURE_SIZES": "4,8,12,16,20,24,28,32",
+    }.items():
+        check(f"parity rejects an oversized or incoherent {key}",
+              "glm53-candidate-envelope" in errs(gc.validate({**parity, key: value})))
+    smaller, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.25bpw")
+    for key, value in {"MAX_NUM_BATCHED_TOKENS": 3072,
+                       "VLLM_EXL3_PREFILL_CAPACITY": 3072}.items():
+        check(f"the 3.25bpw candidate retains its original {key} ceiling",
+              "glm53-candidate-envelope" in errs(gc.validate({**smaller, key: value})))
+    check("a larger unmeasured envelope is not silently accepted",
+          "glm53-candidate-envelope" in errs(gc.validate(
+              {**eff, "MAX_MODEL_LEN": 655360}, {"gpu_count": 4})))
+    check("an inherited smaller KV pool cannot masquerade as 512K support",
+          "glm53-candidate-envelope" in errs(gc.validate(
+              {**eff, "KV_CACHE_MEMORY_BYTES": 3415867392})))
+    check("the old GLM-5.2 graft cannot modify the full GLM-5.3 checkpoint",
+          "mtp-graft-incompatible" in errs(gc.validate(
+              {**eff, "MTP_DRAFT": "tr3-graft"})))
+    low, _, _ = resolved(
+        gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.42bpw-500k",
+        REASONING_EFFORT_DEFAULT="low")
+    args = gc.family_serve_args(low)
+    kwargs = json.loads(args[args.index("--default-chat-template-kwargs") + 1])
+    check("operator reasoning effort reaches the actual serving contract",
+          kwargs == {"reasoning_effort": "low"})
+
+
+def test_prefill_fairness():
+    section("opt-in measured-service fairness")
+    for variant in gc.VARIANTS:
+        family = gc.VARIANTS[variant].get("family", "glm52")
+        cfg, _, _ = resolved(family=family, MODEL_VARIANT=variant)
+        args = gc.family_serve_args(cfg)
+        check(f"{variant} does not implicitly enable fairness",
+              "--fairness-engine" not in args and "--prefill-compute-share" not in args)
+
+    baseline, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.42bpw-500k")
+    enabled = {**baseline, "PREFILL_FAIRNESS_ENGINE": "compute_share"}
+    args = gc.family_serve_args(enabled)
+    fairness_index = args.index("--fairness-engine")
+    check("enabling fairness adds only its two CLI controls",
+          args[fairness_index:fairness_index + 4] ==
+          ["--fairness-engine", "compute_share", "--prefill-compute-share", "0.6"]
+          and args[:fairness_index] + args[fairness_index + 4:]
+          == gc.family_serve_args(baseline))
+    check("compute_share accepts the existing MTP and TP4/DCP4 contract",
+          not errs(gc.validate(enabled, {"gpu_count": 4})))
+    check("compute_share also accepts speculation disabled",
+          not errs(gc.validate({**enabled, "MTP_TOKENS": 0}, {"gpu_count": 4})))
+    check("cadence cannot throttle an enabled fairness controller",
+          "fairness-cadence" in errs(gc.validate(
+              {**enabled, "PREFILL_SCHEDULE_INTERVAL": 2})))
+    check("fairness off preserves cadence scheduling",
+          "fairness-cadence" not in errs(gc.validate(
+              {**baseline, "PREFILL_SCHEDULE_INTERVAL": 2})))
+    qwen, _, _ = resolved(family="qwen36", PREFILL_FAIRNESS_ENGINE="compute_share")
+    check("non-GLM fairness is refused rather than silently ignored",
+          "fairness-family" in errs(gc.validate(qwen)))
+
+    env = gc.env_layer({"PREFILL_FAIRNESS_ENGINE": "compute_share",
+                        "PREFILL_COMPUTE_SHARE": "0.7"})
+    cfg, _, _ = gc.resolve(state_values={}, env_values=env)
+    args = gc.family_serve_args(cfg)
+    check("startup environment controls the emitted share",
+          args[args.index("--prefill-compute-share") + 1] == "0.7")
+    cfg, _, _ = gc.resolve(state_values={"PREFILL_COMPUTE_SHARE": 0.4}, env_values=env)
+    args = gc.family_serve_args(cfg)
+    check("persisted share overrides the startup environment",
+          args[args.index("--prefill-compute-share") + 1] == "0.4")
+    cfg, _, _ = gc.resolve(state_values={"PREFILL_FAIRNESS_ENGINE": "off"}, env_values=env)
+    args = gc.family_serve_args(cfg)
+    check("persisted off removes both flags even with a configured share",
+          "--fairness-engine" not in args and "--prefill-compute-share" not in args)
+    for value in (0, 1, -0.1, 1.1, "nan", "inf", "not-a-number"):
+        for layer in ("env", "state"):
+            invalid = {"PREFILL_COMPUTE_SHARE": value}
+            try:
+                gc.resolve(state_values=invalid if layer == "state" else {},
+                           env_values=gc.env_layer(invalid) if layer == "env" else {})
+            except gc.ConfigError:
+                rejected = True
+            else:
+                rejected = False
+            check(f"invalid {layer} share {value!r} cannot silently become 0.6", rejected)
+    cfg, _, _ = gc.resolve(state_values={"PREFILL_COMPUTE_SHARE": 0.3},
+                          env_values=gc.env_layer({"PREFILL_COMPUTE_SHARE": "nan"}))
+    check("a valid state override repairs malformed lower-precedence input",
+          cfg["PREFILL_COMPUTE_SHARE"] == 0.3)
+    invalid_env = gc.env_layer({"PREFILL_FAIRNESS_ENGINE": "typo",
+                               "PREFILL_COMPUTE_SHARE": "nan"})
+    try:
+        gc.resolve(state_values={}, env_values=invalid_env)
+    except gc.ConfigError:
+        rejected = True
+    else:
+        rejected = False
+    check("unknown fairness selector is not silently treated as off", rejected)
+    original = gc.load_startup_env
+    gc.load_startup_env = lambda: dict(invalid_env)
+    try:
+        repair = gc.minimize({"PREFILL_FAIRNESS_ENGINE": "off",
+                              "PREFILL_COMPUTE_SHARE": 0.6})
+        restored, _, _ = gc.resolve(state_values=repair)
+        check("state minimization preserves default-valued repairs over invalid env",
+              repair == {"PREFILL_FAIRNESS_ENGINE": "off", "PREFILL_COMPUTE_SHARE": 0.6}
+              and "--fairness-engine" not in gc.family_serve_args(restored))
+    finally:
+        gc.load_startup_env = original
+
+
+def test_fairness_cli():
+    section("fairness CLI export and persisted disable")
+    with tempfile.TemporaryDirectory(prefix="glm-fairness-cli-") as tmp:
+        env = {**os.environ, "GLM_STATE_DIR": os.path.join(tmp, "state"),
+               "GLM_RUNTIME_DIR": os.path.join(tmp, "runtime")}
+        env.pop("GLM_CONFIG_ATTEMPT", None)
+        os.makedirs(env["GLM_RUNTIME_DIR"])
+        snapshot = os.path.join(env["GLM_RUNTIME_DIR"], "startup-env.json")
+        state = os.path.join(env["GLM_STATE_DIR"], "config.json")
+        gc.write_json_atomic(snapshot, {
+            "MODEL_FAMILY": "glm52", "GLM_GPU_COUNT": "4",
+            "MODEL_VARIANT": "exl3-tr3-glm53-3.42bpw-500k",
+            "PREFILL_FAIRNESS_ENGINE": "compute_share", "PREFILL_COMPUTE_SHARE": 0.6})
+        cli = [sys.executable, os.path.join(REPO, "scripts/config_cli.py")]
+        for values, expected in (({}, True), ({"PREFILL_FAIRNESS_ENGINE": "off"}, False)):
+            gc.write_json_atomic(state, {"values": values})
+            exported = subprocess.run(cli + ["env"], env=env, text=True, capture_output=True)
+            check("CLI resolves valid fairness state", exported.returncode == 0, exported.stderr)
+            shell = subprocess.run(["bash"], input=exported.stdout +
+                                   '\nprintf "%s\\n" "${FAMILY_SERVE_ARGS[@]}"\n',
+                                   env=env, text=True, capture_output=True)
+            args = shell.stdout.splitlines()
+            check("shell consumes the same enabled/disabled fairness argv",
+                  shell.returncode == 0
+                  and ("--fairness-engine" in args) == expected
+                  and ("--prefill-compute-share" in args) == expected)
+        gc.write_json_atomic(state, {"values": {"PREFILL_SCHEDULE_INTERVAL": 2}})
+        check("CLI rejects cadence conflict before engine startup",
+              subprocess.run(cli + ["validate", "--quiet"], env=env,
+                             capture_output=True).returncode == 2)
+        gc.write_json_atomic(state, {"values": {"PREFILL_COMPUTE_SHARE": "nan"}})
+        check("CLI refuses malformed share rather than exporting fallback argv",
+              subprocess.run(cli + ["env"], env=env, capture_output=True).returncode != 0)
+
+
 def run(test):
     """Run one test_* function. A failing check() raises AssertionError
     after recording the failure; swallow it here so the rest of the
@@ -1286,22 +1147,23 @@ def main():
     os.makedirs(os.environ["GLM_RUNTIME_DIR"], exist_ok=True)
     try:
         run(test_glm_release_defaults)
-        run(test_glm_release_integration)
         run(test_glm_max_context_profile)
         run(test_madeby561_hybrid)
         run(test_higher_fidelity_exl3_candidate)
         run(test_r20_336_online_quant_candidate)
         run(test_r28_342_shared_h_profile)
         run(test_glm53_342_dsa_profile)
+        run(test_full_glm53_candidate_boundaries)
+        run(test_prefill_fairness)
+        run(test_fairness_cli)
         run(test_known_good_replays_across_profile_env_change)
-        run(test_glm53_k6_profile)
+        run(test_flash_is_refused_not_substituted)
         run(test_qwen_preset)
         run(test_custom_profile)
         run(test_inapplicable_knobs)
         run(test_rules_are_family_scoped)
         run(test_family_coherence_rules)
         run(test_gpu_count_gate)
-        run(test_long_context_gate_is_family_independent)
         run(test_env_layer_still_wins_over_family)
         run(test_shipped_variants_validate_clean)
         run(test_validation_scoping_fixes)

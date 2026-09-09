@@ -10,6 +10,114 @@ A **family** owns everything true about an architecture rather than about this
 deployment: which checkpoints exist, which engine flags are needed, which knobs
 mean anything, and which of the measured failure rules apply.
 
+The PR #58 release default is **full non-Flash `glm53-3.42bpw-500k`**,
+variant `exl3-tr3-glm53-3.42bpw-500k`, in the `glm52` architecture family shared
+by full GLM-5.2 and GLM-5.3. It preserves 3.42bpw and the 520,192-token budget.
+Public profile defaults retain the exercised rental-floor shape; the explicit
+AIBeast parity deployment was accepted on 2026-09-08 at C12 with the old larger
+workspaces. This is not a global `latest`/`main` promotion or completion of the
+full quality/stress matrix. The older `glm53-3.42bpw` profile retains its
+historical 393,216-token limit, not refreshed-image qualification, and
+`glm52-exl3` remains an explicit
+alternative. The Flash `glm53` family and its `glm53-k6` / `glm53-k8` variants
+are **withdrawn from this image**: the Gilded Gnosis v20 r34 base contains no
+GLM5Next model runtime, pooled sparse indexer, GDN decode kernels or K-pool
+warmup, so selecting them fails closed and names the separately published
+VerdictAI-derived Flash image instead of remapping to another model. This is
+missing support in this build, not proof that a port is impossible. Neither
+Verdict's GPU qualification nor the historical 393K result transfers to the
+Gilded r34 refresh; necessary patches are re-derived, not a claim that all
+27 Verdict overlays already exist in Gilded.
+
+**AIBeast successfully retained the old GLM-5.2 resources on September 8**,
+as the user requested; shared architecture did not require shrinking them.
+`MAINTENANCE_TRIAL=parity` uses the
+[old environment and serving-argv baseline](../maintenance/glm53-aibeast-500k/production-baseline.json):
+12 sequences, scheduler/prefill arena 3072/3072, GMU 0.95, maximum graph
+capture 48 (4,8,12,16,20,24,28,32,36,40,44,48), Trellis maximum M 48 and
+125 GiB initial LMCache RAM. The stage overrides, not replaces, the general
+profile's rental-floor defaults: 8 sequences, 2048/1024, GMU 0.93, graphs 32
+(4,8,12,16,20,24,28,32), Trellis 32 and 20 GiB initial RAM.
+
+The subsequent [controlled optimization](../TEST_RESULTS.md#controlled-aibeast-optimization-2026-09-08)
+selected a 2048-row arena, retained the 3072-token scheduler, and enabled
+60% measured prefill-service fairness in a separate verified image. It serves
+`GLM-5.3` and `local-primary`. This measured host tradeoff does not alter the
+general profile defaults or the original parity/rental-floor presets above.
+
+Both trials keep the pinned full 3.42bpw weights, context 520,192,
+KV 4,518,907,904 bytes/GPU, TP4/DCP4, interleave 64, native probabilistic MTP3,
+online K6, dynamic NVFP4/FP8 RoPE, RAM ceiling 125 GiB and disk tier 384 GiB.
+Only a recorded parity failure or insufficient measured margin permits explicit
+`MAINTENANCE_TRIAL=rental-floor`, with a `-rental-floor` default-name suffix
+and isolated caches/state/stage manifest. The selector is stage identity.
+There is no automatic shrink, token reduction or lower-bit substitution.
+
+The earlier `200b1841…` image rejected 3072 scheduler/prefill settings; its
+rental-floor receipts remain historical. The actual parity deployment uses
+image `8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`
+(source `499d34e`). It was restarted at 02:58:58 UTC solely to restore the old
+explicit B12X policy through `TUNE_B12X_*` overrides. The
+[installed pure-policy probe](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-effective-policy.json)
+confirms fold `auto`/64 MiB rather than the absent-override 256 MiB default.
+The checked-in B12X-name correction applies to future builds, not retroactively
+to that live image. See [configuration notes](configuration.md#effective-b12x-policy-and-cache-lifetime).
+
+The [final near-boundary receipt](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-final-parity.json)
+recovered 3/3 facts from a 501,099-token haystack in 275.874 seconds and passed
+the subsequent 512-token temperature-1 sampler. Haystack size excludes template
+and question tokens; C12 does not mean twelve simultaneous 520K requests.
+The [03:36:34 UTC accepted soak](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/soak-accepted.json)
+records 64 healthy/0 failed samples, 31.55 minutes since the first external
+client, Chat and Responses traffic, and 96 engine completions including probes.
+Minimum observed free VRAM was 215/245/217/215 MiB at 30-second cadence, not a
+continuous worst-case bound. This operational acceptance is not a quality A/B
+or a performance comparison against the user's stable 24-day GLM-5.2 service.
+
+See the [exact image/source/CI and PR #58 evidence](../TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08).
+That receipt is scoped to `200b1841…` / `e9623135…`; later helper/source
+changes are not retroactively exercised. The provider OS graft matched 19
+critical source, seven module-initializer and seven image-recorded native-library
+hashes. Extra provider NCCL 2.23.4 files remained disclosed; inspected live
+processes loaded image NCCL 2.30.4. This does not establish full filesystem or
+OCI isolation/security equivalence. No AIBeast production restart or final
+promotion occurred during that earlier spot phase. The reused four-GPU rental resumed
+**483634** as **500157**, then was **confirmed Paused after evidence capture**,
+preserving the user's old storage, which remained billable while paused.
+The user subsequently explicitly requested destruction: the provider API
+succeeded, `jl list` returned `[]`, and all six resource counts were zero.
+The [separate destroy receipt](../maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json)
+records the final inventory without changing the historical pause receipt.
+
+### Checkpoint quality and template behavior (2026-09-08)
+
+The deployed model is the complete
+[`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951…`](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/tree/99c6f951333d2b38f1efefa533c7afadf0d376e3),
+with [81/81 files SHA-verified](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/weight-integrity.json).
+A [local metadata derivative](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/metadata-reconciliation.json)
+removes the obsolete native-MTP projection ignore entry; canonical weights
+are unmodified. Mixed K3/K4 projection-tier support is required: a uniform-K
+or vanilla ExLlamaV3 loader is not an equivalent serving implementation.
+
+Independent evaluations support specific original-model GLM-5.3 gains, not
+proven superiority of this exact quantized, `high`-effort local deployment.
+The user's earlier [169/198 GPQA result (85.35%)](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/discussions/2)
+and reported lower score than same-bpw GLM-5.2 are contrary evidence worth
+retaining, not a controlled paired proof. Short-window KL is a fidelity proxy,
+not coding success or 500K reasoning quality. A 3.25bpw + FP8-KV comparison is
+only a proposed separate experiment requiring demonstrated fit and matched
+task quality; it is not a fallback from the current 3.42bpw/NVFP4-KV policy.
+The [dated review](glm52-prefill-optimization-research-2026-08-09.md#2026-09-08-glm-53-deployment-and-constrained-frontier-review)
+separates independent, vendor, community and local evidence.
+
+The [pinned-template render probe](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/thinking-template-probe.json)
+also demonstrates a real version difference. GLM-5.2 clears previous reasoning
+by default and honors `enable_thinking: false`; GLM-5.3 preserves previous
+reasoning by default and still opens `<think>` with that flag false.
+`clear_thinking: true` clears old reasoning on both, without disabling new
+GLM-5.3 reasoning. Use official `low`/`high`/`max` efforts; local `high` is not
+the official card's benchmark `max`. No global template edit was made.
+
 | | |
 |---|---|
 | `scripts/glm_config.py` | `FAMILIES` registry, family-aware resolver, family-scoped validation |
@@ -17,7 +125,7 @@ mean anything, and which of the measured failure rules apply.
 | `scripts/gpu_detect.py` | what the container can actually use, from nvidia-smi ∩ the visibility variables |
 | `tests/test_families.py` | release defaults, Qwen/custom coherence, and rule scoping |
 | `tests/test_gpu_detect.py` | injected visibility/device-list behavior |
-| `tests/test_knob_wiring.py` | every knob has a consumer; the UI hardcodes nothing |
+| CPU configuration smoke + built-image verification | resolved public profile commands and actual installed runtime provenance; source-text wiring checks are not behavioral proof |
 
 ---
 
@@ -83,9 +191,9 @@ file so the landing page can. `/config` shows the source of every value;
 `family` and `variant` are both possible sources.
 
 `minimize()` — the function that decides what actually gets written — compares
-each knob against **the selected family's** baseline, so a value left at that
-family's own default is not pinned into the file and the family stays free to
-change it later. The family key itself is compared against the *no-file*
+each knob against the selected family/variant and startup-environment
+baseline, so unchanged values are not pinned into the state file.
+The family key itself is compared against the *no-file*
 resolution instead; comparing it against a baseline built from itself is
 circular, and an earlier revision did exactly that: the chosen family always
 equalled its own baseline, was never written, and every apply silently reverted
@@ -306,5 +414,15 @@ The generic one-GPU provider path remains cheaply smoke-tested with a small
 Qwen3.5 checkpoint. The exact Qwen3.6-27B NVFP4 checkpoint is now qualified on
 one RTX 5090 at the 192K vision-enabled profile. A Runpod repetition of the
 full 27B performance rows remains useful for provider comparison, but is not a
-model-profile blocker. GLM-5.2 remains the four-GPU flagship; custom
-checkpoints remain compatibility-by-vLLM rather than a blanket support claim.
+model-profile blocker. Full GLM-5.3 **3.42bpw / 520,192 tokens** is the primary
+four-GPU candidate; 3.25bpw is an optional experiment. The >=500K spot result
+does not close cold first-use, full parser edges and boundary matrix,
+concurrency/overlap, disk L2 eviction, restart/fault recovery or any new KLD
+comparison. The initial 131,409-token repeat (62.4 s then 1.3 s) used native
+GPU cache. After a second 501,098-token pressure probe passed 3/3 facts, the
+original prefix returned in 3.115 s with 115,200 external-prefix hit tokens
+and 15,872 native-hit tokens added: **LMCache DRAM retrieval after GPU pressure
+is measured**, not complete GPU eviction or a pure DRAM-only request.
+GLM-5.2 remains an explicit measured
+alternative. Custom checkpoints remain compatibility-by-vLLM rather than a
+blanket support claim.

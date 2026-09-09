@@ -1,0 +1,19 @@
+{
+  "container": "glm52-turnkey-r34-maint-20260815-v1",
+  "image": "docker.io/voipmonitor/vllm@sha256:820181fbbc975cd5291c411cda9771d58fecee1636d916f508f47230df20592b",
+  "runtime_root": "/opt/venv/lib/python3.12/site-packages",
+  "files": [
+    {
+      "source_path": "lmcache/v1/multiprocess/http_api_registry.py",
+      "fixture": "http_api_registry.py",
+      "bytes": 1207,
+      "sha256": "1b2988d2bc633f7473129474f1c3066f797a791f126b446b895130661e741cea"
+    },
+    {
+      "source_path": "lmcache/v1/utils/router_discovery.py",
+      "fixture": "router_discovery.py",
+      "bytes": 1867,
+      "sha256": "c99477a13a2f41eb0d4337dae846e8c983e3efdf1656f53165127a9782fef5b9"
+    }
+  ]
+}

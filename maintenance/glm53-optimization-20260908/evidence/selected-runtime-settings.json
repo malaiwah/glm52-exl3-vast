@@ -1,0 +1,39 @@
+{
+  "name": "glm53-opt-memory-2048-20260908t133955z",
+  "image_id": "56f7a34516009f0405564ec7dfad7380fc5f123ff94252b50ba5e92b80137282",
+  "started_at": "2026-09-08T19:37:51.968130953Z",
+  "restart_policy": {
+    "Name": "no",
+    "MaximumRetryCount": 0
+  },
+  "configured_env": {
+    "MODEL_PROFILE": "glm53-3.42bpw-500k",
+    "MODEL_VARIANT": "exl3-tr3-glm53-3.42bpw-500k",
+    "SERVED_MODEL_NAME": "GLM-5.3 local-primary",
+    "MAX_MODEL_LEN": "520192",
+    "MAX_NUM_SEQS": "12",
+    "MAX_NUM_BATCHED_TOKENS": "3072",
+    "VLLM_EXL3_PREFILL_CAPACITY": "2048",
+    "KV_CACHE_MEMORY_BYTES": "4518907904",
+    "GPU_MEMORY_UTILIZATION": "0.95",
+    "MTP_TOKENS": "3",
+    "MTP_DRAFT_SAMPLE_METHOD": "probabilistic",
+    "DCP": "4",
+    "TENSOR_PARALLEL_SIZE": "4",
+    "CUDA_VISIBLE_DEVICES": "2,1,0,3",
+    "TUNE_VLLM_PREFILL_FAIRNESS_ENGINE": "compute_share",
+    "TUNE_VLLM_PREFILL_COMPUTE_SHARE": "0.6"
+  },
+  "resolved_settings": [
+    "MAX_MODEL_LEN                      = 520192                       [env]",
+    "MAX_NUM_SEQS                       = 12                           [env]",
+    "MAX_NUM_BATCHED_TOKENS             = 3072                         [env]",
+    "VLLM_EXL3_PREFILL_CAPACITY         = 2048                         [file]",
+    "KV_CACHE_MEMORY_BYTES              = 4518907904                   [env]",
+    "SERVED_MODEL_NAME                  = GLM-5.3 local-primary        [file]"
+  ],
+  "fairness_gauge": [
+    "vllm:prefill_compute_share{engine=\"0\",model_name=\"GLM-5.3\"} 0.6"
+  ],
+  "checkpoint_mount_read_only": true
+}

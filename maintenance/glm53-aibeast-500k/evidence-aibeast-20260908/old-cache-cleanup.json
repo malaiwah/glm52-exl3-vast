@@ -1,0 +1,19 @@
+{
+  "time": "2026-09-08T03:37:31Z",
+  "old_container": "glm52-turnkey-r34-maint-20260815-v1",
+  "new_container": "glm53-turnkey-r34-parity-20260908t015846z",
+  "removed": [
+    "/mnt/fast/build/r34-aibeast-maintenance-20260815/runtime/lmcache",
+    "/mnt/fast/build/r34-aibeast-maintenance-20260815/runtime/compile-cache"
+  ],
+  "free_bytes_before": 1173808279552,
+  "free_bytes_after": 1544342691840,
+  "health_after": 200,
+  "preserved": [
+    "old container and image",
+    "old state/logs",
+    "GLM-5.2 canonical weights",
+    "new GLM-5.3 caches/state",
+    "cachefilesd filesystem cache"
+  ]
+}

@@ -399,7 +399,7 @@ def run(base, key, model, vision, auth_enabled=None, checkpoint=None):
 
 
 def write_result(path, doc):
-    blob = json.dumps(doc, indent=1) + "\n"
+    blob = json.dumps(doc, indent=1, allow_nan=False) + "\n"
     if not path:
         sys.stdout.write(blob)
         return
@@ -433,6 +433,7 @@ def main(argv):
         "model": "",
         "vision_requested": args.vision,
         "checks": [],
+        "complete": False,
         "ok": False,
     }
 
@@ -443,7 +444,7 @@ def main(argv):
         # Mirror benchmark_serving.py: no-op here, single final write below.
         if args.out:
             doc["checks"] = checks
-            doc["ok"] = release_ok(checks)
+            doc["ok"] = False
             write_result(args.out, doc)
 
     try:
@@ -468,6 +469,7 @@ def main(argv):
     # Single final write (unconditional): emits exactly one document to stdout
     # in the no-out case, or the completed result to disk.
     doc["checks"] = checks
+    doc["complete"] = True
     doc["ok"] = release_ok(checks)
     write_result(args.out, doc)
     return 0 if doc["ok"] else 1

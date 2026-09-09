@@ -1,0 +1,22 @@
+{
+  "/usr/local/cuda/bin/nvcc": {
+    "rc": 0,
+    "out": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2026 NVIDIA Corporation\nBuilt on Thu_Mar_19_11:12:51_PM_PDT_2026\nCuda compilation tools, release 13.2, V13.2.78\nBuild cuda_13.2.r13.2/compiler.37668154_0\n",
+    "err": ""
+  },
+  "/usr/local/cuda/bin/ptxas": {
+    "rc": 0,
+    "out": "ptxas: NVIDIA (R) Ptx optimizing assembler\nCopyright (c) 2005-2026 NVIDIA Corporation\nBuilt on Thu_Mar_19_11:12:51_PM_PDT_2026\nCuda compilation tools, release 13.2, V13.2.78\nBuild cuda_13.2.r13.2/compiler.37668154_0\n",
+    "err": ""
+  },
+  "/opt/venv/lib/python3.12/site-packages/triton/backends/nvidia/bin/ptxas": {
+    "rc": 0,
+    "out": "ptxas: NVIDIA (R) Ptx optimizing assembler\nCopyright (c) 2005-2025 NVIDIA Corporation\nBuilt on Fri_Feb_21_20:21:21_PST_2025\nCuda compilation tools, release 12.8, V12.8.93\nBuild cuda_12.8.r12.8/compiler.35583870_0\n",
+    "err": ""
+  },
+  "packages_and_worker_env": {
+    "rc": 0,
+    "out": "[{\"name\": \"cuda-bindings\", \"version\": \"13.2.0\"}, {\"name\": \"cuda-core\", \"version\": \"1.0.1\"}, {\"name\": \"cuda-pathfinder\", \"version\": \"1.5.5\"}, {\"name\": \"cuda-python\", \"version\": \"13.2.0\"}, {\"name\": \"cuda-tile\", \"version\": \"1.5.0\"}, {\"name\": \"cuda-toolkit\", \"version\": \"13.2.1\"}, {\"name\": \"cupy-cuda13x\", \"version\": \"13.6.0\"}, {\"name\": \"nvidia-cublas\", \"version\": \"13.4.0.1\"}, {\"name\": \"nvidia-cuda-cccl\", \"version\": \"13.2.75\"}, {\"name\": \"nvidia-cuda-crt\", \"version\": \"13.2.78\"}, {\"name\": \"nvidia-cuda-cupti\", \"version\": \"13.2.75\"}, {\"name\": \"nvidia-cuda-nvcc\", \"version\": \"13.2.78\"}, {\"name\": \"nvidia-cuda-nvdisasm\", \"version\": \"13.3.73\"}, {\"name\": \"nvidia-cuda-nvrtc\", \"version\": \"13.2.78\"}, {\"name\": \"nvidia-cuda-runtime\", \"version\": \"13.2.75\"}, {\"name\": \"nvidia-cuda-tileiras\", \"version\": \"13.2.78\"}, {\"name\": \"tokenspeed-triton\", \"version\": \"3.8.10.post20260721\"}, {\"name\": \"torch\", \"version\": \"2.12.0+cu132\"}, {\"name\": \"torch_c_dlpack_ext\", \"version\": \"0.1.5\"}, {\"name\": \"torchvision\", \"version\": \"0.27.0+cu132\"}, {\"name\": \"triton\", \"version\": \"3.7.0\"}]\n[]\n",
+    "err": ""
+  }
+}

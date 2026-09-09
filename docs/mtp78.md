@@ -3,6 +3,13 @@
 Extracted from the README. The `glm52-exl3` profile's speculative layer-78
 draft: measurements, history, and compatibility paths.
 
+This document's measured draft comparisons are GLM-5.2 history, not proof for
+the new full GLM-5.3 3.42bpw 520K candidate. Full GLM-5.3 uses native
+EXL3/TR3 MTP3 and rejects these GLM-5.2 graft/override paths.
+`MTP78_TRELLIS=0` resolves to `MTP_DRAFT=native`, not “stock BF16”;
+the checkpoint determines the native draft format. `MTP_DRAFT=off` disables
+speculation rather than changing a draft's quantization.
+
 The complete one-by-one justification for every non-default CLI parameter and
 runtime environment value in the balanced profile is kept in
 [`docs/glm52-tuning-rationale.md`](glm52-tuning-rationale.md). It records
@@ -121,10 +128,10 @@ untouched and add one field:
                        "model":"/path/to/GLM-5.2-EXL3-TR3-MTP78/3bpw-keep0"}'
 ```
 
-v29 supports this separately rank-sliced draft by stamping its role during
-construction. The turnkey still defaults to the in-place graft because it
-avoids a second draft directory and is the release configuration exercised by
-the automated boot verifier.
+v29 supported this separately rank-sliced draft by stamping its role during
+construction. That historical release used the in-place graft. Current
+Brandon checkpoints contain native quantized MTP; the full GLM-5.3 profiles
+also use their own native draft, not this separate GLM-5.2 override.
 
 ## Model quality (the target model, unrelated to the draft)
 

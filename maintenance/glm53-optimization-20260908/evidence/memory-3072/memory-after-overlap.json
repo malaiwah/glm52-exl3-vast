@@ -1,0 +1,29 @@
+{
+  "time": 1788894251.1809382,
+  "gpus": [
+    {
+      "index": 0.0,
+      "used_mib": 97149.0,
+      "free_mib": 101.0,
+      "watts": 377.39
+    },
+    {
+      "index": 1.0,
+      "used_mib": 97149.0,
+      "free_mib": 101.0,
+      "watts": 335.91
+    },
+    {
+      "index": 2.0,
+      "used_mib": 97149.0,
+      "free_mib": 101.0,
+      "watts": 362.18
+    },
+    {
+      "index": 3.0,
+      "used_mib": 97149.0,
+      "free_mib": 101.0,
+      "watts": 376.22
+    }
+  ]
+}

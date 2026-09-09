@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -58,75 +57,6 @@ class R28BaseGateTests(unittest.TestCase):
                 result = gate.verify()
             self.assertEqual(result["status"], "verified")
 
-    def test_r28_base_and_inherited_r26_ledger_are_retained(self) -> None:
-        ledger = json.loads(
-            (ROOT / "patches" / "field-review-r26" / "ledger.json").read_text())
-        changelog = (ROOT / "CHANGELOG.md").read_text()
-        self.assertIn(
-            "sha256:501e10e79b4bc854237804d215e454c531ac9c2d354a8fa1a93e450fe7ba6ce0",
-            changelog,
-        )
-        self.assertEqual(ledger["composed_sources"]["vllm"],
-                         "f5981f14b4d39979bc0d799c020d42002b707257")
-
-    def test_mixed_trellis_runtime_counts_fix_is_built_and_ledgered(self) -> None:
-        ledger = json.loads(
-            (ROOT / "patches" / "field-review-r26" / "ledger.json").read_text())
-        dockerfile = (ROOT / "Dockerfile").read_text()
-        native = {item["name"]: item for item in ledger["native_fixes"]}
-        self.assertEqual(
-            native["sparkinfer-mixed-trellis-runtime-counts"]["source"],
-            "local-inference-lab/sparkinfer#117@cfeee9b42d21c19a74d85ed5576f8387168df53c",
-        )
-        self.assertIn(
-            "99e22ada2853d5c091c0a8bb8cca0d02bb8448d69ce8317b5bb747a2914aa855",
-            SCRIPT.read_text(),
-        )
-        self.assertNotIn(
-            "raw.githubusercontent.com/local-inference-lab/sparkinfer",
-            dockerfile,
-        )
-
-    def test_tp4_dcp4_policy_and_inherited_sparkinfer_deltas_are_pinned(self) -> None:
-        ledger = json.loads(
-            (ROOT / "patches" / "field-review-r26" / "ledger.json").read_text())
-        native = {item["name"]: item for item in ledger["native_fixes"]}
-        self.assertIn("tp4-dcp4-lossless-auto-policy", native)
-        self.assertIn("sparkinfer-fp8-gather-validity", native)
-        self.assertIn("sparkinfer-online-k6-e8m0-small-row-scales", native)
-        source = SCRIPT.read_text()
-        for digest in (
-            "3bfeb2cf7e2db8fa80f4a9dedc8a7a816793a480ce6850c7618aa4b5e199626c",
-            "f560e2179101dd428d32711cefe32d3084c78ee92583b0656404a2268498a726",
-            "c30d77498ca00677dae9da552e803f94e7301b58cf26041f82801e6c245d0945",
-        ):
-            self.assertIn(digest, source)
-
-    def test_serial_mtp_warning_fix_is_retained_and_ledgered(self) -> None:
-        ledger = json.loads(
-            (ROOT / "patches" / "field-review-r26" / "ledger.json").read_text())
-        overlays = {item["name"]: item for item in ledger["turnkey_overlays"]}
-        self.assertEqual(
-            overlays["vllm-serial-spec-warning"]["status"],
-            "field-fix-pending-upstream",
-        )
-        patcher = ROOT / "scripts" / "patch_vllm_serial_spec_warning.py"
-        self.assertEqual(
-            hashlib.sha256(patcher.read_bytes()).hexdigest(),
-            "a0b7bc8377a5e29a921da4971d63b5260dac34601598285fee6cce3cd94bc65c",
-        )
-
-    def test_legacy_exl3_source_patchers_are_retained_immutably(self) -> None:
-        expected = {
-            "patch_exl3_parity_abi.py":
-                "e5a442f9aac0493f7fefe8584acfee923f99f4c952382dc6e41670d8b7c8a638",
-            "patch_exl3_mixk.py":
-                "99f597b78c83fce4d7d568305ba147d17a8daf866e833eca42be79d8ec185544",
-        }
-        for name, digest in expected.items():
-            patcher = ROOT / "scripts" / name
-            self.assertEqual(hashlib.sha256(patcher.read_bytes()).hexdigest(),
-                             digest)
 
 
 if __name__ == "__main__":

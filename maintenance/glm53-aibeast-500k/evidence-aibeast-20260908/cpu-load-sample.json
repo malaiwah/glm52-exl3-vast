@@ -1,0 +1,30 @@
+{
+  "sample_seconds": 10.000089370645583,
+  "host_busy_percent": 3.6984908906091185,
+  "process_cpu_percent_one_core_100": [
+    {
+      "role": "vllm",
+      "cpu_percent": 3.29997050795053
+    },
+    {
+      "role": "VLLM::EngineCor",
+      "cpu_percent": 67.99939228504122
+    },
+    {
+      "role": "VLLM::Worker_TP",
+      "cpu_percent": 39.29964877650177
+    },
+    {
+      "role": "VLLM::Worker_TP",
+      "cpu_percent": 39.19964967020024
+    },
+    {
+      "role": "VLLM::Worker_TP",
+      "cpu_percent": 39.19964967020024
+    },
+    {
+      "role": "VLLM::Worker_TP",
+      "cpu_percent": 39.29964877650177
+    }
+  ]
+}

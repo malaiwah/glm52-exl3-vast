@@ -1,0 +1,12 @@
+{
+  "verified": true,
+  "critical_sources": 19,
+  "modules": 7,
+  "native_libraries": 10,
+  "additional_provider_native_libraries": {
+    "nccl:/usr/lib/x86_64-linux-gnu/libnccl.so.2.23.4": "54ac2932033091d5c9192a77da4b244ee9279b2475dbf416018f113dca97b31e",
+    "nccl:/usr/lib/x86_64-linux-gnu/libnccl.so.2": "54ac2932033091d5c9192a77da4b244ee9279b2475dbf416018f113dca97b31e",
+    "nccl:/usr/lib/x86_64-linux-gnu/libnccl.so": "54ac2932033091d5c9192a77da4b244ee9279b2475dbf416018f113dca97b31e"
+  },
+  "source_commit": "e96231359fc5dca2df9d4a397d7a814ba9deae30"
+}

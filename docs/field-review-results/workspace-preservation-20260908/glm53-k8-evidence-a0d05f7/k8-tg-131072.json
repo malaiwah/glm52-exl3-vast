@@ -1,0 +1,380 @@
+{
+ "schema": 1,
+ "ts": "2026-08-29T14:09:29Z",
+ "base_url": "http://127.0.0.1:8000",
+ "model": "GLM-5.3-Flash-K8",
+ "settings": {
+  "input_tokens": 131072,
+  "output_tokens": 512,
+  "concurrency": [
+   1,
+   4,
+   8
+  ],
+  "requests_per_level": 8,
+  "prefill_tokens": [],
+  "warmup": 1,
+  "temperature": 0.0,
+  "seed": null,
+  "prompt_seed": "k8-tg-131072-20260831"
+ },
+ "metadata": {
+  "checkpoint_revision": "b5ef443adce36ba5a10f2d5aa682fc9f2f0d0fae",
+  "image_digest": "ae717cf3c3cc848a344662eef2c2178f5e7b81a8ac5f4c884168a7e496d5e074",
+  "host": "4x-rtx-pro-6000-blackwell-96g",
+  "mtp_tokens": "0"
+ },
+ "prefill": [],
+ "concurrency": [
+  {
+   "concurrency": 1,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 755.4435,
+   "request_throughput_rps": 0.0106,
+   "prompt_tokens": 1048608,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 1388.069,
+   "output_throughput_tok_s": 5.422,
+   "mean_ttft_ms": 44553.007,
+   "p50_ttft_ms": 44543.775,
+   "p95_ttft_ms": 44803.096,
+   "mean_tpot_ms": 97.607,
+   "p50_tpot_ms": 97.617,
+   "p95_tpot_ms": 97.866,
+   "mean_inter_chunk_ms": 97.678,
+   "metric_prompt_tokens": 1048608,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "prefix_cache_query_tokens": 1048608,
+   "gpu_prefix_cache_hit_tokens": 0,
+   "external_prefix_cache_query_tokens": 0,
+   "external_prefix_cache_hit_tokens": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 94.227202,
+     "ttft_ms": 44204.118,
+     "tpot_ms": 97.893,
+     "mean_inter_chunk_ms": 97.892,
+     "output_head": "The user is asking me to continue a deterministic sequence of short lowercase words. The document is a repetitive teleme"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 94.361596,
+     "ttft_ms": 44526.497,
+     "tpot_ms": 97.525,
+     "mean_inter_chunk_ms": 97.525,
+     "output_head": "The user is asking me to continue a deterministic sequence of short lowercase words. The document is a benchmark documen"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 94.496082,
+     "ttft_ms": 44625.006,
+     "tpot_ms": 97.595,
+     "mean_inter_chunk_ms": 97.595,
+     "output_head": "The user is asking me to continue a deterministic sequence of short lowercase words. The document is a repetitive teleme"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 94.536848,
+     "ttft_ms": 44638.948,
+     "tpot_ms": 97.648,
+     "mean_inter_chunk_ms": 97.647,
+     "output_head": "The user is asking me to continue a deterministic sequence of short lowercase words. The document is a repetitive teleme"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 94.784904,
+     "ttft_ms": 44891.484,
+     "tpot_ms": 97.639,
+     "mean_inter_chunk_ms": 97.83,
+     "output_head": "The user has provided a long document with telemetry batch records from 0 to 5354, and asks me to \"Continue with a deter"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 94.262155,
+     "ttft_ms": 44545.583,
+     "tpot_ms": 97.293,
+     "mean_inter_chunk_ms": 97.483,
+     "output_head": "The user is asking me to continue a deterministic sequence of short lowercase words. The document is a benchmark documen"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 94.338713,
+     "ttft_ms": 44541.967,
+     "tpot_ms": 97.45,
+     "mean_inter_chunk_ms": 97.641,
+     "output_head": "The user is asking me to continue a deterministic sequence of short lowercase words. The document is a benchmark documen"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 94.434023,
+     "ttft_ms": 44450.453,
+     "tpot_ms": 97.815,
+     "mean_inter_chunk_ms": 97.815,
+     "output_head": "The user is asking me to continue a deterministic sequence of short lowercase words. The document is a repetitive teleme"
+    }
+   ]
+  },
+  {
+   "concurrency": 4,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 340.0646,
+   "request_throughput_rps": 0.0235,
+   "prompt_tokens": 1048608,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 3083.555,
+   "output_throughput_tok_s": 12.045,
+   "mean_ttft_ms": 86247.99,
+   "p50_ttft_ms": 63196.579,
+   "p95_ttft_ms": 157059.597,
+   "mean_tpot_ms": 125.715,
+   "p50_tpot_ms": 117.916,
+   "p95_tpot_ms": 164.911,
+   "mean_inter_chunk_ms": 125.91,
+   "metric_prompt_tokens": 1048608,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "prefix_cache_query_tokens": 1048608,
+   "gpu_prefix_cache_hit_tokens": 0,
+   "external_prefix_cache_query_tokens": 0,
+   "external_prefix_cache_hit_tokens": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 135.523256,
+     "ttft_ms": 47202.199,
+     "tpot_ms": 172.84,
+     "mean_inter_chunk_ms": 173.86,
+     "output_head": "barNew\u5f0fn syndromerend Parad lb between if SXLES (operator reviewed pressure, and checksum fieldseny, and checksum fields"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 168.097316,
+     "ttft_ms": 91351.998,
+     "tpot_ms": 150.187,
+     "mean_inter_chunk_ms": 150.481,
+     "output_head": "decode [arlosrottcury{, whenever\u6c0f/is hipsset first bundler reviewed pressure, temperature, and. and checksum fields befo"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 199.48058,
+     "ttft_ms": 135744.494,
+     "tpot_ms": 124.728,
+     "mean_inter_chunk_ms": 124.973,
+     "output_head": "halls' L\u00f6 sim\u4ee3thestidy tread in HP core just\u5b8c\u6210. Thelocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklockl"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 229.515712,
+     "ttft_ms": 168536.96,
+     "tpot_ms": 119.332,
+     "mean_inter_chunk_ms": 119.332,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 123.995645,
+     "ttft_ms": 64463.817,
+     "tpot_ms": 116.501,
+     "mean_inter_chunk_ms": 116.501,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 121.246776,
+     "ttft_ms": 61929.342,
+     "tpot_ms": 116.081,
+     "mean_inter_chunk_ms": 116.081,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 115.504266,
+     "ttft_ms": 60541.499,
+     "tpot_ms": 107.559,
+     "mean_inter_chunk_ms": 107.559,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 110.542707,
+     "ttft_ms": 60213.61,
+     "tpot_ms": 98.491,
+     "mean_inter_chunk_ms": 98.491,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    }
+   ]
+  },
+  {
+   "concurrency": 8,
+   "requests": 8,
+   "completed": 8,
+   "failed": 0,
+   "duration_s": 309.2424,
+   "request_throughput_rps": 0.0259,
+   "prompt_tokens": 1048608,
+   "output_tokens": 4096,
+   "prompt_throughput_tok_s": 3390.893,
+   "output_throughput_tok_s": 13.245,
+   "mean_ttft_ms": 153995.718,
+   "p50_ttft_ms": 154250.278,
+   "p95_ttft_ms": 248538.183,
+   "mean_tpot_ms": 113.629,
+   "p50_tpot_ms": 116.459,
+   "p95_tpot_ms": 119.401,
+   "mean_inter_chunk_ms": 113.629,
+   "metric_prompt_tokens": 1048608,
+   "metric_generation_tokens": 4096,
+   "preemptions": 0,
+   "prefix_cache_query_tokens": 1048608,
+   "gpu_prefix_cache_hit_tokens": 0,
+   "external_prefix_cache_query_tokens": 0,
+   "external_prefix_cache_hit_tokens": 0,
+   "speculative": {
+    "drafts": 0,
+    "draft_tokens": 0,
+    "accepted_tokens": 0,
+    "mean_acceptance_length": null,
+    "draft_token_acceptance_rate": null
+   },
+   "errors": [],
+   "requests_detail": [
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 109.169954,
+     "ttft_ms": 47397.217,
+     "tpot_ms": 120.886,
+     "mean_inter_chunk_ms": 120.886,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 168.825658,
+     "ttft_ms": 109333.313,
+     "tpot_ms": 116.423,
+     "mean_inter_chunk_ms": 116.423,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 138.87812,
+     "ttft_ms": 79349.037,
+     "tpot_ms": 116.495,
+     "mean_inter_chunk_ms": 116.495,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 198.825345,
+     "ttft_ms": 139277.441,
+     "tpot_ms": 116.532,
+     "mean_inter_chunk_ms": 116.532,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 228.827729,
+     "ttft_ms": 169223.115,
+     "tpot_ms": 116.643,
+     "mean_inter_chunk_ms": 116.643,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 258.537595,
+     "ttft_ms": 199222.001,
+     "tpot_ms": 116.077,
+     "mean_inter_chunk_ms": 116.077,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 284.184625,
+     "ttft_ms": 229227.23,
+     "tpot_ms": 107.549,
+     "mean_inter_chunk_ms": 107.549,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    },
+    {
+     "ok": true,
+     "prompt_tokens": 131076,
+     "output_tokens": 512,
+     "elapsed_s": 309.230904,
+     "ttft_ms": 258936.388,
+     "tpot_ms": 98.424,
+     "mean_inter_chunk_ms": 98.424,
+     "output_head": "locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock"
+    }
+   ]
+  }
+ ],
+ "complete": true,
+ "ok": true
+}

@@ -1,0 +1,22 @@
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+{"case": "route_tail", "max_rows": 24, "rows": 17, "topk": 1, "experts": 32, "mapped": false, "graph": true, "provide_counts": true, "live_routes": 17, "packed_count": 88, "returned_routes": 192, "returned_blocks": 24}
+{"case": "route_tail", "max_rows": 24, "rows": 23, "topk": 1, "experts": 32, "mapped": false, "graph": true, "provide_counts": true, "live_routes": 23, "packed_count": 128, "returned_routes": 192, "returned_blocks": 24}
+{"case": "route_tail", "max_rows": 24, "rows": 24, "topk": 1, "experts": 32, "mapped": false, "graph": true, "provide_counts": true, "live_routes": 24, "packed_count": 96, "returned_routes": 192, "returned_blocks": 24}
+{"case": "route_tail", "max_rows": 1536, "rows": 1177, "topk": 16, "experts": 896, "mapped": false, "graph": false, "provide_counts": true, "live_routes": 18832, "packed_count": 20992, "returned_routes": 30848, "returned_blocks": 3856}
+{"case": "route_tail", "max_rows": 1536, "rows": 1184, "topk": 16, "experts": 896, "mapped": false, "graph": false, "provide_counts": true, "live_routes": 18944, "packed_count": 21040, "returned_routes": 30848, "returned_blocks": 3856}
+{"case": "route_tail", "max_rows": 1536, "rows": 1536, "topk": 16, "experts": 896, "mapped": false, "graph": false, "provide_counts": true, "live_routes": 24576, "packed_count": 26424, "returned_routes": 30848, "returned_blocks": 3856}
+{"case": "route_tail", "max_rows": 24, "rows": 17, "topk": 1, "experts": 32, "mapped": true, "graph": true, "provide_counts": true, "live_routes": 17, "packed_count": 80, "returned_routes": 192, "returned_blocks": 24}
+{"case": "route_tail", "max_rows": 24, "rows": 23, "topk": 1, "experts": 32, "mapped": true, "graph": true, "provide_counts": true, "live_routes": 23, "packed_count": 96, "returned_routes": 192, "returned_blocks": 24}
+{"case": "route_tail", "max_rows": 24, "rows": 24, "topk": 1, "experts": 32, "mapped": true, "graph": true, "provide_counts": true, "live_routes": 24, "packed_count": 80, "returned_routes": 192, "returned_blocks": 24}
+{"case": "route_tail", "max_rows": 1536, "rows": 1177, "topk": 16, "experts": 896, "mapped": true, "graph": false, "provide_counts": true, "live_routes": 18832, "packed_count": 15608, "returned_routes": 30848, "returned_blocks": 3856}
+{"case": "route_tail", "max_rows": 1536, "rows": 1184, "topk": 16, "experts": 896, "mapped": true, "graph": false, "provide_counts": true, "live_routes": 18944, "packed_count": 15752, "returned_routes": 30848, "returned_blocks": 3856}
+{"case": "route_tail", "max_rows": 1536, "rows": 1536, "topk": 16, "experts": 896, "mapped": true, "graph": false, "provide_counts": true, "live_routes": 24576, "packed_count": 19656, "returned_routes": 30848, "returned_blocks": 3856}
+{"case": "route_tail", "max_rows": 1535, "rows": 1177, "topk": 16, "experts": 896, "mapped": true, "graph": false, "provide_counts": true, "live_routes": 18832, "packed_count": 15608, "returned_routes": 30832, "returned_blocks": 3854}
+{"case": "route_tail", "max_rows": 1535, "rows": 1184, "topk": 16, "experts": 896, "mapped": true, "graph": false, "provide_counts": true, "live_routes": 18944, "packed_count": 15752, "returned_routes": 30832, "returned_blocks": 3854}
+{"case": "route_tail", "max_rows": 1536, "rows": 1177, "topk": 16, "experts": 896, "mapped": true, "graph": true, "provide_counts": false, "live_routes": 18832, "packed_count": 15608, "returned_routes": 30848, "returned_blocks": 3856}
+{"case": "route_tail", "max_rows": 24, "rows": 0, "topk": 1, "experts": 32, "mapped": false, "graph": false, "provide_counts": true, "live_routes": 0, "packed_count": 0, "returned_routes": 8, "returned_blocks": 1}
+{"case": "route_tail", "max_rows": 24, "rows": 1, "topk": 1, "experts": 32, "mapped": false, "graph": false, "provide_counts": true, "live_routes": 1, "packed_count": 0, "returned_routes": 8, "returned_blocks": 1}
+{"case": "route_tail", "max_rows": 24, "rows": 16, "topk": 1, "experts": 32, "mapped": false, "graph": false, "provide_counts": true, "live_routes": 16, "packed_count": 104, "returned_routes": 128, "returned_blocks": 16}
+{"case": "undersized_arena", "rejected": true}
+{"status": "passed", "weights_loaded": false}

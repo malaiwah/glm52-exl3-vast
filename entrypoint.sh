@@ -13,34 +13,64 @@
 set -e
 
 SCRIPTS_DIR="${SCRIPTS_DIR:-/opt/scripts}"
+
+# GLM-5.3-Flash is not served by this image any more: the Gilded Gnosis base
+# carries no GLM5Next/pooled-indexer runtime to load it with. A withdrawn Flash
+# selector must be refused here, at the gate, and with the reason and the image
+# that DOES serve it named — the resolver below would otherwise reduce an
+# unknown family/variant to a default and boot a different model on a rented
+# four-GPU host. glm_config owns the wording so both paths say the same thing.
+refuse_flash_selector() {
+  python3 -c "
+import sys; sys.path.insert(0, '$SCRIPTS_DIR')
+import glm_config as gc
+print(gc.flash_unavailable_message(sys.argv[2], sys.argv[1]))" "$1" "$2" >&2 ||
+    echo "FATAL: $1=$2 selects GLM-5.3-Flash, which this image cannot serve." >&2
+  exit 1
+}
+case "${MODEL_FAMILY:-}" in
+  glm53) refuse_flash_selector MODEL_FAMILY "$MODEL_FAMILY" ;;
+esac
+case "${MODEL_VARIANT:-}" in
+  glm53-k6|glm53-k8) refuse_flash_selector MODEL_VARIANT "$MODEL_VARIANT" ;;
+esac
 MODEL_PROFILE="${MODEL_PROFILE:-}"
+if [ -z "$MODEL_PROFILE" ]; then
+  if [ -n "${MODEL_FAMILY:-}${MODEL_VARIANT:-}" ]; then
+    # Let the resolver choose the variant for an explicit family; do not inject
+    # the new-launch default into an existing selection.
+    MODEL_PROFILE=custom
+  else
+    MODEL_PROFILE=glm53-3.42bpw-500k
+  fi
+fi
 case "$MODEL_PROFILE" in
-  ""|glm52-exl3)
+  glm52-exl3)
     export MODEL_FAMILY="${MODEL_FAMILY:-glm52}"
     export MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3}"
     MODEL_PROFILE="${MODEL_PROFILE:-glm52-exl3}"
     ;;
   glm53-k6|glm53-k8)
-    export MODEL_FAMILY="${MODEL_FAMILY:-glm53}"
-    export MODEL_VARIANT="${MODEL_VARIANT:-$MODEL_PROFILE}"
+    refuse_flash_selector MODEL_PROFILE "$MODEL_PROFILE"
     ;;
-  glm53-3.42bpw)
+  glm53-3.25bpw|glm53-3.42bpw|glm53-3.42bpw-500k)
     # GLM-5.3 retains GLM-5.2's glm_moe_dsa architecture. Reuse that measured
     # runtime family while selecting the independently pinned GLM-5.3 weights.
     export MODEL_FAMILY="${MODEL_FAMILY:-glm52}"
-    export MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3-glm53-3.42bpw}"
+    export MODEL_VARIANT="${MODEL_VARIANT:-exl3-tr3-$MODEL_PROFILE}"
     ;;
   qwen36-27b-nvfp4)
     export MODEL_FAMILY="${MODEL_FAMILY:-qwen36}"
     export MODEL_VARIANT="${MODEL_VARIANT:-qwen36-nvfp4}"
     ;;
   custom)
-    export MODEL_FAMILY="${MODEL_FAMILY:-custom}"
-    export MODEL_VARIANT="${MODEL_VARIANT:-custom}"
+    if [ -z "${MODEL_FAMILY:-}${MODEL_VARIANT:-}" ]; then
+      export MODEL_FAMILY=custom MODEL_VARIANT=custom
+    fi
     ;;
   *)
     echo "FATAL: unknown MODEL_PROFILE=$MODEL_PROFILE"
-    echo "FATAL: choose glm53-k6, glm53-k8, glm53-3.42bpw, glm52-exl3, qwen36-27b-nvfp4, or custom"
+    echo "FATAL: choose glm53-3.42bpw-500k, glm53-3.25bpw, glm53-3.42bpw, glm52-exl3, qwen36-27b-nvfp4, or custom"
     exit 1
     ;;
 esac
@@ -243,11 +273,13 @@ python3 "$SCRIPTS_DIR/config_cli.py" snapshot-env || \
 # replacing the container. A state file that fails pre-validation is rolled back
 # here rather than handed to the engine.
 apply_config() {
-  if python3 "$SCRIPTS_DIR/config_cli.py" env > "$CONFIG_ENV.tmp"; then
+  local config_rc
+  if python3 "$SCRIPTS_DIR/config_cli.py" env --begin-attempt > "$CONFIG_ENV.tmp"; then
     mv "$CONFIG_ENV.tmp" "$CONFIG_ENV"
   else
-    echo "!!! config: resolution failed; keeping the previously loaded configuration" >&2
+    echo "!!! config: resolution failed; refusing to start stale configuration" >&2
     rm -f "$CONFIG_ENV.tmp"
+    return 2
   fi
   if [ -s "$CONFIG_ENV" ]; then
     # shellcheck disable=SC1090
@@ -256,35 +288,42 @@ apply_config() {
   case "${MODEL_FAMILY:-glm52}" in
     glm52)
       case "${MODEL_VARIANT:-exl3-tr3}" in
+        exl3-tr3-glm53-3.25bpw) MODEL_PROFILE=glm53-3.25bpw ;;
         exl3-tr3-glm53-3.42bpw) MODEL_PROFILE=glm53-3.42bpw ;;
+        exl3-tr3-glm53-3.42bpw-500k) MODEL_PROFILE=glm53-3.42bpw-500k ;;
         *) MODEL_PROFILE=glm52-exl3 ;;
-      esac
-      ;;
-    glm53)
-      case "${MODEL_VARIANT:-glm53-k6}" in
-        glm53-k8) MODEL_PROFILE=glm53-k8 ;;
-        *) MODEL_PROFILE=glm53-k6 ;;
       esac
       ;;
     qwen36) MODEL_PROFILE=qwen36-27b-nvfp4 ;;
     custom) MODEL_PROFILE=custom ;;
   esac
   export MODEL_PROFILE
-  if ! python3 "$SCRIPTS_DIR/config_cli.py" validate --quiet; then
-    echo "!!! config: the resolved configuration FAILS pre-validation:"
+  if python3 "$SCRIPTS_DIR/config_cli.py" validate --quiet; then
+    :
+  else
+    config_rc=$?
+    [ "$config_rc" -ne 3 ] || return 3
+    echo "!!! config: the resolved configuration FAILS pre-validation:" >&2
     python3 "$SCRIPTS_DIR/config_cli.py" validate || true
     if python3 "$SCRIPTS_DIR/config_cli.py" should-rollback; then
-      echo "!!! config: refusing to start the engine on it — rolling back"
-      python3 "$SCRIPTS_DIR/config_cli.py" rollback --reason "failed pre-validation at boot" || true
-      python3 "$SCRIPTS_DIR/config_cli.py" clear-restart || true
-      if python3 "$SCRIPTS_DIR/config_cli.py" env > "$CONFIG_ENV.tmp"; then
-        mv "$CONFIG_ENV.tmp" "$CONFIG_ENV"
-        # shellcheck disable=SC1090
-        . "$CONFIG_ENV"
+      echo "!!! config: refusing to start the engine on it — rolling back" >&2
+      if python3 "$SCRIPTS_DIR/config_cli.py" rollback --reason "failed pre-validation at boot"; then
+        if python3 "$SCRIPTS_DIR/config_cli.py" env --begin-attempt > "$CONFIG_ENV.tmp"; then
+          mv "$CONFIG_ENV.tmp" "$CONFIG_ENV"
+          # shellcheck disable=SC1090
+          . "$CONFIG_ENV"
+          python3 "$SCRIPTS_DIR/config_cli.py" validate --quiet || return $?
+        else
+          return 2
+        fi
+      else
+        return $?
       fi
     else
-      echo "!!! config: no known-good configuration to fall back to — starting anyway."
-      echo "!!! The findings above are measured failure modes; expect them."
+      config_rc=$?
+      [ "$config_rc" -ne 3 ] || return 3
+      echo "!!! config: no valid known-good configuration; refusing engine startup." >&2
+      return 2
     fi
   fi
   # SparkInfer's PCIe DMA and B12X DCP A2A channels exchange CUDA IPC handles.
@@ -293,8 +332,7 @@ apply_config() {
   # calibrator cannot merely choose a conservative crossover: every custom
   # channel fails cudaIpcOpenMemHandle. Detect that hard capability boundary
   # before calibration and retain vLLM's NCCL/SHM fallbacks.
-  if { [ "${MODEL_FAMILY:-glm52}" = "glm52" ] ||
-       [ "${MODEL_FAMILY:-glm52}" = "glm53" ]; } &&
+  if [ "${MODEL_FAMILY:-glm52}" = "glm52" ] &&
      [ "${B12X_PCIE_DMA:-1}" = "1" ] &&
      command -v nvidia-smi >/dev/null 2>&1; then
     _p2p_matrix="$(nvidia-smi topo -p2p r 2>/dev/null || true)"
@@ -339,7 +377,7 @@ apply_config
 # of GB they did not ask for, onto a disk that may not hold it, at rental rates,
 # with the UI reporting progress as though everything were fine.
 case "${FAMILY_ENV_BLOCK:-}" in
-  glm52|glm53|generic) ;;
+  glm52|generic) ;;
   *)
     echo "FATAL: MODEL_FAMILY='${MODEL_FAMILY:-?}' resolved to an engine environment"
     echo "       block ('${FAMILY_ENV_BLOCK:-}') that this entrypoint does not implement."
@@ -530,10 +568,8 @@ PY
   # The full status file carries the API key in plaintext, so it stays root-only
   # (600) even when the soul user exists. SOUL runs deprivileged and must not be
   # able to read the key: publish a SANITIZED copy (api_key stripped) for the
-  # soul group instead, and point the controller at it. The controller still
-  # receives the key it needs for probes through its own environment, which it
-  # scrubs before spawning any exec shell — so nothing the model can reach ever
-  # contains the key.
+  # soul group instead, and point the controller at it. Its probe key travels
+  # through a post-hardening pipe from the root launcher, never its environment.
   chmod 600 "$STATUS_FILE" 2>/dev/null || true
   if id soul >/dev/null 2>&1; then
     _soul_status="$STATUS_FILE.soul"
@@ -642,6 +678,7 @@ SOUL_SUPERVISOR_PID=""
 SOUL_LEVEL_CACHE=""
 SOUL_LEVEL_CHECK_AT=0
 SOUL_CONFIG_MTIME=""
+SOUL_IDLE_STOPPED=0
 
 soul_level() {
   python3 "$SCRIPTS_DIR/soul_config.py" level 2>/dev/null || printf '0\n'
@@ -669,6 +706,9 @@ soul_level_cached() {
      [ -f "$SOUL_RUNTIME_DIR/reconcile" ] ||
      [ "$mtime" != "$SOUL_CONFIG_MTIME" ] ||
      [ $((now - SOUL_LEVEL_CHECK_AT)) -ge 60 ]; then
+    # Consume before reading; a concurrent writer during the read leaves a new
+    # marker for the next tick rather than having its notification discarded.
+    rm -f "$SOUL_RUNTIME_DIR/reconcile" 2>/dev/null || true
     SOUL_LEVEL_CACHE=$(soul_level)
     SOUL_LEVEL_CHECK_AT="$now"
     SOUL_CONFIG_MTIME="$mtime"
@@ -689,6 +729,12 @@ soul_prepare_permissions() {
       chown -R soul:soul "$SOUL_STATE_DIR" "$SOUL_RUNTIME_DIR" 2>/dev/null || true
       SOUL_PERMISSIONS_PREPARED=1
     fi
+    for _soul_journal in journal.jsonl journal.jsonl.lock; do
+      if [ -f "$SOUL_STATE_DIR/$_soul_journal" ]; then
+        chgrp soul "$SOUL_STATE_DIR/$_soul_journal" 2>/dev/null || true
+        chmod 660 "$SOUL_STATE_DIR/$_soul_journal" 2>/dev/null || true
+      fi
+    done
     # The autonomy override is written by root (the landing page) and only
     # READ by the soul user, so root-own it: that stops an in-place edit.
     # It is NOT a complete barrier — soul owns this directory (it writes
@@ -734,17 +780,24 @@ start_soul() {
     return 0
   }
   soul_prepare_permissions
+  local GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR"
+  local PORT="${PORT:-8000}" VERIFY_NEEDLE_TOKENS="${VERIFY_NEEDLE_TOKENS:-32768}"
+  local STATUS_FILE="$STATUS_FILE.soul"
   echo ">>> SOUL: starting embedded controller at autonomy level $(soul_level)"
   # The root launcher keeps the key pipe empty until the controller has made
   # itself non-dumpable, and reaps every process for the dedicated soul uid on
   # both sides of the run. SOUL never receives the key in its environment.
-  env -i \
-    SOUL_ROOT_API_KEY="${VLLM_API_KEY:-}" \
+  (
+    # env -i KEY=value exposes KEY in env's argv. Clear export attributes with
+    # shell builtins, then export only the launcher's allowlisted environment.
+    while IFS= read -r _soul_env_name; do
+      export -n "${_soul_env_name?}"
+    done < <(compgen -e)
+    export SOUL_ROOT_API_KEY="${VLLM_API_KEY:-}" \
     HOME="$SOUL_STATE_DIR/workspace" \
     PATH="/opt/nanobot-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     LANG="C.UTF-8" TERM="dumb" USER="soul" PYTHONUNBUFFERED="1" \
-    GLM_STATE_DIR="$GLM_STATE_DIR" GLM_RUNTIME_DIR="$GLM_RUNTIME_DIR" \
-    STATUS_FILE="$STATUS_FILE.soul" PORT="${PORT:-8000}" \
+    GLM_STATE_DIR GLM_RUNTIME_DIR STATUS_FILE PORT \
     SOUL_PROMPT="/opt/soul/SOUL.md" \
     SOUL_AUTONOMY_LEVEL="${SOUL_AUTONOMY_LEVEL:-0}" \
     SOUL_AUTONOMY_MAX_LEVEL="${SOUL_AUTONOMY_MAX_LEVEL:-3}" \
@@ -754,13 +807,14 @@ start_soul() {
     SOUL_EVIDENCE_RETENTION_DAYS="${SOUL_EVIDENCE_RETENTION_DAYS:-7}" \
     SOUL_MAX_STATE_MB="${SOUL_MAX_STATE_MB:-256}" \
     SOUL_TIMEZONE="${SOUL_TIMEZONE:-UTC}" \
-    VERIFY_NEEDLE_TOKENS="${VERIFY_NEEDLE_TOKENS:-32768}" \
+    VERIFY_NEEDLE_TOKENS \
     NVIDIA_VISIBLE_DEVICES="${NVIDIA_VISIBLE_DEVICES:-all}" \
-    CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}" \
-    /usr/bin/python3 "$SCRIPTS_DIR/soul_launcher.py" --user soul -- \
+    CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-}"
+    exec /usr/bin/python3 "$SCRIPTS_DIR/soul_launcher.py" --user soul -- \
       /opt/nanobot-venv/bin/python "$SCRIPTS_DIR/soul_controller.py" \
-      --status-file "$STATUS_FILE.soul" --port "${PORT:-8000}" \
-      >> "$SOUL_LOG" 2>&1 &
+      --status-file "$STATUS_FILE" --port "${PORT:-8000}" \
+      >> "$SOUL_LOG" 2>&1
+  ) &
   SOUL_PID=$!
   SOUL_STARTED_AT=$(date +%s)
   SOUL_NEXT_START=0
@@ -792,11 +846,14 @@ reconcile_soul() {
   # directly in the persistent supervisor subshell, so the cache survives ticks.
   soul_level_cached
   level="$SOUL_LEVEL_CACHE"
-  rm -f "$SOUL_RUNTIME_DIR/reconcile" 2>/dev/null || true
   if [ "${level:-0}" -le 0 ] 2>/dev/null; then
-    stop_soul
+    if [ "$SOUL_IDLE_STOPPED" != "1" ]; then
+      stop_soul
+      SOUL_IDLE_STOPPED=1
+    fi
     return 0
   fi
+  SOUL_IDLE_STOPPED=0
   soul_prepare_permissions
   if [ -n "${SOUL_PID:-}" ] && kill -0 "$SOUL_PID" 2>/dev/null; then
     if [ "${SOUL_STARTED_AT:-0}" -gt 0 ] &&
@@ -1052,20 +1109,16 @@ MTP78_DRAFT_DIR=""
 
 fetch_mtp78_overlay() {
   local _overlay="$MODEL_DIR/.mtp78-overlay/3bpw-keep0"
-  # Gate on the payload shard, not the directory: snapshot_download creates the
-  # directory before the shards land, so a kill/blip mid-download leaves a dir
-  # that every later boot treats as complete and never re-fetches — permanently
-  # serving the degraded native BF16 draft with no recovery. Re-invoking
-  # snapshot_download resumes safely.
-  if ls "$_overlay"/*.safetensors >/dev/null 2>&1; then
-    return 0
-  fi
+  # A shard's existence does not certify a multi-file snapshot completed.
+  # Only commit readiness after snapshot_download returns successfully.
+  [ -f "$_overlay/.download-complete" ] && return 0
   HF_HUB_OFFLINE=0 MODEL_DIR="$MODEL_DIR" python3 -c '
 import os
 from huggingface_hub import snapshot_download
 snapshot_download("malaiwah/GLM-5.2-EXL3-TR3-MTP78", allow_patterns=["3bpw-keep0/*"], local_dir=os.environ["MODEL_DIR"] + "/.mtp78-overlay", max_workers=8)' || return 1
   # Confirm the shard actually landed before declaring the overlay ready.
-  ls "$_overlay"/*.safetensors >/dev/null 2>&1
+  ls "$_overlay"/*.safetensors >/dev/null 2>&1 || return 1
+  touch "$_overlay/.download-complete"
 }
 
 prepare_nvfp4_mtp78_draft() {
@@ -1082,7 +1135,8 @@ prepare_nvfp4_mtp78_draft() {
   local draft_source="${DRAFT_SOURCE_DIR:-${MODEL_ROOT:-/workspace}/.draft-sources/lukealonso-GLM-5.2-NVFP4}"
   echo ">>> MTP78: downloading Luke NVFP4 draft payloads only (~5.6 GiB)"
   mkdir -p "$(dirname "$draft_source")" "$(dirname "$DRAFT_MODEL")"
-  HF_HUB_OFFLINE=0 HF_XET_HIGH_PERFORMANCE=1 python3 -c "
+  HF_HUB_OFFLINE=0 HF_XET_HIGH_PERFORMANCE=1 DRAFT_SOURCE_DIR="$draft_source" python3 -c "
+import os
 from huggingface_hub import snapshot_download
 snapshot_download(
     'lukealonso/GLM-5.2-NVFP4',
@@ -1092,9 +1146,9 @@ snapshot_download(
         'model.safetensors.index.json', 'model-mtp.safetensors',
         'model-mtp-inputscales.safetensors',
     ],
-    local_dir='$draft_source',
+    local_dir=os.environ['DRAFT_SOURCE_DIR'],
     max_workers=8,
-)"
+)" || return 1
   python3 "$SCRIPTS_DIR/build_nvfp4_mtp_draft.py" \
     "$draft_source" "$DRAFT_MODEL"
 }
@@ -1111,7 +1165,7 @@ prepare_mtp78() {
      [ "${MTP_GRAFT_COMPATIBLE:-1}" != "1" ]; then
     echo "FATAL: MTP78 grafting is incompatible with MODEL_VARIANT=${MODEL_VARIANT:-unknown}." >&2
     echo "FATAL: select the native in-checkpoint draft instead." >&2
-    exit 1
+    return 1
   fi
   # The marker records observable checkpoint state, regardless of what format
   # the newly selected variant normally carries. Revert before building or
@@ -1120,9 +1174,9 @@ prepare_mtp78() {
   if [ "$MTP78_MODE" != "graft" ] &&
      [ -f "$MODEL_DIR/.mtp78-grafted" ]; then
     echo ">>> Reverting a previous in-place graft (MTP78_MODE=$MTP78_MODE)"
-    if ! python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert; then
+    if ! python3 "$SCRIPTS_DIR/graft_mtp78.py" "$MODEL_DIR" --revert; then
       echo "FATAL: failed to restore the native checkpoint after an earlier MTP78 graft." >&2
-      exit 1
+      return 1
     fi
   fi
 
@@ -1133,47 +1187,51 @@ prepare_mtp78() {
   # most of the KV that the BF16 fallback draft gives up, while still avoiding
   # _apply_rank_sliced, which is useful for comparing quantization formats.
   if [ -n "${DRAFT_MODEL:-}" ]; then
-    prepare_nvfp4_mtp78_draft
+    prepare_nvfp4_mtp78_draft || return 1
     if [ ! -f "$DRAFT_MODEL/config.json" ] ||
        [ ! -f "$DRAFT_MODEL/model.safetensors.index.json" ]; then
       echo "FATAL: external draft is incomplete: $DRAFT_MODEL"
-      exit 1
+      return 1
     fi
     echo ">>> Draft: external checkpoint $DRAFT_MODEL (target grafting disabled)"
   fi
 
   if [ "$MTP78_MODE" = "override" ]; then
     status_update preparing-mtp78
-    if python3 /opt/scripts/patch_deepseek_mtp.py; then
-      if fetch_mtp78_overlay && python3 /opt/scripts/build_mtp78_draft.py \
+    if python3 "$SCRIPTS_DIR/patch_deepseek_mtp.py"; then
+      if fetch_mtp78_overlay && python3 "$SCRIPTS_DIR/build_mtp78_draft.py" \
            "$MODEL_DIR" "$MODEL_DIR/.mtp78-overlay/3bpw-keep0" "$MTP78_DRAFT_DIR"; then
         DRAFT_MODEL="$MTP78_DRAFT_DIR"
         echo ">>> MTP78: trellis draft via --speculative-config override (target untouched)"
       else
-        echo "!!! MTP78: draft build failed — falling back to the native in-checkpoint draft"
+        echo "!!! MTP78: requested draft preparation failed"
+        return 1
       fi
     else
-      echo "!!! MTP78: vLLM patch anchor missing in this image — keeping the native draft"
+      echo "!!! MTP78: required vLLM patch failed"
+      return 1
     fi
   elif [ "$MTP78_MODE" = "graft" ]; then
     if [ ! -f "$MODEL_DIR/.mtp78-grafted" ]; then
       status_update grafting-mtp78
-      fetch_mtp78_overlay
-      if python3 /opt/scripts/patch_deepseek_mtp.py; then
-        if python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" "$MODEL_DIR/.mtp78-overlay/3bpw-keep0"; then
+      fetch_mtp78_overlay || return 1
+      if python3 "$SCRIPTS_DIR/patch_deepseek_mtp.py"; then
+        if python3 "$SCRIPTS_DIR/graft_mtp78.py" "$MODEL_DIR" "$MODEL_DIR/.mtp78-overlay/3bpw-keep0"; then
           echo ">>> MTP78: trellis draft active (grafted in place)"
         else
           echo "!!! MTP78 graft failed — reverting to the native draft"
-          if ! python3 /opt/scripts/graft_mtp78.py "$MODEL_DIR" --revert; then
+          if ! python3 "$SCRIPTS_DIR/graft_mtp78.py" "$MODEL_DIR" --revert; then
             echo "FATAL: failed to restore the native draft after a partial MTP78 graft." >&2
-            exit 1
+            return 1
           fi
+          return 1
         fi
       else
-        echo "!!! MTP78: vLLM patch anchor missing in this image — keeping the native draft"
+        echo "!!! MTP78: required vLLM patch failed"
+        return 1
       fi
     else
-      python3 /opt/scripts/patch_deepseek_mtp.py || true  # image may have been re-pulled
+      python3 "$SCRIPTS_DIR/patch_deepseek_mtp.py" || return 1
       echo ">>> MTP78: trellis draft already grafted"
     fi
   else
@@ -1207,9 +1265,25 @@ install_vision_plugin() {
   # later as the misleading "Glm5vForConditionalGeneration is not supported".
   # Install from a disposable writable copy and avoid network build isolation.
   install_dir="$(mktemp -d /tmp/glm5v-install.XXXXXX)" || return 1
-  cp -a "$plugin_dir/." "$install_dir/" || return 1
-  rm -rf "$install_dir/build" "$install_dir/glm5v_nf3.egg-info"
-  pip install -q --no-build-isolation --no-deps "$install_dir"
+  local rc=0
+  if cp -a "$plugin_dir/." "$install_dir/"; then
+    rm -rf "$install_dir/build" "$install_dir/glm5v_nf3.egg-info"
+    pip install -q --no-build-isolation --no-deps "$install_dir" || rc=$?
+  else
+    rc=1
+  fi
+  rm -rf "$install_dir"
+  return "$rc"
+}
+
+restore_text_vision_state() {
+  local rc=0
+  python3 "$SCRIPTS_DIR/build_vision_config.py" "$MODEL_DIR" --revert || rc=1
+  python3 "$SCRIPTS_DIR/index_add_vision.py" "$MODEL_DIR" --revert || rc=1
+  if [ -f "$MODEL_DIR/chat_template.jinja.text-only" ]; then
+    cp "$MODEL_DIR/chat_template.jinja.text-only" "$MODEL_DIR/chat_template.jinja" || rc=1
+  fi
+  return "$rc"
 }
 
 prepare_vision() {
@@ -1223,9 +1297,9 @@ prepare_vision() {
     # reconcile_checkpoint.py now closes that hole from the other side, by deriving the
     # wrapper from the tensors on disk instead of from a snapshot.
     if [ -f "$MODEL_DIR/.vision-enabled" ] && \
-       ! python3 -c "
-import json,sys
-c=json.load(open('$MODEL_DIR/config.json'))
+       ! MODEL_DIR="$MODEL_DIR" python3 -c "
+import json,os,sys
+c=json.load(open(os.path.join(os.environ['MODEL_DIR'], 'config.json')))
 sys.exit(0 if 'text_config' in c or any('Glm5v' in a for a in c.get('architectures') or []) else 1)" 2>/dev/null; then
       echo ">>> Vision: marker present but config.json is text-only (graft revert clobbers it) -- reinstalling"
       rm -f "$MODEL_DIR/.vision-enabled"
@@ -1246,7 +1320,7 @@ snapshot_download(os.environ["VISION_REPO"], local_dir=os.environ["MODEL_DIR"] +
         cp "$MODEL_DIR/.vision"/vision_tower.safetensors "$MODEL_DIR/.vision"/mm_projector.safetensors "$MODEL_DIR/" || vision_ok=0
         for f in configuration_glm5v.py kimi_k25_processor.py kimi_k25_vision_processing.py media_utils.py preprocessor_config.json; do
           if [ -f "$MODEL_DIR/.vision/$f" ]; then
-            cp "$MODEL_DIR/.vision/$f" "$MODEL_DIR/"
+            cp "$MODEL_DIR/.vision/$f" "$MODEL_DIR/" || vision_ok=0
           fi
         done
         # The vision chat template is MANDATORY: the text-only template never emits
@@ -1255,28 +1329,24 @@ snapshot_download(os.environ["VISION_REPO"], local_dir=os.environ["MODEL_DIR"] +
         # Keep the text-only one for VISION=0 restore.
         if [ -f "$MODEL_DIR/.vision/chat_template.jinja" ]; then
           if [ -f "$MODEL_DIR/chat_template.jinja" ] && [ ! -f "$MODEL_DIR/chat_template.jinja.text-only" ]; then
-            cp "$MODEL_DIR/chat_template.jinja" "$MODEL_DIR/chat_template.jinja.text-only"
+            cp "$MODEL_DIR/chat_template.jinja" "$MODEL_DIR/chat_template.jinja.text-only" || vision_ok=0
           fi
-          cp "$MODEL_DIR/.vision/chat_template.jinja" "$MODEL_DIR/chat_template.jinja"
+          if [ "$vision_ok" = "1" ]; then
+            cp "$MODEL_DIR/.vision/chat_template.jinja" "$MODEL_DIR/chat_template.jinja" || vision_ok=0
+          fi
         else
           vision_ok=0
         fi
         install_vision_plugin || vision_ok=0
       fi
-      if [ "$vision_ok" = "1" ] && python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" "$MODEL_DIR/.vision" && python3 /opt/scripts/index_add_vision.py "$MODEL_DIR"; then
+      if [ "$vision_ok" = "1" ] && python3 "$SCRIPTS_DIR/build_vision_config.py" "$MODEL_DIR" "$MODEL_DIR/.vision" && python3 "$SCRIPTS_DIR/index_add_vision.py" "$MODEL_DIR"; then
         echo ">>> Vision: ENABLED (image input active; VISION=0 to disable)"
       else
-        echo "!!! Vision install failed — falling back to text-only for this boot"
-        python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert || true
-        python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" --revert || true
-        # The install did NOT succeed, so the achieved state is text-only. Force
-        # VISION=0 for the rest of this boot: prepare_checkpoint runs the
-        # reconciler next with the REQUESTED VISION value, and reconciling to
-        # --vision 1 would immediately re-wrap config.json to Glm5v and recreate
-        # .vision-enabled over a checkpoint whose vLLM plugin never registered —
-        # the exact "Glm5vForConditionalGeneration is not supported" crash-loop
-        # this fallback exists to prevent. A later boot retries the install.
-        VISION=0
+        echo "!!! Vision install failed — restoring text-only state and returning to the supervisor"
+        restore_text_vision_state || echo "!!! Vision rollback failed; checkpoint must not be served" >&2
+        # Never reconcile or serve the failed requested configuration. Keep the
+        # request intact so the supervisor can retry or roll back explicitly.
+        return 1
       fi
     else
       # The marker lives on the VOLUME but the plugin is installed into the
@@ -1291,24 +1361,18 @@ snapshot_download(os.environ["VISION_REPO"], local_dir=os.environ["MODEL_DIR"] +
           echo ">>> Vision: already installed (plugin re-registered in this container)"
         else
           echo "FATAL: Vision plugin installation failed."
-          exit 1
+          return 1
         fi
       else
         echo "FATAL: Vision marker is present but $MODEL_DIR/.vision/plugins/glm5v_nf3 is missing."
         echo "       The Glm5v architecture cannot register. Remove $MODEL_DIR/.vision-enabled"
         echo "       to reinstall, or set VISION=0 to serve text-only."
-        exit 1
+        return 1
       fi
     fi
   elif [ -f "$MODEL_DIR/.vision-enabled" ]; then
     echo ">>> VISION=0: reverting to text-only config"
-    python3 /opt/scripts/build_vision_config.py "$MODEL_DIR" --revert || true
-    python3 /opt/scripts/index_add_vision.py "$MODEL_DIR" --revert || true
-    if [ -f "$MODEL_DIR/chat_template.jinja.text-only" ]; then
-      # copy, not mv: the backup has to survive so a later VISION=1 -> 0 cycle
-      # still has a text-only template to restore.
-      cp "$MODEL_DIR/chat_template.jinja.text-only" "$MODEL_DIR/chat_template.jinja" || true
-    fi
+    restore_text_vision_state || return 1
   fi
   return 0
 }
@@ -1389,17 +1453,17 @@ prepare_checkpoint() {
       if { [ "${MTP78_MODE:-off}" != "off" ] && [ -z "${DRAFT_MODEL:-}" ]; }; then
         echo "FATAL: MODEL_READ_ONLY=1 cannot graft MTP78 into the target."
         echo "       Supply a complete external DRAFT_MODEL or prepare a writable derivative."
-        exit 1
+        return 1
       fi
       if [ "${VISION:-0}" = "1" ] && [ ! -f "$MODEL_DIR/.vision-enabled" ]; then
         echo "FATAL: MODEL_READ_ONLY=1 cannot install vision into an unprepared target."
         echo "       Mount a derivative containing .vision-enabled, or use a writable copy."
-        exit 1
+        return 1
       fi
       if [ "${VISION:-0}" = "1" ]; then
         install_vision_plugin || {
           echo "FATAL: read-only vision derivative cannot register its vLLM plugin."
-          exit 1
+          return 1
         }
         echo ">>> Vision: read-only derivative plugin registered"
       fi
@@ -1407,7 +1471,7 @@ prepare_checkpoint() {
         python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" \
           --vision "${VISION:-0}" --dry-run --quiet || {
           echo "FATAL: read-only EXL3 checkpoint does not pass reconciliation."
-          exit 1
+          return 1
         }
       fi
       # An explicit external draft is independent of the immutable target.  It
@@ -1415,68 +1479,13 @@ prepare_checkpoint() {
       # a separate writable volume (rental).  Validate/prepare it here while
       # continuing to skip every operation that could touch MODEL_DIR.
       if [ -n "${DRAFT_MODEL:-}" ]; then
-        prepare_mtp78
+        prepare_mtp78 || return 1
       fi
       echo ">>> Checkpoint is read-only; mutation steps skipped."
     else
-      prepare_mtp78
-      prepare_vision
-      python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-0}" || \
-        echo "!!! reconcile: failed — the checkpoint config may not match the weights on disk"
-    fi
-  elif [ "${MODEL_FAMILY:-}" = "glm53" ]; then
-    if ! MODEL_DIR="$MODEL_DIR" MODEL_VARIANT="${MODEL_VARIANT:-glm53-k6}" \
-         MAX_MODEL_LEN="${MAX_MODEL_LEN:-458752}" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-model_dir = Path(os.environ["MODEL_DIR"])
-config = json.loads((model_dir / "config.json").read_text())
-variant = os.environ["MODEL_VARIANT"]
-expected_bits = {"glm53-k6": 6, "glm53-k8": 8}.get(variant)
-if expected_bits is None:
-    raise SystemExit(f"FATAL: unsupported GLM-5.3 variant {variant!r}")
-architectures = config.get("architectures") or []
-if architectures != ["Glm5NextForConditionalGeneration"]:
-    raise SystemExit(
-        "FATAL: GLM-5.3 profile requires Glm5NextForConditionalGeneration; "
-        f"checkpoint declares {architectures!r}"
-    )
-quant = config.get("quantization_config") or {}
-if (
-    str(quant.get("quant_method", "")).lower() != "exl3"
-    or str(quant.get("codebook", "")).lower() != "mcg"
-    or int(quant.get("bits", 0)) != expected_bits
-):
-    raise SystemExit(
-        f"FATAL: {variant} requires EXL3/MCG K{expected_bits}; "
-        f"checkpoint declares {quant!r}"
-    )
-text = config.get("text_config") or {}
-native_context = int(text.get("max_position_embeddings", 0))
-requested_context = int(os.environ["MAX_MODEL_LEN"])
-if native_context < requested_context:
-    raise SystemExit(
-        f"FATAL: requested context {requested_context} exceeds checkpoint native "
-        f"limit {native_context}"
-    )
-if not (
-    text.get("mla_use_nope") is True
-    and int(text.get("index_kpool", 0)) == 4
-    and text.get("index_kpool_compress") is True
-):
-    raise SystemExit(
-        "FATAL: GLM-5.3 sparse-MLA NOPE/K-pool contract is missing from config.json"
-    )
-print(
-    f">>> GLM-5.3 checkpoint verified: {architectures[0]}, "
-    f"EXL3/MCG K{expected_bits}, native context {native_context}"
-)
-PY
-    then
-      echo "!!! checkpoint verification failed; supervisor will retry"
-      return 1
+      prepare_mtp78 || return 1
+      prepare_vision || return 1
+      python3 "$SCRIPTS_DIR/reconcile_checkpoint.py" "$MODEL_DIR" --vision "${VISION:-0}" || return 1
     fi
   elif [ "${MODEL_FAMILY:-}" = "qwen36" ]; then
     if ! MODEL_DIR="$MODEL_DIR" MTP_TOKENS="${MTP_TOKENS:-0}" python3 - <<'PY'
@@ -1553,6 +1562,12 @@ compute_offload() {
     # Keep OFF_BYTES as the physical per-worker estimate for the memlock check
     # and operator display, but pass OFF_TOTAL_BYTES to the connector.
     OFF_TOTAL_BYTES=$(python3 -c "print(int($MEM_BYTES*$off_fraction))")
+    if [ "$cache_backend" = "lmcache" ] && [ "${LMCACHE_L1_MAX_GB:-0}" -gt 0 ]; then
+      local l1_ceiling=$((LMCACHE_L1_MAX_GB * 1073741824))
+      if [ "$OFF_TOTAL_BYTES" -gt "$l1_ceiling" ]; then
+        OFF_TOTAL_BYTES=$l1_ceiling
+      fi
+    fi
     OFFLOAD_RANKS="${TENSOR_PARALLEL_SIZE:-1}"
     [ "$OFFLOAD_RANKS" -gt 0 ] 2>/dev/null || OFFLOAD_RANKS=1
     OFF_BYTES=$((OFF_TOTAL_BYTES / OFFLOAD_RANKS))
@@ -1670,9 +1685,10 @@ if [ "${FAMILY_ENV_BLOCK:-glm52}" = "glm52" ]; then
 # conversion/cache contract in the same long-lived PID 1 environment.
 unset VLLM_EXL3_ONLINE_TRELLIS_BITS VLLM_EXL3_ENCODER_SOURCE
 unset VLLM_EXL3_ONLINE_CACHE_DIR VLLM_EXL3_ONLINE_CACHE_MODE
-# The parent image is GLM-5.3-Flash-first. Its NoPE cache and route flags are
-# mutually exclusive with the full GLM_NSA record selected below; leaving them
-# inherited makes KV_FP8_ROPE=1 fail before any weights load.
+# The Gilded Gnosis base no longer carries the GLM-5.3-Flash NoPE cache and
+# route flags, but a template or a TUNE_ override can still inject them. They
+# are mutually exclusive with the full GLM_NSA record selected below; leaving
+# one of them set makes KV_FP8_ROPE=1 fail before any weights load.
 unset VLLM_B12X_GLM_NOPE_NVFP4 B12X_GL53_ROUTE128_WIDE
 unset B12X_GL53_ROUTE128_HYBRID_TAIL VLLM_ALLREDUCE_USE_SYMM_MEM
 export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_SPARSE_INDEXER=1
@@ -1790,9 +1806,57 @@ if [ "${KV_CACHE_DTYPE:-nvfp4_ds_mla}" = "nvfp4_ds_mla" ]; then
 else
   unset KV_FP8_ROPE VLLM_NVFP4_MLA_DYNAMIC_SCALE VLLM_NVFP4_MLA_SCALES_FILE
 fi
-export SPARKINFER_INDEXER_TWO_LEVEL_FOLD="${SPARKINFER_INDEXER_TWO_LEVEL_FOLD:-auto}"
-export SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB="${SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256}"
+export B12X_INDEXER_TWO_LEVEL_FOLD="${B12X_INDEXER_TWO_LEVEL_FOLD:-auto}"
+export B12X_INDEXER_TWO_LEVEL_FOLD_MAX_MIB="${B12X_INDEXER_TWO_LEVEL_FOLD_MAX_MIB:-256}"
 unset _GLM_NVFP4_SCALE_FILE _GLM_NVFP4_SCALE_SHA256
+
+# The Gilded Gnosis base carries the EXL3 kernel package at /opt/exllamav3
+# (exllamav3_ext.cpython-312-x86_64-linux-gnu.so) and the online encoder
+# checkout at /opt/exllamav3-python/exllamav3. Both are OCI defaults of the
+# base image. State the extension path explicitly so a family switch or a
+# provider template cannot leave it unset, and fail closed here instead of
+# letting an EXL3 checkpoint discover at load time that its kernels are absent.
+_glm_exl3_ext=/opt/exllamav3
+if [ -d "$_glm_exl3_ext" ]; then
+  export VLLM_EXL3_EXT_PATH="$_glm_exl3_ext"
+elif [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  unset VLLM_EXL3_EXT_PATH
+else
+  echo "FATAL: the pinned EXL3 extension directory is missing: $_glm_exl3_ext" >&2
+  return 1
+fi
+unset _glm_exl3_ext
+# ONLINE_QUANT=exl3-b6 re-encodes eligible BF16 tensors at load time through
+# that pinned encoder checkout; apply_profile_runtime_env exports its path
+# right after this block, so the directory has to exist before the engine runs.
+if [ "${ONLINE_QUANT:-none}" = "exl3-b6" ] &&
+   [ "${CONFIG_SMOKE:-0}" != "1" ] &&
+   [ ! -d /opt/exllamav3-python/exllamav3 ]; then
+  echo "FATAL: ONLINE_QUANT=exl3-b6 needs the pinned EXL3 encoder source," >&2
+  echo "FATAL: /opt/exllamav3-python/exllamav3, which is not in this image." >&2
+  return 1
+fi
+
+# The Gilded Gnosis base ships its own local-inference NCCL build (2.30.4) and
+# its OCI environment points every consumer at it. State that load-bearing
+# default explicitly so a family switch, a template value or a provider-injected
+# LD_PRELOAD cannot leave the collectives on a different library than the one
+# this profile was qualified with — and fail closed if the pinned library is not
+# in the image, because a silently different NCCL is exactly the class of
+# difference that shows up as a hang at the first all-reduce.
+_glm_nccl=/opt/libnccl-local-inference.so.2.30.4
+if [ -e "$_glm_nccl" ]; then
+  export NCCL_LOCAL_INFERENCE_PATH="$_glm_nccl"
+  export NCCL_PR2127_PATH="$_glm_nccl"
+  export VLLM_NCCL_SO_PATH="$_glm_nccl"
+  export LD_PRELOAD="$_glm_nccl"
+elif [ "${CONFIG_SMOKE:-0}" = "1" ]; then
+  unset NCCL_LOCAL_INFERENCE_PATH NCCL_PR2127_PATH VLLM_NCCL_SO_PATH LD_PRELOAD
+else
+  echo "FATAL: pinned local-inference NCCL library is missing: $_glm_nccl" >&2
+  return 1
+fi
+unset _glm_nccl
 
   # v20's calibrator measures the lossless DMA crossover, DCP query split and
   # CKV prefetch overlap before model load, then caches the result by topology.
@@ -1845,77 +1909,6 @@ unset _GLM_NVFP4_SCALE_FILE _GLM_NVFP4_SCALE_SHA256
   if [ "${PCIE_DMA_MIN_BYTES:--1}" != "-1" ]; then
     export VLLM_PCIE_DMA_MIN_BYTES="$PCIE_DMA_MIN_BYTES"
   fi
-elif [ "${FAMILY_ENV_BLOCK:-}" = "glm53" ]; then
-  # Exact environment used by the four-card K6 qualification. The pinned parent
-  # carries the Glm5Next/B12X stack; these exports make its load-bearing OCI
-  # defaults explicit and make a runtime switch back from another family safe.
-  export PYTHONPATH=/opt/infernal-invocation/vllm:/opt/infernal-invocation/b12x:/opt/exllamav3
-  export OMP_NUM_THREADS=1 LLM_WORKER_MULTIPROC_METHOD=spawn
-  export VLLM_EXL3_EXT_PATH=/opt/exllamav3
-  export VLLM_EXL3_ENCODER_SOURCE=/opt/exllamav3-python/exllamav3
-  export VLLM_EXL3_ENCODER_REVISION=704aefd743b390af4bd0fb429d1906f9b964c7d8
-  export VLLM_EXL3_ONLINE_CACHE_DIR="$MODEL_ROOT/.exl3-online"
-  export VLLM_EXL3_ONLINE_CACHE_MODE=readwrite
-  export VLLM_EXL3_PREFILL_BLOCK_M=128 VLLM_EXL3_PREFILL_TRELLIS=1
-  export B12X_GL53_ROUTE128_WIDE=1 B12X_GL53_ROUTE128_HYBRID_TAIL=1
-  export VLLM_B12X_GLM_NOPE_NVFP4=1
-  export VLLM_USE_AOT_COMPILE=0 VLLM_USE_MEGA_AOT_ARTIFACT=1
-  export VLLM_USE_BREAKABLE_CUDAGRAPH=1
-  export VLLM_USE_B12X_FP8_GEMM=1 VLLM_USE_B12X_MOE=0
-  export VLLM_USE_B12X_SPARSE_INDEXER=1 VLLM_USE_V2_MODEL_RUNNER=1
-  export VLLM_ALLREDUCE_USE_SYMM_MEM=0
-  export VLLM_PCIE_ONESHOT_ALLREDUCE_MAX_SIZE=64KB
-  export VLLM_PCIE_ONESHOT_FUSED_ADD_RMS_NORM_MAX_SIZE=84KB
-  export VLLM_DISABLED_KERNELS=MarlinFP8ScaledMMLinearKernel
-  export VLLM_B12X_ABSORB_BMM=0 B12X_MOE_FORCE_A16=1
-  if [ "${B12X_PCIE_DMA:-1}" = "1" ]; then
-    export VLLM_ENABLE_PCIE_ALLREDUCE=1 VLLM_PCIE_ALLREDUCE_BACKEND=b12x
-    export VLLM_USE_B12X_DCP_A2A=1
-  else
-    export VLLM_ENABLE_PCIE_ALLREDUCE=0 VLLM_USE_B12X_DCP_A2A=0
-    unset VLLM_PCIE_ALLREDUCE_BACKEND
-  fi
-  _glm53_nccl=/opt/local-inference/nccl/lib/libnccl.so.2.31.2
-  if [ -f "$_glm53_nccl" ]; then
-    export NCCL_LOCAL_INFERENCE_PATH="$_glm53_nccl"
-    export NCCL_PR2127_PATH="$_glm53_nccl"
-    export VLLM_NCCL_SO_PATH="$_glm53_nccl"
-    export LD_PRELOAD="$_glm53_nccl"
-  elif [ "${CONFIG_SMOKE:-0}" = "1" ]; then
-    unset NCCL_LOCAL_INFERENCE_PATH NCCL_PR2127_PATH VLLM_NCCL_SO_PATH LD_PRELOAD
-  else
-    echo "FATAL: pinned local-inference NCCL library is missing: $_glm53_nccl" >&2
-    return 1
-  fi
-  unset _glm53_nccl
-  export VLLM_NVFP4_MLA_SCALES_FILE=/opt/glm53/calibration/glm53_nvfp4_mla_outer_scales_mtp_power2_v2.json
-  export VLLM_NVFP4_MLA_DYNAMIC_SCALE=0 KV_FP8_ROPE=0
-  if [ "${CONFIG_SMOKE:-0}" != "1" ]; then
-    _glm53_scale_sha="$(
-      sha256sum "$VLLM_NVFP4_MLA_SCALES_FILE" 2>/dev/null | awk '{print $1}'
-    )"
-    if [ "$_glm53_scale_sha" != "f10b6ee1116d71c4b61c4603d38cb257b3f0dcfde9bcc0847839e48ac9baeb1d" ]; then
-      echo "FATAL: the pinned GLM-5.3 NVFP4 MLA scale artifact is missing or changed." >&2
-      return 1
-    fi
-    unset _glm53_scale_sha
-  fi
-  unset VLLM_EXL3_ONLINE_TRELLIS_BITS VLLM_EXL3_ABI_SHIM
-  unset VLLM_USE_FUSED_MOE_GROUPED_TOPK VLLM_USE_B12X_MHC B12X_MHC_MAX_TOKENS
-  unset VLLM_USE_B12X_WO_PROJECTION B12X_MLA_SM120_UNIFIED B12X_DENSE_SPLITK_TURBO
-  unset B12X_W4A16_TC_DECODE B12X_W4A8_TINY_DECODE
-  unset VLLM_DISABLE_SHARED_EXPERTS_STREAM VLLM_B12X_MLA_SPEC_EXTEND_AS_DECODE
-  unset VLLM_B12X_MLA_SPEC_DECODE_MAX_Q VLLM_DCP_A2A_MAX_TOKENS
-  unset VLLM_DCP_A2A_LARGE_BACKEND VLLM_DCP_GLOBAL_TOPK VLLM_DCP_SHARD_DRAFT
-  unset VLLM_DCP_QUERY_SPLIT VLLM_DCP_TOPK_OWNER_MERGE VLLM_DCP_INDEXER_SHARDS
-  unset VLLM_B12X_MLA_CKV_GATHER VLLM_B12X_MLA_CKV_GATHER_MIN_TOKENS
-  unset VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS VLLM_B12X_MLA_CKV_PREFETCH_DEPTH
-  unset VLLM_B12X_MLA_CKV_PREFETCH_WORKSPACE_MIB
-  unset VLLM_DCP_PROJECT_BEFORE_MERGE VLLM_B12X_MLA_DCP_GATHER_IN_WORKSPACE
-  unset VLLM_DCP_PROJECT_BEFORE_MERGE_MIN_PREFILL_TOKENS
-  unset VLLM_PCIE_DMA_FP8 B12X_PCIE_DMA_FP8 SPARKINFER_PCIE_DMA_FP8
-  unset SPARKINFER_INDEXER_TWO_LEVEL_FOLD SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB
-  echo ">>> GLM-5.3 runtime: TP4/DCP4 B12X sparse MLA, Triton MoE, EXL3, NVFP4 MLA KV"
 else
   echo ">>> ${MODEL_FAMILY:-?}: skipping the GLM-5.2 engine environment (b12x kernels,"
   echo ">>> MLA/DCP path, EXL3 trellis). Only the common block above is exported."
@@ -1927,7 +1920,7 @@ else
   unset VLLM_EXL3_ONLINE_CACHE_DIR VLLM_EXL3_ONLINE_CACHE_MODE
   unset VLLM_NVFP4_MLA_SCALES_FILE
   unset VLLM_NVFP4_MLA_DYNAMIC_SCALE KV_FP8_ROPE
-  unset SPARKINFER_INDEXER_TWO_LEVEL_FOLD SPARKINFER_INDEXER_TWO_LEVEL_FOLD_MAX_MIB
+  unset B12X_INDEXER_TWO_LEVEL_FOLD B12X_INDEXER_TWO_LEVEL_FOLD_MAX_MIB
   unset VLLM_ENABLE_PCIE_ALLREDUCE VLLM_PCIE_ALLREDUCE_BACKEND
   unset VLLM_CPP_AR_1STAGE_NCCL_CUTOFF VLLM_CPP_AR_IGNORE_CUTOFF_MAX_ROWS
   unset VLLM_DISABLE_SHARED_EXPERTS_STREAM VLLM_DISABLED_KERNELS
@@ -1974,7 +1967,10 @@ unset _k _v _n
 }
 
 validate_glm53_full_runtime_isolation() {
-  [ "${MODEL_VARIANT:-}" = "exl3-tr3-glm53-3.42bpw" ] || return 0
+  case "${MODEL_VARIANT:-}" in
+    exl3-tr3-glm53-3.25bpw|exl3-tr3-glm53-3.42bpw|exl3-tr3-glm53-3.42bpw-500k) ;;
+    *) return 0 ;;
+  esac
   local _name
   for _name in VLLM_B12X_GLM_NOPE_NVFP4 \
       B12X_GL53_ROUTE128_WIDE B12X_GL53_ROUTE128_HYBRID_TAIL \
@@ -2089,10 +2085,26 @@ wire_tls_endpoint() {
           echo "!!! Unsafe ACME hostname; internal TLS alias was not installed"
           ;;
         *)
-          if ! grep -Eq "(^|[[:space:]])${ACME_DOMAIN}([[:space:]]|\$)" /etc/hosts 2>/dev/null; then
-            printf '127.0.0.1\t%s\n' "$ACME_DOMAIN" >> /etc/hosts
+          if ! ACME_DOMAIN="$ACME_DOMAIN" python3 - <<'PY'
+import os
+from pathlib import Path
+host = os.environ["ACME_DOMAIN"].lower()
+path = Path("/etc/hosts")
+rows = path.read_text().splitlines()
+found = False
+for row in rows:
+    fields = row.split("#", 1)[0].split()
+    if host in [name.lower() for name in fields[1:]]:
+        if fields[0] not in ("127.0.0.1", "::1"):
+            raise SystemExit("ACME hostname has a non-loopback /etc/hosts mapping")
+        found = True
+if not found:
+    with path.open("a") as out:
+        out.write(f"127.0.0.1\t{host}\n")
+PY
+          then
+            echo "!!! Could not install internal TLS hostname alias; verified probes will fail closed" >&2
           fi
-          TLS_INTERNAL_ALIAS=1
           ;;
       esac
     fi
@@ -2107,10 +2119,8 @@ wire_tls_endpoint() {
     LOCAL_SCHEME="http"; LOCAL_HOST="localhost"
     if [ "$PLATFORM" != "runpod" ]; then
       LOCAL_SCHEME="https"
-      if [ "${TLS_INTERNAL_ALIAS:-0}" = "1" ]; then
-        LOCAL_HOST="$ACME_DOMAIN"
-        export GLM_INTERNAL_TLS_VERIFY=1
-      fi
+      LOCAL_HOST="$ACME_DOMAIN"
+      export GLM_INTERNAL_TLS_VERIFY=1
     fi
     LOCAL_BASE="$LOCAL_SCHEME://$LOCAL_HOST:${PORT:-8000}"
     return 0
@@ -2175,7 +2185,6 @@ fi
 
 TLS_ARGS=()
 TLS_ENABLED=0
-TLS_INTERNAL_ALIAS=0
 if [ "$ACME_DIRECT" = "1" ] && [ -n "${ACME_DOMAIN:-}" ] &&
    [ -n "${ACME_DNS_PROVIDER:-}" ] && command -v lego >/dev/null &&
    [ "${CONFIG_SMOKE:-0}" != "1" ]; then
@@ -2242,7 +2251,7 @@ fi
 # runtime JITs. Keep an explicit overlay-generation suffix: restarts of this
 # exact appliance remain warm, but old GG-v20 and unoverlaid GLM-5.3 artifacts
 # cannot be reused.
-CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-runtime-o27-v3"
+CACHE_NAMESPACE="${LOCAL_INFERENCE_CACHE_FINGERPRINT:-turnkey-unversioned}-turnkey-glm53-full-refresh1"
 case "$CACHE_NAMESPACE" in
   *[!A-Za-z0-9_.-]*|"")
     echo "FATAL: unsafe runtime cache fingerprint: $CACHE_NAMESPACE" >&2
@@ -2290,11 +2299,16 @@ mkdir -p "$VLLM_CACHE_ROOT" "$TRITON_CACHE_DIR" "$TORCH_EXTENSIONS_DIR" \
   "$TORCHINDUCTOR_CACHE_DIR" 2>/dev/null || true
 
 recover_sparkinfer_extension_lock() {
-  # A killed build can strand PyTorch's zero-byte FileBaton sentinel on the
-  # persistent cache. The helper waits for a live compiler and only quarantines
-  # the known SparkInfer PCIe DMA sentinel when it is ownerless. It never
-  # removes Ninja's own lock or clears unrelated extensions.
-  bash "$SCRIPTS_DIR/recover_torch_extension_lock.sh" "$TORCH_EXTENSIONS_DIR"
+  # FileBaton records no namespace/owner identity. A foreign live build and a
+  # dead build are indistinguishable, regardless of sentinel age. Leave both
+  # untouched and compile in a fresh private cache rather than break the lock.
+  if bash "$SCRIPTS_DIR/recover_torch_extension_lock.sh" "$TORCH_EXTENSIONS_DIR"; then
+    return 0
+  fi
+  local replacement
+  replacement="$(mktemp -d "${TORCH_EXTENSIONS_DIR%/}.private.XXXXXX")" || return 1
+  export TORCH_EXTENSIONS_DIR="$replacement"
+  boot_note ">>> Extension cache lock has unknown ownership; using private cache $TORCH_EXTENSIONS_DIR (original untouched)"
 }
 
 export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1 HF_HUB_DISABLE_TELEMETRY=1
@@ -2384,7 +2398,7 @@ build_spec_args() {
 
 # Best-effort: surface readiness + endpoint into the vast.ai dashboard label
 if [ -n "${CONTAINER_API_KEY:-}" ] && [ -n "${CONTAINER_ID:-}" ]; then
-  ( until curl -skf "$LOCAL_BASE/health" >/dev/null 2>&1; do sleep 20; done
+  ( until curl -sf "$LOCAL_BASE/health" >/dev/null 2>&1; do sleep 20; done
     MODEL_LABEL="${SERVED_MODEL_NAME%% *} READY ${EP_URL}/v1"
     LABEL_JSON="$(MODEL_LABEL="$MODEL_LABEL" python3 -c \
       'import json,os; print(json.dumps({"label": os.environ["MODEL_LABEL"]}))')"
@@ -2432,23 +2446,19 @@ fi
 # which surviving VLLM:: workers can hold open long after the engine is dead.
 # GENERIC flags only. Everything architecture-specific — the quantization, the
 # MLA/DCP flags, the attention and MoE backends, the tool/reasoning parsers, the
-# sparse-indexer hf_overrides, the compilation config — comes from
-# FAMILY_SERVE_ARGS, which the config layer built for the selected MODEL_FAMILY.
+# sparse-indexer hf_overrides, the compilation config and opt-in prefill fairness
+# flags — comes from FAMILY_SERVE_ARGS, rebuilt on every config resolution.
+# Fairness-off omits both flags; this layer never selects a V1/V2 model runner.
 # That is what makes a second model family possible without a second serve line,
 # and what removed `--tensor-parallel-size 4` as a literal.
-# GLM-5.3 qualification used the parent image's system Python plus the pinned
-# source-tree PYTHONPATH. Its /opt/venv console script has a different Python
-# environment, so do not silently cross that runtime boundary.
-if [ "${FAMILY_ENV_BLOCK:-}" = "glm53" ]; then
-  _VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)
-elif command -v vllm >/dev/null 2>&1; then
+if command -v vllm >/dev/null 2>&1; then
   _VLLM_LAUNCH=(vllm)
 else
   _VLLM_LAUNCH=(python3 -m vllm.entrypoints.cli.main)
 fi
 _SERVE_CMD=("${_VLLM_LAUNCH[@]}" serve "$MODEL_DIR" \
   --served-model-name "${SERVED_NAMES[@]}" \
-  --host 0.0.0.0 --port "${PORT:-8000}" --trust-remote-code \
+  --host 0.0.0.0 --port "${PORT:-8000}" \
   --tensor-parallel-size "${TENSOR_PARALLEL_SIZE:-4}" \
   --kv-cache-dtype "${KV_CACHE_DTYPE:-nvfp4_ds_mla}" \
   --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION:-0.96}" \
@@ -2582,12 +2592,12 @@ start_verifier() {
     # healthy — the verifier reports that failure itself). A non-401 answer is
     # surfaced as a loud boot note: it means requests are NOT authenticated.
     ( _i=0
-      until curl -skf -o /dev/null "$LOCAL_BASE/health" 2>/dev/null; do
+      until curl -sf -o /dev/null "$LOCAL_BASE/health" 2>/dev/null; do
         _i=$((_i + 1))
         [ "$_i" -ge 720 ] && exit 0
         sleep 5
       done
-      _code="$(curl -sk -o /dev/null -w '%{http_code}' \
+      _code="$(curl -s -o /dev/null -w '%{http_code}' \
         -H 'Authorization: Bearer definitely-wrong' \
         "$LOCAL_BASE/v1/models" 2>/dev/null || true)"
       if [ "$_code" = "401" ]; then
@@ -2673,7 +2683,15 @@ while :; do
   python3 "$SCRIPTS_DIR/config_cli.py" clear-restart || true
   # Re-resolve the config on EVERY start: this is what makes an apply from the
   # landing page take effect without replacing the container.
-  apply_config
+  if apply_config; then
+    :
+  else
+    _config_rc=$?
+    [ "$_config_rc" -ne 3 ] || continue
+    attempt=$((attempt + 1))
+    [ "$attempt" -le "$MAXR" ] || break
+    continue
+  fi
   # Pick up a certificate that the BACKGROUND acme retry issued after boot: this
   # re-evaluates TLS every restart, so a late cert becomes usable without
   # replacing the container. Idempotent and a no-op once TLS is active or when
@@ -2690,6 +2708,10 @@ while :; do
   apply_tuning_overrides
   validate_glm53_full_runtime_isolation
   if ! prepare_checkpoint; then
+    if [ -f "$RESTART_FLAG" ]; then
+      attempt=0
+      continue
+    fi
     attempt=$((attempt + 1))
     # A checkpoint that fails preparation on a config that DIFFERS from the last
     # known-good one is treated like a failed boot: roll back rather than burn the
@@ -2709,6 +2731,11 @@ while :; do
     if [ "$attempt" -gt "$MAXR" ]; then
       break
     fi
+    continue
+  fi
+  # Do not load a superseded checkpoint after a long preparation step.
+  if [ -f "$RESTART_FLAG" ]; then
+    attempt=0
     continue
   fi
   compute_offload
@@ -2806,7 +2833,17 @@ while :; do
       fi
       if verdict_ok "$_verdict_src"; then
         echo ">>> Verified: $(verdict_reason "$_verdict_src")"
-        python3 "$SCRIPTS_DIR/config_cli.py" mark-good --log "$SERVE_LOG" || true
+        if python3 "$SCRIPTS_DIR/config_cli.py" mark-good --log "$SERVE_LOG"; then
+          :
+        else
+          _config_rc=$?
+          if [ "$_config_rc" -eq 3 ]; then
+            reason="requested"
+          else
+            reason="verify-failed"
+          fi
+          break
+        fi
         status_update serving
         attempt=0
         good=1
@@ -2816,14 +2853,23 @@ while :; do
         if python3 "$SCRIPTS_DIR/config_cli.py" should-rollback; then
           reason="verify-failed"
           break
+        else
+          _config_rc=$?
+          if [ "$_config_rc" -eq 3 ]; then
+            reason="requested"
+            break
+          fi
         fi
         # Nothing better to fall back to: keep serving, but never call it healthy.
         echo "!!! No known-good configuration to roll back to — the engine keeps"
         echo "!!! serving and the landing page reports it as UNVERIFIED." >&2
-        python3 -c "
-import sys; sys.path.insert(0, '$SCRIPTS_DIR')
-import glm_config as gc
-gc.set_apply_state('degraded', detail='verification failed and there is no known-good config')" || true
+        if python3 "$SCRIPTS_DIR/config_cli.py" mark-unverified \
+            --reason "verification failed and there is no known-good config"; then
+          :
+        else
+          reason="requested"
+          break
+        fi
         status_update serving-unverified
       fi
     fi
@@ -2882,8 +2928,20 @@ gc.set_apply_state('degraded', detail='verification failed and there is no known
         if python3 "$SCRIPTS_DIR/config_cli.py" rollback --log "$SERVE_LOG" --reason "$reason"; then
           attempt=0
           continue
+        else
+          _config_rc=$?
+          if [ "$_config_rc" -eq 3 ]; then
+            attempt=0
+            continue
+          fi
         fi
         echo "!!! Rollback found nothing to restore" >&2
+      else
+        _config_rc=$?
+        if [ "$_config_rc" -eq 3 ]; then
+          attempt=0
+          continue
+        fi
       fi
       attempt=$((attempt + 1))
       if [ "$attempt" -gt "$MAXR" ]; then

@@ -3,6 +3,271 @@
 The README carries only a current-state summary; this file records the release
 lineage and exact pins that used to open the README.
 
+## Unreleased — full GLM-5.3 3.42bpw 520K, measured AIBeast optimization
+
+### General-build integration
+
+The normal Dockerfile installs the selected B12X #226/#256/#257 and
+V2-compatible fairness Python sources after the existing GLM refresh, with
+fail-closed source hashes and final-stack provenance. Historical experiment
+payloads remain immutable; the archived host entrypoint and experimental MTP
+constraint changes are not installed.
+
+Registered `PREFILL_FAIRNESS_ENGINE` (`off` / `compute_share`) and
+`PREFILL_COMPUTE_SHARE` controls use the existing configuration precedence and
+serving-argument path. Fairness remains off by default; explicitly enabled
+fairness requires cadence 1 and a valid strictly-between-zero-and-one share.
+Public rental defaults and AIBeast's running deployment are not changed by
+this source integration. The earlier GPU receipts qualify the selected
+experimental image, not automatically every newly built appliance image.
+
+### Selected optimization (2026-09-08)
+
+The authorized controlled campaign selected a local image built from immutable
+`8006d209…` with B12X #226/#256/#257 and V2-compatible measured prefill-service
+fairness. The host uses a **0.6 prefill-service share**, a **2048-row EXL3 arena**,
+the unchanged **3072-token scheduler**, TP4/DCP4, native probabilistic MTP3,
+fixed KV bytes and **520,192-token limit**. It advertises **`GLM-5.3` and
+`local-primary`**, not the obsolete GLM-5.2 alias. Public rental defaults,
+weights, precision, power cap and reboot/restart policy are unchanged.
+
+Matched 500K-plus-overlap arms measured **613–669 MiB free/GPU** at 2048 versus
+101 MiB at 3072, for **6.7%** median 64K prefill-delay cost. The 1024 arm gained
+more margin but cost **11.0%**, exceeding the chosen 10% target. The active V2
+MTP proposal-constraint prototype passed native CUDA graph/rejection checks but
+was not adopted because a reliable rate improvement was not established.
+The first V1 proposer edit was inactive on this V2 runtime; a forced-V1 fairness
+startup failed and rolled back. These corrections and all measured arms remain
+in the [optimization evidence](TEST_RESULTS.md#controlled-aibeast-optimization-2026-09-08)
+and [source-locked recipe](maintenance/glm53-optimization-20260908/manifest.json).
+
+### Initial cutover and preservation (historical)
+
+**Repository preservation (2026-09-08):** reconciled the August 30 memory
+postmortem and August 4 r26 research plan as explicitly historical documents
+on the published AIBeast release line. Archived four workspace notes and eleven
+K8 receipts with hashes and credential redaction; see the
+[preservation and runtime audit](TEST_RESULTS.md#workspace-preservation-and-runtime-capacity-audit-2026-09-08).
+The local runtime-capacity candidate remains preserved as open B12X PR #256;
+read-only inspection found it absent from the running r34 image. This
+documentation integration changes no runtime source or production settings.
+
+**2026-09-08: the authorized AIBeast cutover completed.** Full non-Flash
+`MODEL_PROFILE=glm53-3.42bpw-500k`, architecture family `glm52`, variant
+`exl3-tr3-glm53-3.42bpw-500k`, now serves **520,192 total tokens** at the
+old GLM-5.2 resource policy on port **8000**. `GLM-5.2` and `local-primary`
+aliases are preserved, with `GLM-5.3` added; `AUTH=none` and `LANDING=0`
+remain the old local-client contract. This is not the authenticated rental
+default. Two >=500K retrieval trials and a real-client soak passed; the
+**full maintenance, performance and quality matrix remains open**.
+No global `latest`/`main` promotion or boot-policy change occurred, and
+`restart=no` remains unchanged.
+
+The [active receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/active.json)
+pins image
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`,
+source `499d34e`, container `8273cb4d…`
+(`glm53-turnkey-r34-parity-20260908t015846z`).
+The host manual-NVIDIA-device driver-injection hook was corrected in
+`scripts/run-local-podman.sh`, not by runtime-source hot patches. The first
+successful resource-parity boot started **02:13:47 UTC**, ready **02:29:15**.
+It retrieved **3/3 facts from 501,098 exact haystack tokens in 336.364 s**,
+then passed post-stress correctness and **512-token temperature-1 sampling
+in 19.344 s** ([initial receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-initial-parity.json)).
+
+At **02:58:58 UTC**, a deliberate restart restored old explicit B12X settings
+through host `TUNE_` overrides: legacy `SPARK_*` names did not control the
+installed B12X fold budget. **Auto / 64 MiB** now applies instead of the
+absent-setting default 256 MiB. Other restored controls match defaults or are
+likely inert for GLM; the mHC 3072 threshold is not a demonstrated GLM speedup
+([restoration](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-parity-restoration.json),
+[installed effective policy](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-effective-policy.json)).
+The durable source fixes in this checkout are **not inside the running
+`8006d209…` image**; host overrides make its effective B12X policy correct now.
+The final boot retrieved **3/3 facts from 501,099 exact haystack tokens in
+275.874 s**, followed by correctness checks and **512-token temperature-1
+sampling in 7.701 s** ([final receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-final-parity.json)).
+Counts exclude the chat template and question; the probes reserved 4096
+tokens. These timings are not a causal A/B: warmth, compilation and load differ.
+
+The **03:36:34 UTC accepted soak** recorded **64 healthy / 0 failed samples**,
+**31.55 minutes** since the first external client, **87 external POST 200
+headers**, **96 completed engine requests including probes**, and **0 engine
+error requests** across real Chat Completions and Responses traffic. No OOM,
+engine crash or unexpected restart was observed. Minimum sampled raw free
+VRAM was **215 / 245 / 217 / 215 MiB** on GPUs 0–3. **215 MiB is thin
+headroom**, sampled about every 30 seconds, not a continuous worst-case margin
+or safety guarantee ([soak receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/soak-accepted.json)).
+This short soak does not supersede the user's approximately 24-day stable
+GLM-5.2 service history.
+
+At **03:37:31 UTC**, accepted cleanup removed only the old
+`/mnt/fast/build/r34-aibeast-maintenance-20260815/runtime/lmcache` and
+`/compile-cache` directories, reclaiming **370,534,412,288 bytes (345.09 GiB)**;
+health remained HTTP 200. Old image/container, weights, state and logs,
+new GLM-5.3 caches/state and cachefilesd were preserved. **Fast warm-cache
+rollback was intentionally relinquished**; restoring the old service requires
+regenerating removed caches ([cleanup receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/old-cache-cleanup.json)).
+
+Checkpoint pin:
+`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`.
+All 81 LFS weight SHA-256/size pairs match independently evaluated
+`8bef807a0fcdd180e984a26b50e731cdba9a8ff2`; metadata and the chat template
+changed. The AIBeast [integrity read](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/weight-integrity.json)
+verified **81/81 files / 355,150,499,456 bytes** and primed cachefilesd.
+A read-only local metadata-only derivative reconciled the native-MTP
+`model.layers.78.eh_proj*` ignore entry; canonical weights remain unmodified
+([source/derived hashes and change](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/metadata-reconciliation.json)).
+The earlier spot feature suite passed, but the complete parser/continuation
+matrix remains open. The unchanged public-profile rental floor uses TP4/DCP4,
+dynamic NVFP4 KV/FP8 RoPE, 4,518,907,904 KV bytes/GPU, scheduler 2048,
+prefill arena 1024, C8, native probabilistic MTP3, online K6 and GMU 0.93;
+successful retrieval is not C8 capacity proof. No 750K claim is made.
+The previous 393,216-token full-model qualification is historical and does
+not transfer to the refreshed Gilded image. GLM-5.2 is an explicit alternative.
+
+Exact safetensors-header accounting corrects the initial lower-bit preference:
+5.3 3.42bpw adds 0.848 GiB/rank versus the preserved 5.2 3.42bpw tensors, largely
+rotation-vector storage. Their BF16 carrier is identical. Preserve 3.42bpw
+and 520,192 tokens; this accounting does not prove that GLM-5.3 requires
+smaller workspaces. The optional 3.25bpw experiment is not a fallback here.
+The full accounting is retained in `maintenance/glm53-aibeast-500k/memory-comparison.json`.
+
+AIBeast maintenance followed the user's explicit **parity-first** request,
+not a conservative-floor first attempt. `MAINTENANCE_TRIAL=parity` remains the
+maintenance default, overriding the unchanged public profile defaults using
+the [preserved GLM-5.2 environment and serving argv](maintenance/glm53-aibeast-500k/production-baseline.json):
+12 sequences, scheduler/prefill 3072/3072, GMU 0.95, maximum CUDA graph capture
+48 (sizes 4,8,12,16,20,24,28,32,36,40,44,48), Trellis maximum M 48 and
+125 GiB initial LMCache RAM. Only after an operator observes and records
+failure or insufficient margin may `MAINTENANCE_TRIAL=rental-floor` select
+8 sequences, 2048/1024, GMU 0.93, graphs 32 (sizes 4,8,12,16,20,24,28,32),
+Trellis 32 and 20 GiB initial RAM. There is no automatic shrink.
+Both preserve the same checkpoint/3.42bpw, 520,192 context, TP4/DCP4,
+interleave 64, native probabilistic MTP3, KV 4,518,907,904 bytes/GPU,
+125 GiB RAM ceiling and 384 GiB disk tier. No token or precision reduction.
+The fallback default name adds `-rental-floor`; each trial has isolated
+caches, state and stage manifest, with the selector in stage identity.
+
+Parity required a **new image build**, since the `200b1841…` validator rejects
+3072 scheduler/prefill settings. That digest's GPU evidence remains floor-only;
+the later `8006d209…` image has its own AIBeast boot/retrieval/soak evidence
+above. The rental-floor arm was not substituted during this cutover.
+
+Read-only research found no demonstrated dominating stack under the same
+full-model, four-GPU, 520K/C12 and quality constraints; “near the practical
+constrained frontier” is an inference, not Pareto-optimality proof.
+Independent evaluations support gains on some tasks, but exact 3.42bpw
+gain retention is unproven and the published GPQA result supplies contrary
+evidence. No new KLD, paired task-quality or broad performance experiment was
+run as part of that review. The [dated deployment and constrained-frontier
+appendix](docs/glm52-prefill-optimization-research-2026-08-09.md#2026-09-08-glm-53-deployment-and-constrained-frontier-review)
+links primary evidence and distinguishes proposed investigations from
+completed deployment gates.
+
+The runtime parent is now local-inference-lab's **Gilded Gnosis v20 r34**,
+`docker.io/voipmonitor/vllm@sha256:820181fbbc975cd5291c411cda9771d58fecee1636d916f508f47230df20592b`
+(vLLM `e2666d9a65f41fc376607531453cbd57c4c71016`, integration tree
+`4d006a43928cdee01306691a766542c1e9bebb59`; B12X/SparkInfer
+`7cecbb2c4819636ae7f05f8b116f2c45ee2cff7b`, tree
+`cd3ce190f0f1917402cdfd5773724267cc9a63f8`; LMCache `0.5.2+glm52dcp.4`;
+FlashInfer `1ac6942776b383c6b03c7a5805a22e72a3e3349f`; NCCL 2.30.4;
+ExLlamaV3 encoder `704aefd743b390af4bd0fb429d1906f9b964c7d8`; Torch
+2.12.0+cu132; CUDA 13.2.1). This replaces the third-party
+`verdictai/glm53-flash-exl3-k4@sha256:0f1cdcc8891f1cc3a444121eb61d366289a1cbba285f0892dcbb24bc94961692`
+parent used by the preceding candidate, and returns the appliance to the exact
+runtime family that has been serving GLM-5.2 in production. Its CUDA/Torch/NCCL
+stack is 13.2.1 / 2.12 / 2.30.4, not the Verdict candidate's 13.3 / 2.13 / 2.31.2.
+
+The 27 VerdictAI-layout overlays are deleted from this build because their
+targets and runtime layout differ. **The Gilded base does not already contain
+all 27 fixes.** Required maintenance work is re-derived for its installed
+sources, rather than treating overlay removal as equivalent qualification.
+The selected SHA-256-pinned payloads in the importable runtime and `/opt/vllm`
+source tree include the reviewed r34 maintenance sources (vLLM PR277
+compatibility, hybrid external-cache invalid-block recovery, bounded LMCache
+multiprocess retrieve) and the expired-L1-read-lease recovery patch
+(`67561538a08ce3db621f51f0615b67537c0c8361`, upstream draft
+LMCache/LMCache#4691) that makes the candidate's `LMCACHE_L1_READ_TTL=900` and
+`LMCACHE_SESSION_TTL_SECONDS=5400` real rather than inert; the surgical parser
+#639/#640 and scheduler #546 backports, re-derived against Gilded bytes
+(the Gilded parser has no `TOOL_DIRECT_*` states or message-header buffering,
+so those hunks were re-anchored, never back-ported from Verdict); and the
+fail-closed LMCache retrieve-deadline/cache-layout payloads, re-pinned to the
+Gilded connector `c6e0bf5c…` and adapter `0781f930…`.
+
+**GLM-5.3-Flash is no longer served by this image.** `vllm.models.glm5next`,
+`b12x.attention.glm_pooled_indexer`, `b12x.attention.gdn_decode` and
+`vllm.model_executor.warmup.glm5_kpool_warmup` are absent from the Gilded base,
+so `glm53-k6` / `glm53-k8` fail closed and name the VerdictAI-derived lineage
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:9d7ab60a3ad666edb8d38812ec6709909e6752a78fad464c842c7b17659f5d5b`
+instead of silently substituting another profile. Missing runtime support in
+this build does **not** prove that Flash cannot be ported. Qualification of
+the separate Verdict reference does not qualify the refreshed Gilded image.
+
+These source changes are not inherited upstream-head guarantees. Only the
+specific images and observed spot/AIBeast gates have live evidence.
+The parser repairs literal argument delimiters and stripped-stop recovery while
+preserving the installed parser ABI. The non-DP scheduler fix does not by itself
+enable prefill throttling: `prefill_schedule_interval` remains 1 (inert).
+Any interval above 1 needs explicit overlap/progress qualification; DP's
+synchronized counter behavior is unchanged.
+The build-time `/opt/runtime-provenance.json` hashes actual installed sources
+and native libraries and records package/module versions and registry pins;
+the stale copied r26 ledger is no longer current-runtime evidence. The image's
+own pushed digest must be recorded externally after publication.
+
+Operator fixes include full variant precedence, refusing invalid startup
+configs, warning for unqualified variants, and attempt-snapshot protection
+against stale verification/rollback state. Podman 4.9 staging uses explicit
+devices, separate state/cache/name/port, no automatic production stop and no
+restart policy. Rollback preserves the old image, environment and state;
+the accepted AIBeast cleanup intentionally removed its warm caches, as above.
+LMCache gains an optional aggregate `LMCACHE_L1_MAX_GB` ceiling (0 by default;
+candidate 125 GiB; initial arena 125 GiB parity / 20 GiB rental floor);
+it does not enlarge active context.
+
+Spot evidence is tied to
+[`ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9`](https://github.com/malaiwah/glm52-exl3-vast/pkgs/container/glm52-exl3-vast),
+source [`e96231359fc5dca2df9d4a397d7a814ba9deae30`](https://github.com/malaiwah/glm52-exl3-vast/commit/e96231359fc5dca2df9d4a397d7a814ba9deae30),
+[CI 34168581945](https://github.com/malaiwah/glm52-exl3-vast/actions/runs/34168581945)
+and [PR #58](https://github.com/malaiwah/glm52-exl3-vast/pull/58).
+`skopeo` + verified `umoci` unpacked the rootfs; the provider blocks
+mount/user namespaces, so this was an OS graft, **not an exact OCI launch**.
+Final verification matched 19 critical sources, seven module initializers and
+seven image-recorded native libraries. Additional provider NCCL 2.23.4 files remained
+and were disclosed; live process maps showed image NCCL 2.30.4 loaded. These
+are scoped observations, not comprehensive filesystem/security equivalence.
+Later helper/source changes are not retroactively GPU-qualified.
+
+Predecessor **483634** resumed as **500157**, with four spot GPUs (approximately
+**$3.96/hour GPU quote**), 320 GiB shared memory and 1200 GB persistent home.
+**500157 was paused after evidence capture**, confirmed by a fresh provider
+listing, preserving old user storage that remained billable while paused.
+Subsequently the user explicitly requested destruction: the destroy API
+succeeded, `jl list` returned `[]`, and all six resource counts were zero.
+The [new destroy receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json)
+is separate from the unchanged historical pause receipt.
+The 131,409-token prefix took 62.4 s then 1.3 s with native
+GPU cache only. A second 501,098-token pressure probe retrieved 3/3 facts in
+360.891 s; the original prefix then returned correctly in **3.115 s**, adding
+**115,200 external-prefix hit tokens** and 15,872 native-hit tokens. This
+measures **LMCache DRAM retrieval after GPU pressure**, not complete GPU
+eviction or a DRAM-only request. Disk L2, restart, concurrency, fault recovery
+and a new KLD comparison remain unproved by these receipts. See
+[spot results and remaining gates](TEST_RESULTS.md#jarvislabs-spot-container-proof-2026-09-08).
+
+Root/non-root (#20), host/bridge networking (#21), parent dependency index
+selection (#24), and complete core-runtime hash locks (#25) remain open
+hardening boundaries; scoped SOUL locks and loopback cache restrictions do
+not close them. The parent declares `LicenseRef-ShapleyMCG-1.0`; the full
+model uses the custom GLM-5.3 license. The appliance MIT license is not an
+umbrella license. See [attribution and provenance](README.md#attribution-licenses-and-runtime-provenance).
+
+The entries below are historical release evidence. Their “default” and
+“latest” statements describe those releases, not this operationally accepted
+AIBeast deployment or an automatic global release promotion.
+
 ## GLM-5.3 full-model 3.42bpw
 
 ### Post-qualification review hardening

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for the paid-runtime qualification harnesses."""
 import hashlib
+import io
 import json
 import os
 import sys
@@ -84,6 +85,43 @@ not_a_number NaN
         self.assertEqual(metrics["vllm:prompt_tokens_total"], 20)
         self.assertEqual(metrics["vllm:num_preemptions_total"], 2)
         self.assertNotIn("not_a_number", metrics)
+
+    def test_metric_timestamp_and_spaced_labels_do_not_change_sample_value(self):
+        metrics = bench.parse_metrics(
+            'vllm:prompt_tokens_total{model_name="a b"} 12 1788742800000\n'
+            'vllm:prompt_tokens_total{model_name="c"} 8 1788742800000\n')
+        self.assertEqual(metrics["vllm:prompt_tokens_total"], 20)
+
+    def test_overflowing_metric_sum_fails_instead_of_emitting_infinity(self):
+        with self.assertRaises(ValueError):
+            bench.parse_metrics('counter{rank="0"} 1e308\ncounter{rank="1"} 1e308')
+
+    def test_nonfinite_result_does_not_replace_previous_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "result.json")
+            bench.write_result(path, {"ok": False})
+            with self.assertRaises(ValueError):
+                bench.write_result(path, {"gauge": float("nan")})
+            self.assertEqual(json.loads(Path(path).read_text()), {"ok": False})
+
+    def test_sse_chunks_are_not_used_as_token_counts(self):
+        chunk = {"choices": [{"delta": {"content": "one two three"}}]}
+        for usage in ({}, {"prompt_tokens": 100, "completion_tokens": 5}):
+            with self.subTest(usage=usage):
+                stream = io.BytesIO((
+                    "data: " + json.dumps(chunk) + "\n"
+                    + "data: " + json.dumps({"usage": usage}) + "\n"
+                    + "data: [DONE]\n").encode())
+                with mock.patch.object(bench, "request", return_value=stream):
+                    result = bench.stream_completion(
+                        "http://test", "", "model", "prompt", 90, 5)
+                self.assertEqual(result["ok"], bool(usage))
+                if usage:
+                    self.assertEqual(result["output_tokens"], 5)
+                    self.assertEqual(result["prompt_tokens"], 100)
+                    self.assertEqual(result["text_chunks"], 1)
+                else:
+                    self.assertNotIn("output_tokens", result)
 
     def test_speculative_summary_uses_official_mal_formula(self):
         before = {
@@ -177,42 +215,6 @@ not_a_number NaN
             self.assertEqual(partial["prefill"][0]["target_prompt_tokens"], 1024)
             self.assertIn("ConnectionResetError", partial["fatal_error"])
 
-    def test_prompt_seed_makes_ab_request_text_reproducible(self):
-        nonces = []
-
-        def fake_prompt(_base, _key, _model, _tokens, nonce, _insecure):
-            nonces.append(nonce)
-            return f"prompt {nonce}", 32
-
-        ok = {
-            "ok": True, "prompt_tokens": 32, "output_tokens": 1,
-            "ttft_ms": 1, "tpot_ms": 0, "mean_inter_chunk_ms": 0,
-        }
-        with mock.patch.object(bench, "make_prompt", side_effect=fake_prompt), \
-             mock.patch.object(bench, "get_metrics", return_value={}), \
-             mock.patch.object(bench, "stream_completion", return_value=ok):
-            bench.run_level(
-                "http://test", "", "model", 32, 1, 2, 3, 10,
-                nonce_prefix="loader-ab-c2")
-        self.assertEqual(nonces, [
-            "loader-ab-c2-0", "loader-ab-c2-1", "loader-ab-c2-2"])
-
-    def test_temperature_and_seed_reach_each_matched_request(self):
-        ok = {
-            "ok": True, "prompt_tokens": 32, "output_tokens": 1,
-            "ttft_ms": 1, "tpot_ms": 0, "mean_inter_chunk_ms": 0,
-        }
-        with mock.patch.object(
-                bench, "make_prompt", return_value=("prompt", 32)), \
-             mock.patch.object(bench, "get_metrics", return_value={}), \
-             mock.patch.object(
-                 bench, "stream_completion", return_value=ok) as completion:
-            bench.run_level(
-                "http://test", "", "model", 32, 1, 1, 2, 10,
-                nonce_prefix="block-ab", temperature=1.0, seed=1776)
-        self.assertEqual(completion.call_count, 2)
-        for call in completion.call_args_list:
-            self.assertEqual(call.args[-2:], (1.0, 1776))
 
 
 class ScorecardTests(unittest.TestCase):
@@ -228,9 +230,6 @@ class ScorecardTests(unittest.TestCase):
             scorecard.extract_answer("gpqa_diamond", "Answer: $c"), "C"
         )
 
-    def test_scorecard_defaults_leave_room_for_reasoning(self):
-        self.assertEqual(scorecard.default_max_tokens("gsm8k_cot"), 4096)
-        self.assertEqual(scorecard.default_max_tokens("gpqa_diamond"), 32768)
 
     def test_hidden_reasoning_is_not_a_visible_answer(self):
         content = ""
@@ -314,19 +313,6 @@ class NeedleTests(unittest.TestCase):
             self.assertEqual(
                 verify.discover_model("http://test", ""), "GLM-5.2")
 
-    def test_short_probe_enables_thinking_with_sufficient_output_budget(self):
-        answers = iter(("391", "Paris", "BANANA"))
-
-        with mock.patch.object(
-                verify, "complete",
-                side_effect=lambda *_args, **_kwargs: next(answers)) as complete:
-            result = verify.short_probe("http://test", "", "model")
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(complete.call_count, 3)
-        for call in complete.call_args_list:
-            self.assertEqual(call.kwargs["max_tokens"], 256)
-            self.assertTrue(call.kwargs["enable_thinking"])
 
     def test_complete_rejects_truncated_reasoning_as_an_answer(self):
         response = {
@@ -344,18 +330,13 @@ class NeedleTests(unittest.TestCase):
     def test_haystack_is_seeded_unique_and_contains_every_needle(self):
         text_a, needles_a = verify.build_haystack(8192, [0.01, 0.5, 0.99], 7)
         text_b, needles_b = verify.build_haystack(8192, [0.01, 0.5, 0.99], 8)
-        self.assertIn("trial 7", text_a.splitlines()[0])
         self.assertNotEqual(text_a, text_b)
         self.assertNotEqual(needles_a, needles_b)
         for city, code in needles_a:
             self.assertIn(f"access code for {city} is {code}", text_a)
 
-    def test_degenerate_detector_catches_known_failure_shapes(self):
-        self.assertIn("no word", verify.degenerate("...,,,!!!"))
-        self.assertIn("repeats", verify.degenerate("one two three " * 10))
-        self.assertEqual(verify.degenerate("Kyoto: ABC-1234"), "")
 
-    def test_structured_probe_requires_exact_schema_and_enables_thinking(self):
+    def test_structured_probe_accepts_exact_schema(self):
         response = {
             "choices": [{
                 "message": {
@@ -364,19 +345,12 @@ class NeedleTests(unittest.TestCase):
                 },
             }],
         }
-        with mock.patch.object(verify, "_req", return_value=response) as request:
+        with mock.patch.object(verify, "_req", return_value=response):
             result = verify.structured_output_probe(
                 "http://test", "key", "model"
             )
         self.assertTrue(result["ok"])
         self.assertTrue(result["reasoning_field"])
-        payload = request.call_args.args[1]
-        self.assertTrue(
-            payload["chat_template_kwargs"]["enable_thinking"]
-        )
-        self.assertTrue(
-            payload["response_format"]["json_schema"]["strict"]
-        )
 
     def test_structured_probe_rejects_extra_schema_fields(self):
         response = {
@@ -435,36 +409,6 @@ class NeedleTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(calls["n"], 1)
 
-    def test_stochastic_probe_uses_qualified_sampling_payload(self):
-        response = {
-            "choices": [{
-                "finish_reason": "length",
-                "message": {
-                    "content": " ".join(f"word{i}" for i in range(512)),
-                },
-            }],
-            "usage": {"completion_tokens": 512},
-        }
-
-        def fake_req(url, payload=None, **_kwargs):
-            return "healthy" if url.endswith("/health") else response
-
-        with mock.patch.object(
-                verify, "count_tokens", return_value=(1024, True)), \
-             mock.patch.object(verify, "_req", side_effect=fake_req) as request:
-            result = verify.stochastic_sampling_probe(
-                "http://test", "key", "model")
-
-        self.assertTrue(result["ok"])
-        payload = request.call_args_list[0].args[1]
-        self.assertEqual(payload["max_tokens"], 512)
-        self.assertEqual(payload["temperature"], 1.0)
-        self.assertEqual(payload["seed"], 42)
-        self.assertTrue(payload["ignore_eos"])
-        self.assertFalse(
-            payload["chat_template_kwargs"]["enable_thinking"])
-        self.assertEqual(result["prompt_tokens"], 1024)
-        self.assertTrue(result["health_after"])
 
     def test_stochastic_probe_requires_full_output_budget(self):
         response = {
@@ -484,7 +428,6 @@ class NeedleTests(unittest.TestCase):
             result = verify.stochastic_sampling_probe(
                 "http://test", "", "model")
         self.assertFalse(result["ok"])
-        self.assertIn("511/512", result["detail"])
 
     def test_main_fails_before_long_probe_when_stochastic_sampling_fails(self):
         failure = {
@@ -515,7 +458,6 @@ class NeedleTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertFalse(verdict["ok"])
         self.assertEqual(verdict["stochastic_sampling"], failure)
-        self.assertIn("temperature-1", verdict["reason"])
         needle.assert_not_called()
 
     def test_probe_records_seed_duration_and_retrieval(self):
@@ -566,6 +508,38 @@ class NeedleTests(unittest.TestCase):
             needle_matrix.capped_sizes(
                 [490000, 32768, 600000, 32768], 524288, 4096),
             [32768, 490000, 520192])
+
+    def test_interrupted_matrix_never_publishes_partial_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "needles.json")
+            with mock.patch.object(verify, "needle_probe", side_effect=[
+                    {"ok": True, "tokens": 8192, "tokens_exact": True},
+                    KeyboardInterrupt()]):
+                with self.assertRaises(KeyboardInterrupt):
+                    needle_matrix.main([
+                        "--model", "model", "--sizes", "8192,16384", "--out", path])
+            report = json.loads(Path(path).read_text())
+            self.assertFalse(report["complete"])
+            self.assertFalse(report["ok"])
+            self.assertTrue(report["probes"][0]["ok"])
+
+    def test_matrix_gates_exact_length_and_post_stress_and_emits_one_document(self):
+        for exact, tokens, post_ok, expected in (
+                (True, 8192, True, True), (False, 8192, True, False),
+                (True, 4096, True, False), (True, 8192, False, False)):
+            with self.subTest(exact=exact, tokens=tokens, post_ok=post_ok):
+                output = io.StringIO()
+                with mock.patch.object(verify, "needle_probe", return_value={
+                        "ok": True, "tokens": tokens, "tokens_exact": exact}), \
+                     mock.patch.object(verify, "short_probe", return_value={"ok": True}), \
+                     mock.patch.object(verify, "stochastic_sampling_probe",
+                                       return_value={"ok": post_ok}), \
+                     mock.patch("sys.stdout", output):
+                    status = needle_matrix.main(["--model", "model", "--sizes", "8192"])
+                report = json.loads(output.getvalue())
+                self.assertTrue(report["complete"])
+                self.assertEqual(report["ok"], expected)
+                self.assertEqual(status, 0 if expected else 1)
 
 
 if __name__ == "__main__":

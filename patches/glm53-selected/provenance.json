@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "selection": "B12X PR226/256/257 and V2-compatible compute-share fairness; no experimental MTP overlay",
+  "source_manifest": "maintenance/glm53-optimization-20260908/build/build-manifest.json",
+  "source_manifest_sha256": "9cf7f80cd01178468abbd46faf904c333f0006e9252027d08601efe99f89a49d",
+  "install_root": "/opt/venv/lib/python3.12/site-packages",
+  "mirror_root": "/opt",
+  "files": [
+    {
+      "payload": "b12x/moe/_shared/kernels/w4a16/route_pack.py",
+      "path": "b12x/moe/_shared/kernels/w4a16/route_pack.py",
+      "before_sha256": "ad7ee1b0a86e5af43587051fb82aa182fcb4f3b50a51575476f6eefe271caafe",
+      "after_sha256": "a31fe50488145da58fb875ddad6fb6fecc724f76ae6880b0d69f09af78f8c298"
+    },
+    {
+      "payload": "b12x/comm/pcie/pcie_oneshot.py",
+      "path": "b12x/comm/pcie/pcie_oneshot.py",
+      "before_sha256": "d8be62ce5330b92cf8fb73dc36384f7268494fff1b3795496a1ee4898dfc312e",
+      "after_sha256": "c4614bc6f3a2fea80e72ce087af2e76e94dc1737025b37a3ce07e79a0a37bcf9"
+    },
+    {
+      "payload": "vllm/config/scheduler.py",
+      "path": "vllm/config/scheduler.py",
+      "before_sha256": "ecda4b0c12a2e40dddafa6e9c1f5328740a0bae29d7cb8dc5bc1a8d3de56021e",
+      "after_sha256": "aae93351af40efbdb28d75e82cb91b6948c703fc18b7a1bd2a6d7714b5ba7a4f"
+    },
+    {
+      "payload": "vllm/config/vllm.py",
+      "path": "vllm/config/vllm.py",
+      "before_sha256": "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f",
+      "after_sha256": "b40fc3b5d131851d15f2e88d550a02abd11f043d998ec927c60ba299e424b853"
+    },
+    {
+      "payload": "vllm/engine/arg_utils.py",
+      "path": "vllm/engine/arg_utils.py",
+      "before_sha256": "8449722b2285fd17271be4123d70b9c9c84b550e6107f00cfe53c6274e2c41be",
+      "after_sha256": "64d56a589b71f3cabe38de9b786ae7ffb26995ebc9df8e126ba0d41eadaf1233"
+    },
+    {
+      "payload": "vllm/v1/core/sched/compute_fairness.py",
+      "path": "vllm/v1/core/sched/compute_fairness.py",
+      "before_sha256": null,
+      "after_sha256": "e46de15e31a1d1a52fa63c8d9ebec7867365132d07fe258c7a25aa2a972dc10a"
+    },
+    {
+      "payload": "vllm/v1/core/sched/interface.py",
+      "path": "vllm/v1/core/sched/interface.py",
+      "before_sha256": "01684d9eb30820c210d4fccbda5fd2dc304fc58e04704b30d574c83edce3f8ff",
+      "after_sha256": "1cad843c243dc6447e23365859c2a81d58098c2b69790582374ed062bf98110a"
+    },
+    {
+      "payload": "vllm/v1/core/sched/output.py",
+      "path": "vllm/v1/core/sched/output.py",
+      "before_sha256": "91fcedcc9fa478b5e5bf718c8fc50052c52bf418193c02cd471ca20e7f7518c6",
+      "after_sha256": "eb1d522c1dcd050bcf3668957063db31940a299692c1a349fe404728e79c6df5"
+    },
+    {
+      "payload": "vllm/v1/core/sched/scheduler.py",
+      "path": "vllm/v1/core/sched/scheduler.py",
+      "before_sha256": "f569c1e58ef6d2e1f244d488d7172f39a2017d9c5f7b7653bfdcd13d857580ab",
+      "after_sha256": "072f9bd18b98d2d6189d34d55742cf6c14bdb940d012951618ce16323948d83e"
+    },
+    {
+      "payload": "vllm/v1/engine/core.py",
+      "path": "vllm/v1/engine/core.py",
+      "before_sha256": "276186db3c5a3df793594ed596974c2729b916bccae7d94a892a39c5301e183d",
+      "after_sha256": "142b645bdd125806b6af9af1b501ef03fc7df25d104a6565add86a3f9cb3717b"
+    },
+    {
+      "payload": "vllm/v1/metrics/stats.py",
+      "path": "vllm/v1/metrics/stats.py",
+      "before_sha256": "9ec1157ff57ab65e7b71ef79c10523f9d5aaef5ea2de60d8f63ed1e3c489a923",
+      "after_sha256": "dd2ee1676db2aaa707a2e46361cdedddcfe6e2be0c309c74da85faefb963319e"
+    },
+    {
+      "payload": "vllm/v1/metrics/loggers.py",
+      "path": "vllm/v1/metrics/loggers.py",
+      "before_sha256": "114edcb850ea3c21234ae04c3bde5bb1b2f7d3b40a72f707b3288e7d608ee637",
+      "after_sha256": "1532c87d3b31fda21aa130b9c664718e1338f1a2600fd9dfe919d4755c823b3f"
+    }
+  ]
+}

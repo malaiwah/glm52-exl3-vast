@@ -50,6 +50,18 @@ class DecisionTests(unittest.TestCase):
         self.assertTrue(guard.needs_republish(
             {"ns1": {"old"}, "ns2": {"new"}}))
 
+    def test_outside_zone_is_rejected_before_dns_or_write(self):
+        with mock.patch.object(guard, "authoritative_txt") as query:
+            with self.assertRaises(ValueError):
+                guard.guard("example.test", "notexample.test", "secret", 10)
+        query.assert_not_called()
+
+    def test_apex_challenge_queries_exact_name(self):
+        with mock.patch.object(guard, "authoritative_txt",
+                               return_value={"ns1": {"proof"}, "ns2": {"proof"}}) as query:
+            guard.guard("Example.Test.", "EXAMPLE.TEST.", "secret", 10)
+        query.assert_called_once_with("example.test", "_acme-challenge.example.test")
+
     def test_republish_uses_idempotent_bulk_put_and_quoted_txt_rdata(self):
         response = mock.MagicMock()
         response.status = 204

@@ -1,0 +1,253 @@
+{
+  "candidate": "fairness",
+  "status": "prepared_unvalidated",
+  "baseline_source": "/home/mbelleau/code/turnkey-experiments/20260908T133955Z/baseline",
+  "upstream": {
+    "repository": "https://github.com/local-inference-lab/vllm",
+    "commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+    "feature_parent_commit": "390d68793c25dec7b3024cae078c5acc6bc64866",
+    "first_parent_commit": "7362f065e3fed56cf269218a8b28378c7bd7c4c8",
+    "source_urls": [
+      "https://github.com/local-inference-lab/vllm/commit/a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "https://api.github.com/repos/local-inference-lab/vllm/commits/a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "https://raw.githubusercontent.com/local-inference-lab/vllm/a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96/vllm/v1/core/sched/compute_fairness.py"
+    ]
+  },
+  "files": [
+    {
+      "path": "vllm/config/scheduler.py",
+      "baseline_sha256": "ecda4b0c12a2e40dddafa6e9c1f5328740a0bae29d7cb8dc5bc1a8d3de56021e",
+      "candidate_sha256": "aae93351af40efbdb28d75e82cb91b6948c703fc18b7a1bd2a6d7714b5ba7a4f",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Compute-share selector and share only; retain old partial-prefill fields/defaults/validation. No micro-slicing knobs or runtime switching."
+    },
+    {
+      "path": "vllm/config/vllm.py",
+      "baseline_sha256": "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f",
+      "candidate_sha256": "b40fc3b5d131851d15f2e88d550a02abd11f043d998ec927c60ba299e424b853",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Fail closed outside DP=PP=PCP=1, no DBO, and MTP-or-no-speculation. Both baseline V1 and V2 model runners use the same scheduler/output timing ABI. Keep existing V2 selection for the actual TP4/DCP4 partial-indexer-replication target."
+    },
+    {
+      "path": "vllm/engine/arg_utils.py",
+      "baseline_sha256": "8449722b2285fd17271be4123d70b9c9c84b550e6107f00cfe53c6274e2c41be",
+      "candidate_sha256": "64d56a589b71f3cabe38de9b786ae7ffb26995ebc9df8e126ba0d41eadaf1233",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Expose only --fairness-engine and --prefill-compute-share through existing SchedulerConfig CLI construction; retain existing cadence argument."
+    },
+    {
+      "path": "vllm/v1/core/sched/compute_fairness.py",
+      "baseline_sha256": null,
+      "candidate_sha256": "e46de15e31a1d1a52fa63c8d9ebec7867365132d07fe258c7a25aa2a972dc10a",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Upstream weighted virtual-runtime controller with async in-flight reservations, measured-cost correction, and contention reset; no behavioral changes."
+    },
+    {
+      "path": "vllm/v1/core/sched/interface.py",
+      "baseline_sha256": "01684d9eb30820c210d4fccbda5fd2dc304fc58e04704b30d574c83edce3f8ff",
+      "candidate_sha256": "1cad843c243dc6447e23365859c2a81d58098c2b69790582374ed062bf98110a",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Only record_compute_time feedback contract; omit idle runtime switching APIs."
+    },
+    {
+      "path": "vllm/v1/core/sched/output.py",
+      "baseline_sha256": "91fcedcc9fa478b5e5bf718c8fc50052c52bf418193c02cd471ca20e7f7518c6",
+      "candidate_sha256": "eb1d522c1dcd050bcf3668957063db31940a299692c1a349fe404728e79c6df5",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Only service-class and contention tags; preserve all baseline output fields."
+    },
+    {
+      "path": "vllm/v1/core/sched/scheduler.py",
+      "baseline_sha256": "f569c1e58ef6d2e1f244d488d7172f39a2017d9c5f7b7653bfdcd13d857580ab",
+      "candidate_sha256": "072f9bd18b98d2d6189d34d55742cf6c14bdb940d012951618ce16323948d83e",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Port compute-share selection and running-pass fallback onto installed scheduler. Preserve old allocation/lookahead/partial-prefill/LMCache recovery. Known in-flight remote-KV/grammar/streaming waits are not runnable prefill candidates until eligible. Mixed prefill-first batches charge their whole service quantum to prefill, as upstream. No micro-slicing, new draft-input budgets, Mamba ABI changes, or idle runtime switching."
+    },
+    {
+      "path": "vllm/v1/engine/core.py",
+      "baseline_sha256": "276186db3c5a3df793594ed596974c2729b916bccae7d94a892a39c5301e183d",
+      "candidate_sha256": "142b645bdd125806b6af9af1b501ef03fc7df25d104a6565add86a3f9cb3717b",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Upstream host model-service wallclock timer, completion callback, FIFO overlap subtraction, synchronous and queued/deferred-grammar integration. Charge successful queued results after error check. Documentation explicitly rejects GPU-only interpretation. Preserve #546 cadence helper and existing parser/cache/speculative hooks."
+    },
+    {
+      "path": "vllm/v1/metrics/stats.py",
+      "baseline_sha256": "9ec1157ff57ab65e7b71ef79c10523f9d5aaef5ea2de60d8f63ed1e3c489a923",
+      "candidate_sha256": "dd2ee1676db2aaa707a2e46361cdedddcfe6e2be0c309c74da85faefb963319e",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Only target share and per-class measured service-time deltas; no micro-slicing metrics."
+    },
+    {
+      "path": "vllm/v1/metrics/loggers.py",
+      "baseline_sha256": "114edcb850ea3c21234ae04c3bde5bb1b2f7d3b40a72f707b3288e7d608ee637",
+      "candidate_sha256": "1532c87d3b31fda21aa130b9c664718e1338f1a2600fd9dfe919d4755c823b3f",
+      "upstream_commit": "a8893b78e7e3f9ed8b7ac26b38122d5bb2e7cf96",
+      "port_deviations": "Only target-share gauge and per-class model-service counters; help text explicitly says wallclock, not accelerator-only time."
+    },
+    {
+      "path": "appliance/model-turnkey-entry.sh",
+      "install_target": "/usr/local/bin/model-turnkey-entry.sh",
+      "baseline_sha256": "4f016cf359ab324347aca2dd389af3e4858088fbe17faf76e37870f21eb6a07d",
+      "candidate_sha256": "3672539888409f46450558f2ead86ae0ab60ec1234687cc803547ebd7a83e45f",
+      "port_deviations": "Explicit VLLM_PREFILL_FAIRNESS_ENGINE/VLLM_PREFILL_COMPUTE_SHARE forwarded to CLI; unset command unchanged."
+    }
+  ],
+  "configuration": {
+    "enable_append_or_replace_cli": [
+      "--fairness-engine",
+      "compute_share",
+      "--prefill-compute-share",
+      "0.5",
+      "--prefill-schedule-interval",
+      "1"
+    ],
+    "required_existing_topology": {
+      "tensor_parallel_size": 4,
+      "decode_context_parallel_size": 4,
+      "data_parallel_size": 1,
+      "pipeline_parallel_size": 1,
+      "prefill_context_parallel_size": 1
+    },
+    "required_runner_environment": {},
+    "other_requirements": [
+      "enable_chunked_prefill=true",
+      "enable_dbo=false",
+      "built-in scheduler",
+      "speculative method mtp or unset"
+    ],
+    "async_scheduling": "Retain baseline setting. With PP1, V2 async scheduling and V1 async scheduling both have two concurrent batches. The unchanged AsyncScheduler V2 next_decode_eligible_step=current_step+pp_size remains valid at PP1.",
+    "disable": "Omit both --fairness-engine and --prefill-compute-share; restore original --prefill-schedule-interval value. No runtime switch endpoint is added.",
+    "share_domain": "0 < prefill_compute_share < 1; tuning without the explicit selector is rejected.",
+    "partial_prefill_semantics": "Existing max_num_partial_prefills>=1, max_long_partial_prefills, and long_prefill_token_threshold semantics/defaults remain baseline. Upstream micro-slicing reinterpretation (zero=unlimited) is intentionally not imported.",
+    "runner_selection": "PRESERVE THE PROVEN BASELINE V2 MODEL RUNNER SELECTION. Do not set VLLM_USE_V2_MODEL_RUNNER=0 or launcher TUNE_VLLM_USE_V2_MODEL_RUNNER=0. The actual GLM TP4/DCP4 partially replicated sparse-indexer KV requires V2. No runner-selection override is needed from this fairness layer.",
+    "required_target_runner": "V2 model runner within the V1 engine"
+  },
+  "measurement": {
+    "kind": "model-service wallclock share (upstream), NOT pure accelerator-compute share",
+    "clock": "time.perf_counter in engine process",
+    "start": "Immediately before execute_model(non_block=True).",
+    "completion": "Synchronous: after final model/sample result. Queued: callback on exact final model/sample Future, including deferred structured-output sampling.",
+    "charge": "max(completed_at - max(started_at, previous_tagged_completion), 0). Only tagged contended nonempty batches reserve/charge service.",
+    "includes": [
+      "executor IPC",
+      "host output handling",
+      "sampling and MTP host dispatch before final result; asynchronous GPU tail completion is not guaranteed by a host result timestamp",
+      "host response-consumption delay",
+      "host and device synchronization visible in the model-service interval"
+    ],
+    "excludes": [
+      "step-count cadence as a substitute for duration",
+      "transfer-only empty batches as prefill compute",
+      "untagged noncontended batches"
+    ],
+    "mixed_batch": "A prefill turn runs prefills first and can fill leftover capacity with decode; the entire measured quantum is charged to prefill, matching upstream.",
+    "prometheus_target": "vllm:prefill_compute_share",
+    "prometheus_seconds": "vllm:scheduler_compute_seconds_total{class=\"prefill\"|\"decode\"}",
+    "measured_fraction": "delta(prefill counter) / (delta(prefill counter) + delta(decode counter)); undefined if denominator is zero."
+  },
+  "essential_dependencies": [
+    "Controller module; SchedulerOutput tags; SchedulerInterface feedback method.",
+    "EngineCore batch_queue tuple extended coherently from three to four fields at every append/pop; deferred sampling carries its original timer.",
+    "SchedulerStats fields and Prometheus exporter updated together.",
+    "No executor/worker/proposer/parser/cache transport ABI changes; no GPU events, extra RPCs, or new synchronization."
+  ],
+  "validation": {
+    "script": "validate_fairness.py",
+    "sha256": "585bc52f17f38707b1430cc55b8bdd36cafd53eb213e7d2bb1dac5cbbb84eca8",
+    "command": "python3 /home/mbelleau/code/turnkey-experiments/20260908T133955Z/candidates/fairness/validate_fairness.py",
+    "requirements": "Python 3.10+ standard library only; ship validation_sources/ alongside the script. No installed vLLM, torch, model weights, GPU, network, or remote actions.",
+    "method": "Executes unchanged production scheduler/config/timer method ASTs with deterministic cache/executor boundaries and the full production controller module.",
+    "coverage": [
+      "Legacy mixed batches, #546 cadence and capacity-bound escape with mode off.",
+      "Decode tie, measured prefill turn, FCFS partial prefills, residual decode fill.",
+      "Async decode guard fallback and alignment-blocked prefill fallback.",
+      "Full APC hit classification; async external restore excluded from local prefill; failed-restore prefix rewind/recompute promotion.",
+      "Pause-all dispatch suppression; unequal measured-cost convergence with two in-flight batches; zero-time reservation release; contention reset/cost change.",
+      "Final-future completion, FIFO overlap attribution, deferred-grammar exact-batch timing.",
+      "Explicit selector/cadence conflict; baseline old partial-prefill configuration behavior.",
+      "All eight scheduler behavior cases repeated through V2 new/resumed request packing.",
+      "Actual baseline AsyncScheduler override: a decode skipped for prefill retains MTP width and PP1 eligibility.",
+      "Actual V2 add_requests consumer reconstructs a resumed generated prefix from the scheduler payload rather than dropping it back to prompt-only tokens."
+    ],
+    "executed_by_worker": false,
+    "reason": "Parent/user instructed workers to skip all builds/tests/formatters/linters/validation and all runtime actions. Main owns execution proof.",
+    "harness_sha256": "e0acefce04cc731498a9fc230e45464ce9c18f1ff21cbbca247b583e4e42d7a2",
+    "revision_note": "New V2 coverage is unexecuted by worker; Main owns validation and real serving proof. Preserve prior Main-added harness fixes.",
+    "auxiliary_files": [
+      {
+        "path": "validation_sources/async_scheduler.py",
+        "sha256": "be58b169edbff482ecb4cacc9f90f44ee50b8442fd3887f920ca1db329d295b0"
+      },
+      {
+        "path": "validation_sources/v2_contracts.py",
+        "sha256": "900face335b54cd47a8928c354cd8f9e911ce47d9770ecbc1de30bbd00b40c7f"
+      }
+    ]
+  },
+  "risks": [
+    "No performance or startup-success claim: candidate and CPU validation script have not been executed by worker.",
+    "Host model-service timing is not accelerator-only time. Old MultiprocExecutor.FutureWrapper only consumes replies and invokes callbacks during result()/_wait_for_response(), not actual GPU completion or response arrival.",
+    "FIFO overlap subtraction only tracks timed contended batches, as upstream. Untimed in-flight work at contention transitions and deferred host grammar work can bias measured shares.",
+    "Mixed prefill/decode batches are attributed entirely to prefill; target is a service-quantum share, not an isolated per-kernel prefill/decode split.",
+    "Shared live clients and asynchronous LMCache lookup/restore readiness change contention, so HTTP TTFT/decode latency and throughput require independent controlled measurement.",
+    "Pure weighted-service pacing can change the number of graph shapes and effective batch composition. It does not guarantee latency or throughput gains.",
+    "DP/PP/PCP>1, DBO, custom schedulers, and non-MTP speculative methods are rejected rather than claiming unported ABI support.",
+    "Prometheus collection must remain enabled to observe charged service-time counters.",
+    "Actual target requires V2 due sparse-indexer DCP replication. Changing runner selection independently of fairness is unsafe and is not part of this layer."
+  ],
+  "v2_compatibility_review": {
+    "conclusion": "No worker/model-runner/attention/block-table changes are necessary for the target. Remove only the unsupported V1-only guard and runner-selection override; retain topology/DBO/speculative-method guards.",
+    "startup_failure_correction": "Main reported fairness-off startup failed because the manifest forced V1 while partial sparse-indexer DCP replication requires V2. Do not reproduce that known failure. Baseline V2 selection must remain untouched.",
+    "source_evidence": [
+      {
+        "path": "vllm/model_executor/models/deepseek_v2.py",
+        "lines": "622-674",
+        "finding": "Partial sparse-indexer KV replication explicitly rejects non-V2 runner; DCP2..8/PCP1 and per-group CP tables are required.",
+        "baseline_sha256": "27cf047c09c829174025c7372403ae2607315acbb063463582dbb43607eebf04"
+      },
+      {
+        "path": "vllm/config/vllm.py",
+        "lines": "554-565",
+        "finding": "At PP1, async V2 max_concurrent_batches=pp_size+1=2, identical queue depth to non-PP async V1.",
+        "baseline_sha256": "fbc581651521d8f5fb753be7bb9baa24deddac5dcc7cef5da27d6a6b9d99af5f"
+      },
+      {
+        "path": "vllm/v1/core/sched/async_scheduler.py",
+        "lines": "19-49",
+        "finding": "Existing override calls parent advancement then maintains placeholders/spec tokens and next_decode_eligible_step=current_step+pp_size. Fairness still increments current_step exactly once.",
+        "baseline_sha256": "be58b169edbff482ecb4cacc9f90f44ee50b8442fd3887f920ca1db329d295b0"
+      },
+      {
+        "path": "vllm/v1/core/sched/scheduler.py",
+        "lines": "1113-1145 (baseline)",
+        "finding": "Unchanged V2 branch merges resumed into new requests and passes full _all_token_ids as prefill_token_ids. Cached-request/V1 previous-step distinction is retained.",
+        "baseline_sha256": "f569c1e58ef6d2e1f244d488d7172f39a2017d9c5f7b7653bfdcd13d857580ab"
+      },
+      {
+        "path": "vllm/v1/worker/gpu/model_runner.py",
+        "lines": "1110-1201,1224-1236,2232-2238",
+        "finding": "Persistent request slots are removed only for finished/preempted IDs. Scheduled subset maps into persistent state; batch sort normalizes decoder prefix order regardless of scheduler insertion order.",
+        "baseline_sha256": "e8f13cbabadc6c591bc644874abbfcca5a0c935396993e1046ace173f227b0d0"
+      },
+      {
+        "path": "vllm/v1/worker/gpu/model_runner.py",
+        "lines": "1563-1583,1874-1910,1967-1990,2106-2113",
+        "finding": "V2 uses the same execute_model(None)/sample_tokens(AsyncOutput) split; zero-token steps use kv_connector.no_forward. Timing wraps the unchanged final executor result ABI.",
+        "baseline_sha256": "e8f13cbabadc6c591bc644874abbfcca5a0c935396993e1046ace173f227b0d0"
+      },
+      {
+        "path": "vllm/v1/worker/gpu/async_utils.py",
+        "lines": "17-60,80-118",
+        "finding": "AsyncOutput subclasses AsyncModelRunnerOutput; get_output waits for its existing copy event and returns ModelRunnerOutput, consumed by unchanged executor output path.",
+        "baseline_sha256": "0412834b010cf90b1c2417375e95512aced70e1d2e3cef5df7811e9e59659dba"
+      },
+      {
+        "path": "vllm/v1/worker/gpu/block_table.py",
+        "lines": "37-46,305-341",
+        "finding": "Per-KV-group CP sizes and partially replicated DCP slot mapping remain baseline and independent of fairness tags.",
+        "baseline_sha256": "dc94fc742be40711b85e4cbd73209bc86dafc915aa192a424cd79b57381fc4f0"
+      }
+    ],
+    "independent_review": "FairnessReview independently confirmed the same V2 PP1/MTP compatibility and zero-token connector recovery path to this worker."
+  }
+}

@@ -3,6 +3,7 @@
 
     config_cli.py snapshot-env          freeze the startup env layer (once, at boot)
     config_cli.py env                   print `export K=V` for the resolved config
+    config_cli.py env --begin-attempt   freeze this boot's config; export its token
     config_cli.py show                  human-readable table of value + source
     config_cli.py validate [--quiet]    exit 2 if the resolved config has errors
     config_cli.py mark-good --log F     record the running config as known-good
@@ -15,14 +16,17 @@
     config_cli.py request-restart       set the restart flag
     config_cli.py clear-restart         clear the restart flag
 
-Exit codes: 0 ok, 2 validation errors, 3 nothing to do.
+Exit codes: 0 ok, 1 no useful rollback, 2 validation errors,
+3 superseded attempt or nothing to do.
 """
 import argparse
+import hashlib
 import json
 import os
 import shlex
 import shutil
 import sys
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import glm_config as gc  # noqa: E402
@@ -97,9 +101,20 @@ def cmd_snapshot_env(_args):
     return 0
 
 
-def cmd_env(_args):
-    effective, sources, notes = _resolved()
-    derived = gc.derive(effective)
+def cmd_env(args):
+    with gc.state_lock():
+        effective, sources, notes = _resolved()
+        derived = gc.derive(effective)
+        attempt = None
+        if getattr(args, "begin_attempt", False):
+            attempt = {
+                "token": uuid.uuid4().hex,
+                "state_identity": _state_identity(),
+                "effective": effective,
+                "sources": sources,
+                "values": _state_values(),
+            }
+            gc.write_json_atomic(_attempt_path(), attempt, mode=0o600)
     for note in notes:
         print(f"!!! config: {note}", file=sys.stderr)
     lines = []
@@ -123,6 +138,8 @@ def cmd_env(_args):
         shlex.quote(a) for a in derived.get("PROFILE_RUNTIME_ENV", [])))
     # a compact source map so the boot log can explain where a value came from
     lines.append("export GLM_CONFIG_SOURCES=%s" % shlex.quote(json.dumps(sources)))
+    if attempt is not None:
+        lines.append("export GLM_CONFIG_ATTEMPT=%s" % shlex.quote(attempt["token"]))
     print("\n".join(lines))
     return 0
 
@@ -154,8 +171,15 @@ def cmd_show(_args):
 
 
 def cmd_validate(args):
-    effective, _sources, _notes = _resolved()
-    findings = gc.validate(effective, _context())
+    with gc.state_lock():
+        attempt = _current_attempt()
+        if attempt is False:
+            return 3
+        effective = attempt["effective"] if attempt else _resolved()[0]
+        context = _context()
+        if attempt:
+            context["state_keys"] = list(attempt["values"])
+        findings = gc.validate(effective, context)
     errs = gc.errors(findings)
     if not args.quiet:
         for f in findings:
@@ -170,12 +194,57 @@ def _state_values():
         return {}
 
 
+def _attempt_path():
+    return os.path.join(gc.runtime_dir(), "config-attempt.json")
+
+
+def _state_identity():
+    """Include raw metadata such as written_at, not just resolved knob values."""
+    try:
+        with open(gc.p_state(), "rb") as state:
+            return hashlib.sha256(state.read()).hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def _current_attempt():
+    """None is an explicit manual CLI operation; False is a superseded boot.
+
+    Call only under state_lock. Comparing the token prevents an earlier boot
+    from completing after a later attempt of the same configuration; comparing
+    raw state catches dashboard writes before PID 1 begins the next attempt.
+    """
+    if "GLM_CONFIG_ATTEMPT" not in os.environ:
+        return None
+    token = os.environ["GLM_CONFIG_ATTEMPT"]
+    attempt = gc.read_json(_attempt_path())
+    if (not token or not isinstance(attempt, dict)
+            or attempt.get("token") != token
+            or "state_identity" not in attempt
+            or not isinstance(attempt.get("effective"), dict)
+            or not isinstance(attempt.get("sources"), dict)
+            or not isinstance(attempt.get("values"), dict)
+            or attempt["state_identity"] != _state_identity()):
+        print(">>> config attempt superseded; retry the current configuration",
+              file=sys.stderr)
+        return False
+    return attempt
+
+
 def cmd_mark_good(args):
     # Serialize against a concurrent landing-page apply/reset (see gc.state_lock).
     with gc.state_lock():
-        effective, sources, _notes = _resolved()
+        attempt = _current_attempt()
+        if attempt is False:
+            return 3
+        if attempt is None:
+            effective, sources, _notes = _resolved()
+            values = _state_values()
+        else:
+            effective, sources = attempt["effective"], attempt["sources"]
+            values = attempt["values"]
         verify = gc.read_json(gc.p_verify_last())
-        doc = {"ts": _now(), "values": _state_values(), "effective": effective,
+        doc = {"ts": _now(), "values": values, "effective": effective,
                "sources": sources, "verify": verify}
         gc.write_json_atomic(gc.p_known_good(), doc, mode=0o644)
         if args.log and os.path.exists(args.log):
@@ -200,12 +269,15 @@ def _prune_failures():
 def cmd_rollback(args):
     """Preserve the failed config + its log, restore the last known-good.
 
-    The whole read-known-good / write-state sequence is serialized against a
-    concurrent landing-page apply/reset via gc.state_lock() (a cross-process
-    flock), so a rollback and an apply cannot interleave and persist a state
-    neither actor saw."""
+    Under the shared state lock, reject completions from superseded boots
+    before preserving or restoring anything. Locking alone only serializes a
+    newer dashboard apply and an older boot failure; the attempt check stops
+    the latter from overwriting the former after it acquires the lock."""
     with gc.state_lock():
-        return _cmd_rollback_locked(args)
+        attempt = _current_attempt()
+        if attempt is False:
+            return 3
+        return _cmd_rollback_locked(args, attempt)
 
 
 def _known_good_replay(good):
@@ -236,7 +308,7 @@ def _known_good_replay(good):
     }
     restored_contract = {
         key: value for key, value in restored.items()
-        if key in comparable_keys
+        if key in target_contract
     }
     differences = gc.diff(target_contract, restored_contract)
     if differences:
@@ -263,9 +335,12 @@ def _known_good_replay(good):
     return replay, ""
 
 
-def _cmd_rollback_locked(args):
-    effective, _sources, _notes = _resolved()
-    failed_values = _state_values()
+def _cmd_rollback_locked(args, attempt=None):
+    if attempt is None:
+        effective, _sources, _notes = _resolved()
+        failed_values = _state_values()
+    else:
+        effective, failed_values = attempt["effective"], attempt["values"]
     good = gc.read_json(gc.p_known_good())
     log_text = _tail(args.log) if args.log else ""
 
@@ -294,7 +369,7 @@ def _cmd_rollback_locked(args):
         if failed_values:
             try:
                 os.remove(gc.p_state())
-            except OSError:
+            except FileNotFoundError:
                 pass
             gc.set_apply_state("rolled-back", since=ts, failure=ts, detail=args.reason,
                                restored="built-in defaults + template env")
@@ -339,15 +414,23 @@ def _cmd_rollback_locked(args):
 
 
 def cmd_should_rollback(_args):
-    """Exit 0 when an exact rollback would change the effective config."""
-    effective, _sources, _notes = _resolved()
-    good = gc.read_json(gc.p_known_good())
-    if not good:
-        return 0 if _state_values() else 1
-    _replay, error = _known_good_replay(good)
-    if error:
-        return 1
-    return 0 if gc.diff(effective, good["effective"]) else 1
+    """Exit 0 for a useful rollback, 1 for none, 3 for a superseded boot."""
+    with gc.state_lock():
+        attempt = _current_attempt()
+        if attempt is False:
+            return 3
+        if attempt is None:
+            effective, _sources, _notes = _resolved()
+            values = _state_values()
+        else:
+            effective, values = attempt["effective"], attempt["values"]
+        good = gc.read_json(gc.p_known_good())
+        if not good:
+            return 0 if values else 1
+        _replay, error = _known_good_replay(good)
+        if error:
+            return 1
+        return 0 if gc.diff(effective, good["effective"]) else 1
 
 
 def cmd_switches(_args):
@@ -390,12 +473,21 @@ def cmd_clear_restart(_args):
     return 0
 
 
+def cmd_mark_unverified(args):
+    with gc.state_lock():
+        if _current_attempt() is False:
+            return 3
+        gc.set_apply_state("degraded", detail=args.reason or "verification failed")
+    return 0
+
+
 COMMANDS = {
     "snapshot-env": cmd_snapshot_env,
     "env": cmd_env,
     "show": cmd_show,
     "validate": cmd_validate,
     "mark-good": cmd_mark_good,
+    "mark-unverified": cmd_mark_unverified,
     "rollback": cmd_rollback,
     "should-rollback": cmd_should_rollback,
     "switches": cmd_switches,
@@ -411,6 +503,8 @@ def main(argv):
     ap.add_argument("--log", default="")
     ap.add_argument("--reason", default="")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--begin-attempt", action="store_true",
+                    help="env: freeze this boot's configuration for guarded completion")
     args = ap.parse_args(argv)
     return COMMANDS[args.command](args)
 

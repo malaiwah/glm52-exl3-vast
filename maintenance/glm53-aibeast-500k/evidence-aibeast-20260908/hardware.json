@@ -1,0 +1,15 @@
+{
+  "cpu": {
+    "Architecture:": "x86_64",
+    "CPU(s):": "64",
+    "Model name:": "AMD Ryzen Threadripper 9970X 32-Cores",
+    "Thread(s) per core:": "2",
+    "Core(s) per socket:": "32",
+    "Socket(s):": "1",
+    "CPU max MHz:": "5484.0000",
+    "NUMA node(s):": "1"
+  },
+  "ram_memtotal": "MemTotal:       263230736 kB",
+  "gpu_topology": "\t\u001b[4mGPU0\tGPU1\tGPU2\tGPU3\tCPU Affinity\tNUMA Affinity\tGPU NUMA ID\u001b[0m\nGPU0\t X \tNODE\tNODE\tNODE\t0-63\t0\t\tN/A\nGPU1\tNODE\t X \tNODE\tNODE\t0-63\t0\t\tN/A\nGPU2\tNODE\tNODE\t X \tNODE\t0-63\t0\t\tN/A\nGPU3\tNODE\tNODE\tNODE\t X \t0-63\t0\t\tN/A\n\nLegend:\n\n  X    = Self\n  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)\n  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node\n  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)\n  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)\n  PIX  = Connection traversing at most a single PCIe bridge\n  NV#  = Connection traversing a bonded set of # NVLinks\n",
+  "gpu_limits": "0, NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 375.00 W, 97887 MiB, 595.71.05\n1, NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 375.00 W, 97887 MiB, 595.71.05\n2, NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 375.00 W, 97887 MiB, 595.71.05\n3, NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 375.00 W, 97887 MiB, 595.71.05\n"
+}

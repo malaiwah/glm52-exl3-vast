@@ -1,7 +1,7 @@
 # Appliance test results
 
 Cost-controlled execution of [TEST_PLAN.md](TEST_PLAN.md) from 2026-07-26
-through 2026-08-29. Provider credentials and generated appliance tokens were
+through 2026-09-08. Provider credentials and generated appliance tokens were
 kept in process-local environment variables and are not included here.
 
 Per-release GLM-5.2 model qualification details (throughput tables, KLD
@@ -12,11 +12,20 @@ and the per-release `docs/glm52-rXX-*.md` files. This file records provider
 integration evidence, bug discoveries and fixes, cost tracking, and the
 decision history that explains why the codebase is the way it is.
 
-Current profile qualification: **GLM-5.3 full-model mixed 3.42bpw** (2026-08-29 on JarvisLabs).
+**AIBeast serves full GLM-5.3 3.42bpw at 520,192 total tokens** as
+`GLM-5.3` and `local-primary` on port 8000. Its selected optimization uses
+the B12X route/teardown fixes, 60% measured prefill-service fairness, and a
+2048-row EXL3 arena with the 3072-token scheduler. The
+[controlled optimization record](#controlled-aibeast-optimization-2026-09-08)
+preserves every arm and its limits. This is not a completed broad task-quality
+or long-term stability matrix; public rental-floor defaults remain unchanged.
+The older 393,216-token and Verdict/Flash qualifications remain historical and
+do not transfer to this Gilded image.
 
 ## Contents
 
 - [Current qualification status](#current-qualification-status)
+- [AIBeast parity cutover and accepted soak](#aibeast-parity-cutover-and-accepted-soak-2026-09-08)
 - [GLM-5.3 full-model 3.42bpw qualification](#glm-53-full-model-342bpw-qualification-jarvislabs-2026-08-29)
 - [Provider integration](#provider-integration)
 - [Qwen3.6-27B NVFP4 qualification](#qwen36-27b-nvfp4-qualification-vast-rtx-5090)
@@ -29,16 +38,240 @@ Current profile qualification: **GLM-5.3 full-model mixed 3.42bpw** (2026-08-29 
 
 ## Current qualification status
 
+The primary full `glm53-3.42bpw-500k` profile is pinned to
+`99c6f951333d2b38f1efefa533c7afadf0d376e3`. All 81 weight-file LFS identities
+match evaluated `8bef807a0fcdd180e984a26b50e731cdba9a8ff2`; the updated
+template still changes conversational behavior. Both complete 81-shard
+headers were also compared against the live GLM-5.2 3.42bpw checkpoint:
+the BF16 carrier is identical, and 5.3 adds 0.848 GiB/rank of quantized
+payload/rotations. The 5.2 index includes headers; the 5.3 index excludes them.
+See `maintenance/glm53-aibeast-500k/memory-comparison.json` for exact bytes.
+
+The preserved GLM-5.2 boot reports 81.73 GiB model loading and 0.75 GiB graphs
+per rank. The older 5.3 receipt reports 82.42 GiB and 0.61 GiB on another
+runtime. The earlier spot-container arm used scheduler/prefill 2048/1024
+without lowering precision; AIBeast initially used 3072/3072 and subsequently
+selected 3072/2048 after a controlled margin/latency comparison. Neither
+observation establishes that the architecture requires smaller workspaces.
+The two initial AIBeast near-boundary probes and accepted soak
+below establish operational viability at parity, not controlled performance,
+full concurrency, disk L2/recovery, KLD or broad task-quality qualification.
+No 750K result is claimed.
+
+**The original maintenance policy was parity first**, using the
+[GLM-5.2 environment/argv baseline](maintenance/glm53-aibeast-500k/production-baseline.json).
+The later optimization changed only explicitly measured host settings; the
+original `MAINTENANCE_TRIAL` presets remain available and unchanged.
+
+| setting | selected AIBeast optimization | exercised rental floor / public defaults |
+|---|---|---|
+| sequences / scheduler / prefill arena | 12 / 3072 / 2048 | 8 / 2048 / 1024 |
+| GMU / maximum graph capture / Trellis maximum M | 0.95 / 48 / 48 | 0.93 / 32 / 32 |
+| graph capture sizes | 4,8,12,16,20,24,28,32,36,40,44,48 | 4,8,12,16,20,24,28,32 |
+| LMCache initial RAM | 125 GiB | 20 GiB |
+| measured prefill-service share | 0.6 (model-service wallclock) | disabled |
+
+Both retain full 3.42bpw at the same revision, 520,192 context, TP4/DCP4,
+interleave 64, native probabilistic MTP3, online K6, dynamic NVFP4/FP8 RoPE,
+KV 4,518,907,904 bytes/GPU, RAM ceiling 125 GiB and disk tier 384 GiB.
+The public profile defaults remain the rental floor. The original parity and
+explicit rental-floor presets retain their isolated stage identities; the
+selected optimization uses a separate source-locked image and host overrides.
+No automatic fallback, token-limit
+reduction or quantization reduction is authorized.
+
+The parity-capable image is `8006d209…`, built from source `499d34e`;
+the prior `200b1841…` image rejects 3072 scheduler/prefill settings and remains
+floor-only evidence. **The authorized AIBeast cutover completed and its soak
+was accepted at 03:36:34 UTC on 2026-09-08.** No global `latest`/`main`
+promotion, automatic reboot-policy change or restart-policy change occurred.
+The current container retains `restart=no`, as did the old service.
+
+All qualified rows below retain their original hardware/runtime scope. The
+3.42 results and older GLM-5.2/Flash measurements are not retroactively
+relabelled as tests of the refreshed candidate.
+
 | profile | release | hardware | status | section |
 |---|---|---|---|---|
+| Full GLM-5.3 EXL3 TR3 3.42bpw optimized host | Local image `56f7a345…`, exact `8006d209…` parent plus verified overlays | 4x RTX PRO 6000 (AIBeast) | **Selected: 500K and concurrency gates passed; scoped soak/evidence below** | [Optimization](#controlled-aibeast-optimization-2026-09-08) |
+| Full GLM-5.3 EXL3 TR3 3.42bpw initial parity | Gilded r34-derived image `8006d209…`, source `499d34e` | 4x RTX PRO 6000 (AIBeast) | **Historical cutover: two >=500K retrievals and real-client soak accepted; full matrix open** | [AIBeast cutover](#aibeast-parity-cutover-and-accepted-soak-2026-09-08) |
+| Full GLM-5.3 EXL3 TR3 3.42bpw reduced-workspace (next-release default) | Gilded r34 plus required patches, image `200b1841…` | 4x RTX PRO 6000 (JarvisLabs spot 500157, resumed from 483634) | **>=500K retrieval, features and DRAM retrieval passed; full matrix open** | [spot proof](#jarvislabs-spot-container-proof-2026-09-08) |
 | GLM-5.3 full-model EXL3 TR3 3.42bpw | 27-overlay r28 runtime | 4x RTX PRO 6000 (JarvisLabs) | Qualified | [GLM-5.3 full model](#glm-53-full-model-342bpw-qualification-jarvislabs-2026-08-29) |
-| GLM-5.2 EXL3 TR3 3.0bpw (default) | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
+| GLM-5.2 EXL3 TR3 3.0bpw (historical default) | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
 | GLM-5.2 EXL3 TR3 3.36bpw | GG v20-r26 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r26 gate](#gg-v20-r26-tp4dcp4-policy-gate-aibeast-2026-08-04-current) |
 | GLM-5.2 EXL3 TR3 3.25bpw mixed-K | GG v20-r17 | 4x RTX PRO 6000 (AIBeast) | Qualified | [r17 gate](#gg-v20-r17-native-mixed-k-production-gate-2026-08-01) |
 | Qwen3.6-27B NVFP4 vision | GG v20-r9 | 1x RTX 5090 (Vast) | Qualified | [Qwen section](#qwen36-27b-nvfp4-qualification-vast-rtx-5090) |
 | JarvisLabs VM (NCCL fallback) | GG v20-r9 | 4x RTX PRO 6000 (IN1) | Qualified | [JarvisLabs](#jarvislabs-in1-flagship-qualification-2026-07-30) |
 | Runpod 590.48.01 / CUDA 13.2 | GG v20-r9 | 1x RTX 5090 (Secure) | Qualified | [Runpod compat](#runpod-5904801--cuda-132-compatibility-2026-07-29) |
 | GLM-5.2 vision (opt-in) | GG v20 | 4x RTX PRO 6000 (AIBeast) | Short-context only | [Vision section](#v20-vision-qualification-2026-07-27) |
+
+### AIBeast parity cutover and accepted soak (2026-09-08)
+
+The [active receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/active.json)
+pins `glm53-turnkey-r34-parity-20260908t015846z`, container `8273cb4d…`, to
+`ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`
+(source `499d34e`). It serves full non-Flash GLM-5.3, not a renamed 5.2
+checkpoint. Port **8000**, `AUTH=none`, `LANDING=0`, and the existing
+`GLM-5.2` / `local-primary` aliases are preserved; `GLM-5.3` is also served.
+This preserves the existing client contract, not the authenticated rental
+default. TP4/DCP4, C12, scheduler/EXL3 arena 3072/3072, graphs/Trellis 48,
+GMU 0.95, native probabilistic MTP3, 4,518,907,904 KV bytes/GPU
+(520,192 tokens), and LMCache 125 GiB initial RAM / 384 GiB disk remain.
+
+The [integrity receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/weight-integrity.json)
+records all **81/81 files**, **355,150,499,456 bytes**, SHA-256 verified
+against revision `99c6f951333d2b38f1efefa533c7afadf0d376e3`; the read also
+primed cachefilesd. Canonical weights were not modified. A local
+metadata-only derivative, mounted read-only for serving, reconciled the
+native-MTP ignore entry `model.layers.78.eh_proj*` in `config.json`.
+The [reconciliation receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/metadata-reconciliation.json)
+records source/derived hashes and the exact change; this is not re-quantization.
+
+The first launch exposed a host manual-NVIDIA-device driver-injection hook
+bug. It was fixed in `scripts/run-local-podman.sh`, **not by patching runtime
+sources inside the live image**. The successful initial resource-parity boot
+started **02:13:47 UTC**, ready **02:29:15 UTC**. Inspection subsequently
+found that legacy `SPARK_*` fold controls did not set the installed B12X
+policy. At **02:58:58 UTC** the service was deliberately restarted to restore
+the old explicit B12X controls through host `TUNE_` overrides
+([events](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/cutover-events.jsonl),
+[restored settings](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-parity-restoration.json)).
+The applicable changed policy is the exact-fold budget **64 MiB instead of
+the absent-setting default 256 MiB**. Other restored controls match defaults;
+the mHC 3072 threshold is likely inert for full GLM's hidden size 6144, not
+a demonstrated speed improvement. The [effective-policy receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-effective-policy.json)
+evaluates installed pure policy functions under the observed API-server
+environment and confirms `auto` / 67,108,864 bytes; it runs no GPU kernel.
+The durable source fixes in this checkout are **not inside image `8006d209…`**;
+effective host overrides restore B12X parity in the current service.
+
+| observed AIBeast gate | result | receipt |
+|---|---|---|
+| Initial resource-parity boot, before B12X restoration | **501,098 exact haystack tokens, 3/3 facts, 336.364 s**; post-stress correctness and temperature-1 **512 output tokens / 19.344 s** passed | [initial parity](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-initial-parity.json) |
+| Final boot, B12X parity restored | **501,099 exact haystack tokens, 3/3 facts, 275.874 s**; post-stress correctness and temperature-1 **512 output tokens / 7.701 s** passed | [final parity](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-final-parity.json) |
+| Accepted real-client soak, **03:36:34 UTC** | **64 healthy / 0 failed samples**, **1,893.113 s (31.55 min)** since first external client; **87 external POST 200 headers**, **96 completed engine requests including probes**, **0 engine error requests** | [soak acceptance](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/soak-accepted.json) |
+| Extended final-config monitoring | **129/129 health samples**, 03:04:50–04:09:06 UTC; lowest sampled free VRAM **215 MiB**. Final 04:10 health read: HTTP 200, container healthy, **162 completed engine requests including probes**, zero engine-error requests | [extended soak](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/final-soak-summary.json), [final health](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/final-health.json) |
+
+Both retrieval probes used depths 10/50/90% and separate trial identities;
+counts cover the **haystack body**, excluding chat template and question,
+with 4096 tokens reserved inside the 520,192 total limit. Cache regime was
+not measured. The timings are **not a causal performance A/B**: cache warmth,
+compilation and concurrent client load differ. Real clients exercised both
+`/v1/chat/completions` and `/v1/responses`. No OOM, engine crash or unexpected
+restart was observed in the accepted soak; this short interval does not
+replace the user's approximately 24-day stable GLM-5.2 service history.
+
+Minimum **raw free VRAM sampled at roughly 30-second cadence** was
+**215 / 245 / 217 / 215 MiB** on GPUs 0/1/2/3. The overall **215 MiB** minimum
+is thin headroom, not a continuous worst-case measurement or a guarantee
+against unseen allocator, sampler or workspace peaks. Earlier warmup readings
+are not the final soak minimum. No automatic resource shrink was applied.
+
+After acceptance, the [cleanup receipt](maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/old-cache-cleanup.json)
+records removal at **03:37:31 UTC** of only the old
+`/mnt/fast/build/r34-aibeast-maintenance-20260815/runtime/lmcache` and
+`/compile-cache` directories, reclaiming **370,534,412,288 bytes (345.09 GiB)**;
+health remained **HTTP 200**. The old image/container, weights, state and logs,
+new GLM-5.3 caches/state and cachefilesd filesystem cache were preserved.
+**Warm-cache/fast rollback was intentionally relinquished**: the old service
+can still be restored, but its removed caches must be regenerated.
+
+**Scope still open:** full boundary/repetition and parser/continuation matrix,
+controlled C1/C4/C12 and mixed-prefill/decode performance, cancellation and
+fault recovery, disk L2/restart persistence, and a new paired KLD/task-quality
+comparison. Independent benchmark evidence supports capability gains in some
+tasks, but does not prove their retention in this exact quantized deployment.
+The published 3.42bpw GPQA result is contrary evidence, not something to erase.
+No dominating alternative stack was demonstrated; a constrained-frontier
+interpretation remains an inference, not proof of Pareto optimality. See the
+[dated deployment and constrained-frontier research appendix](docs/glm52-prefill-optimization-research-2026-08-09.md#2026-09-08-glm-53-deployment-and-constrained-frontier-review)
+for primary sources, quality caveats and proposed investigations. No new GPU
+experiments beyond the deployment receipts are implied by that review.
+
+### JarvisLabs spot-container proof (2026-09-08)
+
+Exercised image:
+[`ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9`](https://github.com/malaiwah/glm52-exl3-vast/pkgs/container/glm52-exl3-vast),
+source [`e96231359fc5dca2df9d4a397d7a814ba9deae30`](https://github.com/malaiwah/glm52-exl3-vast/commit/e96231359fc5dca2df9d4a397d7a814ba9deae30),
+[CI 34168581945](https://github.com/malaiwah/glm52-exl3-vast/actions/runs/34168581945),
+release work [PR #58](https://github.com/malaiwah/glm52-exl3-vast/pull/58).
+Newer checkout/helper changes are source changes, not exercised-image evidence.
+The runtime is Gilded Gnosis r34 plus necessary patches re-derived for that
+base; the removed 27 Verdict-layout overlays were **not all already present**
+in Gilded.
+
+This resumed **pre-existing container 483634 as machine 500157** with four spot RTX PRO
+6000 Blackwell GPUs, driver 595.58.03, 320 GiB shared memory and 1200 GB
+persistent `/home`; the GPU quote was approximately **$3.96/hour**.
+[Hardware receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/hardware.json).
+After evidence capture, **500157 was successfully paused**, and a fresh
+`jl list` confirmed Paused, four GPUs, spot and 1200 GB storage. The initial
+pause call using predecessor 483634 returned missing; the current machine was
+identified by the same name and IP (`151.185.34.24`). No storage was destroyed.
+Storage billing continues while paused; always resolve the current machine ID.
+
+**Subsequent lifecycle update, separate from the unchanged pause receipt:**
+the user explicitly requested destruction of paused 500157. The destroy API
+returned success; `jl list` then returned `[]`, and all six provider resource
+counts were zero. The remaining account balance was **$79.3082 USD**.
+See the [new destroy receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/destroy.json).
+The retained historical pause receipt describes the earlier billable-storage
+state, not the final inventory.
+
+`skopeo` copied 11.77 GiB compressed and `umoci` 0.6 unpacked the image
+(verified umoci SHA-256:
+`b51c267ec394499e42c6fde47f240b7b7dba57ea49df0b5acd304378b82a3b71`).
+Because the provider container blocks mounts/user namespaces, the image OS was
+grafted into that container instead of launched by an OCI runtime.
+Final [rootfs verification](maintenance/glm53-aibeast-500k/evidence-spot-20260908/rootfs-verify.json)
+matched **19 critical source hashes, seven module-initializer hashes and seven
+image-recorded native-library hashes**. Three additional provider NCCL names
+(`libnccl.so.2.23.4`, `libnccl.so.2`, `libnccl.so`) remained under
+`/usr/lib/x86_64-linux-gnu` and were disclosed, not removed. The
+[live process-map receipt](maintenance/glm53-aibeast-500k/evidence-spot-20260908/loaded-nccl.json)
+showed image `/opt/libnccl.so.2.30.4` loaded in the inspected processes.
+These scoped hashes and load observations do not establish comprehensive
+filesystem equivalence, exact OCI isolation, container security or supply-chain
+qualification. Provider mounts, namespace and driver remain in use. The newer
+verification helper passed against the running graft, not a fresh full GPU
+qualification of every subsequent source change.
+
+| observed gate | result | receipt |
+|---|---|---|
+| Unique-prefix long retrieval | **501,086 tokenizer-exact haystack tokens**, 3/3 facts at depths 10/50/90%, one seed, **361.42 s** | [needle-500k.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/needle-500k.json) |
+| Post-stress correctness | Arithmetic, factual and instruction checks passed | same needle receipt |
+| Post-stress stochastic sampling | Temperature 1, 960 exact prompt tokens, **512/512 output tokens in 7.76 s**; engine healthy afterward | same needle receipt |
+| OpenAI feature suite | All exercised checks passed: bad-key rejection, tokenize, chat/reasoning, streaming usage, preserved-thinking multi-turn, structured JSON, tools and tool-result round trip; **vision skipped** | [feature-suite.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/feature-suite.json) |
+| Repeated 131,409-token prefix | **62.4 s then 1.3 s**, native GPU cache only; not external-cache proof | [pass 1](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-pass1.json), [pass 2](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-pass2.json) |
+| Independent GPU-pressure retrieval | **501,098 tokenizer-exact haystack tokens**, 3/3 facts at depths 10/50/90%, second seed, **360.891 s**; post-stress correctness and 512-token sampling passed | [cache-eviction-500k.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-eviction-500k.json) |
+| Original prefix after GPU pressure | Same **131,409-token** prefix correct in **3.115 s**; **115,200 external-cache hit tokens** plus 15,872 native-hit tokens added | [cache-pass3-after-eviction.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-pass3-after-eviction.json), [cache-counter-deltas.json](maintenance/glm53-aibeast-500k/evidence-spot-20260908/cache-counter-deltas.json) |
+
+The 501,086 count covers the **haystack body**, excluding the chat template
+and retrieval question; the configured total request limit was 520,192 and
+the probe reserved 4096 tokens. The receipt does not report an exact total
+API prompt-token count. Its cache regime was not measured; it used a fresh
+trial identity. The feature runner passed its declared checks, not a claim
+that every response is perfectly clean (the recorded tool-result reply
+contains a literal `</think>`). Vision was disabled, not qualified.
+
+The post-pressure replay positively measures **LMCache DRAM retrieval**, rather
+than inferring offload from a warm latency alone. External-prefix hits rose
+from 0 to 115,200, external queries from 1,173,064 to 1,289,696, and native
+hits from 131,072 to 146,944. Some prefix remained GPU-resident, so this is
+not a pure DRAM-only request or proof of complete GPU eviction. The initial
+62.4 s / 1.3 s pair alone remains native-cache evidence. These later receipts
+do not establish disk L2, restart persistence, fault recovery or concurrency.
+
+**Open gates at the time of this spot run:** exact OCI/AIBeast-stage cold boot
+and first-use sampling; full boundary/repetition matrix beyond these two
+three-depth seeds; complete parser/continuation edge cases; C1/C4/C8 and
+long-prefill/decode overlap, cancellation and memory/error audit; disk L2
+transfers and eviction, restart and failure recovery; full maintenance matrix
+and any new KLD comparison. The later
+[AIBeast deployment](#aibeast-parity-cutover-and-accepted-soak-2026-09-08)
+adds its own scoped boot, near-boundary and soak evidence; it does not
+retroactively expand the spot receipt. No global image/`latest` promotion
+was performed.
 
 ### GLM-5.3 full-model 3.42bpw qualification (JarvisLabs, 2026-08-29)
 
@@ -204,6 +437,157 @@ During that workload all GPUs were at 100% utilization with at least 943 MiB
 free in the sampled snapshot. To avoid disrupting live use, the 389,959-token
 matrix was not rerun against the hardening-only image; the exact runtime/profile
 matrix above remains the long-context qualification evidence.
+
+#### Memory-accounting postmortem and GLM-5.2 control (2026-08-30)
+
+**Historical scope, preserved 2026-09-08:** this postmortem records the August 30
+Brandon-derived image and control, not the refreshed Gilded Gnosis deployment.
+Its 393,216-token envelope and recommendations apply only to that experiment;
+they do not supersede the [September 8 AIBeast qualification](#aibeast-parity-cutover-and-accepted-soak-2026-09-08).
+Preservation adds no new runtime qualification, raw rental evidence, or completed
+GPQA result. The source-trace findings and original evidence limitations below
+remain part of the historical record.
+
+Three superficially similar events had different failure semantics and must not
+be aggregated as one OOM count:
+
+| event | memory policy | observed failure |
+|---|---|---|
+| GLM-5.2 3.42bpw natural 524,800-token arm | vLLM profiling at GMU 0.95 | startup completed with about 2.3 GiB/GPU free, but the first 131,070-token prefill died when Trellis requested 48 MiB with 32.81 MiB physically free; pinning 2,032 blocks / 520,192 tokens returned 18 blocks and the same workload passed |
+| GLM-5.3 inherited 520,192-token arm | fixed 4,518,907,904 B/GPU | deterministic startup and 32K retrieval passed, but the first seeded temperature-1 request OOMed in top-p sampling and hung the workers with 3–169 MiB free/rank |
+| GLM-5.2 control at the GLM-5.3 envelope | fixed 3,415,867,392 B/GPU | 4,275 recoverable allocator-attempt warnings occurred during cold model loading; startup, stochastic verification, and 3/3 long probes still passed with zero restarts |
+
+The first event remains detailed in
+[the GLM-5.2 3.42bpw qualification plan](docs/AIBEAST_GLM52_342_QUALIFICATION_PLAN.md#first-342-capacity-result).
+The rejected GLM-5.3 arm's free-memory minima were transcribed during live
+diagnosis, but its raw server and `nvidia-smi` traces were not retained.
+Consequently, the exact allocation that finally failed cannot be reconstructed;
+the top-p location, request shape, worker hang, and insufficient physical
+headroom are established, but a more specific allocation-size claim is not.
+
+The controlled GLM-5.2 boot used the same hardening image and the immutable
+`willfalco/GLM-5.2-EXL3-TR3-3.42bpw@a350292cb2038f2c31732569a711a89e5d72fd46`
+checkpoint. Its allocator warnings ran from 11:38:27 through 11:39:51 UTC while
+online EXL3 mixed-Trellis loading advanced through layers 45–77. Counts by rank
+were 1,512 / 920 / 919 / 924. The attempted segment sizes were:
+
+- 20 MiB: 3,876;
+- 162 / 168 / 324 / 334 MiB: 89 / 90 / 92 / 92;
+- 2 / 16 / 24 / 48 / 144 / 454 MiB: 3 / 29 / 1 / 1 / 1 / 1.
+
+The minimum CUDA-reported free values in those warning records were 2,228,224 B
+on rank 0 and 2,555,904 B on ranks 1–3. The final rank-0 attempts overlapped
+direct symmetric-memory DCP, LMCache initialization, and B12X MLA construction.
+Model loading nevertheless finished at 81.69 GiB/rank, the API became ready,
+the authoritative verifier passed, and the container remained running with
+`RestartCount=0` and `OOMKilled=false`.
+
+These warnings are failed `cudaMalloc` *attempts*, not one thrown
+`torch.OutOfMemoryError` each. The pinned allocator source logs at every failed
+attempt, clears CUDA's error state, then tries an overflow pool, releases
+suitable cached blocks, and finally releases all non-split cached blocks before
+throwing. It also obtains a 20 MiB segment for an original request between 1
+and 10 MiB when no suitable block exists. Therefore, the 3,876 20 MiB records
+do not establish that callers each requested a 20 MiB tensor. This behavior
+matches PyTorch's documented
+[segment and fragmentation model](https://docs.pytorch.org/devlogs/eager/2026-06-01-cuda-caching-allocator/).
+
+The GLM-5.2 control generated all 1,644 online-K6 entries from scratch under
+its model-identity-isolated namespace: zero hits and 11,897,961,792 bytes of
+fresh cache data. The GLM-5.3 baseline reused its warm cache. That cold/warm
+difference is strongly associated with 4,275 versus 123 load-phase warnings
+and makes the raw warning counts unsuitable as a model-to-model runtime-memory
+comparison. It does not affect the frozen inference settings.
+
+Source inspection identified why the inherited KV envelope was admitted before
+the later allocation appeared:
+
+1. `GPUWorker` takes `init_snapshot` after NCCL initialization but **before**
+   model-runner construction and weight loading. The fixed-mode log's
+   92.28–93.56 GiB “Initial free memory” values are that pre-model snapshot.
+   They are not post-load or pre-KV headroom; prior notes interpreting them as
+   free memory after the allocator warnings were incorrect.
+2. When `kv_cache_memory_bytes` is set, `determine_available_memory()` runs a
+   compile/profile-shaped forward and partial kernel warmup, but explicitly
+   skips the accounting profile and returns the manual KV byte count unchanged.
+   It does not deduct measured non-KV consumption or a CUDA-graph estimate.
+   This is consistent with vLLM's
+   [`kv_cache_memory_bytes` API](https://docs.vllm.ai/en/stable/api/vllm/config/cache/)
+   and
+   [startup-optimization warning](https://docs.vllm.ai/en/latest/configuration/optimization/):
+   fixed KV ignores `gpu_memory_utilization`, skips memory profiling and graph
+   estimation, and is valid only for the same GPU and initial occupancy.
+3. The engine initializes the fixed KV pool first, then performs
+   runtime-dependent kernel warmup and CUDA-graph capture. The control's graph
+   capture added 0.61 GiB/rank after the 3.18 GiB/rank KV decision. Sampler
+   warmup follows graph capture. These operations can prove that the selected
+   pool happens to fit, but they were not inputs to fixed-pool admissibility.
+4. V2 sampler warmup uses `SamplingParams.for_sampler_warmup()`, which exercises
+   temperature, top-p, and top-k but supplies no explicit seed. The active
+   sampler uses FlashInfer in that case. Any explicit per-request seed disables
+   FlashInfer and selects native top-k/top-p plus Gumbel; native batches below
+   eight logits rows use a full PyTorch vocabulary sort. The rejected arm's
+   first failing request was seeded. On the control, `_gumbel_sample_kernel`
+   first JIT-compiled at 11:42:33, after API application startup, proving that
+   engine warmup had not exercised that exact path.
+5. Later C8 activity first compiled sparse-DCP empty-row sanitation and
+   correction at 11:58:17 and `_topk_topp_kernel` at 11:58:19. Startup warmup
+   cannot enumerate every prompt length, DCP occupancy, sampler backend, and
+   batch shape. Physical residual headroom remains necessary even after all
+   declared startup phases pass.
+
+The appliance now closes the most dangerous operational gap: its authoritative
+gate sends a seeded temperature-1 request with an exact 512-token output, then
+checks engine health before `mark-good` and `phase=serving`. That gate caught
+the class of failure, but it is intentionally after API-process readiness and
+does not make vLLM's earlier fixed-KV calculation predictive.
+
+The upstream findings corroborate the source trace:
+
+- [vLLM issue 26300](https://github.com/vllm-project/vllm/issues/26300)
+  calls CUDA-graph/compile allocation versus KV sizing a general problem and
+  proposes profiling before final physical KV mapping; it was closed as not
+  scheduled.
+- [vLLM issue 30637](https://github.com/vllm-project/vllm/issues/30637)
+  records a sampler-warmup full-vocabulary-sort OOM near physical capacity and
+  a later serving-shape 100 MiB OOM with only 43.75 MiB free.
+- [vLLM issue 33920](https://github.com/vllm-project/vllm/issues/33920)
+  records the analogous GLM sampler-warmup sort requesting 304 MiB with only
+  about 200 MiB free; it closed stale without a fix.
+- PyTorch's
+  [CUDA-memory tooling](https://docs.pytorch.org/docs/2.13/torch_cuda_memory.html)
+  sees only allocator-managed memory. Direct CUDA allocations require
+  device-level/NVML comparison, so an allocator snapshot alone is insufficient.
+
+The operational conclusions are:
+
+- Keep the controlled 393,216-token / 3,415,867,392-byte envelope unchanged.
+  It is empirically qualified for this image, hardware, and first-use workload;
+  it is not a general admission proof.
+- Scope every fixed KV value to the exact checkpoint, image, GPU, initial
+  occupancy, online/JIT cache state, graph mode, speculation settings, and
+  declared workload. Lowering `gpu_memory_utilization` does nothing while fixed
+  KV is active.
+- Preserve both the seeded stochastic gate and per-rank physical free-memory
+  sampling after first use and at maximum declared concurrency.
+- Extend engine warmup to cover unseeded FlashInfer and explicitly seeded native
+  small-batch sampling, plus sparse-DCP long-prefill shapes, before readiness
+  where practical.
+- A durable allocator design must profile/capture persistent graph and kernel
+  resources before committing the final physical KV pool, or shrink/remap KV
+  from measured residual memory. Expandable segments may reduce fragmentation;
+  they do not create missing headroom or repair fixed-KV accounting.
+- Future negative arms must retain raw per-rank server logs, `nvidia-smi`
+  traces, and bounded allocator snapshots. Report allocator-attempt warnings,
+  thrown OOMs, EngineCore deaths, and recoverable KV preemption separately.
+- Report cold and warm online-quant starts separately. Their allocator-warning
+  counts are not directly comparable.
+
+The rental retains the machine-readable analysis, parsed distributions, exact
+runtime source excerpts, redacted boot log, and control manifest under
+`qualification/gpqa-glm52-control-20260830/`. At the analysis boundary the
+single owner-controlled GPQA run was still active; no second run or completion
+probe was sent.
 
 ## Provider integration
 
@@ -1874,3 +2258,124 @@ GPU and yields about 14.4 GiB less KV/GPU. K6 is 5.3–7.3× faster at short
 context and 8.3–24.4× faster when the measured 32K/128K prefill cost is
 included. K8 is qualified as a fidelity-first alternative. K6 remains the
 production default.
+
+## Workspace preservation and runtime-capacity audit (2026-09-08)
+
+The [archive manifest](docs/field-review-results/workspace-preservation-20260908/manifest.json)
+records four historical workspace notes and eleven GLM-5.3 Flash K8 JSON receipts
+that previously lived outside Git. Each entry includes the original and archived
+SHA-256 and whether redaction changed the copy. The original files remain in
+place; a verified private archive outside this repository also preserves their
+exact bytes. The Git copy of `SESSION-NOTES.md` redacts its historical HF token.
+Archived commands, relative paths, plans, and profile recommendations are
+historical context, not current operating instructions or new qualification.
+
+The [read-only runtime audit](docs/field-review-results/workspace-preservation-20260908/runtime-capacity-audit.json)
+inspected installed B12X source in the active AIBeast container `8273cb4d…`,
+image `8006d209…`. Its route-count, post-prefix, and sort kernels still use plain
+`triton.jit`, and the post-prefix workspace bounds remain `tl.constexpr`.
+The runtime-capacity candidate `64db087c` is therefore **not present in this
+deployment**. It is preserved on the contributor branch and submitted as
+[B12X PR #256](https://github.com/local-inference-lab/b12x/pull/256), open and
+mergeable with a successful CodeRabbit status at inspection time. This inspection
+did not import GPU kernels, issue model requests, alter production, or benchmark
+whether the current deployment needs the patch.
+
+Local profile smoke passed with `CONFIG_SMOKE=1 SCRIPTS_DIR=scripts
+MODEL_PROFILE=glm53-3.42bpw-500k bash entrypoint.sh`: it resolved the 520,192-token
+public profile and exited without downloading weights or touching a GPU.
+This is configuration-resolution evidence, not a new live qualification.
+
+## Controlled AIBeast optimization (2026-09-08)
+
+The [source and evidence manifest](maintenance/glm53-optimization-20260908/manifest.json)
+records the exact parent image, selected overlays, benchmark identity,
+corrections, and validation boundaries. Experiments retained the checkpoint,
+520,192-token limit, TP4/DCP4, native probabilistic MTP3, fixed KV bytes,
+3072-token scheduler, sequence limit 12, capture maximum 48, and 375 W/GPU.
+The selected image contains B12X #226/#256/#257 and a narrow measured-service
+fairness port. It does **not** adopt the experimental MTP sampling-constraint
+prototype.
+
+### Measurement and interpretation
+
+- The pinned `llm-inference-bench` v0.6.2 workload used three repetitions of
+  eight requests each at synthetic C1 and C4, fixed seeds, temperature 1,
+  top-p 0.95, and a 2048-token output budget. Hotel Lights frequently exhausted
+  that budget; retained scores are not a model-quality verdict.
+- Its `aggregate_gen_tok_s` divides tokens by summed request generation time;
+  it is a request-time-weighted rate, not total concurrent server throughput.
+  Client contention was measured, not assumed absent. The fresh original-code
+  control's median C1 rate was 66.15 tok/s versus 68.30 for B12X and 76.97 for
+  the initial long-running baseline; no causal B12X speedup or slowdown is claimed.
+- Engine V1 does not mean model runner V1. The actual DCP indexer needs V2.
+  A forced-V1 fairness arm failed before serving and triggered rollback.
+  The first V1 proposer edit was inactive under V2 and is retained only as a
+  control. The subsequent native V2 prototype passed 25 real CUDA cases,
+  including rotating-UVA graph replay and native rejection-q checks, but did
+  not establish a reliable serving-rate benefit under mixed traffic.
+- Synthetic text was removed from exported benchmark rows. Aggregate client
+  counters contain no request bodies; private inspect/env and container logs
+  are not published.
+
+### Fairness tradeoff
+
+The same corrected V2 image was exercised with fairness off, 40%, and 60%
+prefill-service share. These are **model-service wallclock** measurements,
+including executor/host effects, not GPU-only timing. Each mode passed the
+8/12-concurrent-request completion gate.
+
+| share | fresh 64K request-to-first-text range | decode text chunks during prefill |
+|---|---:|---:|
+| off | 23.84–26.85 s | 24–25 |
+| 0.4 | 46.24–56.20 s | 675–747 |
+| **0.6** | **36.55–38.15 s** | **347–469** |
+
+The 40% setting exceeded the chosen two-times prefill-delay bound at the median.
+The 60% setting retained substantial decode progress with a smaller prefill
+delay. Chunks are SSE text chunks, not individual tokens. These shared-traffic
+observations are not an isolated throughput or universal latency guarantee.
+
+### Memory-margin tradeoff
+
+All rows below use the same selected B12X + fairness image, baseline native MTP
+behavior, and 60% share. Each arm passed a fresh 500K retrieval gate followed by
+three fresh 64K prefill/decode overlap trials. KV bytes and context limit stayed
+fixed; a fresh-process memory snapshot was not substituted for this warm state.
+
+| EXL3 arena | free VRAM after standardized workload | median 64K prefill wait | versus 3072 |
+|---|---:|---:|---:|
+| 3072 | 101 MiB/GPU | 39.58 s | reference |
+| **2048** | **613–669 MiB/GPU** | **42.25 s** | **+6.7%** |
+| 1024 | 1275–1301 MiB/GPU | 43.92 s | +11.0% |
+
+**2048 was selected:** 512–568 MiB/rank additional observed headroom while
+remaining within the declared 10% prefill-cost target. This is headroom under
+the exercised workload, not an allocation-admission proof for every request.
+The selected container's separate final 500K, C8/C12, model-alias and real-client
+soak receipts are included under the manifest's evidence directory.
+
+### Final selected-stack acceptance
+
+After restarting the selected 2048-row arm, a separate
+[500K verification](maintenance/glm53-optimization-20260908/evidence/memory-2048/final-verify-500k.json)
+and [C8/C12 completion gate](maintenance/glm53-optimization-20260908/evidence/memory-2048/final-concurrency-gate.json)
+passed. The [model list](maintenance/glm53-optimization-20260908/evidence/memory-2048/final-models.json)
+contains exactly `GLM-5.3` and `local-primary`.
+
+The [30-minute soak](maintenance/glm53-optimization-20260908/evidence/memory-2048/soak.json)
+recorded **60/60 healthy samples**, no restart-count increase, no OOM-killed
+state, and **727 MiB minimum free VRAM on every GPU**. Global counters recorded
+65 engine completions, 66 successful Chat Completions POSTs and 3 successful
+Responses POSTs; these are interval counters, not isolated benchmark throughput.
+Invalid-route/client 4xx responses are retained in the receipt rather than
+silently counted as engine failures or omitted.
+
+The [live source check](maintenance/glm53-optimization-20260908/evidence/final-source-check.json)
+matched all 19 checked paths, including selected overlays, preserved parser
+backports and the baseline native MTP implementation. The
+[runtime settings](maintenance/glm53-optimization-20260908/evidence/selected-runtime-settings.json)
+verify the live 0.6 fairness gauge, selected capacity, unchanged context/KV
+settings, read-only checkpoint mount and unchanged restart policy. The
+[active deployment identity](maintenance/glm53-optimization-20260908/evidence/active-deployment.json)
+and original stopped rollback container are preserved.

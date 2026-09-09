@@ -1,0 +1,796 @@
+{
+  "b12x": {
+    "synthetic": [
+      {
+        "file": "hotel-c1-r0.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 5,
+        "gen_tps": 58.03523877355622,
+        "e2e_tps": 57.500028698495804,
+        "ttft_p50_s": 0.2544367539230734,
+        "ttft_p90_s": 0.2594131694640964,
+        "request_gen_tps_p50": 77.53924489519565
+      },
+      {
+        "file": "hotel-c1-r1.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 5,
+        "gen_tps": 68.3023549221611,
+        "e2e_tps": 67.66170942109109,
+        "ttft_p50_s": 0.22503614705055952,
+        "ttft_p90_s": 0.2562022187747061,
+        "request_gen_tps_p50": 72.5974552613273
+      },
+      {
+        "file": "hotel-c1-r2.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 6,
+        "gen_tps": 69.52892379929754,
+        "e2e_tps": 68.88208798386259,
+        "ttft_p50_s": 0.23400096432305872,
+        "ttft_p90_s": 0.25340618868358433,
+        "request_gen_tps_p50": 69.85054128500599
+      },
+      {
+        "file": "hotel-c4-r0.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 8,
+        "gen_tps": 46.56557264015905,
+        "e2e_tps": 46.15785288646444,
+        "ttft_p50_s": 0.32258088095113635,
+        "ttft_p90_s": 0.6236728024203331,
+        "request_gen_tps_p50": 46.71256053592465
+      },
+      {
+        "file": "hotel-c4-r1.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 6,
+        "gen_tps": 47.94524219679647,
+        "e2e_tps": 47.56134150558606,
+        "ttft_p50_s": 0.32505897688679397,
+        "ttft_p90_s": 0.36662315130233764,
+        "request_gen_tps_p50": 47.38160404221691
+      },
+      {
+        "file": "hotel-c4-r2.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 6,
+        "gen_tps": 47.5036302314386,
+        "e2e_tps": 47.05729632268089,
+        "ttft_p50_s": 0.3680699993856251,
+        "ttft_p90_s": 0.4587251368444413,
+        "request_gen_tps_p50": 46.61848928993484
+      }
+    ],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 24.449394,
+        "decode_tpot_ms": 41.66,
+        "max_chunk_gap_s": 1.1472162529826164,
+        "decode_chunks_during_prefill": 26
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 28.773752,
+        "decode_tpot_ms": 47.623,
+        "max_chunk_gap_s": 1.4093497511930764,
+        "decode_chunks_during_prefill": 24
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 30.347941,
+        "decode_tpot_ms": 28.015,
+        "max_chunk_gap_s": 1.4281139690428972,
+        "decode_chunks_during_prefill": 24
+      }
+    ],
+    "steady_free_mib_min": [
+      257.0,
+      257.0,
+      257.0,
+      257.0
+    ],
+    "monitor_samples": 141,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "b12x-mtp": {
+    "synthetic": [
+      {
+        "file": "hotel-c1-r0.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 4,
+        "gen_tps": 59.489863913647994,
+        "e2e_tps": 58.98642365932745,
+        "ttft_p50_s": 0.2506459567230195,
+        "ttft_p90_s": 0.2540819721762091,
+        "request_gen_tps_p50": 67.86703386147207
+      },
+      {
+        "file": "hotel-c1-r1.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 6,
+        "gen_tps": 69.42140492385201,
+        "e2e_tps": 68.79313761345247,
+        "ttft_p50_s": 0.2524152621626854,
+        "ttft_p90_s": 0.257159670535475,
+        "request_gen_tps_p50": 67.2886957805953
+      },
+      {
+        "file": "hotel-c1-r2.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 7,
+        "gen_tps": 43.23275488238825,
+        "e2e_tps": 42.99852250492583,
+        "ttft_p50_s": 0.25439439178444445,
+        "ttft_p90_s": 0.26264664535410703,
+        "request_gen_tps_p50": 65.47470002751581
+      },
+      {
+        "file": "hotel-c4-r0.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 7,
+        "gen_tps": 47.437614369788136,
+        "e2e_tps": 47.031522273427925,
+        "ttft_p50_s": 0.3268453327473253,
+        "ttft_p90_s": 0.3763727393466979,
+        "request_gen_tps_p50": 46.70417194539209
+      },
+      {
+        "file": "hotel-c4-r1.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 3,
+        "gen_tps": 45.26666900183056,
+        "e2e_tps": 44.82622496347469,
+        "ttft_p50_s": 0.3226400308776647,
+        "ttft_p90_s": 0.3755717406515032,
+        "request_gen_tps_p50": 45.35890374246706
+      },
+      {
+        "file": "hotel-c4-r2.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 6,
+        "gen_tps": 43.539313243402525,
+        "e2e_tps": 43.17171644908136,
+        "ttft_p50_s": 0.3523913845419884,
+        "ttft_p90_s": 0.45687455330044024,
+        "request_gen_tps_p50": 43.84673311845721
+      }
+    ],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 28.003807000000002,
+        "decode_tpot_ms": 24.916,
+        "max_chunk_gap_s": 1.4319301210343838,
+        "decode_chunks_during_prefill": 24
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 27.798996,
+        "decode_tpot_ms": 26.959,
+        "max_chunk_gap_s": 1.4046121560968459,
+        "decode_chunks_during_prefill": 25
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 24.352520000000002,
+        "decode_tpot_ms": 31.052,
+        "max_chunk_gap_s": 1.1633712160401046,
+        "decode_chunks_during_prefill": 25
+      }
+    ],
+    "steady_free_mib_min": [
+      329.0,
+      329.0,
+      329.0,
+      329.0
+    ],
+    "monitor_samples": 166,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "baseline": {
+    "synthetic": [
+      {
+        "file": "hotel-c1-r0.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 5,
+        "gen_tps": 76.9706197292876,
+        "e2e_tps": 76.19631197242104,
+        "ttft_p50_s": 0.23634937102906406,
+        "ttft_p90_s": 0.2668077203910798,
+        "request_gen_tps_p50": 80.82886055819087
+      },
+      {
+        "file": "hotel-c1-r1.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 5,
+        "gen_tps": 84.37533973584586,
+        "e2e_tps": 83.35899675574146,
+        "ttft_p50_s": 0.21843726630322635,
+        "ttft_p90_s": 0.2571594807785004,
+        "request_gen_tps_p50": 84.78430339916298
+      },
+      {
+        "file": "hotel-c1-r2.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 8,
+        "gen_tps": 72.48567634905571,
+        "e2e_tps": 71.8761656006308,
+        "ttft_p50_s": 0.2409436642192304,
+        "ttft_p90_s": 0.26316258325241504,
+        "request_gen_tps_p50": 79.40339909798894
+      },
+      {
+        "file": "hotel-c4-r0.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 8,
+        "gen_tps": 46.60007449316839,
+        "e2e_tps": 46.25598735626445,
+        "ttft_p50_s": 0.3276788501534611,
+        "ttft_p90_s": 0.37763297455385325,
+        "request_gen_tps_p50": 46.523454779747695
+      },
+      {
+        "file": "hotel-c4-r1.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 5,
+        "gen_tps": 61.01365938338364,
+        "e2e_tps": 60.224038669856235,
+        "ttft_p50_s": 0.2688100391533226,
+        "ttft_p90_s": 0.553985436540097,
+        "request_gen_tps_p50": 61.06101240082049
+      },
+      {
+        "file": "hotel-c4-r2.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 8,
+        "gen_tps": 36.79269106895421,
+        "e2e_tps": 36.57949090698091,
+        "ttft_p50_s": 0.3258492494933307,
+        "ttft_p90_s": 0.37093784674070773,
+        "request_gen_tps_p50": 37.16644665877121
+      }
+    ],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 30.26635,
+        "decode_tpot_ms": 29.613,
+        "max_chunk_gap_s": 1.4220491950400174,
+        "decode_chunks_during_prefill": 24
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 27.690922999999998,
+        "decode_tpot_ms": 28.613,
+        "max_chunk_gap_s": 1.4372702459804714,
+        "decode_chunks_during_prefill": 24
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 27.909712,
+        "decode_tpot_ms": 25.715,
+        "max_chunk_gap_s": 1.4372919900342822,
+        "decode_chunks_during_prefill": 24
+      }
+    ],
+    "steady_free_mib_min": [
+      117.0,
+      147.0,
+      117.0,
+      117.0
+    ],
+    "monitor_samples": 147,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "baseline-return": {
+    "synthetic": [
+      {
+        "file": "hotel-c1-r0.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 4,
+        "gen_tps": 69.71188853661921,
+        "e2e_tps": 68.98053966712236,
+        "ttft_p50_s": 0.25068437145091593,
+        "ttft_p90_s": 0.2556845976039767,
+        "request_gen_tps_p50": 69.5207149441361
+      },
+      {
+        "file": "hotel-c1-r1.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 7,
+        "gen_tps": 65.4192238880102,
+        "e2e_tps": 64.87277423589902,
+        "ttft_p50_s": 0.25268324837088585,
+        "ttft_p90_s": 0.25931285568512974,
+        "request_gen_tps_p50": 66.55570366523062
+      },
+      {
+        "file": "hotel-c1-r2.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 8,
+        "gen_tps": 66.1527806591922,
+        "e2e_tps": 65.61749836532688,
+        "ttft_p50_s": 0.2527415188960731,
+        "ttft_p90_s": 0.25655583548359573,
+        "request_gen_tps_p50": 64.08598700357166
+      },
+      {
+        "file": "hotel-c4-r0.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 3,
+        "gen_tps": 49.39781183881076,
+        "e2e_tps": 48.881951571489374,
+        "ttft_p50_s": 0.3533280133269727,
+        "ttft_p90_s": 0.35727745541371403,
+        "request_gen_tps_p50": 48.73985777635974
+      },
+      {
+        "file": "hotel-c4-r1.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 6,
+        "gen_tps": 46.36273632027395,
+        "e2e_tps": 45.992945082789,
+        "ttft_p50_s": 0.3245852938853204,
+        "ttft_p90_s": 0.37135598845779894,
+        "request_gen_tps_p50": 45.55739380436202
+      },
+      {
+        "file": "hotel-c4-r2.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 5,
+        "gen_tps": 45.700666713334165,
+        "e2e_tps": 45.275007325041386,
+        "ttft_p50_s": 0.3132180676329881,
+        "ttft_p90_s": 0.3509920514654368,
+        "request_gen_tps_p50": 45.47946965996686
+      }
+    ],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 30.121753000000002,
+        "decode_tpot_ms": 25.997,
+        "max_chunk_gap_s": 1.4188724160194397,
+        "decode_chunks_during_prefill": 24
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 30.160225999999998,
+        "decode_tpot_ms": 27.817,
+        "max_chunk_gap_s": 1.4245302556082606,
+        "decode_chunks_during_prefill": 24
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 25.54622,
+        "decode_tpot_ms": 26.872,
+        "max_chunk_gap_s": 1.3806477398611605,
+        "decode_chunks_during_prefill": 24
+      }
+    ],
+    "steady_free_mib_min": [
+      103.0,
+      103.0,
+      103.0,
+      103.0
+    ],
+    "monitor_samples": 345,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "fairness-v2-40": {
+    "synthetic": [],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 46.243447,
+        "decode_tpot_ms": 18.759,
+        "max_chunk_gap_s": 1.1017715949565172,
+        "decode_chunks_during_prefill": 725
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 55.59795,
+        "decode_tpot_ms": 24.961,
+        "max_chunk_gap_s": 1.139698355924338,
+        "decode_chunks_during_prefill": 747
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 56.199252,
+        "decode_tpot_ms": 22.79,
+        "max_chunk_gap_s": 1.143294868990779,
+        "decode_chunks_during_prefill": 675
+      }
+    ],
+    "steady_free_mib_min": [
+      303.0,
+      351.0,
+      303.0,
+      351.0
+    ],
+    "monitor_samples": 106,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "fairness-v2-60": {
+    "synthetic": [],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 36.552047,
+        "decode_tpot_ms": 24.01,
+        "max_chunk_gap_s": 1.122622299939394,
+        "decode_chunks_during_prefill": 347
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 37.309726000000005,
+        "decode_tpot_ms": 23.722,
+        "max_chunk_gap_s": 1.1265548132359982,
+        "decode_chunks_during_prefill": 450
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 38.147394,
+        "decode_tpot_ms": 28.312,
+        "max_chunk_gap_s": 1.1547504239715636,
+        "decode_chunks_during_prefill": 469
+      }
+    ],
+    "steady_free_mib_min": [
+      195.0,
+      193.0,
+      195.0,
+      193.0
+    ],
+    "monitor_samples": 133,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "fairness-v2-off": {
+    "synthetic": [],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 26.845841,
+        "decode_tpot_ms": 26.957,
+        "max_chunk_gap_s": 1.3985666097141802,
+        "decode_chunks_during_prefill": 24
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 26.840128,
+        "decode_tpot_ms": 24.425,
+        "max_chunk_gap_s": 1.402588474098593,
+        "decode_chunks_during_prefill": 24
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 23.842396,
+        "decode_tpot_ms": 19.423,
+        "max_chunk_gap_s": 1.14122116798535,
+        "decode_chunks_during_prefill": 25
+      }
+    ],
+    "steady_free_mib_min": [
+      143.0,
+      143.0,
+      255.0,
+      255.0
+    ],
+    "monitor_samples": 87,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "memory-1024": {
+    "synthetic": [],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 43.639837,
+        "decode_tpot_ms": 23.539,
+        "max_chunk_gap_s": 1.3203375758603215,
+        "decode_chunks_during_prefill": 431
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 44.26574,
+        "decode_tpot_ms": 26.823,
+        "max_chunk_gap_s": 1.305343785788864,
+        "decode_chunks_during_prefill": 473
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 43.918833,
+        "decode_tpot_ms": 26.346,
+        "max_chunk_gap_s": 1.3087268648669124,
+        "decode_chunks_during_prefill": 516
+      }
+    ],
+    "steady_free_mib_min": [
+      1273.0,
+      1299.0,
+      1299.0,
+      1273.0
+    ],
+    "monitor_samples": 55,
+    "http_unhealthy_samples": 1,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "memory-2048": {
+    "synthetic": [],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 44.829985,
+        "decode_tpot_ms": 24.734,
+        "max_chunk_gap_s": 1.33453573519364,
+        "decode_chunks_during_prefill": 435
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 42.246031,
+        "decode_tpot_ms": 29.008,
+        "max_chunk_gap_s": 1.263606479857117,
+        "decode_chunks_during_prefill": 408
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 42.149957,
+        "decode_tpot_ms": 24.427,
+        "max_chunk_gap_s": 1.2621012218296528,
+        "decode_chunks_during_prefill": 358
+      }
+    ],
+    "steady_free_mib_min": [
+      669.0,
+      669.0,
+      613.0,
+      669.0
+    ],
+    "monitor_samples": 46,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "memory-3072": {
+    "synthetic": [],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 39.579695,
+        "decode_tpot_ms": 25.432,
+        "max_chunk_gap_s": 1.1866245162673295,
+        "decode_chunks_during_prefill": 356
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 40.172138,
+        "decode_tpot_ms": 23.462,
+        "max_chunk_gap_s": 1.477902112994343,
+        "decode_chunks_during_prefill": 473
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 39.537466,
+        "decode_tpot_ms": 29.107,
+        "max_chunk_gap_s": 1.1874822089448571,
+        "decode_chunks_during_prefill": 373
+      }
+    ],
+    "steady_free_mib_min": [
+      101.0,
+      101.0,
+      101.0,
+      101.0
+    ],
+    "monitor_samples": 48,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  },
+  "mtp-v2-active": {
+    "synthetic": [
+      {
+        "file": "hotel-c1-r0.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 7,
+        "gen_tps": 36.08624639618967,
+        "e2e_tps": 35.9079886886029,
+        "ttft_p50_s": 0.2588756172917783,
+        "ttft_p90_s": 0.3193931930232793,
+        "request_gen_tps_p50": 56.63153271679384
+      },
+      {
+        "file": "hotel-c1-r1.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 6,
+        "gen_tps": 45.90500920203373,
+        "e2e_tps": 44.71488816686364,
+        "ttft_p50_s": 0.25817656982690096,
+        "ttft_p90_s": 2.3228559346869577,
+        "request_gen_tps_p50": 63.04174906075647
+      },
+      {
+        "file": "hotel-c1-r2.json",
+        "concurrency": 1,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 7,
+        "gen_tps": 66.41381321023468,
+        "e2e_tps": 65.87215513507721,
+        "ttft_p50_s": 0.2541897085029632,
+        "ttft_p90_s": 0.25861026155762373,
+        "request_gen_tps_p50": 66.20603691694012
+      },
+      {
+        "file": "hotel-c4-r0.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 7,
+        "gen_tps": 47.669082550000695,
+        "e2e_tps": 47.29360510468599,
+        "ttft_p50_s": 0.3174839694984257,
+        "ttft_p90_s": 0.3577252957969904,
+        "request_gen_tps_p50": 46.772365908650855
+      },
+      {
+        "file": "hotel-c4-r1.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 6,
+        "gen_tps": 48.81477704631598,
+        "e2e_tps": 48.28624721376376,
+        "ttft_p50_s": 0.30219034012407064,
+        "ttft_p90_s": 0.5357978850603103,
+        "request_gen_tps_p50": 46.672503438280316
+      },
+      {
+        "file": "hotel-c4-r2.json",
+        "concurrency": 4,
+        "completed": 8,
+        "errors": 0,
+        "truncated": 8,
+        "gen_tps": 48.175282791401614,
+        "e2e_tps": 47.78214083869261,
+        "ttft_p50_s": 0.35205617384053767,
+        "ttft_p90_s": 0.42411143439821897,
+        "request_gen_tps_p50": 48.613650154482045
+      }
+    ],
+    "overlap": [
+      {
+        "file": "overlap-0.json",
+        "ok": true,
+        "prefill_ttft_s": 29.909589,
+        "decode_tpot_ms": 26.965,
+        "max_chunk_gap_s": 1.4019758836366236,
+        "decode_chunks_during_prefill": 25
+      },
+      {
+        "file": "overlap-1.json",
+        "ok": true,
+        "prefill_ttft_s": 25.077785,
+        "decode_tpot_ms": 23.626,
+        "max_chunk_gap_s": 1.3772979001514614,
+        "decode_chunks_during_prefill": 25
+      },
+      {
+        "file": "overlap-2.json",
+        "ok": true,
+        "prefill_ttft_s": 24.286707999999997,
+        "decode_tpot_ms": 54.475,
+        "max_chunk_gap_s": 1.1623040772974491,
+        "decode_chunks_during_prefill": 24
+      }
+    ],
+    "steady_free_mib_min": [
+      217.0,
+      217.0,
+      157.0,
+      157.0
+    ],
+    "monitor_samples": 310,
+    "http_unhealthy_samples": 0,
+    "log_counts": null,
+    "scope": "Global passive samples include real clients; request-local results are synthetic, all capped/truncated results retained. Missing private logs are not evidence of zero failures."
+  }
+}

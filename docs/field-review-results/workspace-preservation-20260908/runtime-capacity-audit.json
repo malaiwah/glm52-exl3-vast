@@ -1,0 +1,161 @@
+{
+  "observed_at": "2026-09-08T11:24:47.877865+00:00",
+  "method": "Read-only SSH, rootless Podman container listing, and AST inspection of installed package source; no GPU package import, model request, runtime patch, or restart.",
+  "host": "aibeast",
+  "container_name": "glm53-turnkey-r34-parity-20260908t015846z",
+  "container_id": "8273cb4d544408140b87f815c5a5058bc0fc00c503c1971430feb35fa3d854b1",
+  "image": "ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a",
+  "package_source": {
+    "source_path": "/opt/venv/lib/python3.12/site-packages/b12x/moe/_shared/kernels/w4a16/route_pack.py",
+    "sha256": "ad7ee1b0a86e5af43587051fb82aa182fcb4f3b50a51575476f6eefe271caafe",
+    "mtime": 1786386946.0,
+    "functions": [
+      {
+        "name": "_w4a16_route_count_kernel",
+        "line": 24,
+        "decorators": [
+          "triton.jit"
+        ],
+        "arguments": [
+          {
+            "name": "topk_ids",
+            "annotation": null
+          },
+          {
+            "name": "expert_map",
+            "annotation": null
+          },
+          {
+            "name": "counts",
+            "annotation": null
+          },
+          {
+            "name": "live_numel",
+            "annotation": null
+          },
+          {
+            "name": "NUM_EXPERTS",
+            "annotation": "tl.constexpr"
+          },
+          {
+            "name": "HAS_EXPERT_MAP",
+            "annotation": "tl.constexpr"
+          },
+          {
+            "name": "BLOCK_T",
+            "annotation": "tl.constexpr"
+          }
+        ]
+      },
+      {
+        "name": "_pack_topk_routes_post_prefix_kernel",
+        "line": 113,
+        "decorators": [
+          "triton.jit"
+        ],
+        "arguments": [
+          {
+            "name": "packed_route_indices",
+            "annotation": null
+          },
+          {
+            "name": "block_expert_ids",
+            "annotation": null
+          },
+          {
+            "name": "expert_offsets",
+            "annotation": null
+          },
+          {
+            "name": "live_numel",
+            "annotation": null
+          },
+          {
+            "name": "BLOCK_SIZE",
+            "annotation": "tl.constexpr"
+          },
+          {
+            "name": "NUM_EXPERTS",
+            "annotation": "tl.constexpr"
+          },
+          {
+            "name": "MAX_PACKED_ROUTES",
+            "annotation": "tl.constexpr"
+          },
+          {
+            "name": "MAX_ROUTE_BLOCKS",
+            "annotation": "tl.constexpr"
+          },
+          {
+            "name": "BLOCK_T",
+            "annotation": "tl.constexpr"
+          }
+        ]
+      },
+      {
+        "name": "_pack_topk_routes_sort_kernel",
+        "line": 266,
+        "decorators": [
+          "triton.jit"
+        ],
+        "arguments": [
+          {
+            "name": "topk_ids",
+            "annotation": null
+          },
+          {
+            "name": "expert_map",
+            "annotation": null
+          },
+          {
+            "name": "packed_route_indices",
+            "annotation": null
+          },
+          {
+            "name": "expert_offsets",
+            "annotation": null
+          },
+          {
+            "name": "live_numel",
+            "annotation": null
+          },
+          {
+            "name": "NUM_EXPERTS",
+            "annotation": "tl.constexpr"
+          },
+          {
+            "name": "HAS_EXPERT_MAP",
+            "annotation": "tl.constexpr"
+          },
+          {
+            "name": "BLOCK_T",
+            "annotation": "tl.constexpr"
+          }
+        ]
+      }
+    ]
+  },
+  "runtime_capacity_patch_present": false,
+  "reason": "Post-prefix MAX_PACKED_ROUTES and MAX_ROUTE_BLOCKS are tl.constexpr; count, post-prefix, and sort kernels use plain triton.jit without do_not_specialize.",
+  "candidate_commit": "64db087cea1a20de243e4e6c31dcaf364fb1016e",
+  "candidate_ref": "contributor/perf/route-pack-runtime-capacity",
+  "upstream_pr": {
+    "number": 256,
+    "url": "https://github.com/local-inference-lab/b12x/pull/256",
+    "state": "OPEN",
+    "headRefOid": "64db087cea1a20de243e4e6c31dcaf364fb1016e",
+    "baseRefName": "master",
+    "mergeable": "MERGEABLE",
+    "mergeStateStatus": "CLEAN",
+    "statusCheckRollup": [
+      {
+        "__typename": "StatusContext",
+        "context": "CodeRabbit",
+        "startedAt": "2026-08-29T09:34:48Z",
+        "state": "SUCCESS",
+        "targetUrl": ""
+      }
+    ]
+  },
+  "scope_limit": "This is installed-source inspection, not a benchmark or a claim that the current deployment needs the patch. The PR remains open; its earlier GPU smoke evidence is not current production qualification."
+}

@@ -1,0 +1,553 @@
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+{
+  "status": "pass",
+  "mode": "installed",
+  "device": "cuda",
+  "vocab_size": 257,
+  "results": [
+    {
+      "case": "temperature_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "topk_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "topp_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "combined",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_combined",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topk",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topp",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "large_batch_dispatch",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "mixed_greedy",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "tied_topk",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "tiny_nucleus",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "temperature_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "topk_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "topp_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "combined",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_combined",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topk",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topp",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "large_batch_dispatch",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "mixed_greedy",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "tied_topk",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "tiny_nucleus",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "temperature_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "topk_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "topp_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "combined",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_combined",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topk",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topp",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "large_batch_dispatch",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "mixed_greedy",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "tied_topk",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "tiny_nucleus",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "temperature_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "topk_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "topp_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "combined",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_combined",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topk",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topp",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "large_batch_dispatch",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "mixed_greedy",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "tied_topk",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "tiny_nucleus",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "temperature_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "topk_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "topp_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "combined",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_combined",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topk",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topp",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "large_batch_dispatch",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "mixed_greedy",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "tied_topk",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "tiny_nucleus",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "temperature_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "topk_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "topp_only",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "combined",
+      "rows": 3,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_combined",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topk",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "parallel_topp",
+      "rows": 6,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "large_batch_dispatch",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "mixed_greedy",
+      "rows": 12,
+      "slots_per_request": 3,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "tied_topk",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "tiny_nucleus",
+      "rows": 1,
+      "slots_per_request": 1,
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "greedy_disabled_and_invalid_shape",
+      "input_dtype": "torch.float32",
+      "status": "pass"
+    },
+    {
+      "case": "greedy_disabled_and_invalid_shape",
+      "input_dtype": "torch.bfloat16",
+      "status": "pass"
+    },
+    {
+      "case": "greedy_disabled_and_invalid_shape",
+      "input_dtype": "torch.float16",
+      "status": "pass"
+    }
+  ]
+}

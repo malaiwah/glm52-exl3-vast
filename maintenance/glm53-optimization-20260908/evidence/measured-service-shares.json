@@ -1,0 +1,50 @@
+{
+  "fairness-v2-off": {
+    "service_seconds": {
+      "prefill": 0.0,
+      "decode": 0.0
+    },
+    "observed_prefill_fraction": null,
+    "scope": "contended model-service wallclock; all clients included"
+  },
+  "fairness-v2-40": {
+    "service_seconds": {
+      "prefill": 86.13860097434372,
+      "decode": 120.25956499157473
+    },
+    "observed_prefill_fraction": 0.4173418914418424,
+    "scope": "contended model-service wallclock; all clients included"
+  },
+  "fairness-v2-60": {
+    "service_seconds": {
+      "prefill": 97.9004618129693,
+      "decode": 60.02643542876467
+    },
+    "observed_prefill_fraction": 0.6199099933123867,
+    "scope": "contended model-service wallclock; all clients included"
+  },
+  "memory-3072": {
+    "service_seconds": {
+      "prefill": 88.75328377867118,
+      "decode": 121.43991509499028
+    },
+    "observed_prefill_fraction": 0.42224622040229354,
+    "scope": "contended model-service wallclock; all clients included"
+  },
+  "memory-2048": {
+    "service_seconds": {
+      "prefill": 88.38206808036193,
+      "decode": 94.36599096655846
+    },
+    "observed_prefill_fraction": 0.4836279440739227,
+    "scope": "contended model-service wallclock; all clients included"
+  },
+  "memory-1024": {
+    "service_seconds": {
+      "prefill": 94.94506056746468,
+      "decode": 60.74363391473889
+    },
+    "observed_prefill_fraction": 0.609839146530435,
+    "scope": "contended model-service wallclock; all clients included"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "predecessor_instance_id": 483634,
+  "resumed_instance_id": 500157,
+  "resumed_name": "glm53-500k-gilded",
+  "spot": true,
+  "num_gpus": 4,
+  "storage_gb": 1200,
+  "pause_response": {"success": true, "machine_id": 500157},
+  "verified_status": "Paused",
+  "running_instances_after": 0,
+  "paused_instances_after": 1,
+  "balance_before_usd": 87.0275,
+  "balance_after_usd": 79.3726,
+  "balance_reduction_usd": 7.6549,
+  "cost_scope": "Account balance change during this work, including any storage billing; not an itemized GPU invoice",
+  "storage_retained": true,
+  "storage_note": "Pre-existing volume preserved; paused storage remains billable. No resource destroyed.",
+  "production_note": "AIBeast production appliance was not stopped or replaced."
+}

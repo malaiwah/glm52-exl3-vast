@@ -11,7 +11,6 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "scripts" / "recover_torch_extension_lock.sh"
-ENTRYPOINT = ROOT / "entrypoint.sh"
 
 
 class ExtensionLockRecoveryTests(unittest.TestCase):
@@ -27,27 +26,24 @@ class ExtensionLockRecoveryTests(unittest.TestCase):
             check=False,
         )
 
-    def test_ownerless_filebaton_is_quarantined_but_ninja_lock_survives(self):
+    def test_old_ambiguous_filebaton_and_ninja_lock_are_preserved(self):
         with tempfile.TemporaryDirectory() as temp:
             extension = Path(temp) / "sparkinfer_pcie_dma_ext"
             extension.mkdir()
             sentinel = extension / "lock"
             ninja_lock = extension / ".ninja_lock"
             sentinel.touch()
-            # Age the sentinel well past the default minimum age so the
-            # ownerless-quarantine path is exercised, not the fresh-lock guard.
+            # Even a very old lock can belong to a foreign live namespace.
             old = time.time() - 7200
             os.utime(sentinel, (old, old))
             ninja_lock.write_text("keep")
 
             result = self.run_helper(temp)
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse(sentinel.exists())
+            self.assertEqual(result.returncode, 75, result.stderr)
+            self.assertTrue(sentinel.exists())
             self.assertEqual(ninja_lock.read_text(), "keep")
-            quarantined = list(extension.glob("lock.stale-*"))
-            self.assertEqual(len(quarantined), 1)
-            self.assertEqual(quarantined[0].stat().st_size, 0)
+            self.assertEqual(list(extension.glob("lock.stale-*")), [])
 
     def test_fresh_ownerless_sentinel_is_not_quarantined(self):
         # A sentinel with no owner visible in this PID namespace is NOT proof of
@@ -67,9 +63,7 @@ class ExtensionLockRecoveryTests(unittest.TestCase):
             self.assertTrue(sentinel.exists())
             self.assertEqual(list(extension.glob("lock.stale-*")), [])
 
-    def test_old_ownerless_sentinel_recovers_when_age_gate_disabled(self):
-        # EXT_LOCK_MIN_AGE_S=0 opts out of the cross-container age gate; a fresh
-        # ownerless sentinel is then quarantined as before the gate existed.
+    def test_disabling_legacy_age_gate_does_not_authorize_quarantine(self):
         with tempfile.TemporaryDirectory() as temp:
             extension = Path(temp) / "sparkinfer_pcie_dma_ext"
             extension.mkdir()
@@ -78,9 +72,9 @@ class ExtensionLockRecoveryTests(unittest.TestCase):
 
             result = self.run_helper(temp, EXT_LOCK_MIN_AGE_S="0")
 
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse(sentinel.exists())
-            self.assertEqual(len(list(extension.glob("lock.stale-*"))), 1)
+            self.assertEqual(result.returncode, 75, result.stderr)
+            self.assertTrue(sentinel.exists())
+            self.assertEqual(list(extension.glob("lock.stale-*")), [])
 
     def test_disabled_recovery_leaves_sentinel_in_place(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -124,16 +118,6 @@ class ExtensionLockRecoveryTests(unittest.TestCase):
                 owner.terminate()
                 owner.wait(timeout=5)
 
-    def test_entrypoint_runs_preflight_before_serve(self):
-        source = ENTRYPOINT.read_text()
-        preflight = source.index("if ! recover_sparkinfer_extension_lock; then")
-        launch = source.index("serve_once &", preflight)
-        self.assertLess(preflight, launch)
-        self.assertIn(
-            'bash "$SCRIPTS_DIR/recover_torch_extension_lock.sh" '
-            '"$TORCH_EXTENSIONS_DIR"',
-            source,
-        )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,7 @@
+{
+  "timing_unit": "model-service wallclock, not pure GPU time",
+  "required_runner": "V2 model runner (auto-selected by baseline configuration)",
+  "initial_v1_override_arm": "failed before serving; rollback retained",
+  "comparison": "same-image corrected V2 off vs40% share; synthetic inter-chunk timing + C8/C12; all raw results retained",
+  "active_mtp": "new native V2 path separately qualified by25 CUDA cases; earlier V1 edit inactive"
+}

@@ -1,0 +1,30 @@
+{
+  "arm": "memory-2048",
+  "container": "glm53-opt-memory-2048-20260908t133955z",
+  "samples": 60,
+  "unhealthy_samples": 0,
+  "restarts_observed": 0,
+  "oom_killed_observed": false,
+  "min_free_mib_per_gpu": [
+    727.0,
+    727.0,
+    727.0,
+    727.0
+  ],
+  "counter_delta_includes_real_clients": {
+    "vllm:spec_decode_num_drafts_total{engine=\"0\",model_name=\"GLM-5.3\"}": 47773.0,
+    "vllm:spec_decode_num_draft_tokens_total{engine=\"0\",model_name=\"GLM-5.3\"}": 143319.0,
+    "vllm:spec_decode_num_accepted_tokens_total{engine=\"0\",model_name=\"GLM-5.3\"}": 99542.0,
+    "vllm:spec_decode_num_accepted_tokens_per_pos_total{engine=\"0\",model_name=\"GLM-5.3\",position=\"0\"}": 40443.0,
+    "vllm:spec_decode_num_accepted_tokens_per_pos_total{engine=\"0\",model_name=\"GLM-5.3\",position=\"1\"}": 32727.0,
+    "vllm:spec_decode_num_accepted_tokens_per_pos_total{engine=\"0\",model_name=\"GLM-5.3\",position=\"2\"}": 26372.0,
+    "vllm:request_success_total{engine=\"0\",finished_reason=\"stop\",model_name=\"GLM-5.3\"}": 65.0,
+    "http_requests_total{handler=\"/v1/chat/completions\",method=\"POST\",status=\"2xx\"}": 66.0,
+    "http_requests_total{handler=\"/v1/responses\",method=\"POST\",status=\"2xx\"}": 3.0,
+    "http_requests_total{handler=\"/v1/models\",method=\"GET\",status=\"2xx\"}": 10.0,
+    "http_requests_total{handler=\"none\",method=\"GET\",status=\"4xx\"}": 14.0,
+    "http_requests_total{handler=\"none\",method=\"POST\",status=\"4xx\"}": 4.0,
+    "http_requests_total{handler=\"/v1/chat/completions\",method=\"POST\",status=\"4xx\"}": 2.0
+  },
+  "scope": "Global counters include real client traffic; not an isolated benchmark."
+}

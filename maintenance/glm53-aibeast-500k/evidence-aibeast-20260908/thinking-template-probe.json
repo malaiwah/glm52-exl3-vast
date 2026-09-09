@@ -1,0 +1,30 @@
+{
+  "5.2": {
+    "defaults": {
+      "generation_suffix": "|user|>Question two.<|assistant|><think>",
+      "preserves_previous_reasoning": false
+    },
+    "enable_thinking_false": {
+      "generation_suffix": "uestion two.<|assistant|><think></think>",
+      "preserves_previous_reasoning": false
+    },
+    "clear_thinking_true": {
+      "generation_suffix": "|user|>Question two.<|assistant|><think>",
+      "preserves_previous_reasoning": false
+    }
+  },
+  "5.3": {
+    "defaults": {
+      "generation_suffix": "|user|>Question two.<|assistant|><think>",
+      "preserves_previous_reasoning": true
+    },
+    "enable_thinking_false": {
+      "generation_suffix": "|user|>Question two.<|assistant|><think>",
+      "preserves_previous_reasoning": true
+    },
+    "clear_thinking_true": {
+      "generation_suffix": "|user|>Question two.<|assistant|><think>",
+      "preserves_previous_reasoning": false
+    }
+  }
+}

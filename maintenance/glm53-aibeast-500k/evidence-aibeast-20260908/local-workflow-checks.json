@@ -1,0 +1,162 @@
+[
+  {
+    "step": "shellcheck boot scripts",
+    "exit_code": 0,
+    "seconds": 9.026
+  },
+  {
+    "step": "validate Python",
+    "exit_code": 0,
+    "seconds": 0.297
+  },
+  {
+    "step": "fail-closed field-review patch applicator",
+    "exit_code": 0,
+    "seconds": 1.123
+  },
+  {
+    "step": "termination + switch tests",
+    "exit_code": 0,
+    "seconds": 1.532
+  },
+  {
+    "step": "model family tests",
+    "exit_code": 0,
+    "seconds": 0.106
+  },
+  {
+    "step": "container-only rootfs runner contract",
+    "exit_code": 0,
+    "seconds": 0.508
+  },
+  {
+    "step": "full GLM parser and TP scheduling backports",
+    "exit_code": 0,
+    "seconds": 0.819
+  },
+  {
+    "step": "LMCache deadline and DMA ownership regression",
+    "exit_code": 0,
+    "seconds": 0.594
+  },
+  {
+    "step": "role-invariant cache layout namespace",
+    "exit_code": 0,
+    "seconds": 0.294
+  },
+  {
+    "step": "dynamically loaded encoder provenance",
+    "exit_code": 0,
+    "seconds": 0.327
+  },
+  {
+    "step": "supervisor configuration transactions and HTTP capabilities",
+    "exit_code": 0,
+    "seconds": 2.774
+  },
+  {
+    "step": "maintenance qualification and durable rollback boundaries",
+    "exit_code": 0,
+    "seconds": 0.218
+  },
+  {
+    "step": "shell preparation lifecycle",
+    "exit_code": 0,
+    "seconds": 0.666
+  },
+  {
+    "step": "immutable GG r28 source gate",
+    "exit_code": 0,
+    "seconds": 0.139
+  },
+  {
+    "step": "serial speculative scheduler warning patch",
+    "exit_code": 0,
+    "seconds": 0.091
+  },
+  {
+    "step": "mixed-K EXL3 patch",
+    "exit_code": 0,
+    "seconds": 0.165
+  },
+  {
+    "step": "deSEC DNS-01 convergence guard",
+    "exit_code": 0,
+    "seconds": 0.15
+  },
+  {
+    "step": "gpu detection",
+    "exit_code": 0,
+    "seconds": 0.128
+  },
+  {
+    "step": "persistent extension lock recovery",
+    "exit_code": 0,
+    "seconds": 0.225
+  },
+  {
+    "step": "bounded LMCache process and tier contract",
+    "exit_code": 0,
+    "seconds": 7.808
+  },
+  {
+    "step": "LMCache administration boundary",
+    "exit_code": 0,
+    "seconds": 0.127
+  },
+  {
+    "step": "local Podman profile forwarding",
+    "exit_code": 0,
+    "seconds": 0.649
+  },
+  {
+    "step": "bounded ACME retry contract",
+    "exit_code": 0,
+    "seconds": 0.12
+  },
+  {
+    "step": "serving benchmark and needle harness",
+    "exit_code": 0,
+    "seconds": 0.239
+  },
+  {
+    "step": "standalone NVFP4 MTP draft builder",
+    "exit_code": 0,
+    "seconds": 0.332
+  },
+  {
+    "step": "OpenAI feature qualification harness",
+    "exit_code": 0,
+    "seconds": 0.167
+  },
+  {
+    "step": "structured output + speculative decode compatibility patch",
+    "exit_code": 0,
+    "seconds": 0.16
+  },
+  {
+    "step": "EXL3 parity ABI patch",
+    "exit_code": 0,
+    "seconds": 0.133
+  },
+  {
+    "step": "field-review runtime log audit",
+    "exit_code": 0,
+    "seconds": 0.097
+  },
+  {
+    "step": "checkpoint reconciliation",
+    "exit_code": 0,
+    "seconds": 0.146
+  },
+  {
+    "step": "embedded SOUL controller",
+    "exit_code": 0,
+    "seconds": 1.828
+  },
+  {
+    "step": "validate profile compatibility and Runpod templates",
+    "exit_code": 0,
+    "seconds": 4.806
+  }
+]

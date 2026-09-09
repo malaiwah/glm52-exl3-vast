@@ -1,3 +1,4 @@
+import __future__
 import importlib.util
 import pathlib
 import tempfile
@@ -34,26 +35,26 @@ class Fixture:
 
 
 class Exl3MixedKPatchTests(unittest.TestCase):
-    def test_applies_exact_mixed_k_patch_and_is_idempotent(self):
+    def test_installed_patch_handles_mixed_metadata_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / "exl3.py"
             target.write_text(fixture_source())
             with mock.patch.object(PATCH, "find_exl3", return_value=target):
                 PATCH.main()
                 first = target.read_text()
-                self.assertIn(PATCH.MARKER_V5, first)
-                self.assertIn("self.mixed_k_values = tuple(k_values)", first)
-                self.assertIn('"output_expert_map": mix_tier', first)
-                self.assertIn("api.plan_weights(", first)
-                self.assertIn('"experts" if "_load_sparkinfer_fused_moe"', first)
-                self.assertIn("max_batched_tokens = int(", first)
-                self.assertIn("_runtime_owner_token(", first)
-                self.assertIn(
-                    '"VLLM_EXL3_TRELLIS_MIN_M", _DEFAULT_TRELLIS_MIN_M',
-                    first,
-                )
-                self.assertIn("param.exl3_backing = None", first)
-                self.assertIn("torch.cuda.empty_cache()", first)
+                namespace = {"RoutedExperts": object,
+                             "Exl3MoEMethod": type("Exl3MoEMethod", (), {})}
+                exec(compile(first, str(target), "exec",
+                             flags=__future__.annotations.compiler_flag), namespace)
+                config = namespace["Fixture"]()
+                config.config({"bits": "mixed", "k_values": [4, 3], "codebook": "mcg"})
+                self.assertEqual(config.mixed_k_values, (3, 4))
+                self.assertIsNone(config.bits)
+                with self.assertRaises(ValueError):
+                    config.config({"bits": "mixed", "k_values": [2], "codebook": "mcg"})
+                config.config({"bits": 4, "codebook": "mcg"})
+                self.assertEqual(config.bits, 4.0)
+                self.assertIsNone(config.mixed_k_values)
                 PATCH.main()
                 self.assertEqual(target.read_text(), first)
 
@@ -68,7 +69,7 @@ class Exl3MixedKPatchTests(unittest.TestCase):
     def test_r14_native_mixed_k_is_left_untouched(self):
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / "exl3.py"
-            source = "\n\n".join(PATCH.NATIVE_R14_MARKERS) + "\n"
+            source = "\n\n".join(marker + "):\n    pass" for marker in PATCH.NATIVE_R14_MARKERS) + "\n"
             target.write_text(source)
             with mock.patch.object(PATCH, "find_exl3", return_value=target):
                 PATCH.main()
@@ -77,12 +78,34 @@ class Exl3MixedKPatchTests(unittest.TestCase):
     def test_partial_native_mixed_k_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory) / "exl3.py"
-            target.write_text(PATCH.NATIVE_R14_MARKERS[0] + "\n")
+            target.write_text(PATCH.NATIVE_R14_MARKERS[0] + "):\n    pass\n")
             with mock.patch.object(PATCH, "find_exl3", return_value=target):
                 with self.assertRaisesRegex(
                     SystemExit, "INCOMPLETE NATIVE MIXED-K API"
                 ):
                     PATCH.main()
+
+    def test_forged_current_marker_and_duplicate_anchor_do_not_mutate_source(self):
+        for source in (fixture_source() + "\n" + PATCH.MARKER_V5,
+                       fixture_source() + "\n" + fixture_source()):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as directory:
+                target = pathlib.Path(directory) / "exl3.py"
+                target.write_text(source)
+                with mock.patch.object(PATCH, "find_exl3", return_value=target):
+                    with self.assertRaises(SystemExit):
+                        PATCH.main()
+                self.assertEqual(target.read_text(), source)
+
+    def test_failed_patch_compilation_preserves_current_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory) / "exl3.py"
+            source = fixture_source()
+            target.write_text(source)
+            with mock.patch.object(PATCH, "find_exl3", return_value=target), \
+                 mock.patch.object(PATCH, "APPEND", "invalid syntax !!!"):
+                with self.assertRaises(SystemExit):
+                    PATCH.main()
+            self.assertEqual(target.read_text(), source)
 
 
 if __name__ == "__main__":

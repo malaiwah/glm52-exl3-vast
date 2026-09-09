@@ -1,0 +1,73 @@
+{
+  "observed_date": "2026-09-07",
+  "method": "Parsed every safetensors header in both 81-shard snapshots; no GPU model loaded.",
+  "snapshots": {
+    "GLM-5.2": {
+      "snapshot": "/mnt/vault/llm/huggingface/models--willfalco--GLM-5.2-EXL3-TR3-3.42bpw/snapshots/a350292cb2038f2c31732569a711a89e5d72fd46",
+      "shards": 81,
+      "tensor_count": 702545,
+      "index_total_size": 351480991216,
+      "tensor_bytes": 351394015232,
+      "disk_bytes": 351480991216,
+      "header_bytes": 86975984,
+      "dtype_bytes": {
+        "BF16": 37781026816,
+        "F32": 77824,
+        "I32": 933888,
+        "F16": 250281984,
+        "I16": 313361694720
+      },
+      "group_bytes": {
+        "other/weight": 37781021184,
+        "other/bias": 5632,
+        "other/e_score_correction_bias": 77824,
+        "routed/mcg": 933888,
+        "routed/suh": 87162880,
+        "routed/trellis": 313361694720,
+        "routed/svh": 163119104
+      }
+    },
+    "GLM-5.3": {
+      "snapshot": "/mnt/vault/llm/huggingface/hub/models--davidsyoung--GLM-5.3-EXL3-TR3-3.42bpw/snapshots/99c6f951333d2b38f1efefa533c7afadf0d376e3",
+      "shards": 81,
+      "tensor_count": 935105,
+      "index_total_size": 355034998784,
+      "tensor_bytes": 355034998784,
+      "disk_bytes": 355150499456,
+      "header_bytes": 115500672,
+      "dtype_bytes": {
+        "BF16": 37781026816,
+        "F32": 77824,
+        "I32": 933888,
+        "F16": 3107979264,
+        "I16": 314144980992
+      },
+      "group_bytes": {
+        "other/weight": 37781021184,
+        "other/bias": 5632,
+        "other/e_score_correction_bias": 77824,
+        "routed/mcg": 933888,
+        "routed/suh": 1992294400,
+        "routed/svh": 1115684864,
+        "routed/trellis": 314144980992
+      }
+    }
+  },
+  "delta": {
+    "tensor_bytes": 3640983552,
+    "per_rank_gib": 0.8477325439453125
+  },
+  "live_boot": {
+    "model_loading_gib_per_rank": 81.73,
+    "graph_gib_per_rank": 0.75,
+    "kv_bytes_per_rank": 4518907904,
+    "max_model_len": 520192,
+    "source": "AIBeast r34 maintenance last-good.log 2026-08-15"
+  },
+  "prior_glm53_receipt": {
+    "model_loading_gib_per_rank": 82.42,
+    "graph_gib_per_rank": 0.61,
+    "source": "TEST_RESULTS.md full GLM-5.3 3.42bpw 2026-08-29; different runtime, not controlled same-runtime A/B"
+  },
+  "conclusion": "Preserve 3.42bpw and 520192 tokens; first candidate reduces scheduler/prefill workspace to2048/1024 and graph concurrency to8. GPU qualification remains required; unchanged-swap fit is not established."
+}

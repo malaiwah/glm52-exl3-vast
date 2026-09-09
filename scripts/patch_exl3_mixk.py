@@ -36,6 +36,7 @@ rebuilt in place from the v1 marker. Backup at exl3.py.orig on first apply.
 
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 
@@ -469,11 +470,25 @@ def main() -> None:
         return
     path = find_exl3()
     src = path.read_text()
-    native_markers = tuple(marker in src for marker in NATIVE_R14_MARKERS)
+    try:
+        tree = ast.parse(src, filename=str(path))
+        compile(tree, str(path), "exec")
+    except SyntaxError as error:
+        sys.exit(f"INVALID SOURCE in {path}: {error}")
+    definitions = [
+        node.name for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    native_counts = tuple(
+        definitions.count(marker.removeprefix("def ").removesuffix("("))
+        for marker in NATIVE_R14_MARKERS)
+    native_markers = tuple(count == 1 for count in native_counts)
     if all(native_markers):
+        if MARKER_V1 in src:
+            sys.exit(f"AMBIGUOUS native and appended mixed-K implementations in {path}")
         print(f"upstream native mixed-K present; compatibility patch skipped: {path}")
         return
-    if any(native_markers):
+    if any(native_counts):
         present = [
             marker for marker, found in zip(NATIVE_R14_MARKERS, native_markers)
             if found
@@ -482,31 +497,35 @@ def main() -> None:
             f"INCOMPLETE NATIVE MIXED-K API {present!r} in {path}; "
             "image lineage differs from reviewed r14 — do not patch blindly."
         )
+    edits = ((E1_OLD, E1_NEW), (E2_OLD, E2_NEW),
+             (E3_OLD, E3_NEW), (E5_OLD, E5_NEW))
+    if MARKER_V1 in src or MARKER_V5 in src:
+        prefix = src.split(MARKER_V1, 1)[0]
+        if (src.count(MARKER_V1) != 1
+                or any(prefix.count(new) != 1 or old in prefix.replace(new, "")
+                       for old, new in edits)):
+            sys.exit(f"INCOMPLETE OR AMBIGUOUS mixed-K installation in {path}")
     if MARKER_V5 in src:
+        if src.count(APPEND) != 1 or src.count(MARKER_V5) != 1:
+            sys.exit(f"INCOMPLETE OR AMBIGUOUS v5 mixed-K body in {path}")
         print(f"already patched (v5): {path}")
         return
     def write_and_compile(new_src, action):
-        """Stage in a temp file, byte-compile it, then atomically swap it in.
-
-        Writing exl3.py in place risked a truncated module if the write was
-        interrupted, bricking every subsequent vLLM boot when the applier ran
-        on a retained appliance rather than inside a Docker build. Stage the
-        new text in a sibling temp file and byte-compile *that* file first;
-        only once it compiles do we os.replace() it over the live module, so a
-        compile failure (or an interrupted write) leaves the previous good
-        exl3.py untouched. Matches the tmp-file + os.replace discipline of the
-        sibling appliers (parity-abi, deepseek-mtp)."""
+        """Compile before an atomic replacement, retaining the current source on failure."""
         import os
-        import py_compile
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(new_src)
+        import tempfile
+        temporary = None
         try:
-            py_compile.compile(str(tmp), doraise=True)
-        except py_compile.PyCompileError:
-            tmp.unlink(missing_ok=True)
-            sys.exit(f"{action} produced a module that does not compile; "
-                     f"left the previous source of {path} in place")
-        os.replace(tmp, path)
+            compile(new_src, str(path), "exec")
+            with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(new_src)
+            temporary.chmod(path.stat().st_mode)
+            os.replace(temporary, path)
+        except Exception as error:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            sys.exit(f"{action} failed; left the previous source of {path} in place: {error}")
 
     if MARKER_V1 in src:
         # rebuild any older mixk install: keep the in-place E-edits, replace
@@ -522,8 +541,7 @@ def main() -> None:
         sys.exit(f"ANCHOR MISMATCH {missing} in {path}; image lineage differs "
                  "from v20final — do not apply blindly.")
     original = src
-    for old, new in ((E1_OLD, E1_NEW), (E2_OLD, E2_NEW),
-                     (E3_OLD, E3_NEW), (E5_OLD, E5_NEW)):
+    for old, new in edits:
         if src.count(old) != 1:
             sys.exit(f"anchor not unique ({src.count(old)}x): {old[:60]!r}")
         src = src.replace(old, new)

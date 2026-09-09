@@ -7,7 +7,9 @@ page and PID 1 can resolve SOUL settings without importing Nanobot's venv.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import datetime as dt
+import fcntl
 import json
 import os
 import re
@@ -86,6 +88,7 @@ def paths(env: Optional[Mapping[str, str]] = None) -> Dict[str, Path]:
         "config": root / "config.json",
         "status": root / "status.json",
         "journal": root / "journal.jsonl",
+        "journalLock": root / "journal.jsonl.lock",
         "incidents": root / "incidents",
         "evidence": root / "evidence",
         "snapshots": root / "snapshots",
@@ -234,20 +237,44 @@ def redact(value: Any) -> Any:
     return text
 
 
-def append_jsonl(path: Path, document: Mapping[str, Any]) -> None:
+@contextmanager
+def journal_lock(path: Path):
+    """Serialize append and retention across processes using a stable inode.
+
+    Lock the sidecar, not the journal: retention atomically replaces the latter.
+    The sidecar must never be unlinked while a controller or landing page runs.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(redact(dict(document)), ensure_ascii=False, separators=(",", ":")) + "\n"
-    fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o640)
+    fd = os.open(path.with_suffix(path.suffix + ".lock"),
+                 os.O_CREAT | os.O_RDWR, 0o660)
     try:
-        try:
+        if os.fstat(fd).st_uid == os.geteuid():
             os.fchown(fd, -1, path.parent.stat().st_gid)
-            os.fchmod(fd, 0o640)
-        except (OSError, PermissionError):
-            pass
-        os.write(fd, line.encode("utf-8"))
-        os.fsync(fd)
+            os.fchmod(fd, 0o660)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
     finally:
         os.close(fd)
+
+
+def append_jsonl(path: Path, document: Mapping[str, Any]) -> None:
+    line = (json.dumps(redact(dict(document)), ensure_ascii=False,
+                       separators=(",", ":")) + "\n").encode("utf-8")
+    with journal_lock(path):
+        fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o660)
+        try:
+            if os.fstat(fd).st_uid == os.geteuid():
+                os.fchown(fd, -1, path.parent.stat().st_gid)
+                os.fchmod(fd, 0o660)
+            remaining = memoryview(line)
+            while remaining:
+                written = os.write(fd, remaining)
+                if written == 0:
+                    raise OSError("journal write made no progress")
+                remaining = remaining[written:]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def audit(headline: str, summary: str, config: Mapping[str, Any],

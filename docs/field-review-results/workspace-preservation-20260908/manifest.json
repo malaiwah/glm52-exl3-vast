@@ -1,0 +1,114 @@
+{
+  "archived_at": "2026-09-08T11:24:05.666540+00:00",
+  "scope": "Historical workspace notes and GLM-5.3 Flash K8 receipts; not current production configuration or new qualification. Original relative paths and operational instructions are historical context, not runnable archive instructions.",
+  "source_files_left_in_place": true,
+  "original_backup": "Verified private original-workspace-files.tar.gz outside the repository; contains unredacted originals.",
+  "redaction": "Existing scripts/soul_config.py redact() policy; SESSION-NOTES.md HF_TOKEN removed from the Git copy. Rotate that historical credential if it remains valid.",
+  "files": [
+    {
+      "source_workspace_path": "K6-FALLBACKS.md",
+      "archive_path": "K6-FALLBACKS.md",
+      "original_sha256": "5df4ef700db2e35559053a1b0783fd95e9bf1b0b08bbfa0135b289b89edcd28f",
+      "archived_sha256": "5df4ef700db2e35559053a1b0783fd95e9bf1b0b08bbfa0135b289b89edcd28f",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "HANDOFF.md",
+      "archive_path": "HANDOFF.md",
+      "original_sha256": "7a1a3187ef8c3e81672500b09f209f5b39b158c568bf8fcfefdeba7fe3761639",
+      "archived_sha256": "7a1a3187ef8c3e81672500b09f209f5b39b158c568bf8fcfefdeba7fe3761639",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "K6-SPILL-OVER.md",
+      "archive_path": "K6-SPILL-OVER.md",
+      "original_sha256": "6c95dea8050777c0ab6e99842747efbb266e8928f18c022b53c18e7ded110e2b",
+      "archived_sha256": "6c95dea8050777c0ab6e99842747efbb266e8928f18c022b53c18e7ded110e2b",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "SESSION-NOTES.md",
+      "archive_path": "SESSION-NOTES.md",
+      "original_sha256": "d8113928661fa3810685d58c79cc7af26c03d8fa94536175e571be4a763857c8",
+      "archived_sha256": "cb55038171e16878b2d7820075521eeb2da6fca357f574192d816b3be7c9ae26",
+      "redacted": true
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/verify-last.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/verify-last.json",
+      "original_sha256": "8029f3621dc15505a9ccc4efbc50404e7429896be1505a29ab2e9a010594682b",
+      "archived_sha256": "8029f3621dc15505a9ccc4efbc50404e7429896be1505a29ab2e9a010594682b",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/apply-state.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/apply-state.json",
+      "original_sha256": "3f087bbb7145d0c91afc8d092d27ee0c3a1da1265c5aaafedbb5d46fabd9a075",
+      "archived_sha256": "3f087bbb7145d0c91afc8d092d27ee0c3a1da1265c5aaafedbb5d46fabd9a075",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/k8-tg-256.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/k8-tg-256.json",
+      "original_sha256": "2e813c9bb764eced580f975c53c33559086b4a169abe755cadb3c46a494c8dd5",
+      "archived_sha256": "2e813c9bb764eced580f975c53c33559086b4a169abe755cadb3c46a494c8dd5",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/k8-tg-32768.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/k8-tg-32768.json",
+      "original_sha256": "24f74f05464768edf9debf0318d27fbecc5594db7fc0bc3faf8823034400a640",
+      "archived_sha256": "24f74f05464768edf9debf0318d27fbecc5594db7fc0bc3faf8823034400a640",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/k8-post-long.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/k8-post-long.json",
+      "original_sha256": "92a8af38f758871f119ad8924d27ca4e86936fc87595b8bd497bc1093ef5c2f8",
+      "archived_sha256": "92a8af38f758871f119ad8924d27ca4e86936fc87595b8bd497bc1093ef5c2f8",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/k8-prefill.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/k8-prefill.json",
+      "original_sha256": "730b8f96028d03127a9572ca8dec8098c00dd47537693d96d9a77063ae5a4cea",
+      "archived_sha256": "730b8f96028d03127a9572ca8dec8098c00dd47537693d96d9a77063ae5a4cea",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/k8-448k-20260905.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/k8-448k-20260905.json",
+      "original_sha256": "30055ca496dc79a9c1e252f3adc7f2fa48b9d5a127f1dde8feac791a1400fd63",
+      "archived_sha256": "30055ca496dc79a9c1e252f3adc7f2fa48b9d5a127f1dde8feac791a1400fd63",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/final-image-verify-last.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/final-image-verify-last.json",
+      "original_sha256": "9293e12fb18ebbcd893b9def4b43325969f4491b78cd60b4f92d01913cdc1499",
+      "archived_sha256": "9293e12fb18ebbcd893b9def4b43325969f4491b78cd60b4f92d01913cdc1499",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/k8-448k-20260904.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/k8-448k-20260904.json",
+      "original_sha256": "ab35830adb1ac0998468fa898e80c1417cdf1ba86249bf203fb3af97e878d1ce",
+      "archived_sha256": "ab35830adb1ac0998468fa898e80c1417cdf1ba86249bf203fb3af97e878d1ce",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/k8-tg-131072.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/k8-tg-131072.json",
+      "original_sha256": "4821e6076ff1053638825a7492a981c1edbc603dec9129b30998ee5ad8d8fc3f",
+      "archived_sha256": "4821e6076ff1053638825a7492a981c1edbc603dec9129b30998ee5ad8d8fc3f",
+      "redacted": false
+    },
+    {
+      "source_workspace_path": "glm53-k8-evidence-a0d05f7/known-good.json",
+      "archive_path": "glm53-k8-evidence-a0d05f7/known-good.json",
+      "original_sha256": "af30b82340db2b6bf59f6d0d80b8aaf4dd310d38894d149a5770ef86ece8e87e",
+      "archived_sha256": "af30b82340db2b6bf59f6d0d80b8aaf4dd310d38894d149a5770ef86ece8e87e",
+      "redacted": false
+    }
+  ]
+}

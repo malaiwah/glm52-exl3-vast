@@ -1,16 +1,17 @@
 # Self-service configuration
 
-A user rents the template, the image is locked in, and they get working
-defaults. Everything after that — model variant, draft type, speculation depth,
-context length, KV dtype, concurrency, DRAM offload, vision — is changeable
-from the landing page on `:1111`, applied by restarting vLLM only. No image
-rebuild, no re-rent, no SSH.
+A deployment can change supported model variants and runtime knobs from the
+landing page on `:1111` without rebuilding the image. Changes affecting model
+files require checkpoint preparation; engine-only changes restart vLLM.
+The next-release bare-launch default is full `glm53-3.42bpw-500k`, an unqualified
+520K reduced-workspace candidate, not permission to replace production. Persisted
+state still wins over new defaults. See the [candidate gate](../TEST_PLAN.md#full-glm-53-candidate-maintenance-gate).
 
 The parts:
 
 | file | role |
 |---|---|
-| `scripts/glm_config.py` | knob registry, three-layer resolution, pre-validation matrix, failure signatures. Imported by everything. |
+| `scripts/glm_config.py` | knob registry, family/variant-aware resolution, pre-validation matrix, failure signatures. Imported by everything. |
 | `scripts/config_cli.py` | the shell-facing side: `env`, `show`, `validate`, `mark-good`, `should-rollback`, `rollback`, `pending-analysis`. |
 | `scripts/verify_serving.py` | health + short prompts + **long-context needle probe**. Decides whether a config is good. |
 | `scripts/analyze_failure.py` | asks the running model to explain the config that failed. |
@@ -27,9 +28,7 @@ The parts:
 Lowest to highest precedence:
 
 ```
-built-in defaults  <  startup environment  <  JSON state file on the volume
-   glm_config.py         template env, frozen           $GLM_STATE_DIR/config.json
-                         at container start             written by the landing page
+built-in defaults < family < variant < startup environment < JSON state file
 ```
 
 **Why the file wins over env.** The environment comes from the rental template.
@@ -47,14 +46,17 @@ env layer on the next restart, and the layering would quietly become
 self-referential.
 
 **The state file is a diff, not a snapshot.** `glm_config.minimize()` stores
-only the knobs whose value differs from `defaults + env`. Writing all of them
+only the knobs whose value differs from the selected family/variant plus
+startup-environment baseline. Writing all of them
 would freeze the instance against its own template (a knob the user never
 touched would start winning over the operator's env), and it makes an exported
 config portable to an instance launched with different template env.
 
-Legacy spellings still feed the env layer: `MTP78_MODE`, `MTP78_TRELLIS=0`,
-`DRAFT_MODEL`, `TUNE_VLLM_EXL3_TRELLIS_MAX_M`. Nothing that worked as an env var
-before stopped working.
+Legacy spellings still feed the env layer where applicable: `MTP78_MODE`,
+`MTP78_TRELLIS=0`, `DRAFT_MODEL`, `TUNE_VLLM_EXL3_TRELLIS_MAX_M`.
+`MTP78_TRELLIS=0` selects the native in-checkpoint draft, not BF16.
+Full GLM-5.3 uses native EXL3/TR3 MTP3 and rejects GLM-5.2 graft/override and
+Flash runtime settings. Compatibility aliases do not bypass validation.
 
 ### Where state lives
 
@@ -77,14 +79,42 @@ applied in that container.
 }
 ```
 
-`values` holds knob keys from the registry only; unknown keys are ignored with
-a note and out-of-range values fall back to the layer below with a note. A
-state file that is not valid JSON is ignored entirely rather than
-bricking the boot — the note appears in the boot log and on `/config`.
+`values` holds knob keys from the registry. Resolution may expose fallback
+values and explanatory notes for malformed values; that display is not
+permission to launch a known-invalid configuration. Startup validation refuses
+known-invalid effective configurations before the engine starts.
+The fairness controls fail closed on malformed applicable input instead of
+falling back to their defaults. A valid state-file value still supersedes an
+invalid lower-precedence startup value.
 
-`known-good.json` stores `{ts, values, effective, sources, verify}`. Restoring
-it writes `values` back to the state file, so the restored configuration is
-reproduced through the same resolution path rather than pinned.
+`known-good.json` stores `{ts, values, effective, sources, verify}`. Rollback
+re-minimizes the saved effective configuration against the current startup
+environment and requires exact applicable-knob reproduction plus valid host
+topology. It does not blindly copy an old diff into a different baseline.
+Verification and rollback are tied to the attempt's configuration snapshot:
+a stale attempt cannot mark a newer user's configuration good or roll it back.
+
+For general-build prefill fairness, set these `values` through the editor or
+import them in the state-file schema above:
+
+```json
+{
+  "PREFILL_FAIRNESS_ENGINE": "compute_share",
+  "PREFILL_COMPUTE_SHARE": 0.6,
+  "PREFILL_SCHEDULE_INTERVAL": 1
+}
+```
+
+This adds `--fairness-engine compute_share --prefill-compute-share 0.6` to the
+resolved serve argv. Setting the selector to `off` removes both flags; merely
+changing the share does not enable it. Defaults remain off on every profile.
+These are GLM (`glm52` family) engine-only knobs with normal state-over-env
+precedence, not `TUNE_VLLM_*` aliases. Shares must be finite and strictly between
+zero and one; cadence greater than one conflicts with enabled fairness. The
+engine definitively rejects unsupported DP/PP/PCP, DBO, custom scheduler and
+non-MTP speculation configurations. Baseline TP/DCP and V2 selection remain
+unchanged. See [the enablement, accounting and metrics reference](configuration.md#opt-in-prefill-fairness-in-the-general-build)
+before interpreting wallclock share as a performance result.
 
 ---
 
@@ -103,6 +133,8 @@ knobs to the model. Summary of the trade each one makes:
 | `DCP` | The balanced Brandon default uses DCP2 for ordinary prefill/decode while retaining a verified ~522K request. DCP4 serves the measured maximum-context and mixed 3.25-bpw variants; DCP1 prioritizes low-concurrency decode but cannot expose the same context envelope. |
 | `DCP_CKV_PREFETCH_DEPTH`, `DCP_QUERY_SPLIT_MIN_CONTEXT_TOKENS` | Topology overlap and the context crossover for query splitting. `auto`/`-1` retain calibration; the MadeBy561 profile pins the measured 0/8,192 shape. |
 | `F8_DMA`, `PCIE_DMA_MIN_BYTES`, `PCIE_CALIBRATION` | Collective wire format and byte crossover. The family stays lossless/automatic; the MadeBy561 profile pins the 521K-qualified FP8 ring/393,216-byte shape. |
+| `PREFILL_FAIRNESS_ENGINE` | `off` preserves legacy scheduling; `compute_share` opts the GLM family into measured model-service fairness. Requires cadence 1 and an engine restart; never changes the selected model runner. |
+| `PREFILL_COMPUTE_SHARE` | Default `0.6`, strictly `0 < share < 1`. Only emitted when fairness is enabled. Targets contended host-observed model-service wallclock, not GPU-only time or token throughput; mixed batches are charged entirely to prefill. |
 | `KV_CACHE_DTYPE` | calibrated `nvfp4_ds_mla` (GLM default; cross-provider-qualified on v31 and re-gated at each base refresh) vs fp8 (~1.7x bytes/token); models without calibrated MLA scales are refused. |
 | `MAX_MODEL_LEN` | Longest request, and a hard startup gate against available KV. |
 | `GPU_BLOCKS_OVERRIDE` | 0 auto-profiles the largest safe pool. The final r11 safetensors/DCP2/LMCache/GMU-0.957, batch-3,072, gather-140K shape exposed 542,208 logical tokens on its cold AIBeast boot and 553,472 on the same-stack warm restart; the value varies with usable VRAM, graphs, driver and loader. A positive value pins a reproducible smaller pool. On the measured MLA stack logical capacity is `blocks × 64 × DCP`; DCP4 therefore needs 2,048 blocks—not 8,192—for exactly 524,288 tokens. |
@@ -290,8 +322,9 @@ Design points:
   nothing better to fall back to, the engine keeps serving and the landing page
   says UNVERIFIED. Killing a partially-working endpoint on a rental to reach an
   identical one is not an improvement.
-- **Pre-validation also runs at boot.** A hand-edited state file that fails
-  validation is rolled back before the engine is started, not after.
+- **Pre-validation also runs at boot.** Known-invalid startup configurations
+  are refused before the engine starts. A valid rollback may restore service;
+  a failed rollback is not permission to launch the invalid values.
 - **What is preserved on rollback:** `failures/<UTC>/config.json` (the failed
   values and their resolution), `error.log` (tail of the failed boot),
   `diff.txt`, `meta.json` (reason + matched signatures). Ten failures are kept.

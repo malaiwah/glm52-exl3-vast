@@ -1,0 +1,155 @@
+/opt/venv/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+{
+  "status": "pass",
+  "device": "cuda",
+  "scope": "native_cuda_sampling_graphs_rejection",
+  "results": [
+    {
+      "case": "small",
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "large_padded",
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "request_major_slots",
+      "input_dtype": "torch.float32",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "small",
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "large_padded",
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "request_major_slots",
+      "input_dtype": "torch.float32",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "small",
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "large_padded",
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "request_major_slots",
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "small",
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "large_padded",
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "request_major_slots",
+      "input_dtype": "torch.bfloat16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "small",
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "large_padded",
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "request_major_slots",
+      "input_dtype": "torch.float16",
+      "fp64_noise": false,
+      "status": "pass"
+    },
+    {
+      "case": "small",
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "large_padded",
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "request_major_slots",
+      "input_dtype": "torch.float16",
+      "fp64_noise": true,
+      "status": "pass"
+    },
+    {
+      "case": "graph_replay_rotating_uva",
+      "input_dtype": "torch.float32",
+      "transitions": 4,
+      "status": "pass"
+    },
+    {
+      "case": "graph_replay_rotating_uva",
+      "input_dtype": "torch.bfloat16",
+      "transitions": 4,
+      "status": "pass"
+    },
+    {
+      "case": "graph_replay_rotating_uva",
+      "input_dtype": "torch.float16",
+      "transitions": 4,
+      "status": "pass"
+    },
+    {
+      "case": "native_rejection_p_equals_q",
+      "constraint": "topk1",
+      "status": "pass"
+    },
+    {
+      "case": "native_rejection_disjoint_support",
+      "constraint": "topk1",
+      "status": "pass"
+    },
+    {
+      "case": "native_rejection_p_equals_q",
+      "constraint": "tiny_nucleus",
+      "status": "pass"
+    },
+    {
+      "case": "native_rejection_disjoint_support",
+      "constraint": "tiny_nucleus",
+      "status": "pass"
+    }
+  ]
+}

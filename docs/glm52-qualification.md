@@ -9,7 +9,10 @@ and LMCache campaign is recorded
 in
 [glm52-r20-3.36-qualification-plan.md](glm52-r20-3.36-qualification-plan.md);
 per-flag justifications are in
-[glm52-tuning-rationale.md](glm52-tuning-rationale.md).
+[glm52-tuning-rationale.md](glm52-tuning-rationale.md). The historical August 4
+r26 source audit and proposed SparkInfer experiments are preserved in
+[glm52-sparkinfer-performance-followup-plan.md](glm52-sparkinfer-performance-followup-plan.md);
+that research is not the current production baseline or an authorized next plan.
 
 ## Terminal-Bench reproduction
 

@@ -1,0 +1,77 @@
+{
+  "status": "selected and accepted after final gates and30-minute real-client soak",
+  "baseline_image": "ghcr.io/malaiwah/glm52-exl3-vast@sha256:8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a",
+  "selected_image_id": "56f7a34516009f0405564ec7dfad7380fc5f123ff94252b50ba5e92b80137282",
+  "selected_source_layers": [
+    "B12X226/256/257",
+    "V2-compatible measured model-service prefill fairness"
+  ],
+  "selected_prefill_share": 0.6,
+  "selected_prefill_capacity": 2048,
+  "max_model_len": 520192,
+  "max_num_seqs": 12,
+  "scheduler_tokens": 3072,
+  "mtp": "baseline native probabilistic3; matching-constraints prototype not selected",
+  "source_build": "build/Dockerfile uses exact parent and before/after hashes; build context is build/",
+  "benchmark": {
+    "repo": "https://github.com/local-inference-lab/llm-inference-bench",
+    "commit": "ccd9ad8ced7e387794391bfb0ac6d99b1f66ba6f",
+    "script_sha256": "053989edff8c9c93e2b96e61342b2ffbd9851e03deba17e6d3fc96fcd6694c1e",
+    "version": "0.6.2",
+    "rate_definition": "sum output tokens / sum request generation seconds, not aggregate concurrent server throughput",
+    "caveat": "Hotel Lights 2048 output budget often truncates reasoning; scores are not a model-quality conclusion.",
+    "source_url": "https://raw.githubusercontent.com/local-inference-lab/llm-inference-bench/ccd9ad8ced7e387794391bfb0ac6d99b1f66ba6f/llm_decode_bench.py"
+  },
+  "evidence_privacy": "Only synthetic request metrics and aggregate real-client counters. Synthetic output text removed from exported benchmark rows. No client bodies, credentials, private inspect/env, or raw container logs exported.",
+  "corrections": [
+    "V1 engine uses V2 model runner. Forcing V1 failed before serving; rollback executed.",
+    "Earlier V1 proposer edit is inactive under V2 and retained only as a control, not an MTP effect.",
+    "Active V2 prototype verified native graph replay/UVA rotation and rejection q; no reliable rate gain established.",
+    "Selected restart poll fixed to require live HTTP200 rather than stale persisted serving status."
+  ],
+  "validation_scope": "GPU route/teardown and activeV2 graph/rejection checks; real serving gates; same-image fairness off/40/60; same-image capacities3072/2048/1024 with fresh500K and3x64K overlap. No general long-term/full-task quality guarantee.",
+  "final_soak": {
+    "arm": "memory-2048",
+    "container": "glm53-opt-memory-2048-20260908t133955z",
+    "samples": 60,
+    "unhealthy_samples": 0,
+    "restarts_observed": 0,
+    "oom_killed_observed": false,
+    "min_free_mib_per_gpu": [
+      727.0,
+      727.0,
+      727.0,
+      727.0
+    ],
+    "counter_delta_includes_real_clients": {
+      "vllm:spec_decode_num_drafts_total{engine=\"0\",model_name=\"GLM-5.3\"}": 47773.0,
+      "vllm:spec_decode_num_draft_tokens_total{engine=\"0\",model_name=\"GLM-5.3\"}": 143319.0,
+      "vllm:spec_decode_num_accepted_tokens_total{engine=\"0\",model_name=\"GLM-5.3\"}": 99542.0,
+      "vllm:spec_decode_num_accepted_tokens_per_pos_total{engine=\"0\",model_name=\"GLM-5.3\",position=\"0\"}": 40443.0,
+      "vllm:spec_decode_num_accepted_tokens_per_pos_total{engine=\"0\",model_name=\"GLM-5.3\",position=\"1\"}": 32727.0,
+      "vllm:spec_decode_num_accepted_tokens_per_pos_total{engine=\"0\",model_name=\"GLM-5.3\",position=\"2\"}": 26372.0,
+      "vllm:request_success_total{engine=\"0\",finished_reason=\"stop\",model_name=\"GLM-5.3\"}": 65.0,
+      "http_requests_total{handler=\"/v1/chat/completions\",method=\"POST\",status=\"2xx\"}": 66.0,
+      "http_requests_total{handler=\"/v1/responses\",method=\"POST\",status=\"2xx\"}": 3.0,
+      "http_requests_total{handler=\"/v1/models\",method=\"GET\",status=\"2xx\"}": 10.0,
+      "http_requests_total{handler=\"none\",method=\"GET\",status=\"4xx\"}": 14.0,
+      "http_requests_total{handler=\"none\",method=\"POST\",status=\"4xx\"}": 4.0,
+      "http_requests_total{handler=\"/v1/chat/completions\",method=\"POST\",status=\"4xx\"}": 2.0
+    },
+    "scope": "Global counters include real client traffic; not an isolated benchmark."
+  },
+  "selected_container": "glm53-opt-memory-2048-20260908t133955z",
+  "rollback_container": "glm53-turnkey-r34-parity-20260908t015846z",
+  "rollback_note": "Retained stopped original container/image/state. Stop selected container before starting rollback; never run both GPU models concurrently. Re-run health/serving gates after any rollback.",
+  "measurement_script_scope": "Recorded host-specific harness expects a staged experiment root and pinned benchmark copy. build/Dockerfile independently reproduces the selected source overlay. Raw command arrays are retained in bench-events.jsonl.",
+  "monitor_boundary_note": {
+    "memory_1024": [
+      {
+        "time": 1788896066.0639403,
+        "health": "URLError",
+        "after_controlled_window": true
+      }
+    ],
+    "explanation": "The single labeled1024 connection-refused sample is after the controlled measurement window, during the deliberate selection stop. Raw monitoring is retained; do not classify it as a failed benchmark gate."
+  }
+}

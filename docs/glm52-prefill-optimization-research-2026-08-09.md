@@ -1,5 +1,11 @@
 # GLM-5.2 prefill optimization research — 2026-08-09
 
+> Historical research: the August 9 baseline, hypotheses and forecasts below
+> are preserved as a dated record, not current tuning instructions. The
+> [September 8 appendix](#2026-09-08-glm-53-deployment-and-constrained-frontier-review)
+> supersedes its present-tense frontier assessment and power/clock/DMA
+> recommendations, and corrects the later mHC causal attribution.
+
 ## Outcome
 
 The current r31 GLM-5.2 profile is already close to the **configuration**
@@ -595,3 +601,468 @@ and the test is explicitly classified as a stress gate.
 - [POD-Attention](https://arxiv.org/abs/2410.18038)
 - [Hydragen](https://arxiv.org/abs/2402.05099)
 - [ChunkAttention](https://arxiv.org/abs/2402.15220)
+
+## 2026-09-08: GLM-5.3 deployment and constrained-frontier review
+
+### Verdict and evidence standard
+
+**[INFERENCE] The deployed full GLM-5.3 stack is plausibly near the practical
+constrained frontier, not a proven Pareto optimum. No other investigated stack
+demonstrably dominates it under the same contract.** That contract is four
+96 GB RTX PRO 6000 Blackwell Workstation cards, 520,192 total tokens, C12,
+full 3.42bpw weights, TP4/DCP4, exact/lossless transport, the current quality
+policy and production reliability. A faster alternative with fewer tokens,
+lower precision, different hardware or weaker correctness is a different
+tradeoff, not domination. No distance from optimal or local speed forecast
+can be justified from the available evidence.
+
+Evidence grades used here:
+
+- **A — independent evaluator:** its own dated measured results, with the
+  evaluator's harness and population limits.
+- **B — vendor:** first-party model-card results, even when using public suites.
+- **C — public runtime report:** firsthand qualification, testimonial or local
+  receipt; not automatically independently reproduced or paired.
+- **P — proxy:** distributional fidelity, not task-level correctness.
+- **Local operational evidence:** immutable deployment receipts and retained
+  log scans; these establish exercised behavior, not a model-quality ranking.
+
+All research and follow-up proposals below are investigations/recommendations,
+**not executed tuning experiments**. Completed deployment, restoration, soak
+and cleanup actions are separately identified by their receipts.
+
+### What actually ran, and how narrow the memory margin is
+
+The [active identity](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/active.json)
+is image `8006d209b8f1d1bbf815983514e430fb77bbf01bd66075578483473d9310416a`
+(source `499d34e`), container `glm53-turnkey-r34-parity-20260908t015846z`.
+The [complete weight audit](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/weight-integrity.json)
+verified all 81 files of
+[`davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw@99c6f951333d2b38f1efefa533c7afadf0d376e3`](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/tree/99c6f951333d2b38f1efefa533c7afadf0d376e3).
+Canonical weights are unchanged; a
+[local metadata derivative](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/metadata-reconciliation.json)
+reconciles the obsolete native-MTP projection ignore entry. NFS/cachefilesd
+priming and a host manual-NVIDIA-hook fix in `run-local-podman.sh` were
+deployment work, not a hot model-runtime patch.
+
+The old resource shape survived: scheduler/EXL3 prefill arena 3072/3072,
+12 sequences, graphs/Trellis 48, GMU 0.95, fixed KV 4,518,907,904 bytes/GPU,
+TP4/DCP4, native probabilistic MTP3, dynamic NVFP4 KV + FP8 RoPE, online K6,
+LMCache 125 GiB initial RAM plus 384 GiB disk. Byte-pinned KV supersedes GMU
+autosizing; C12 is an admission ceiling, not twelve concurrent 520K requests.
+The [hardware receipt](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/hardware.json)
+shows 97,887 MiB/card, 375 W caps, driver 595.71.05, one NUMA node and NODE
+PCIe topology—not NVSwitch-equivalent bandwidth.
+
+Initial startup ran 02:13:47–02:29:15 UTC. The
+[first parity needle](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-initial-parity.json)
+retrieved 3/3 facts from 501,098 haystack tokens in 336.364 seconds.
+An explicit 02:58:58 restart restored the old B12X policy; the
+[final parity needle](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/needle-final-parity.json)
+retrieved 3/3 at 501,099 tokens in 275.874 seconds, followed by a healthy
+512-token temperature-1 sampler in 7.701 seconds. These are body-token counts
+excluding template/question overhead. Different cache warmth and live load
+make the two durations **observations, not a causal fold-cap speed A/B**.
+
+The [03:36:34 UTC accepted soak](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/soak-accepted.json)
+records 64 healthy/0 failed samples and 31.55 minutes since the first external
+client, with Chat and Responses traffic. There were 87 external POST 200
+headers and 96 engine completions **including probes**, with zero engine-error
+requests. HTTP 200 streaming headers are not independently proof of completed
+response bodies. No OOM, engine crash or unexpected restart was observed.
+Free VRAM minima at 30-second cadence were **215/245/217/215 MiB**:
+memory-thin operational acceptance, not continuous worst-case allocator,
+sampler or workspace headroom. It does not satisfy every historical August
+stress gate or substitute for the user's 24-day old-model stability record.
+
+At 03:37:31, [cleanup](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/old-cache-cleanup.json)
+removed only the old runtime LMCache and compile-cache directories, reclaiming
+370,534,412,288 bytes (345.09 GiB); health afterward was 200. Old
+image/container/state/logs/weights, new caches and cachefilesd were preserved.
+Port 8000, `AUTH=none`, `LANDING=0`, and aliases `GLM-5.2`/`local-primary`
+remain compatible, with `GLM-5.3` added. No global `latest`/`main` promotion or
+boot-policy change occurred; restart policy remains `no`.
+
+### Effective B12X parity, and the mHC attribution correction
+
+The live image still had legacy `SPARK_` fold settings; the installed B12X
+reader does not translate them. The absent-override policy was `auto`/256 MiB,
+not the intended 64 MiB. The
+[six restored controls](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-parity-restoration.json)
+were supplied through `TUNE_B12X_*` launch overrides. The
+[installed pure-policy receipt](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/b12x-effective-policy.json)
+now reports `auto`/67,108,864 bytes and an over-budget candidate choosing carry.
+This proves the policy reader under the observed launch environment, not an
+observed peak allocation or every live kernel route. Source now uses the
+correct B12X names for future builds; that source edit did not mutate the
+running image.
+
+Only fold 64 versus 256 MiB is demonstrated to change applicable policy.
+Fold mode `auto`, remote-push `0`, small-M split-K `0` and T12 SMEM `1`
+otherwise match defaults; the latter is additionally T12-specific, not this
+MCG codebook. Fold is an exact memory/performance choice, not an approximate
+quality knob. Actual query rows and workspace geometry matter: scheduler 3072
+alone does not prove the speculative 96–240 MiB slab sizes were allocated.
+See pinned [indexer policy](https://github.com/local-inference-lab/b12x/blob/7cecbb2c4819636ae7f05f8b116f2c45ee2cff7b/b12x/attention/nsa_indexer/paged.py),
+[environment reader](https://github.com/local-inference-lab/b12x/blob/7cecbb2c4819636ae7f05f8b116f2c45ee2cff7b/b12x/_lib/env.py)
+and open [scratch-budget issue #134](https://github.com/local-inference-lab/b12x/issues/134)
+(August 9; status checked September 8).
+
+**Correction to the historical mHC explanation:** the audited
+[mHC kernels](https://github.com/local-inference-lab/b12x/blob/7cecbb2c4819636ae7f05f8b116f2c45ee2cff7b/b12x/norm/mhc/_kernels.py)
+support hidden sizes 4096/7168; this pinned full GLM has hidden size 6144.
+The [GLM model mapping](https://github.com/local-inference-lab/vllm/blob/e2666d9a65f41fc376607531453cbd57c4c71016/vllm/model_executor/models/deepseek_v2.py)
+and [optimized implementation](https://github.com/local-inference-lab/vllm/blob/e2666d9a65f41fc376607531453cbd57c4c71016/vllm/models/deepseek_v32/nvidia/model.py)
+do not establish an mHC path; the latter uses RMSNorm/fused all-reduce RMSNorm.
+Thus threshold 3072 is **likely inert for full GLM**. The
+[August maintenance record](aibeast-r33-maintenance-results-2026-08-09.md#mhc-prefill-geometry-crossover)
+still records PP control/candidate medians 2542/2672 at 3K, 2678/3061 at 8K,
+2590/2880 at 64K, 2398/2736 at 128K and 2175/2352 at 262K tok/s.
+Keep these observations, including their live-traffic caveat, but retract the
+causal claim that changing mHC geometry produced those GLM gains. Restoring
+3072 preserves explicit configuration, not a proven speed optimization.
+
+### Is the original model smarter? Evidence with dates and versions
+
+There is real evidence of gains in specific measured capabilities, **not a
+universal percentage smarter**, and not proof that the exact local quantized
+`high`-effort deployment retains all of them.
+
+| Evaluation | GLM-5.2 → GLM-5.3 | Date/version and interpretation |
+|---|---|---|
+| AA Intelligence Index, current | 39 → 45 (+6 rounded points) | **A**, retrieved September 8; both [5.2](https://artificialanalysis.ai/models/glm-5-2) and [5.3](https://artificialanalysis.ai/models/glm-5-3) pages label **v4.3**. The 5.2 chart has an “Estimate (independent evaluation forthcoming)” legend whose per-datapoint scope was not recoverable; not every new component can be called independently rerun. |
+| AA Intelligence Index, launch | 53 → 60 (+7 points) | **A**, [August 18 launch](https://x.com/ArtificialAnlys/status/2089830890709135426), [original chart](https://pbs.twimg.com/media/HQCRfGPakAArNUF.jpg?name=orig), max/max, **v4.1-family**. Chart says v4.1; current method history calls the August–September revision v4.1.1. |
+| GDPval-AA v2 | 1524 → 1770 (+246 Elo) | **A**, same August 18 launch, not a claim about today's leaderboard or a task-solved percentage. |
+| FrontierSWE v1 | Mean@5 average rank 6.21 → 4.50 (lower better); chart dominance 67% → 78% | **A**, [Proximal August 14](https://x.com/ProximalHQ/status/2088336618495377636), [chart](https://pbs.twimg.com/media/HPtAamBaUAA87bz.jpg?name=orig), [v1 method](https://frontierswe.com/v1). Vendor card's decimal precision is 67.5 → 78.1 (**B**), +10.6 dominance points. Dominance is pairwise win probability, **not 78.1% of tasks solved**. |
+| AA-Omniscience | score 4 → 14; accuracy 24% → 34%; attempt rate 46% → 55% | **A**, August 18 launch. More correct answers support genuine gains; this is not a general intelligence percentage. |
+| AA-Omniscience hallucination rate | 26% → 30% (+4 percentage points worse) | **A**, August 18 launch. Keep the evaluator's denominator; do not infer universally improved reliability. |
+| Output use per AA task | about 15,700 → 18,700 tokens | **A**, August 18 v4.1-family: about +19%, rounded to **20%** in the post. Added capability has an output/latency cost, not a free speedup. |
+| Terminal Bench 3.0 | 4.6 → 28.3 | **B**, [official card](https://huggingface.co/zai-org/GLM-5.3), retrieved September 8. Vendor-run public suite, not independent replication. |
+| DeepSWE v1.1 | 46.2 → 66.9 | **B**, same card; +20.7 points under its harness, not a local coding A/B. |
+
+The [AA version history](https://artificialanalysis.ai/methodology/intelligence-benchmarking#version-history)
+explains why **60 and 45 must not be compared as a regression**. v4.2 added
+Briefcase/GDP.pdf, removed GPQA, revised LCR and SciCode grading and reweighted
+categories; v4.3 replaced tau with AutomationBench-AA and Terminal Bench 2.1
+with 4.0/mini-SWE-agent. Current weights are agents/coding/scientific/general
+30/20/20/30, versus v4.1's 34/24/24/18. The earlier 44-versus-42 observation
+has no retrieved, dated index-version evidence; do not relabel it v4.2 or
+repeat it as current.
+
+[GDPval-AA methodology](https://artificialanalysis.ai/evaluations/gdpval-aa)
+uses 220 real deliverable tasks across 44 occupations and nine industries,
+agent tools and blind pairwise judging with Bradley–Terry Elo anchored to
+human deliverables at 1000. It is independent agentic-work evidence, not a
+coding unit-test score. No GLM-specific confidence interval was retrieved,
+and current readable leaderboard rows did not expose this pair; 1524/1770
+is the **dated launch pair**. The vendor's 1508/1769 is a different snapshot,
+not interchangeable endpoints. FrontierSWE v1 has 17 tasks; partial test
+progress ranks implementation tasks with no complete successful solution.
+Mean@5 is not pass@1, best@5 or percent solved.
+
+Vendor settings also limit transfer. Terminal Bench 3 uses Claude Code
+2.1.207, max effort, 400K context, 128K output, avg@3, up to 600 turns/10 hours
+and a separate verifier. DeepSWE uses mini-swe-agent, 400K context and six
+hours. FrontierSWE, ALE and several other card protocols use 1M context,
+beyond this local envelope. HLE-with-tools uses a 163840 output cap, versus
+local 131072 (32768 tokens/20% less), plus its own tools/context management.
+Near-500K input cannot simultaneously reserve 131072 output within 520192
+total. The vendor's “50% coding improvement” refers to private Z.ai Code
+Bench, not 50% smarter or an independent suite aggregate. Disclosed verifier,
+anti-cheat and environment changes require pinned harness comparisons; they
+are neither proof of cheating nor reproducible by changing only model ID.
+The February [GLM-5 paper](https://arxiv.org/abs/2602.15763) (v2 February 24)
+is architecture/RL background, not documentation of August GLM-5.3 posttraining.
+No defensible same-date full-model human-arena pair was retrieved; Flash
+AutoEval results and ranks across changing pools are not a substitute.
+
+### Exact quant quality: preserve the contrary evidence
+
+The user's [August 30 GPQA report](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/discussions/2)
+is an actual 3.42bpw evaluation: **169/198 = 85.35%**, Wilson 95% interval
+79.76–89.60%, zero API errors; temperature 0.6, max effort, C8, TP4/DCP4,
+NVFP4 KV + FP8 RoPE, 131072 output cap, llm-inference-bench 0.4.29 at
+`42c38fdd`. Eight responses hit the cap; two lacked final answers and six
+already contained one. Even awarding both unanswered cases yields 171/198
+(86.36%). The August 31 comment says it scored below same-bpw GLM-5.2,
+without supplying the numeric 5.2 ledger there. **C: prior self-report, not
+independent corroboration, not a paired proof of regression**, and not this
+current image. The cited AA 91.7% reference is 6.35 points higher, but prompts,
+ordering, repeat counts, output limits and the entire serving stack differ:
+this is not isolated quantization loss. Do not reuse the report's inconsistent
+aggregate-throughput label as a hardware benchmark.
+
+The [3.42 card](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw)
+and [3.25 card](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.25bpw)
+report August 29 teacher-forced full-vocabulary KL(teacher||student), four
+held-out windows of 2047 positions, with a separate CN3 reproduction:
+
+| Weight / KV | Original KL | CN3 KL |
+|---|---:|---:|
+| 3.42 / FP8 | 0.024105 | 0.023966 |
+| 3.25 / FP8 | 0.026103 | 0.026776 |
+| 3.42 / NVFP4 + FP8 RoPE | 0.039518 | 0.037695 |
+| 3.25 / NVFP4 + FP8 RoPE | unmeasured | 0.039396 |
+
+**P:** this measures short-window distributional fidelity, not real coding
+success, 500K synthesis or retained 5.3-over-5.2 gains. KV format moves this
+proxy more than 0.17 weight bits; it does not establish global monotonicity
+or that 3.25 dominates. The separate [September 5 discussion correction](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/discussions/3)
+labels its reconstructed-BF16/Transformers KL lane **advisory**, not strict
+serving-kernel fidelity; do not pool unlike panels/teachers.
+
+3.42 uses 148 K3/108 K4 experts per layer versus 3.25's 192/64; it upgrades
+44 experts/layer with the same selection machinery. Correct mixed-tier
+loading is essential: the card warns a uniform-K loader can produce fluent
+garbage. Nominal 3.25 checkpoint metadata is 339,256,027,136 bytes versus
+3.42 tensor payload 355,034,998,784: about 3.674 GiB/equal quarter saved,
+**not measured VRAM recovery**. Full 3.42's tensor payload exceeds 5.2's by
+3,640,983,552 bytes total (about 0.848 GiB/equal quarter); loaded model,
+KV, graphs and workspaces are distinct allocations.
+
+Preserve current 3.42/NVFP4. A **separate, explicit 3.25 + FP8-KV experiment**
+is worth considering only after actual artifact/layout, per-rank loading and
+peak fit demonstrate the same 520K/C12 envelope, and matched task-quality
+measurements justify the exchange. It is not an automatic fallback or a
+claim that the checkpoint-size saving necessarily pays for FP8 KV.
+Higher-bit full 5.3 fit at unchanged context/concurrency is likewise unproven.
+
+### Reasoning budget and history are part of the deployment contract
+
+The [pinned-template rendering receipt](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/thinking-template-probe.json)
+shows:
+
+| Template input | Pinned GLM-5.2 | Pinned GLM-5.3 |
+|---|---|---|
+| Defaults | Clears old reasoning; opens `<think>` | Preserves old reasoning; opens `<think>` |
+| `enable_thinking: false` | Clears old reasoning; emits `<think></think>` | Still preserves old reasoning and opens `<think>`; flag does not disable it |
+| `clear_thinking: true` | Clears old reasoning | Clears old reasoning, still opens new `<think>` |
+
+This is a rendered-template proof, not a measured speed or answer-quality
+benefit. No global template edit was made. Use the
+[official GLM-5.3](https://huggingface.co/zai-org/GLM-5.3) `low`/`high`/`max`
+efforts rather than promising thought disable; official default and reported
+benchmarks use max, whereas this appliance defaults high. Clearing history
+may save tokens and alter prefix identity, but also removes reasoning context:
+measure real agent tasks before changing the client policy.
+
+### Public community evidence, including negative reports
+
+These are accessible public sources, not private Discord testimony:
+
+| Report and date | What it supports | Grade and limit |
+|---|---|---|
+| [3.42 bring-up discussion](https://huggingface.co/davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw/discussions/1), August 29–30 | Positive historical 393216/C8 qualification: 72/72 temperature-1 decode requests and 15/15 long-context facts; author corroborates first-sampler/graph OOM in the older 520K attempt | **C**. Qualification is the user's campaign, not an independent positive vote; author corroborates the OOM mechanism. C8 227.55 tok/s is aggregate, not C1 or AIBeast parity speed. The historical rejected arm does not disprove today's successful 520192 profile. |
+| [Independent agent PR #22](https://github.com/KrishnaAnnavaram/semantic-mcp-data-access-gateway/pull/22), August 30 | Reverted default to 5.2: 5.3 truncated 1/4 cases at both 1200 and 4000 ceilings, 5.2 0/4; one turn spent 9999/10000 tokens reasoning | **C**, firsthand Z.ai API workflow, small sample, unknown quant/hardware. Reported 476/557-second agent latencies versus earlier 110–370 seconds are multistage observations, not controlled decode/TTFT. Low effort helped one probe; not evidence no larger budget could work. |
+| [DCP2 issue #236](https://github.com/local-inference-lab/vllm/issues/236) and [PR #54](https://github.com/local-inference-lab/rtx6kpro/pull/54), August 4–10 | GLM-5.2 DCP2 long-context corruption could look fast; reporter later confirms r33 fix with salted probes | **C**, same reporter/campaign, not two replications. DCP4 control was clean; current DCP4 is not implicated. Broken 14.97-second readout versus 50.21 seconds is not a speed win. |
+| [Persistent-L2 contamination #55](https://github.com/local-inference-lab/rtx6kpro/issues/55), August 4 | Bad KV from broken images replayed through healthy ones and produced false bisections; salts exposed cache contamination | **C**, detailed firsthand mechanism, not independent reproduction or evidence the stable old AIBeast service was corrupt. Preserve checkpoint/engine/KV-layout cache namespaces. |
+| [Prefill tuning PR #57](https://github.com/local-inference-lab/rtx6kpro/pull/57), August 4 | Same-boot 64K prefill: CKV gather cap 16384 yielded 1478 tok/s versus 2895 with 140K default | **C**, counterexample to treating smaller workspace as free performance; incomplete power/batch/harness controls, not 5.3 decode or AIBeast gain. |
+| [Malformed-history #684](https://github.com/local-inference-lab/vllm/issues/684) and [candidate fixes #701](https://github.com/local-inference-lab/vllm/pull/701), September 6–7 | Incomplete tool JSON can cause pre-generation 400; Flash/Jovian report also identifies late callback races | **C**, concrete frontend lead and CPU tests, open PR, not current full-GLM GG GPU qualification. Establish exact path applicability before porting or inventing JSON repairs. |
+| [Lifecycle issue #60](https://github.com/local-inference-lab/rtx6kpro/issues/60) / [fix #252](https://github.com/local-inference-lab/vllm/pull/252), August 7 | Positive reporter/maintainer reproducer, fix and 1792/1792-request live qualification | **C**, strong reliability evidence for that native-offload DS4 TP2 profile, not current full-GLM LMCache or model-quality evidence. |
+
+GitHub #54/#57 refer to Discord tuning posts; the actual sources retrieved were
+GitHub. No authenticated/private Discord content or direct message archive
+was accessed, and no accessible controlled independent positive full-5.3
+coding testimonial was found. This does not prove none exists. Positive
+qualification and author corroboration are retained without manufacturing a
+community consensus; the user's own HF reports are not counted twice.
+
+### Complete-log review: stable engine, rare request failures
+
+The retained old stdout scan covered **134,038,560 bytes / 767,123 records**,
+August 15 01:57:47 to September 8 02:10:09 UTC (24 days, 12 minutes).
+It contains one startup/engine initialization/ready event and one retained
+PID per role, with no matched engine crash or restart: this respects the
+user's stable-uptime observation. The initial new snapshot covered
+700,903 bytes / 3291 records through 02:40:19; it had only 11 post-ready
+minutes and is not the later accepted soak. Main additionally scanned the
+old internal LMCache log (about 348 MB / 2,078,720 records).
+
+The [final scan ledger](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/log-review.json)
+also covers the complete first-parity attempt and final container through
+04:10:11 UTC: the latter has 4,946 stdout records and 5,127 cache-service
+records, with no ERROR-level entries. Its token-weighted draft acceptance is
+73.17%; the earlier 70.89% figure below describes the short initial snapshot.
+Neither is a matched speed or quality comparison. The
+[extended soak](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/final-soak-summary.json)
+has 129 successful health samples and no failed samples over roughly 64 minutes.
+
+- Five logical KV retrieve failures on August 21 produced 20 rank errors,
+  five scheduler request failures, and continued healthy serving—not five
+  crashes. Internal logs add 4736 prefetched-object read errors in the same
+  five bursts, with “exists but cannot read”/non-readlocked warnings consistent
+  with a lease gap. This is not proof of every root cause. The adapter's
+  “recompute” wording did not mean recovery: the deployed scheduler used
+  failure policy `fail`. Do not blindly switch to recompute, especially where
+  DMA ownership after timeout is unresolved.
+- All 22 old HTTP 500s were legacy `/v1/completions` logprob failures on
+  August 26: `IndexError` at `top_logprobs[i]` in
+  `_create_completion_logprobs`, while health and generation continued.
+  [Upstream PR #53722](https://github.com/vllm-project/vllm/pull/53722)
+  guards a **KeyError**, not this array-length mismatch. No new legacy calls
+  in the initial snapshot means zero new failures is not evidence of a fix.
+- Both boots contain **1644 INFO-level `fallback proxy error` measurements**:
+  numerical quantization-error metrics, not network/proxy/runtime errors.
+  SymmMem native peer-atomic warnings do not mean all peer access is disabled.
+- The old log's 45 preemption-warning records, nine late/duplicate callback
+  warnings and queue/engine-stat gaps are not unique-victim or downtime
+  counts. HTTP 200 during a gap establishes API response headers, not
+  uninterrupted streaming progress. Absence of cache-eviction text is not
+  absence of eviction.
+- Old token-weighted MTP acceptance was 76.17% versus 70.89% in the short
+  initial new window; this measures draft agreement, not intelligence or
+  controlled speed. Old hot caches and 24-day mixed workloads cannot be
+  compared to new JIT/cold-cache/long-prefill probes using aggregate interval
+  throughput means.
+
+Cache observability is incomplete: standalone 9090 metrics are disabled and
+the current 8089 admin API exposes six informational GET routes, not
+`/metrics`. The shared `metrics_api` module also defines mutating
+`POST /metrics/reset`; future exposure must select **read-only GET** rather
+than whitelist that module. Source supports session retention, but the
+wrapper does not forward `LMCACHE_SESSION_TTL_SECONDS`; **5400 seconds is not
+an active claim**. Its 600/300-second L1 write/read TTLs are different controls.
+
+### Why a newer stack is not yet a dominating replacement
+
+The [published stack inventory](https://github.com/local-inference-lab/blackwell-llm-docker/blob/master/README.md)
+and [r34 integration lock](https://github.com/local-inference-lab/blackwell-llm-docker/blob/master/patches/releases/gilded-gnosis-v20-r34/b12x/integration.lock.json)
+were reviewed September 8. GG's public 3.5bpw qualification is GLM-5.2
+R7 K3/K4/K5, TP4/DCP1, C8, 65K—not full 5.3 at 520K. Infernal Invocation
+r18 (August 18; CUDA 13.3/Torch 2.13) GPU-qualifies DS4 Flash and only
+source-qualifies the listed GLM-5.2 profiles. Jovian's DS4 TP2 and Kimi TP16
+qualification do not transfer to full GLM TP4/DCP4. LIL SGLang's documented
+GLM NVFP4 quickstart uses eight GPUs; no matching full 5.3 mixed-EXL3
+520K/C12 proof was found. Stock vLLM/SGLang/TRT-LLM/vanilla ExLlama are not
+drop-in loaders for this exact mixed-tier artifact.
+
+[B12X #133](https://github.com/local-inference-lab/b12x/pull/133) merged August 11
+and is already in r34. Its TP8 two-island 12–20% claims are not TP4 gains;
+reported TP4 gains are 1.67/2.27% at C4/C8 with additional staging memory.
+Keep remote-push off rather than advertise a free 20%. September 6–7 open
+[paired-push #339](https://github.com/local-inference-lab/b12x/pull/339),
+[T12 #328](https://github.com/local-inference-lab/b12x/pull/328) and
+[two-bit planner #327](https://github.com/local-inference-lab/b12x/pull/327)
+are topology/model/layout-specific, not already merged GLM improvements.
+SM100/SM103 kernel headlines and TP9 Kimi microseconds are not SM120 TP4
+end-to-end evidence. A generic LMCache or NCCL update likewise does not
+automatically preserve this appliance's adapter, leases and device-safety
+contracts.
+
+CPU offload is a different capacity/latency tradeoff, not demonstrated
+domination. About 251 GiB host RAM minus the 125 GiB cache initial allocation
+leaves about 126 GiB **before** OS, workers, pinned buffers, page cache and
+loaders; this is not a safe available offload budget. Full checkpoint payload
+already exceeds host RAM. The [generic offload contract](https://github.com/vllm-project/vllm/blob/main/vllm/config/offload.py)
+does not qualify mixed EXL3 slabs in GG; UVA transfers weights each forward
+and prefetch spends extra GPU memory. The
+[official card bandwidth](https://www.nvidia.com/en-us/products/workstations/professional-desktop-gpus/rtx-pro-6000/)
+1792 GB/s is local GDDR7 peak: summing four links into 7.168 TB/s does not
+make a shared memory fabric or predict MoE decode rate. One NUMA node offers
+no intersocket-placement windfall; idle host cores do not accelerate GPU
+tensor kernels without a proven offload path.
+
+### Retained decisions: do not recycle rejected knobs as free gains
+
+The [August maintenance measurements](aibeast-r33-maintenance-results-2026-08-09.md)
+supersede this document's early 280 W/clock/DMA hypotheses:
+
+- **375 W** retained **98.6%** of 400 W's 262K prefill: 2154 versus 2184
+  tok/s; 280 W delivered 1788. The 400 W hottest GPU briefly reached 92°C
+  without an observed thermal-throttle indication. The retained cap is a
+  measured energy/performance choice, not arbitrary underpowering.
+- **16365 MHz memory clock** at 375 W delivered 2442 tok/s at 128K; 15165
+  delivered 2341 (−4.2%), 13965 delivered 2305 (−5.6%). Downclocking has
+  already been tested; do not resell it as an untried gain.
+- **24 MiB lossless DMA crossover** remains selected. 6/24 MiB medians were
+  2721/2678 at 8K, 2677/2641 at 32K, 2502/2590 at 64K, 2304/2398 at 128K
+  and 2217/2175 at 262K; C4 TG 193.3/194.2 was parity. Live-traffic
+  confounders remain; 6 MiB was not consistently better. The actual
+  communicator uses 25,165,824 bytes even when the old wrapper banner says
+  6 MB.
+- **Async scheduling and MTP3** are not newly discovered free upgrades.
+  Old async pressure qualification completed twelve 65,725-token inputs in
+  393.23 seconds without error, preemption, OOM or restart; decode comparisons
+  were traffic/acceptance-sensitive. MTP5 was previously slower than MTP3
+  on an older 3.42 profile, not proof of the current 5.3 optimum.
+
+### Ranked post-soak follow-ups (not yet executed)
+
+1. **Reasoning-budget/history contract.** Replay the eight capped GPQA cases
+   plus ordinary real agent controls with high/max and, where safely possible,
+   131072/163840 output limits. Compare current history preservation against
+   explicit `clear_thinking: true`, keeping system/tools and task facts fixed.
+   Record correctness, loops, truncations, valid tools, token count and
+   time-to-correct-result. Test low for bounded routing work, not as a claim
+   of disabled reasoning. Do not change the global template speculatively.
+2. **Matched task quality and quant/KV attribution.** Pair pinned 5.2/5.3
+   on actual coding/agent tasks with hidden verifiers, identical harness,
+   effort, budgets and repeated seeds. Add reference/exact-3.42 and FP8/NVFP4
+   arms only with fit and safety evidence. Treat 3.25 + FP8 as a separately
+   justified experiment, not fallback. Include 128K/300K/~500K multi-file
+   synthesis and verifiable edits; needles alone do not measure that quality.
+3. **Cache reliability/observability and exact-prefix reuse.** Correlate the
+   five old failure bursts with leases, occupancy, retrieval completion and
+   session lifecycle. Expose GET-only metrics safely, not the reset route;
+   verify actual retention forwarding before promising a TTL. Distinguish
+   cold token-zero nonce, GPU hit, pressure/DRAM restore and L2/restart arms,
+   with hit tokens, tier bytes, TTFT and correct outputs. Keep namespaces
+   separate; do not infer disk/restart qualification from DRAM-hit speed.
+4. **Legacy logprob array alignment.** Reproduce the old completions
+   `top_logprobs[i]` mismatch with the exact speculative/sampling contract,
+   then investigate output-array alignment. The KeyError guard is not its
+   fix; do not suppress an exception or claim the new model solved it.
+5. **Isolated CUDA 13.2 Update 2 correctness rebuild.** The
+   [runtime compiler audit](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/runtime-compiler-audit.json)
+   found system NVCC/ptxas **13.2.78**, Triton's bundled ptxas **12.8.93**,
+   NVRTC **13.2.78**, package cuBLAS **13.4.0.1**. NVIDIA's
+   [Update 2 release notes](https://docs.nvidia.com/cuda/archive/13.2.2/cuda-toolkit-release-notes/index.html)
+   fix nested-divergence register corruption and the Update 1 NVFP4 cuBLAS
+   tensor-scale omission; fixed NVCC is 13.2.86 and cuBLAS 13.4.1.3.
+   The later [live library map](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/loaded-compute-libraries.json)
+   and [wheel-record hash check](../maintenance/glm53-aibeast-500k/evidence-aibeast-20260908/cublas-record-check.json)
+   identify the loaded cuBLAS as the unmodified **13.4.0.1** package. The
+   NVFP4 scaling regression was **introduced in Update 1**; an older version
+   number alone does not establish exposure to that regression. Keep this
+   distinct from the compiler issue documented as present since CUDA 12.8.
+   Inventory predating fixes is not proof an affected kernel executed or
+   caused an incident. Audit **every actual compiler/assembler/JIT/library
+   path**, not just system `nvcc`; isolate image and JIT namespaces, retain
+   GG sources and all resource/quality settings, then requalify long context
+   and soak. This is correctness work, not a predicted speedup or blind
+   CUDA 13.3/Torch upgrade.
+6. **Prefill cadence 1 versus 2.** [vLLM #546](https://github.com/local-inference-lab/vllm/pull/546)
+   merged September 1 and is already backported; current 1 is unthrottled.
+   Its public DCP1/DFlash 1-versus-8 experiment traded decode responsiveness
+   against prompt throughput, not proof of native-MTP3 interval-2 gains.
+   Use A/B/B/A with a position-aligned long prefill during matched decode;
+   measure p50/p95/p99 ITL, prefill TTFT, goodput, queue progress and acceptance.
+   A better decode tail at worse prefill TTFT is another frontier point.
+7. **MTP depth and unused draft work.** Measure per-position acceptance,
+   draft/verify duration and total latency at C1/C4/C12 before a bounded
+   depth comparison; mean accepted length is not throughput or intelligence.
+   [Issue #272](https://github.com/local-inference-lab/vllm/issues/272)
+   (August 9, still open at review) proposes hydrating required draft KV but
+   skipping unused heads/sampling/additional draft steps for unfinished
+   prefills. Profile actual calls before implementing; final chunks, mixed
+   row compaction, grammar, prompt logprobs and draft KV are correctness
+   boundaries. No quoted 1–4% or upstream Qwen headline is a measured local
+   gain. DFlash/DSpark need their own weight/graph/runtime qualification.
+
+Only after those measurements justify it should exact metadata reuse
+([#207](https://github.com/local-inference-lab/vllm/issues/207)) or caller-owned
+fold scratch ([#134](https://github.com/local-inference-lab/b12x/issues/134))
+be reconsidered. The >140K compaction copy protects a real cuBLAS tail/OOB
+hazard; removing it without padded backing and correctness evidence is not
+an optimization.
+
+For any candidate, pin image, checkpoint, template/parser, sampler, KV format,
+compiler and cache namespaces. Screen intermediate workspace boundaries before
+near-limit shapes; separate cold/warm/tier-restored prefixes and mixed
+prefill/decode workloads. Record output correctness, accepted tokens and
+step durations, tail latency, queue/preemption behavior, worst-rank
+power/clocks/temperature and allocated/reserved/physical VRAM. Promote only
+after matched quality and reliability hold at the retained context/C12
+contract. Until then, stronger original-model scores and a successful
+deployment support the upgrade's rationale—not proven local quality
+dominance, a free speed gain, or a measured Pareto optimum.

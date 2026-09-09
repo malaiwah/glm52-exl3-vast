@@ -1,0 +1,53 @@
+{
+  "status": "Prepared only: no tests, builds, imports, GPU operations, or execution validation were run by B12xCandidate.",
+  "operator": "Main alone selects GPUs, stops/starts workloads, layers the running exact image, and executes validation.",
+  "installation": [
+    "For each manifest.files entry, resolve its target under the installed Python package root and require its SHA256 to equal baseline_sha256 before copying the candidate source bytes. Do not layer onto a stale checkout or silently accept mismatches.",
+    "Copy only the two manifest.files source paths into their matching package-relative targets. Keep manifest.json and validation/ together at an isolated experiment location; they are not package modules.",
+    "Run from a neutral working directory without PYTHONPATH pointing at a checkout. Both scripts check the imported installed module's SHA256 against manifest.json before accessing CUDA; mismatches are fatal.",
+    "The scripts intentionally have no skip/fallback path for missing CUDA, mismatched candidate source, unsupported B12X runtime, failed collectives, or failed output checks. Preserve nonzero exits as failures."
+  ],
+  "commands": [
+    {
+      "name": "route_tail_cuda",
+      "environment": {
+        "CUDA_VISIBLE_DEVICES": "ONE_GPU_EXPLICITLY_ASSIGNED_BY_MAIN",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "argv": ["timeout", "--signal=TERM", "--kill-after=15s", "240s", "python", "/CANDIDATE/validation/route_tail_cuda.py", "--manifest", "/CANDIDATE/manifest.json", "--device", "0"],
+      "checks": [
+        "Actual CUDA route payload multiset, unique coverage, invalid-ID/expert-map rejection, per-expert block grouping, padded counts, live_numel route sentinels, -1 block sentinels, caller data pointers and guard suffixes.",
+        "PR226 small-prefix fixed arena max=24 rows, K1, E32, block=8 with tails 17/23/24; eager and captured execution, with and without expert maps.",
+        "PR226 prefill fixed arena max=1536 rows, K16, E896, block=8 with tails 1177/1184/1536; must return the full 30848 route-slot/3856 block-slot caller arena.",
+        "PR256 runtime-bound variation using another adequate max=1535 arena and differently aligned live tail lengths.",
+        "Preallocated expert-count path, allocation-based eager count path, and old captured-prefix fallback with explicit out-of-capture warmup.",
+        "Empty/below-bucket behavior and genuinely undersized arena ValueError remain intact."
+      ],
+      "limits": "No model weights. Finite cases, largest input 1536x16 int64 routes and roughly 31k int32 packed slots plus maps/counts/guard suffixes. CUDA contexts, JIT compilation and allocator reservation are additional; this is not a memory-margin benchmark.",
+      "success": "Exit 0, per-case JSON, and final JSON status=passed. No timing or no-recompile claim is made by this script."
+    },
+    {
+      "name": "pcie_teardown_cuda",
+      "environment": {
+        "CUDA_VISIBLE_DEVICES": "TWO_DISTINCT_GPUS_EXPLICITLY_ASSIGNED_BY_MAIN",
+        "PYTHONUNBUFFERED": "1"
+      },
+      "argv": ["timeout", "--signal=TERM", "--kill-after=15s", "270s", "python", "/CANDIDATE/validation/pcie_teardown_cuda.py", "--manifest", "/CANDIDATE/manifest.json"],
+      "checks": [
+        "Actual two-rank NCCL/PCIe eager reduction followed by transient-channel CUDA graph capture and three changed-input replays per cycle, with exact BF16 sums and no additional torch allocations during replay.",
+        "Destroy/reset graphs before releasing referenced IPC channels. Set each process current_device to the OTHER GPU before rollback and close.",
+        "All three real teardown barriers must explicitly target the pool owner's rank-local GPU; an unbound barrier raises before entering NCCL.",
+        "Rollback releases transient IPC ownership while preserving the retained channel, which must still perform a correct all-reduce.",
+        "Explicit close releases retained ownership; a repeated close is idempotent; current_device remains the unrelated GPU. Two complete cycles exercise re-creation."
+      ],
+      "limits": "Exactly two visible CUDA devices are required. Two processes, two cycles, at most two pool channels per cycle, max_input_bytes=65536 and 4x1024 BF16 input/output tensors; default rank-data storage is 8 MiB per channel. NCCL/context/compiler allocations are additional. No models or persistent weights. Internal 240-second worker deadline terminates and then kills surviving children; outer timeout is a second bound.",
+      "success": "Exit 0, each rank/cycle JSON confirming graph/rollback/reuse/close, and final JSON status=passed.",
+      "caution": "Do not wrap the whole rollback/close in torch.cuda.device(owner): that would mask the wrong-current-device condition. Existing status object collectives still use their baseline current-device policy; this exact runtime must be qualified rather than assuming upstream results transfer."
+    }
+  ],
+  "serving_followup": [
+    "Only after source-hash checks and isolated CUDA correctness pass, Main can measure route-tail serving behavior and compilation events under the controlled experiment.",
+    "No throughput, prefill fairness, memory margin, numerical parity of a complete model, or global absence of serving-time compilation is established by this source layer or its unexecuted scripts.",
+    "PR256 intentionally leaves the small-prefix and legacy captured-prefix live scalar specialization unchanged. Existing alignment/bucket warmup remains relevant; do not remove it based on this patch."
+  ]
+}
