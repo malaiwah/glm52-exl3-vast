@@ -848,7 +848,59 @@ Connect panel. To force proxy-only API access, remove `8443/tcp` and set
 `RUNPOD_DIRECT_TLS=0`. Port behavior and the 100-second limit are documented in
 [Runpod's expose-ports guide](https://docs.runpod.io/pods/configuration/expose-ports).
 
+
 ## Launch on JarvisLabs
+
+### The two-command human path
+
+**A. Full VM (recommended: the image runs directly, no unpacking).**
+
+```bash
+jl create --vm --gpu RTX-PRO6000 --num-gpus 4 --storage 700 \
+  --region IN1 --name glm53 --yes
+jl ssh <machine-id>     # or: ssh ubuntu@<public-ip>
+```
+
+Then, on the VM:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_vm_bootstrap.sh \
+  | bash
+```
+
+That single command pulls the qualified `docker.io/malaiwah/glm52-exl3-vast:latest`,
+runs it directly with Docker, frees port 5555 from `nvidia-dcgm`, and waits
+until the endpoint is healthy. It then prints the endpoint, the generated API
+key, the dashboard token, and a ready-to-paste `curl` example. Defaults:
+`glm53-3.42bpw-500k` profile (520,192-token context), `GLM-5.3` model name,
+authenticated endpoint, tokenized dashboard. No Hugging Face token is needed
+(the checkpoint is public); no other environment is required. Expect roughly
+25–45 minutes from `jl create` to a working endpoint on a fresh VM (weights
+are ~331 GB); a re-run with cached weights takes ~10 minutes.
+
+**B. Spot container (about half the GPU price; no Docker daemon exists
+there, so the image is unpacked and grafted in place).**
+
+```bash
+jl create --gpu RTX-PRO6000 --num-gpus 4 --storage 700 --spot \
+  --region IN1 --http-ports 8000,1111 --name glm53-spot --yes
+ssh root@<public-ip>
+```
+
+Then, on the instance:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_quickstart.sh \
+  | bash
+```
+
+The quickstart resolves `:latest` to its immutable digest before anything
+runs (the underlying runner refuses floating tags by design), then fetches,
+unpacks, verifies and grafts the image, launches the appliance, waits for
+health, and prints the same summary. The advanced, unrolled form of this path
+is documented below.
 
 Choose **[▶ RTX PRO 6000 Blackwell VM on JarvisLabs](https://jarvislabs.ai/dashboard/vm)**,
 then select exactly four `RTX-PRO6000` GPUs, at least 650 GB of disk, and the
@@ -948,13 +1000,16 @@ jl list
 ssh ubuntu@<public-ip>
 ```
 
-On the VM, export the numeric id and region shown by `jl list`. Add the two
-optional download/TLS credentials without putting them in a shared script or
-shell history, then run the checked-in launcher:
+On the VM, the launcher needs no required environment: it auto-detects the
+machine id from the `jl-vm-*` hostname, defaults the region to IN1, pulls the
+qualified public `docker.io/malaiwah/glm52-exl3-vast:latest`, defaults the
+`glm53-3.42bpw-500k` profile, and masks `nvidia-dcgm` to free port 5555.
+Optional download/TLS credentials are supplied without putting them in a
+shared script or shell history:
 
 ```bash
-export JARVISLABS_MACHINE_ID=<numeric-id>
-export JARVISLABS_REGION=IN1
+export JARVISLABS_MACHINE_ID=<numeric-id>   # only if auto-detection fails
+export JARVISLABS_REGION=IN1                # only if your VM is not in IN1
 export DESEC_DOMAIN=<your-zone>.dedyn.io
 read -rsp "Hugging Face token (optional): " HF_TOKEN; export HF_TOKEN; echo
 read -rsp "deSEC token (optional): " DESEC_TOKEN; export DESEC_TOKEN; echo
@@ -965,9 +1020,10 @@ curl -fsSL \
 ```
 
 The launcher writes credentials to a mode-0600 env file, stores weights and
-compile caches under persistent `/home/turnkey`, pulls the appliance, and
-starts it with host networking, host IPC, all GPUs, and unlimited memlock.
-Follow first boot with:
+compile caches under persistent `/home/turnkey`, pulls the appliance, starts
+it with host networking, host IPC, all GPUs, unlimited memlock — then waits
+for health and prints the endpoint, generated API key, dashboard token and a
+`curl` example. First boot can also be followed directly:
 
 ```bash
 sudo docker logs -f glm52-turnkey
@@ -993,9 +1049,8 @@ a VM image.
 <details>
 <summary><b>JarvisLabs container instance (spot) without any container runtime</b></summary>
 
-The exercised path resumed predecessor **483634** as **500157**, not a new rental.
-Do not create a second instance for that workflow. For a separately authorized
-new disposable rental, the creation shape is:
+The quickstart (shown above) wraps this whole flow. For reference, its
+unrolled creation shape is:
 
 ```bash
 jl create --gpu RTX-PRO6000 --num-gpus 4 --storage 700 --spot \
@@ -1005,34 +1060,29 @@ ssh -o StrictHostKeyChecking=no root@<public-ip>
 ```
 
 On the instance, downloads and state live under persistent `/home`; grafting
-also changes the ephemeral provider OS. The helper in this checkout includes
-source changes newer than the exercised `e9623135` image; record its revision
-separately and do not treat the image receipt as proof of those later changes.
-Use a reviewed checkout of PR #58 to supply the helper rather than a moving
-`main` script:
+also changes the ephemeral provider OS. `scripts/jarvislabs_quickstart.sh`
+(shown above) wraps the whole flow. Its unrolled, digest-pinned form is:
 
 ```bash
-export TURNKEY_IMAGE=ghcr.io/malaiwah/glm52-exl3-vast@sha256:200b1841453b6a46c91f0b7a2866589cda7e52625b29590bb7a69fe90948e6c9
+export TURNKEY_IMAGE=docker.io/malaiwah/glm52-exl3-vast@sha256:<digest-of-latest>
 export TURNKEY_ROOT=/home/turnkey TURNKEY_GRAFT=1
-# Copy scripts/jarvislabs_container_rootfs.sh from the reviewed checkout
-# to /home/turnkey/rootfs.sh before running these commands.
-bash /home/turnkey/rootfs.sh prepare   # skopeo fetch + umoci unpack
-bash /home/turnkey/rootfs.sh graft     # install over the container, then verify
+bash rootfs.sh prepare   # skopeo fetch + umoci unpack
+bash rootfs.sh graft     # install over the container, then verify
 MODEL_PROFILE=glm53-3.42bpw-500k SSHD=0 \
-  bash /home/turnkey/rootfs.sh smoke   # GPU-free resolved-argv check
-read -rsp "Hugging Face token (optional): " HF_TOKEN; export HF_TOKEN; echo
+  bash rootfs.sh smoke   # GPU-free resolved-argv check
 MODEL_PROFILE=glm53-3.42bpw-500k SSHD=0 \
-  setsid nohup bash /home/turnkey/rootfs.sh run >/home/turnkey/serve.log 2>&1 &
+  setsid nohup bash rootfs.sh run >/home/turnkey/serve.log 2>&1 &
 ```
 
-Use a silent prompt as above or a permission-restricted credential file, never
-literal token values in command arguments, examples, logs or shell history.
-Environment values are still visible to privileged processes and the provider.
-Spot instances can be reclaimed at any time, so copy evidence off-host as it is
-produced. **The resumed 500157 is now paused, with its old storage preserved.**
-Storage continues while paused (the recorded `$0.00014/GB-hour` rate is about
-`$4/day` for 1.2 TB; check current billing). Destroy only a separately created
-disposable rental after explicit authorization to delete its data.
+The runner refuses floating tags by design, so the quickstart resolves
+`:latest` to its immutable digest before the first byte is fetched. The
+default checkpoint is public and ungated; an `HF_TOKEN` is only needed for
+gated repositories, and must then be supplied via a silent prompt or a
+permission-restricted credential file, never literal in command arguments.
+Environment values are still visible to privileged processes and the
+provider. Spot instances can be reclaimed at any time, so copy evidence
+off-host as it is produced, and destroy the instance when finished: storage
+continues to bill while it exists, paused or not.
 
 </details>
 
