@@ -115,6 +115,7 @@ launch_and_wait() {
 
   log "stage 1/4: fetching and unpacking the image (a few minutes)"
   bash "$RUNNER" prepare
+  relocate_conflicting_opt_trees
   log "stage 2/4: installing the appliance over this container and verifying sources"
   bash "$RUNNER" graft
   log "stage 3/4: checking the resolved configuration (no GPU involved)"
@@ -142,6 +143,25 @@ launch_and_wait() {
   [[ "$health" == "200" ]] || fatal "endpoint did not become healthy within 60 minutes; inspect $log_file."
 
   print_summary
+}
+
+relocate_conflicting_opt_trees() {
+  # JarvisLabs pytorch containers ship a provider CUDA stack under /opt
+  # (notably /opt/nvidia). The graft preflight refuses to replace a real
+  # provider directory, by design; the appliance brings its own CUDA user
+  # space, so move colliding provider trees aside instead of failing.
+  local rootfs="${TURNKEY_ROOT:-/home/turnkey/qual}/bundle/rootfs" entry name
+  [[ -d "$rootfs/opt" ]] || return 0
+  for entry in "$rootfs"/opt/*; do
+    [[ -e "$entry" || -L "$entry" ]] || continue
+    name="${entry##*/}"
+    if [[ -e "/opt/$name" && ! -L "/opt/$name" ]]; then
+      [[ "$name" == "nvidia" ]] || fatal "/opt/$name is a real provider directory the appliance also ships; relocate it manually and re-run."
+      mv "/opt/$name" "/root/provider-opt-nvidia-backup"
+      log "relocated the provider's /opt/nvidia to /root/provider-opt-nvidia-backup (the appliance ships its own)"
+    fi
+  done
+  return 0
 }
 
 print_summary() {
