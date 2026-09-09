@@ -969,6 +969,25 @@ KNOBS = [
              "reuse the atomically published cache. Both modes change numerical "
              "behavior and require KLD plus cold long-context retrieval before use.")),
 
+    dict(key="VLLM_EXL3_ONLINE_CACHE_DIR", families=("glm52",), type="str",
+         default="", group="Engine", scope="engine",
+         label="Online-quantization cache directory",
+         rationale=(
+             "Where the exl3-b6 online Trellis conversion stores its ~12 GiB "
+             "of quantized layers. Empty keeps the profile default "
+             "(/cache/exl3-online on the instance disk). Set it to a directory "
+             "on persistent shared storage so relaunches reuse the conversion "
+             "instead of re-quantizing at every boot.")),
+
+    dict(key="VLLM_EXL3_ONLINE_CACHE_MODE", families=("glm52",),
+         type="choice", default="", choices=["", "readonly", "readwrite"],
+         group="Engine", scope="engine",
+         label="Online-quantization cache mode",
+         rationale=(
+             "readwrite lets a boot regenerate missing cache entries; readonly "
+             "never writes, which suits a shared cache another process owns. "
+             "Empty keeps the profile default (readwrite).")),
+
     dict(key="MTP_DRAFT", families=("glm52",), type="choice", default="native", choices=list(DRAFTS),
          group="Speculative decoding", scope="checkpoint", label="MTP draft type",
          aliases=[],
@@ -2114,8 +2133,14 @@ def derive(cfg: dict) -> dict:
         runtime_env.update({
             "VLLM_EXL3_ONLINE_TRELLIS_BITS": "6",
             "VLLM_EXL3_ENCODER_SOURCE": EXL3_ENCODER_SOURCE,
-            "VLLM_EXL3_ONLINE_CACHE_DIR": "/cache/exl3-online",
-            "VLLM_EXL3_ONLINE_CACHE_MODE": "readwrite",
+            # The cache-dir default keeps the quantized layers on the
+            # instance's own disk; an env override moves it (e.g. onto the
+            # JarvisLabs fleet's shared filesystem) so a slot relaunch does
+            # not re-quantize ~12 GiB of layers.
+            "VLLM_EXL3_ONLINE_CACHE_DIR":
+                cfg.get("VLLM_EXL3_ONLINE_CACHE_DIR") or "/cache/exl3-online",
+            "VLLM_EXL3_ONLINE_CACHE_MODE":
+                cfg.get("VLLM_EXL3_ONLINE_CACHE_MODE") or "readwrite",
             "VLLM_B12X_ABSORB_BMM": "0",
         })
     elif fam_name == "glm52" and cfg.get("ONLINE_QUANT") == "mxfp8":

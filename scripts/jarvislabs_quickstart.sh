@@ -199,7 +199,11 @@ mint_landing_token() {
 print_summary() {
   local port="${PORT:-8000}"
   local keyfile key token models
-  keyfile="$(for f in "${TURNKEY_WORKSPACE:-/home/turnkey/workspace}/.vllm-api-key" /workspace/.vllm-api-key; do [[ -r "$f" ]] && { printf '%s' "$f"; break; }; done || true)"
+  keyfile="$(for f in "${GLM_STATE_DIR:-}/.vllm-api-key" \
+                          "${MODEL_DIR%/*}/.vllm-api-key" \
+                          /workspace/.glm-config/.vllm-api-key \
+                          /workspace/.vllm-api-key; do
+              [[ -n "$f" && -r "$f" ]] && { printf '%s' "$f"; break; }; done || true)"
   key=""
   [[ -n "$keyfile" ]] && key="$(cat "$keyfile")"
   local ws="${TURNKEY_WORKSPACE:-/home/turnkey/workspace}"
@@ -252,7 +256,7 @@ except Exception:
 ==================================================================
  Endpoint (from your machine)    : $api_line
  Endpoint (inside the instance)  : http://127.0.0.1:${port}/v1
- API key                         : ${key:-(see ${ws}/.vllm-api-key)}
+ API key                         : ${key:-(see ${GLM_STATE_DIR:-$ws/.glm-config}/.vllm-api-key)}
                                     send it as "Authorization: Bearer <key>"
  Model name                      : ${models:-GLM-5.3 (see /v1/models)}
  Dashboard (from your machine)   : $dash_line

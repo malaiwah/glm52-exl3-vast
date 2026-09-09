@@ -9,7 +9,7 @@ sweep. Results are written as JSON and never contain the API key.
 Example:
 
     python3 /opt/scripts/benchmark_serving.py \
-      --api-key-file /workspace/.vllm-api-key \
+      --api-key-file /workspace/.glm-config/.vllm-api-key \
       --input-tokens 1024 --output-tokens 512 \
       --concurrency 1,2,4,8 --requests-per-level 8 \
       --prefill-tokens 1024,8192,32768,131072 \

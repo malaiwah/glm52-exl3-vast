@@ -78,8 +78,13 @@ class Paths:
         self.state_dir = gc.state_dir()
         self.runtime_dir = gc.runtime_dir()
         self.status_file = env.get("STATUS_FILE", "/tmp/glm-boot-status.json")
-        self.keyfile = os.path.join(os.path.dirname(self.model_dir.rstrip("/")) or "/workspace",
-                                    ".vllm-api-key")
+        # The API key lives in the config state dir (see entrypoint.sh); the
+        # weights-adjacent location is the legacy layout, erased too when a
+        # recycled disk still carries it.
+        self.keyfile = os.path.join(gc.state_dir(), ".vllm-api-key")
+        self.legacy_keyfile = os.path.join(
+            os.path.dirname(self.model_dir.rstrip("/")) or "/workspace",
+            ".vllm-api-key")
         # Extra roots that are not under any of the above. On RunPod a network
         # volume mounts at /runpod-volume and PID 1's environment points the
         # whole Hugging Face cache at it by default (VERIFIED: HF_HOME=
@@ -270,6 +275,8 @@ def plan(paths=None, keep=()):
     # 1. credentials -------------------------------------------------------
     _add(targets, p.keyfile, "credentials",
          "the persisted vLLM API key — grants use of your endpoint", seen)
+    _add(targets, p.legacy_keyfile, "credentials",
+         "legacy weights-adjacent vLLM API key (pre-fleet layouts)", seen)
     _add(targets, p.status_file, "credentials",
          "boot status file; it carries the API key in plaintext for the landing page", seen)
     # ~/.runpod/config.toml is where runpodctl persists the account API key —
