@@ -134,7 +134,10 @@ launch_and_wait() {
     health="$(curl --max-time 5 -s -o /dev/null -w '%{http_code}' \
       "http://127.0.0.1:${PORT:-8000}/health" 2>/dev/null || true)"
     [[ "$health" == "200" ]] && break
-    if ! kill -0 "$(pgrep -f 'model-turnkey-entry.sh' | head -1)" 2>/dev/null; then
+    # Give the launch chain (setsid -> runner -> exec entrypoint) a grace
+    # period before liveness can be declared failed; the process name only
+    # exists after the exec, and an eager check false-positives.
+    if (( waited >= 180 )) && ! pgrep -f 'model-turnkey-entry.sh' >/dev/null 2>&1; then
       tail -20 "$log_file" >&2 || true
       fatal "the appliance exited before serving; inspect $log_file."
     fi
