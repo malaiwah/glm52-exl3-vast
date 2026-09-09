@@ -110,9 +110,19 @@ def installed_overlay_sources(modules: dict) -> list[dict]:
         owners = [name for name, info in modules.items()
                   if any(installed.is_relative_to(Path(root))
                          for root in info["package_roots"])]
+        # A graft reaches mirror trees through symlinks from the unpack
+        # prefix, so compare prefix-normalized paths rather than raw
+        # absolute equality; behavior is unchanged without the prefix.
+        prefix = os.environ.get("TURNKEY_ROOTFS_PREFIX", "").rstrip("/")
+        installed_s, path_s = str(installed), str(path)
+        if prefix and installed_s.startswith(prefix + "/"):
+            installed_s = installed_s[len(prefix):]
+        if prefix and path_s.startswith(prefix + "/"):
+            path_s = path_s[len(prefix):]
+        mirror_match = target["is_mirror"] and installed_s == path_s
         if len(owners) == 1:
             record.update(module=owners[0], role="imported_runtime")
-        elif not owners and target["is_mirror"] and installed == path.absolute():
+        elif not owners and mirror_match:
             record.update(module=None, role="base_image_source_tree")
         else:
             raise RuntimeError(f"critical target not in one resolved runtime package: {path}")
