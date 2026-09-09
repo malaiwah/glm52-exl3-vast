@@ -484,7 +484,10 @@ graft() {
     --exclude '/usr/lib/x86_64-linux-gnu/libnvidia*' \
     --exclude '/usr/lib/x86_64-linux-gnu/libcuda.so*' \
     --exclude '/usr/lib/x86_64-linux-gnu/libnvcuvid*' \
-    --exclude '/usr/lib/x86_64-linux-gnu/libnvoptix*' \
+    --exclude '/usr/lib/xorg/modules/drivers/nvidia_drv.so' \
+    --exclude '/usr/share/egl/egl_external_platform.d/15_nvidia_gbm.json' \
+    --exclude '/usr/share/glvnd/egl_vendor.d/10_nvidia.json' \
+    --exclude '/usr/share/nvidia/nvoptix.bin' \
     --exclude '/usr/share/doc/**' --exclude '/usr/share/man/**' \
     "$ROOTFS"/usr "$ROOTFS"/lib "$ROOTFS"/lib64 "$ROOTFS"/bin \
     "$ROOTFS"/sbin /
