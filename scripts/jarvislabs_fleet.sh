@@ -168,6 +168,15 @@ cmd_serve() { # cmd_serve <name>
     mkdir -p '$FS_MOUNT/.runtimes/$name'
     export VLLM_EXL3_ONLINE_CACHE_DIR='$FS_MOUNT/.runtimes/$name/exl3-online'
     export VLLM_EXL3_ONLINE_CACHE_MODE=readwrite
+    # AIBeast's selected runtime (maintenance glm53-optimization-20260908):
+    # prefill fairness at a 60% compute share, with the tuned batching shape
+    # measured for mixed interactive/long-prefill traffic.
+    export PREFILL_FAIRNESS_ENGINE=compute_share
+    export PREFILL_COMPUTE_SHARE=0.6
+    export MAX_NUM_SEQS=12
+    export MAX_NUM_BATCHED_TOKENS=3072
+    export VLLM_EXL3_PREFILL_CAPACITY=2048
+    export GPU_MEMORY_UTILIZATION=0.95
     bash /root/quickstart.sh
   " 2>&1 | tee /tmp/fleet-"$name".log | tail -40
   log "$name serving; total time-to-serve $((SECONDS - t0))s (see /tmp/fleet-$name.log for the endpoint block)"
@@ -216,7 +225,9 @@ for k, v in sorted(json.load(sys.stdin).items()):
   printf '      - deployment_affinity\n'
   printf '      - session_affinity\n'
   printf '  deployment_affinity_ttl_seconds: 3600\n'
-  printf 'litellm_settings:\n  drop_params: true\n'
+  # The router's public port must not be an open relay: every request needs
+  # the master key (persisted on the router, printed by cmd_router).
+  printf 'general_settings:\n  master_key: os.environ/LITELLM_MASTER_KEY\n'
 }
 
 cmd_router() {
@@ -239,10 +250,15 @@ cmd_router() {
     pip3 install -q "litellm[proxy]" --break-system-packages 2>/dev/null \
       || sudo pip3 install -q "litellm[proxy]"
     mkdir -p "$HOME/router"
+    if [ ! -s "$HOME/router/master-key" ]; then
+      python3 -c "import secrets; print(\"sk-router-\" + secrets.token_hex(24))" > "$HOME/router/master-key"
+    fi
   '
   # Re-generate the config from live fleet state and ship it, then start.
   regenerate_router_config "$ip"
   router_restart "$ip"
+  local rkey
+  rkey=$(ssh -o BatchMode=yes "$ROUTER_USER@$ip" 'cat $HOME/router/master-key')
   # CPU VMs have no JarvisLabs HTTPS proxy; probe the public IP directly and
   # fall back to documenting an SSH tunnel.
   local probe
@@ -250,8 +266,10 @@ cmd_router() {
     "http://$ip:$ROUTER_PORT/health/liveliness" 2>/dev/null || true)
   if [[ "$probe" == "200" ]]; then
     log "router ready in $((SECONDS - t0))s at http://$ip:$ROUTER_PORT/v1 (publicly reachable)"
+    log "router master key (send as 'Authorization: Bearer <key>'): $rkey"
   else
     log "router ready in $((SECONDS - t0))s; port $ROUTER_PORT is not reachable on the public IP."
+    log "master key: $rkey"
     log "use an SSH tunnel: ssh -L $ROUTER_PORT:localhost:$ROUTER_PORT $ROUTER_USER@$ip"
   fi
 }
@@ -271,6 +289,7 @@ router_restart() { # router_restart <ip>: (re)start litellm under systemd so it
     sudo systemctl stop litellm-router.service 2>/dev/null || true
     sudo systemd-run --uid='"$ROUTER_USER"' --unit=litellm-router --collect \
       --working-directory=$HOME/router --setenv=HOME=$HOME \
+      --setenv=LITELLM_MASTER_KEY=$(cat $HOME/router/master-key) \
       $HOME/.local/bin/litellm --config $HOME/router/config.yaml \
       --port '"$ROUTER_PORT"' --host 0.0.0.0
     sleep 15
