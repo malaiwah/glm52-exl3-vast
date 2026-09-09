@@ -124,7 +124,9 @@ launch_and_wait() {
     bash "$RUNNER" smoke | tail -40
   log "stage 4/4: launching the appliance in the background"
   local log_file=/home/turnkey/serve.log
+  mint_landing_token
   MODEL_PROFILE="${MODEL_PROFILE:-glm53-3.42bpw-500k}" SSHD=0 \
+    OPEN_BUTTON_TOKEN="${OPEN_BUTTON_TOKEN:-}" \
     setsid nohup bash "$RUNNER" run >"$log_file" 2>&1 < /dev/null &
   log "boot log: $log_file"
 
@@ -176,41 +178,97 @@ relocate_conflicting_opt_trees() {
   return 0
 }
 
+mint_landing_token() {
+  # The appliance auto-mints a dashboard token only when it detects the
+  # provider by hostname (jl-vm-* VMs). JarvisLabs container hostnames do not
+  # match, so mint and persist the token here instead; the runner forwards
+  # OPEN_BUTTON_TOKEN to the appliance.
+  local file="${TURNKEY_WORKSPACE:-/home/turnkey/workspace}/.model-turnkey-landing-token"
+  if [[ -z "${OPEN_BUTTON_TOKEN:-}" ]]; then
+    if [[ -s "$file" ]]; then
+      OPEN_BUTTON_TOKEN="$(cat "$file")"
+    else
+      OPEN_BUTTON_TOKEN="lp-$(head -c 18 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+      ( umask 077; printf '%s\n' "$OPEN_BUTTON_TOKEN" > "$file" )
+    fi
+    export OPEN_BUTTON_TOKEN
+    log "dashboard token ready (persisted at $file)"
+  fi
+}
+
 print_summary() {
   local port="${PORT:-8000}"
   local keyfile key token models
-  keyfile="$(for f in /home/turnkey/.vllm-api-key /workspace/../.vllm-api-key; do [[ -r "$f" ]] && { printf '%s' "$f"; break; }; done || true)"
+  keyfile="$(for f in "${TURNKEY_WORKSPACE:-/home/turnkey/workspace}/.vllm-api-key" /workspace/.vllm-api-key; do [[ -r "$f" ]] && { printf '%s' "$f"; break; }; done || true)"
   key=""
-  [[ -n "$keyfile" && -r "$keyfile" ]] && key="$(cat "$keyfile")"
+  [[ -n "$keyfile" ]] && key="$(cat "$keyfile")"
+  local ws="${TURNKEY_WORKSPACE:-/home/turnkey/workspace}"
   token=""
-  [[ -r /workspace/.model-turnkey-landing-token ]] && token="$(cat /workspace/.model-turnkey-landing-token)"
+  [[ -r "$ws/.model-turnkey-landing-token" ]] && token="$(cat "$ws/.model-turnkey-landing-token")"
   models="$(curl --max-time 10 -s -H "Authorization: Bearer $key" \
-    "http://127.0.0.1:${port}/v1/models" | tr ',' '\n' | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ' || true)"
+    "http://127.0.0.1:${port}/v1/models" 2>/dev/null | \
+    python3 -c 'import json,sys
+try:
+    print(" ".join(m["id"] for m in json.load(sys.stdin)["data"]))
+except Exception:
+    pass' || true)"
+  # JarvisLabs exposes http-ports only through its HTTPS proxy, never as raw
+  # TCP on the public IP. The proxy hostnames embed the first six hostname
+  # characters, the machine id, and a per-port index; discover and VERIFY the
+  # URLs instead of guessing the index policy.
+  local api_url="" dash_url="" i u code
+  if [[ -n "${MACHINE_ID:-}" && -n "${DNS:-}" ]]; then
+    local host="${DNS#https://}"
+    for i in 0 1 2 3 4 5; do
+      u="https://$(hostname | cut -c1-6)${MACHINE_ID}${i}.${host}"
+      code="$(curl --max-time 10 -s -o /dev/null -w '%{http_code}' \
+        "$u/v1/models" -H "Authorization: Bearer $key" 2>/dev/null || true)"
+      [[ "$code" == "200" ]] && api_url="$u" && break
+    done
+    for i in 0 1 2 3 4 5; do
+      u="https://$(hostname | cut -c1-6)${MACHINE_ID}${i}.${host}"
+      body="$(curl --max-time 10 -s "$u/" 2>/dev/null || true)"
+      [[ "$body" == *"GLM-5.3 turnkey"* ]] && dash_url="$u" && break
+    done
+  fi
+  local api_line="" dash_note="" dash_line="" fallback_note=""
+  if [[ -n "$api_url" ]]; then
+    api_line="$api_url/v1 (verified with your API key)"
+    dash_note="verified; token persisted at $ws/.model-turnkey-landing-token"
+  else
+    api_line="not found: JarvisLabs containers expose ports only via their HTTPS"
+    fallback_note="proxy. Open the JarvisLabs dashboard for this instance, or tunnel:
+  ssh -L 8000:localhost:8000 root@$(curl --max-time 5 -s https://api.ipify.org 2>/dev/null || echo '<public-ip>')"
+  fi
+  if [[ -n "$dash_url" ]]; then
+    dash_line="$dash_url/?token=$token ($dash_note)"
+  else
+    dash_line="(dashboard token at $ws/.model-turnkey-landing-token; proxy URL in the JarvisLabs dashboard)"
+  fi
   cat <<SUMMARY
 
 ==================================================================
  GLM-5.3 is serving.
 ==================================================================
- Endpoint (inside this instance) : http://127.0.0.1:${port}/v1
- Endpoint (from your machine)    : your JarvisLabs proxy URL for port ${port}
-                                    (dashboard -> this instance -> port ${port})
- API key                         : ${key:-(see /home/turnkey/.vllm-api-key)}
+ Endpoint (from your machine)    : $api_line
+ Endpoint (inside the instance)  : http://127.0.0.1:${port}/v1
+ API key                         : ${key:-(see ${ws}/.vllm-api-key)}
                                     send it as "Authorization: Bearer <key>"
- Model name                      : ${models:-GLM-3 (see /v1/models)}
- Dashboard (port 1111)           : append ?token=${token:-(cat /workspace/.model-turnkey-landing-token)}
-                                    to your port-1111 proxy URL
+ Model name                      : ${models:-GLM-5.3 (see /v1/models)}
+ Dashboard (from your machine)   : $dash_line
+$fallback_note
  Boot log                        : /home/turnkey/serve.log
- Weights / state                 : /home/turnkey/workspace (persistent volume)
+ Weights / state                 : $ws (persistent volume)
 
- Try it:
-   curl http://127.0.0.1:${port}/v1/chat/completions \\
+ Try it from your machine:
+   curl ${api_url:-http://127.0.0.1:${port}}/v1/chat/completions \\
      -H "Authorization: Bearer $key" \\
      -H 'Content-Type: application/json' \\
      -d '{"model":"GLM-5.3","messages":[{"role":"user","content":"Say hi"}]}'
 
  Remember: spot instances can be reclaimed at any time, and billing
  continues while the instance exists. When you are done:
-   jl destroy <machine-id>
+   jl destroy ${MACHINE_ID:-<machine-id>}
 ==================================================================
 SUMMARY
 }
