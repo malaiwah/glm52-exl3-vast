@@ -2446,8 +2446,9 @@ fi
 # which surviving VLLM:: workers can hold open long after the engine is dead.
 # GENERIC flags only. Everything architecture-specific — the quantization, the
 # MLA/DCP flags, the attention and MoE backends, the tool/reasoning parsers, the
-# sparse-indexer hf_overrides, the compilation config — comes from
-# FAMILY_SERVE_ARGS, which the config layer built for the selected MODEL_FAMILY.
+# sparse-indexer hf_overrides, the compilation config and opt-in prefill fairness
+# flags — comes from FAMILY_SERVE_ARGS, rebuilt on every config resolution.
+# Fairness-off omits both flags; this layer never selects a V1/V2 model runner.
 # That is what makes a second model family possible without a second serve line,
 # and what removed `--tensor-parallel-size 4` as a literal.
 if command -v vllm >/dev/null 2>&1; then

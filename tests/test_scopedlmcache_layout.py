@@ -44,9 +44,9 @@ def load_namespace():
     return namespace[helper.name]
 
 
-def load_vllm_block_size_rule():
+def load_vllm_block_size_rule(path=None):
     """Execute the installed vLLM validate_block_size itself, not a paraphrase."""
-    tree = ast.parse(gilded_source(VLLM_CONFIG).read_text())
+    tree = ast.parse((path or gilded_source(VLLM_CONFIG)).read_text())
     rule = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
                 and n.name == "validate_block_size")
     module = ast.Module(body=[rule], type_ignores=[])
@@ -154,8 +154,8 @@ class GildedPrecedenceParityTests(unittest.TestCase):
         self.assertEqual(self.vllm_outcome(config(dcp=4, block=64, cp=1, legacy=64)), 64)
 
     def test_installed_vllm_rule_identity_is_pinned(self):
-        self.assertEqual(digest(gilded_source(VLLM_CONFIG)),
-                         installer.VLLM_CONFIG_SHA256)
+        self.assertIn(digest(gilded_source(VLLM_CONFIG)),
+                      installer.VLLM_CONFIG_SHA256S)
 
 
 class GildedLayoutInstallTests(unittest.TestCase):
@@ -206,6 +206,35 @@ class GildedLayoutInstallTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 installer.patch(path, layout=True, vllm_config_path=vllm_config)
             self.assertEqual(path.read_bytes(), original)
+
+
+class SelectedPrecedenceParityTests(GildedPrecedenceParityTests):
+    """The final general-build composition must retain the namespace contract."""
+
+    def setUp(self):
+        self.selected = ROOT / "patches/glm53-selected/vllm/config/vllm.py"
+        self.name = load_namespace()
+        self.rule = load_vllm_block_size_rule(self.selected)
+
+    def test_installed_vllm_rule_identity_is_pinned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "connector.py"
+            target.write_bytes(installer.default_payload(layout=True).read_bytes())
+            self.assertEqual(installer.patch(
+                target, layout=True, verify_only=True,
+                vllm_config_path=self.selected), "verified")
+
+    def test_unreviewed_selected_config_refuses_even_installed_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "connector.py"
+            original = installer.default_payload(layout=True).read_bytes()
+            target.write_bytes(original)
+            config_path = Path(directory) / "vllm.py"
+            config_path.write_text(self.selected.read_text() + "\n# unreviewed change\n")
+            with self.assertRaisesRegex(RuntimeError, "Unreviewed vLLM"):
+                installer.patch(target, layout=True, verify_only=True,
+                                vllm_config_path=config_path)
+            self.assertEqual(target.read_bytes(), original)
 
 
 if __name__ == "__main__":

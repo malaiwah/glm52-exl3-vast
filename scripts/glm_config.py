@@ -765,6 +765,8 @@ DRAFTS = {
 # aliases    additional env names accepted for the env layer (legacy spellings)
 # type       bool | int | float | choice | csv | str
 # editable   False -> shown read-only in the UI (a locked, load-bearing value)
+# reject_invalid  True -> refuse invalid applicable input instead of falling back
+# min_exclusive / max_exclusive  True -> float bounds exclude their endpoints
 # scope      "engine"     restart of vLLM is enough
 #            "checkpoint" needs on-disk preparation (graft/vision) before serve
 #            "download"   needs a (large) weight download
@@ -831,6 +833,25 @@ KNOBS = [
              "work exists. 1 preserves the current unthrottled policy. The TP "
              "cadence backport makes values above 1 effective outside DP; compare "
              "concurrent decode latency and prefill throughput before promotion.")),
+
+    dict(key="PREFILL_FAIRNESS_ENGINE", families=("glm52",), type="choice",
+         default="off", choices=["off", "compute_share"], reject_invalid=True,
+         group="Serving", scope="engine", label="Prefill fairness engine",
+         rationale=(
+             "Off preserves the existing scheduler and emits no fairness flags. "
+             "Compute_share targets measured prefill model-service wallclock "
+             "share during contention with decode; requires cadence 1. It leaves "
+             "the baseline V1/V2 model-runner selection unchanged.")),
+
+    dict(key="PREFILL_COMPUTE_SHARE", families=("glm52",), type="float",
+         default=0.6, min=0.0, max=1.0, min_exclusive=True, max_exclusive=True,
+         reject_invalid=True, group="Serving", scope="engine",
+         label="Prefill model-service share",
+         rationale=(
+             "Strictly between 0 and 1; used only with fairness engine compute_share. "
+             "The target is contended host-observed model-service wallclock, not "
+             "GPU-only time or a token/throughput ratio. Mixed batches are charged "
+             "entirely to prefill. No latency or throughput gain is guaranteed.")),
 
     dict(key="TRUST_REMOTE_CODE", type="bool", default=False,
          group="Model", scope="engine", label="Allow checkpoint Python code",
@@ -1374,6 +1395,10 @@ def coerce(knob: dict, raw):
             raise ConfigError(f"{key}: {v} is below the minimum {knob['min']}")
         if "max" in knob and v > knob["max"]:
             raise ConfigError(f"{key}: {v} is above the maximum {knob['max']}")
+        if knob.get("min_exclusive") and v == knob["min"]:
+            raise ConfigError(f"{key}: must be greater than {knob['min']}")
+        if knob.get("max_exclusive") and v == knob["max"]:
+            raise ConfigError(f"{key}: must be less than {knob['max']}")
         return v
     if typ == "choice":
         v = str(raw).strip()
@@ -1459,9 +1484,9 @@ def state_lock():
 def env_layer(env=None, invalid=None) -> dict:
     """Knob values present in the (startup) environment, incl. legacy spellings.
 
-    A malformed value falls back to the default, but it must not do so
-    silently: pass `invalid` (a list) to collect one message per rejected
-    value so the snapshot/boot log can say the knob was ignored."""
+    Legacy knobs fall back on malformed input, with messages collected in
+    `invalid`. Knobs marked reject_invalid retain the raw value so resolution
+    can refuse it unless a valid higher-precedence state value supersedes it."""
     env = os.environ if env is None else env
     out = {}
     for knob in KNOBS:
@@ -1470,9 +1495,12 @@ def env_layer(env=None, invalid=None) -> dict:
                 try:
                     out[knob["key"]] = coerce(knob, env[name])
                 except ConfigError as e:
-                    # a bad env value falls back to the default — loudly
-                    if invalid is not None:
+                    if invalid is not None and not knob.get("reject_invalid"):
                         invalid.append(str(e))
+                    if knob.get("reject_invalid"):
+                        # Retain the input for resolution: a valid state-file
+                        # override may supersede it, otherwise refuse startup.
+                        out[knob["key"]] = env[name]
                 break
     # legacy draft spellings: MTP78_MODE / MTP78_TRELLIS / DRAFT_MODEL predate
     # the MTP_DRAFT knob and are still documented in the README.
@@ -1758,10 +1786,10 @@ def resolve(state_values=None, env_values=None):
     Inapplicable knobs are reported with source 'n/a' and keep a value only so
     that nothing downstream has to special-case a missing key.
 
-    Never raises over unusable INPUT: a bad state file degrades to env+defaults
-    and says so in `notes`, because bricking the instance over a bad file is
-    worse than ignoring it. An explicit GLM-5.3-Flash selection is the one
-    exception and propagates FlashProfileUnavailable from resolve_family()."""
+    Legacy unusable inputs degrade to env+defaults with explanatory notes.
+    Applicable knobs marked reject_invalid instead raise ConfigError unless a
+    valid higher-precedence value supersedes the input. Explicit GLM-5.3-Flash
+    selection propagates FlashProfileUnavailable from resolve_family()."""
     notes = []
     if env_values is None:
         env_values = load_startup_env()
@@ -1784,6 +1812,7 @@ def resolve(state_values=None, env_values=None):
     for knob in KNOBS:
         key = knob["key"]
         value, src = knob["default"], "default"
+        invalid_value = None
         if key == "MODEL_VARIANT":
             value = fam.get("default_variant", value)
             src = "family"
@@ -1806,6 +1835,8 @@ def resolve(state_values=None, env_values=None):
                 value, src = coerce(knob, env_values[key]), "env"
             except ConfigError as e:
                 notes.append(f"env {e}")
+                if knob.get("reject_invalid"):
+                    invalid_value = e
         if key in state_values:
             if not knob.get("editable", True):
                 notes.append(f"{key} is locked; the state file's value is ignored")
@@ -1814,6 +1845,11 @@ def resolve(state_values=None, env_values=None):
                     value, src = coerce(knob, state_values[key]), "file"
                 except ConfigError as e:
                     notes.append(f"state file {e}")
+                    if knob.get("reject_invalid"):
+                        invalid_value = e
+        if (invalid_value is not None and src != "file"
+                and applies_to(knob, fam_name)):
+            raise invalid_value
         if not applies_to(knob, fam_name):
             src = "n/a"
         effective[key], sources[key] = value, src
@@ -1881,6 +1917,18 @@ def minimize(values: dict, dropped=None) -> dict:
     portable between instances with different templates."""
     env_layer = load_startup_env()
     fam_name = resolve_family(values, env_layer)
+    # An invalid strict startup value has no usable baseline. Resolve defaults
+    # for comparison, but always persist a valid repair, even at the default.
+    invalid_env_keys = set()
+    baseline_env = dict(env_layer)
+    for knob in KNOBS:
+        key = knob["key"]
+        if knob.get("reject_invalid") and key in baseline_env:
+            try:
+                coerce(knob, baseline_env[key])
+            except ConfigError:
+                invalid_env_keys.add(key)
+                del baseline_env[key]
     # Two baselines, and the difference between them matters.
     #  * `base` is what the SELECTED family would give with no state file, so a
     #    knob the user left at that family's own default is not pinned into the
@@ -1891,8 +1939,9 @@ def minimize(values: dict, dropped=None) -> dict:
     #    did exactly that: the selected family always equalled its own baseline,
     #    was therefore never written, and every apply silently reverted to the
     #    previous family — taking its validation rules with it.
-    base, _s1, _n1 = resolve(state_values={"MODEL_FAMILY": fam_name})
-    unfiled, _s2, _n2 = resolve(state_values={})
+    base, _s1, _n1 = resolve(state_values={"MODEL_FAMILY": fam_name},
+                            env_values=baseline_env)
+    unfiled, _s2, _n2 = resolve(state_values={}, env_values=baseline_env)
     # A non-default MODEL_VARIANT is itself an override and must be written, but
     # every OTHER knob has to be compared against THAT variant's defaults, not
     # the family default variant's. `base` carries the family default variant,
@@ -1907,7 +1956,8 @@ def minimize(values: dict, dropped=None) -> dict:
         except ConfigError:
             pass
     var_base, _s3, _n3 = resolve(
-        state_values={"MODEL_FAMILY": fam_name, "MODEL_VARIANT": sel_variant})
+        state_values={"MODEL_FAMILY": fam_name, "MODEL_VARIANT": sel_variant},
+        env_values=baseline_env)
     out = {}
     if fam_name != unfiled["MODEL_FAMILY"]:
         out["MODEL_FAMILY"] = fam_name
@@ -1923,6 +1973,8 @@ def minimize(values: dict, dropped=None) -> dict:
         try:
             value = coerce(knob, values[key])
         except ConfigError:
+            if knob.get("reject_invalid") and applies_to(knob, fam_name):
+                raise
             continue
         # A knob the selected family does not have is dropped rather than
         # written: switching family would otherwise leave a stale MTP_DRAFT or
@@ -1932,7 +1984,7 @@ def minimize(values: dict, dropped=None) -> dict:
             if dropped is not None and value != knob["default"]:
                 dropped.append(key)
             continue
-        if value != var_base[key]:
+        if value != var_base[key] or key in invalid_env_keys:
             out[key] = value
     return out
 
@@ -1951,6 +2003,10 @@ def family_serve_args(cfg: dict):
     args = [a % subs if "%(" in a else a for a in fam.get("serve_args", [])]
     if cfg.get("TRUST_REMOTE_CODE"):
         args += ["--trust-remote-code"]
+    if (cfg.get("MODEL_FAMILY") == "glm52"
+            and cfg.get("PREFILL_FAIRNESS_ENGINE", "off") == "compute_share"):
+        args += ["--fairness-engine", "compute_share",
+                 "--prefill-compute-share", subs["PREFILL_COMPUTE_SHARE"]]
     if cfg.get("MODEL_FAMILY") == "glm52" and cfg.get("CLAMP_ROPE_TABLES", True):
         # Keep this conditional rather than formatting a sentinel into the JSON:
         # disabling the experiment must omit the override entirely so the checkpoint's
@@ -2116,6 +2172,27 @@ def validate(cfg: dict, context=None):
     fam_name = cfg.get("MODEL_FAMILY", "glm52")
     fam = family(fam_name)
     is_glm = fam_name == "glm52"
+
+    if cfg.get("PREFILL_FAIRNESS_ENGINE", "off") == "compute_share":
+        if not is_glm:
+            err("fairness-family", ["PREFILL_FAIRNESS_ENGINE", "MODEL_FAMILY"],
+                "compute_share is supported only by the glm52 runtime family.")
+        if cfg.get("PREFILL_SCHEDULE_INTERVAL", 1) != 1:
+            err("fairness-cadence",
+                ["PREFILL_FAIRNESS_ENGINE", "PREFILL_SCHEDULE_INTERVAL"],
+                "compute_share requires PREFILL_SCHEDULE_INTERVAL=1; cadence "
+                "throttling and measured-service fairness cannot be combined.")
+        # TP/DCP are supported. DP/PP/PCP, DBO and scheduler selection are not
+        # appliance knobs; the installed engine checks their definitive values.
+        if toks > 0 and fam.get("spec_method", "mtp") != "mtp":
+            err("fairness-speculation", ["PREFILL_FAIRNESS_ENGINE", "MTP_TOKENS"],
+                "compute_share supports MTP or disabled speculation only.")
+    if is_glm:
+        try:
+            coerce(KNOB_BY_KEY["PREFILL_COMPUTE_SHARE"],
+                   cfg.get("PREFILL_COMPUTE_SHARE", 0.6))
+        except ConfigError as e:
+            err("fairness-share", ["PREFILL_COMPUTE_SHARE"], str(e))
 
     if fam_name == "qwen36" and toks > 0:
         warn(

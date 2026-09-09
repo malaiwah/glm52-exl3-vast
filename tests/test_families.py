@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import sys
+import subprocess
 import tempfile
 from types import SimpleNamespace
 
@@ -1009,6 +1010,124 @@ def test_full_glm53_candidate_boundaries():
           kwargs == {"reasoning_effort": "low"})
 
 
+def test_prefill_fairness():
+    section("opt-in measured-service fairness")
+    for variant in gc.VARIANTS:
+        family = gc.VARIANTS[variant].get("family", "glm52")
+        cfg, _, _ = resolved(family=family, MODEL_VARIANT=variant)
+        args = gc.family_serve_args(cfg)
+        check(f"{variant} does not implicitly enable fairness",
+              "--fairness-engine" not in args and "--prefill-compute-share" not in args)
+
+    baseline, _, _ = resolved(gpus=4, MODEL_VARIANT="exl3-tr3-glm53-3.42bpw-500k")
+    enabled = {**baseline, "PREFILL_FAIRNESS_ENGINE": "compute_share"}
+    args = gc.family_serve_args(enabled)
+    fairness_index = args.index("--fairness-engine")
+    check("enabling fairness adds only its two CLI controls",
+          args[fairness_index:fairness_index + 4] ==
+          ["--fairness-engine", "compute_share", "--prefill-compute-share", "0.6"]
+          and args[:fairness_index] + args[fairness_index + 4:]
+          == gc.family_serve_args(baseline))
+    check("compute_share accepts the existing MTP and TP4/DCP4 contract",
+          not errs(gc.validate(enabled, {"gpu_count": 4})))
+    check("compute_share also accepts speculation disabled",
+          not errs(gc.validate({**enabled, "MTP_TOKENS": 0}, {"gpu_count": 4})))
+    check("cadence cannot throttle an enabled fairness controller",
+          "fairness-cadence" in errs(gc.validate(
+              {**enabled, "PREFILL_SCHEDULE_INTERVAL": 2})))
+    check("fairness off preserves cadence scheduling",
+          "fairness-cadence" not in errs(gc.validate(
+              {**baseline, "PREFILL_SCHEDULE_INTERVAL": 2})))
+    qwen, _, _ = resolved(family="qwen36", PREFILL_FAIRNESS_ENGINE="compute_share")
+    check("non-GLM fairness is refused rather than silently ignored",
+          "fairness-family" in errs(gc.validate(qwen)))
+
+    env = gc.env_layer({"PREFILL_FAIRNESS_ENGINE": "compute_share",
+                        "PREFILL_COMPUTE_SHARE": "0.7"})
+    cfg, _, _ = gc.resolve(state_values={}, env_values=env)
+    args = gc.family_serve_args(cfg)
+    check("startup environment controls the emitted share",
+          args[args.index("--prefill-compute-share") + 1] == "0.7")
+    cfg, _, _ = gc.resolve(state_values={"PREFILL_COMPUTE_SHARE": 0.4}, env_values=env)
+    args = gc.family_serve_args(cfg)
+    check("persisted share overrides the startup environment",
+          args[args.index("--prefill-compute-share") + 1] == "0.4")
+    cfg, _, _ = gc.resolve(state_values={"PREFILL_FAIRNESS_ENGINE": "off"}, env_values=env)
+    args = gc.family_serve_args(cfg)
+    check("persisted off removes both flags even with a configured share",
+          "--fairness-engine" not in args and "--prefill-compute-share" not in args)
+    for value in (0, 1, -0.1, 1.1, "nan", "inf", "not-a-number"):
+        for layer in ("env", "state"):
+            invalid = {"PREFILL_COMPUTE_SHARE": value}
+            try:
+                gc.resolve(state_values=invalid if layer == "state" else {},
+                           env_values=gc.env_layer(invalid) if layer == "env" else {})
+            except gc.ConfigError:
+                rejected = True
+            else:
+                rejected = False
+            check(f"invalid {layer} share {value!r} cannot silently become 0.6", rejected)
+    cfg, _, _ = gc.resolve(state_values={"PREFILL_COMPUTE_SHARE": 0.3},
+                          env_values=gc.env_layer({"PREFILL_COMPUTE_SHARE": "nan"}))
+    check("a valid state override repairs malformed lower-precedence input",
+          cfg["PREFILL_COMPUTE_SHARE"] == 0.3)
+    invalid_env = gc.env_layer({"PREFILL_FAIRNESS_ENGINE": "typo",
+                               "PREFILL_COMPUTE_SHARE": "nan"})
+    try:
+        gc.resolve(state_values={}, env_values=invalid_env)
+    except gc.ConfigError:
+        rejected = True
+    else:
+        rejected = False
+    check("unknown fairness selector is not silently treated as off", rejected)
+    original = gc.load_startup_env
+    gc.load_startup_env = lambda: dict(invalid_env)
+    try:
+        repair = gc.minimize({"PREFILL_FAIRNESS_ENGINE": "off",
+                              "PREFILL_COMPUTE_SHARE": 0.6})
+        restored, _, _ = gc.resolve(state_values=repair)
+        check("state minimization preserves default-valued repairs over invalid env",
+              repair == {"PREFILL_FAIRNESS_ENGINE": "off", "PREFILL_COMPUTE_SHARE": 0.6}
+              and "--fairness-engine" not in gc.family_serve_args(restored))
+    finally:
+        gc.load_startup_env = original
+
+
+def test_fairness_cli():
+    section("fairness CLI export and persisted disable")
+    with tempfile.TemporaryDirectory(prefix="glm-fairness-cli-") as tmp:
+        env = {**os.environ, "GLM_STATE_DIR": os.path.join(tmp, "state"),
+               "GLM_RUNTIME_DIR": os.path.join(tmp, "runtime")}
+        env.pop("GLM_CONFIG_ATTEMPT", None)
+        os.makedirs(env["GLM_RUNTIME_DIR"])
+        snapshot = os.path.join(env["GLM_RUNTIME_DIR"], "startup-env.json")
+        state = os.path.join(env["GLM_STATE_DIR"], "config.json")
+        gc.write_json_atomic(snapshot, {
+            "MODEL_FAMILY": "glm52", "GLM_GPU_COUNT": "4",
+            "MODEL_VARIANT": "exl3-tr3-glm53-3.42bpw-500k",
+            "PREFILL_FAIRNESS_ENGINE": "compute_share", "PREFILL_COMPUTE_SHARE": 0.6})
+        cli = [sys.executable, os.path.join(REPO, "scripts/config_cli.py")]
+        for values, expected in (({}, True), ({"PREFILL_FAIRNESS_ENGINE": "off"}, False)):
+            gc.write_json_atomic(state, {"values": values})
+            exported = subprocess.run(cli + ["env"], env=env, text=True, capture_output=True)
+            check("CLI resolves valid fairness state", exported.returncode == 0, exported.stderr)
+            shell = subprocess.run(["bash"], input=exported.stdout +
+                                   '\nprintf "%s\\n" "${FAMILY_SERVE_ARGS[@]}"\n',
+                                   env=env, text=True, capture_output=True)
+            args = shell.stdout.splitlines()
+            check("shell consumes the same enabled/disabled fairness argv",
+                  shell.returncode == 0
+                  and ("--fairness-engine" in args) == expected
+                  and ("--prefill-compute-share" in args) == expected)
+        gc.write_json_atomic(state, {"values": {"PREFILL_SCHEDULE_INTERVAL": 2}})
+        check("CLI rejects cadence conflict before engine startup",
+              subprocess.run(cli + ["validate", "--quiet"], env=env,
+                             capture_output=True).returncode == 2)
+        gc.write_json_atomic(state, {"values": {"PREFILL_COMPUTE_SHARE": "nan"}})
+        check("CLI refuses malformed share rather than exporting fallback argv",
+              subprocess.run(cli + ["env"], env=env, capture_output=True).returncode != 0)
+
+
 def run(test):
     """Run one test_* function. A failing check() raises AssertionError
     after recording the failure; swallow it here so the rest of the
@@ -1035,6 +1154,8 @@ def main():
         run(test_r28_342_shared_h_profile)
         run(test_glm53_342_dsa_profile)
         run(test_full_glm53_candidate_boundaries)
+        run(test_prefill_fairness)
+        run(test_fairness_cli)
         run(test_known_good_replays_across_profile_env_change)
         run(test_flash_is_refused_not_substituted)
         run(test_qwen_preset)

@@ -36,6 +36,7 @@ export DOWNLOAD_MARKER_HOST="$tmp/download-complete" NAME=candidate
 export PODMAN_TEST_ARGS="$tmp/args" PODMAN_TEST_LOG="$tmp/log"
 export GPU_DISCOVERY_LOG="$tmp/gpu-log"
 
+unset PREFILL_FAIRNESS_ENGINE PREFILL_COMPUTE_SHARE
 launch() { bash "$repo/scripts/run-local-podman.sh" >"$tmp/stdout" 2>"$tmp/stderr"; }
 reject() {
   if launch; then echo 'unsafe launch unexpectedly succeeded' >&2; exit 1; fi
@@ -74,6 +75,17 @@ grep -Fxq -- '--pull=never' "$tmp/args"
 if grep -Eq -- '^--(gpus|device|replace|privileged)(=|$)' "$tmp/args"; then exit 1; fi
 grep -Fxq 'NVIDIA_VISIBLE_DEVICES=void' "$tmp/args"
 grep -q '^--hooks-dir=' "$tmp/args"
+# A default launch must not pin fairness over persisted configuration.
+if grep -Eq '^PREFILL_(FAIRNESS_ENGINE|COMPUTE_SHARE)=' "$tmp/args"; then exit 1; fi
+# Explicit registered controls reach the container without a TUNE_ translation.
+reset_log
+CONFIG_SMOKE=1 PREFILL_FAIRNESS_ENGINE=compute_share PREFILL_COMPUTE_SHARE=0.4 launch
+grep -Fxq 'PREFILL_FAIRNESS_ENGINE=compute_share' "$tmp/args"
+grep -Fxq 'PREFILL_COMPUTE_SHARE=0.4' "$tmp/args"
+reset_log
+CONFIG_SMOKE=1 PREFILL_FAIRNESS_ENGINE=off launch
+grep -Fxq 'PREFILL_FAIRNESS_ENGINE=off' "$tmp/args"
+if grep -q '^PREFILL_COMPUTE_SHARE=' "$tmp/args"; then exit 1; fi
 # Podman 4.9-compatible CDI selection preserves physical TP rank order.
 reset_log
 CONFIG_SMOKE=0 GPU_DEVICE_MODE=cdi GPU_DEVICES=2,1,0,3 launch

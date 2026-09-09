@@ -21,6 +21,8 @@ as `defaults < family < variant < startup env < state file`; see
 | `REASONING_PARSER` / `TOOL_CALL_PARSER` | custom profile only | model-specific OpenAI response parsers |
 | `REASONING_EFFORT_DEFAULT` | `high` | full GLM chat-template default; `low`, `high`, or `max`. Individual requests can override it |
 | `PREFILL_SCHEDULE_INTERVAL` | `1` | full GLM prefill admission cadence. `1` preserves unthrottled behavior; evaluate `2` or higher for concurrent decode responsiveness using the TP cadence backport before changing production |
+| `PREFILL_FAIRNESS_ENGINE` | `off` | GLM-family opt-in: `compute_share` enables measured-service fairness; requires `PREFILL_SCHEDULE_INTERVAL=1`. Off emits neither fairness CLI flag and preserves the baseline scheduler |
+| `PREFILL_COMPUTE_SHARE` | `0.6` | finite number strictly between 0 and 1; target prefill share of contended model-service wallclock, not GPU-only time. Used only when fairness is enabled |
 | `TRUST_REMOTE_CODE` | `0` | explicit opt-in for reviewed custom checkpoint Python. Native GLM/Qwen profiles do not grant checkpoint-code execution by default |
 | `AUTH` | `key` | `none` serves unauthenticated on a trusted LAN |
 | `MIN_NVIDIA_DRIVER_VERSION` | `590.48.01` | lower bound of the qualified driver/CUDA pair; the gate runs before model download |
@@ -71,6 +73,57 @@ State-file values override new variant defaults: stage a new state/cache root
 and preserve the old deployment for rollback. Known-invalid startup
 configurations are refused before launch; an untested variant warning is not
 qualification. `CONFIG_SMOKE=1` resolves the CPU-side contract only.
+
+### Opt-in prefill fairness in the general build
+
+The general image includes the V2-compatible measured-service fairness overlay.
+Existing users remain **off**; no profile memory, scheduler-token, concurrency,
+capture-window, or model-runner default changes when these knobs are added.
+In particular, the public full GLM-5.3 candidate keeps its 1,024-row EXL3 arena,
+2,048 scheduler tokens, eight sequences, and capture ceiling 32.
+
+For a new container, explicitly supply:
+
+```sh
+-e PREFILL_FAIRNESS_ENGINE=compute_share \
+-e PREFILL_COMPUTE_SHARE=0.6 \
+-e PREFILL_SCHEDULE_INTERVAL=1
+```
+
+The local Podman launcher forwards the same explicitly set environment variables;
+it supplies no launcher-side fairness defaults. The landing-page editor exposes
+both registered controls under Serving. Startup env and persisted state use the
+normal precedence; state wins. Enabling emits exactly
+`--fairness-engine compute_share --prefill-compute-share 0.6` (or your chosen
+share). To disable, set `PREFILL_FAIRNESS_ENGINE=off` in the winning configuration
+layer and restart the engine. Both flags disappear even if a valid share remains
+configured. A share alone does not enable fairness. Invalid selectors and malformed,
+nonfinite, or out-of-domain shares are rejected, not silently replaced by 0.6;
+a valid higher-precedence state value can repair invalid startup input.
+
+Enabled fairness requires cadence 1 and the GLM `glm52` runtime family. The
+appliance's existing TP/DCP validation still applies. The installed engine is the
+definitive guard for DP=PP=PCP=1, no DBO, decoder-only chunked prefill, the built-in
+scheduler, and MTP or no speculation. TP and decode-context parallelism and both
+V1/V2 model runners are supported by this port. Do **not** force a different model
+runner to enable fairness: the full GLM sparse-indexer DCP topology needs its
+baseline V2 selection. There is no legacy `TUNE_VLLM_*` fairness alias.
+
+“Compute share” means **host-observed model-service wallclock during contention**:
+the controller uses measured completion time, in-flight reservations, and FIFO
+overlap subtraction. It is not isolated GPU kernel time, a prompt-token ratio,
+or an end-to-end latency/throughput guarantee. Host dispatch, IPC/collectives,
+result handling and visible synchronization can contribute; a host result
+timestamp does not guarantee all asynchronous GPU work has completed. A mixed
+prefill/decode service quantum is charged entirely to prefill. Uncontended work
+is not held idle merely to satisfy the target share.
+
+With Prometheus collection enabled, `vllm:prefill_compute_share` reports the target
+and `vllm:scheduler_compute_seconds_total{class="prefill"|"decode"}` reports charged
+service seconds. Measure the prefill fraction from counter deltas:
+`delta(prefill) / (delta(prefill) + delta(decode))`; it is undefined when both
+deltas sum to zero. Compare under sustained contention and measure HTTP TTFT,
+decode latency and throughput separately before promoting a workload setting.
 
 ### AIBeast maintenance trial selector
 

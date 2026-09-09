@@ -19,6 +19,21 @@ This is operational acceptance, not the full maintenance/performance/quality
 matrix. **No global `latest`/`main` promotion or reboot-policy change occurred**;
 the service retains `restart=no`, as before.
 
+The general Docker build now includes the selected B12X route/teardown and
+measured-service fairness code, without copying the historical experiment
+entrypoint or enabling its host policy globally. Fairness is **off by default**.
+For a separately qualified `glm52`-family deployment, set
+`PREFILL_FAIRNESS_ENGINE=compute_share`, `PREFILL_COMPUTE_SHARE=0.6`, and
+`PREFILL_SCHEDULE_INTERVAL=1` through the normal environment/state configuration.
+The existing source/runtime topology checks remain authoritative; model-runner
+selection is not forced. Public arena, scheduler, concurrency and graph defaults
+are unchanged. See [configuration](docs/configuration.md).
+When migrating from the historical experiment image, replace its
+`TUNE_VLLM_PREFILL_FAIRNESS_ENGINE` / `TUNE_VLLM_PREFILL_COMPUTE_SHARE` entries
+with the registered names above as part of the image/configuration cutover.
+Those experimental names are not aliases in the general build. Keep any
+qualified host-specific arena/resource overrides explicit.
+
 The runtime base is local-inference-lab's **Gilded Gnosis v20 r34**
 (`docker.io/voipmonitor/vllm@sha256:820181fb…`: vLLM `e2666d9a65` integration
 tree `4d006a43`, B12X/SparkInfer `cd3ce190`, LMCache `0.5.2+glm52dcp.4`,
