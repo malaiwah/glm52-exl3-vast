@@ -47,6 +47,18 @@ SECRET_PATTERNS = (
     (re.compile(r"(?i)(https?://[^\s?#]+[?&](?:token|access_token|key|api_key|"
                 r"signature|sig|x-amz-signature)=)[^&#\s]+"),
      r"\1[REDACTED]"),
+    # HTML form credential fields: name=token value='...' (either attribute
+    # order) survive the key[=:] rules because the key is an attribute name,
+    # not a prefix. Values are bounded to token-shaped strings so ordinary
+    # short input values are untouched.
+    (re.compile(
+        r"""(?ix)(<input[^>]*?\bname\s*=\s*['"]?token['"]?[^>]*?\bvalue\s*=\s*['"])"""
+        r"""[A-Za-z0-9_-]{16,}['"]"""),
+     r'\1[REDACTED]"'),
+    (re.compile(
+        r"""(?ix)(<input[^>]*?\bvalue\s*=\s*['"])[A-Za-z0-9_-]{16,}['"]"""
+        r"""[^>]*?\bname\s*=\s*['"]?token['"]?"""),
+     r'\1[REDACTED]"'),
     (re.compile(r"(?i)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
                 re.DOTALL), "[REDACTED PRIVATE KEY]"),
     (re.compile(r"\b(?:hf_|sk-)[A-Za-z0-9_-]{12,}\b"), "[REDACTED TOKEN]"),
