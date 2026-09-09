@@ -96,7 +96,18 @@ class SoulConfigTests(unittest.TestCase):
         self.assertNotIn("button-secret", clean)
         self.assertNotIn("json-secret", clean)
         self.assertNotIn("signed-value", clean)
-        self.assertNotIn("hf_abcdefghijklmno", clean)
+        html_raw = (
+            "<input type=hidden name=token value='tok-AUDIT_SYNTHETIC_0123456789'>"
+            '<input value="tok-AUDIT_SYNTHETIC_9876543210" name="token" type="hidden">'
+            "<input type=hidden name=token value='short'>"
+            "<input type=hidden name=user value='tok-NOT_A_TOKEN_FIELD_0123'>"
+        )
+        html_clean = sc.redact(html_raw)
+        self.assertNotIn("AUDIT_SYNTHETIC_0123456789", html_clean)
+        self.assertNotIn("AUDIT_SYNTHETIC_9876543210", html_clean)
+        self.assertIn("value='short'", html_clean)
+        self.assertIn("tok-NOT_A_TOKEN_FIELD_0123", html_clean)
+        self.assertIn("name=token", html_clean)
         self.assertEqual(
             sc.redact({"VLLM_API_KEY": "dictionary-secret", "safe": "visible"}),
             {"safe": "visible"},
