@@ -196,7 +196,7 @@ printf 'supervisor-retry\\n'
             env.update(PATH=str(bindir) + ":" + os.environ["PATH"],
                        TURNKEY_WORKSPACE=str(workspace), JARVISLABS_MACHINE_ID="123",
                        JARVISLABS_REGION="EU1", PUBLIC_IPADDR="127.0.0.1",
-                       TERMINATE_ENABLED="0")
+                       TERMINATE_ENABLED="0", TURNKEY_WAIT_FOR_SERVING="0")
             result = subprocess.run(["bash", str(ROOT / "scripts/jarvislabs_vm_bootstrap.sh")],
                                     env=env, capture_output=True, text=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stderr)

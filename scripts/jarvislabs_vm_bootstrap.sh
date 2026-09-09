@@ -12,7 +12,7 @@
 set -Eeuo pipefail
 
 main() {
-  IMAGE="${TURNKEY_IMAGE:-ghcr.io/malaiwah/glm52-exl3-vast:latest}"
+  IMAGE="${TURNKEY_IMAGE:-docker.io/malaiwah/glm52-exl3-vast:latest}"
   CONTAINER_NAME="${TURNKEY_CONTAINER_NAME:-glm52-turnkey}"
   WORKSPACE="${TURNKEY_WORKSPACE:-/home/turnkey}"
   REGION="${JARVISLABS_REGION:-}"
@@ -60,6 +60,11 @@ main() {
     echo "FATAL: set JARVISLABS_MACHINE_ID to the numeric VM id shown by 'jl list'." >&2
     exit 2
   fi
+  if [[ -z "${JARVISLABS_REGION:-}" ]]; then
+    REGION="IN1"
+    echo ">>> JARVISLABS_REGION not set; defaulting to IN1 (RTX-PRO6000 4-GPU VMs)."
+    echo ">>> Export JARVISLABS_REGION=IN2/EU1 explicitly if your VM is elsewhere."
+  fi
   case "${REGION^^}" in
     IN1|IN2|EU1) REGION="${REGION^^}" ;;
     *)
@@ -76,6 +81,17 @@ main() {
     exit 2
   fi
 
+  # JarvisLabs VM images auto-start nvidia-dcgm (nv-hostengine), which binds
+  # tcp://127.0.0.1:5555 and collides with the appliance's LMCache ZMQ
+  # adapter. Mask the service and stop the daemon before the first launch;
+  # killing it without masking just makes it restart.
+  if systemctl list-unit-files 2>/dev/null | grep -q '^nvidia-dcgm\.service'; then
+    sudo systemctl mask nvidia-dcgm.service 2>/dev/null || true
+    sudo systemctl mask nv-hostengine.service 2>/dev/null || true
+    sudo pkill -x nv-hostengine 2>/dev/null || true
+    echo ">>> Masked nvidia-dcgm (port 5555 freed for LMCache ZMQ)."
+  fi
+
   PASSTHROUGH_KEYS=(
     MODEL_FAMILY MODEL_VARIANT MODEL_ID MODEL_DISPLAY_NAME SERVED_MODEL_NAME
     TENSOR_PARALLEL_SIZE MAX_MODEL_LEN MAX_NUM_SEQS MAX_NUM_BATCHED_TOKENS
@@ -89,6 +105,7 @@ main() {
     OFFLOAD_IGNORE_MEMLOCK PREFIX_CACHE_BACKEND PREFIX_CACHE_DISK_GB
     VISION VISION_CHUNKS FEATURE_TEST_LEVEL
     ACME_ATTEMPT_TIMEOUT_S ACME_BACKGROUND_RETRY_S
+    PORT PREFILL_FAIRNESS_ENGINE PREFILL_COMPUTE_SHARE PREFILL_SCHEDULE_INTERVAL
   )
 
   for key in HF_TOKEN DESEC_TOKEN JARVISLABS_API_KEY \
@@ -130,7 +147,7 @@ main() {
     printf 'JARVISLABS_REGION=%s\n' "$REGION"
     printf 'PUBLIC_IPADDR=%s\n' "$PUBLIC_IP"
     printf 'MODEL_PROFILE=%s\n' "$PROFILE"
-    printf 'MODEL_DISPLAY_NAME=%s\n' "${MODEL_DISPLAY_NAME:-GLM-5.2 JarvisLabs}"
+    printf 'MODEL_DISPLAY_NAME=%s\n' "${MODEL_DISPLAY_NAME:-GLM-5.3 JarvisLabs}"
     printf 'LANDING_PAGE=1\n'
     printf 'OPEN_BUTTON_PORT=1111\n'
     printf 'DESEC_DOMAIN=%s\n' "${DESEC_DOMAIN:-}"
@@ -179,15 +196,69 @@ main() {
     -v "$WORKSPACE:/workspace" \
     "$IMAGE"
 
-  echo ">>> Appliance launched on JarvisLabs VM $MACHINE_ID ($REGION)"
-  echo ">>> Follow startup: sudo docker logs -f $CONTAINER_NAME"
-  if [[ -n "${DESEC_DOMAIN:-}" && -n "${DESEC_TOKEN:-}" ]]; then
-    echo ">>> The logs will print the trusted dashboard and API URLs after DNS/TLS issuance."
-  else
-    echo ">>> DNS/TLS is not configured; keep credentials off public HTTP."
-    echo ">>> Secure fallback: ssh -L 8000:localhost:8000 -L 1111:localhost:1111 ubuntu@$PUBLIC_IP"
-    echo ">>> Then open http://localhost:1111/ with the persisted token from the logs."
+  wait_and_summarize
+}
+
+wait_and_summarize() {
+  if [[ "${TURNKEY_WAIT_FOR_SERVING:-1}" != "1" ]]; then
+    echo ">>> TURNKEY_WAIT_FOR_SERVING=0: launched without waiting."
+    echo ">>> Follow startup: sudo docker logs -f $CONTAINER_NAME"
+    return 0
   fi
+  local port="${PORT:-8000}" waited=0 health="" key="" token=""
+  echo ">>> Waiting for the endpoint (image layers + 331 GB weights + model load;"
+  echo ">>> typically 25-45 minutes on a fresh VM, ~10 minutes with cached weights)."
+  while (( waited < 3600 )); do
+    health="$(curl --max-time 5 -s -o /dev/null -w '%{http_code}' \
+      "http://127.0.0.1:${port}/health" 2>/dev/null || true)"
+    [[ "$health" == "200" ]] && break
+    local running
+    running="$(sudo docker container inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+    if [[ "$running" == "false" ]]; then
+      sudo docker logs --tail 30 "$CONTAINER_NAME" >&2 || true
+      echo "FATAL: the appliance container exited before serving." >&2
+      exit 1
+    fi
+    sleep 30; waited=$(( waited + 30 ))
+    (( waited % 300 == 0 )) && \
+      echo ">>> still booting... ${waited}s elapsed (last health: ${health:-none})"
+  done
+  [[ "$health" == "200" ]] || { echo "FATAL: not healthy after 60 minutes; inspect: sudo docker logs $CONTAINER_NAME" >&2; exit 1; }
+  key="$(sudo docker exec "$CONTAINER_NAME" sh -c 'cat /workspace/../.vllm-api-key 2>/dev/null || true')"
+  [[ -z "$key" && -r "$WORKSPACE/.vllm-api-key" ]] && key="$(cat "$WORKSPACE/.vllm-api-key")"
+  [[ -z "$key" && -r "$WORKSPACE/../.vllm-api-key" ]] && key="$(cat "$WORKSPACE/../.vllm-api-key")"
+  token="$(sudo docker logs "$CONTAINER_NAME" 2>&1 | grep -oE 'token=[a-zA-Z0-9-]+' | head -1 | cut -d= -f2 || true)"
+  local models
+  models="$(curl --max-time 10 -s -H "Authorization: Bearer $key" \
+    "http://127.0.0.1:${port}/v1/models" | tr ',' '\n' | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ' || true)"
+  cat <<SUMMARY
+
+==================================================================
+ GLM-5.3 is serving on VM $MACHINE_ID ($REGION)
+==================================================================
+ Endpoint (inside the VM)  : http://127.0.0.1:${port}/v1
+ Endpoint (from your machine): ssh -L 8000:localhost:8000 ubuntu@$PUBLIC_IP
+                                then http://localhost:8000/v1
+ API key                    : ${key:-(printed once in 'docker logs' at first boot)}
+                              send it as "Authorization: Bearer <key>"
+ Model name                 : ${models:-GLM-5.3}
+ Dashboard                  : ssh -L 1111:localhost:1111 ubuntu@$PUBLIC_IP
+                              then http://localhost:1111/?token=${token:-(see docker logs)}
+ Logs                       : sudo docker logs -f $CONTAINER_NAME
+
+ Try it:
+   curl http://127.0.0.1:${port}/v1/chat/completions \\
+     -H "Authorization: Bearer $key" \\
+     -H 'Content-Type: application/json' \\
+     -d '{"model":"GLM-5.3","messages":[{"role":"user","content":"Say hi"}]}'
+
+ Optional one-time host tuning (P2P override + pcie_aspm=off, needs a
+ reboot): see the README JarvisLabs section. The appliance serves safely
+ without it (NCCL fallback).
+
+ Billing continues while the VM exists. When done: jl destroy $MACHINE_ID
+==================================================================
+SUMMARY
 }
 
 main "$@"
