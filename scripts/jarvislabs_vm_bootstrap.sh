@@ -200,6 +200,11 @@ main() {
 }
 
 wait_and_summarize() {
+  if [[ "${TURNKEY_WAIT_FOR_SERVING:-1}" != "1" ]]; then
+    echo ">>> TURNKEY_WAIT_FOR_SERVING=0: launched without waiting."
+    echo ">>> Follow startup: sudo docker logs -f $CONTAINER_NAME"
+    return 0
+  fi
   local port="${PORT:-8000}" waited=0 health="" key="" token=""
   echo ">>> Waiting for the endpoint (image layers + 331 GB weights + model load;"
   echo ">>> typically 25-45 minutes on a fresh VM, ~10 minutes with cached weights)."
@@ -207,8 +212,9 @@ wait_and_summarize() {
     health="$(curl --max-time 5 -s -o /dev/null -w '%{http_code}' \
       "http://127.0.0.1:${port}/health" 2>/dev/null || true)"
     [[ "$health" == "200" ]] && break
-    if ! sudo docker container inspect -f '{{.State.Running}}' "$CONTAINER_NAME" \
-        2>/dev/null | grep -q true; then
+    local running
+    running="$(sudo docker container inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+    if [[ "$running" == "false" ]]; then
       sudo docker logs --tail 30 "$CONTAINER_NAME" >&2 || true
       echo "FATAL: the appliance container exited before serving." >&2
       exit 1
