@@ -136,6 +136,19 @@ snapshot_download(sys.argv[1], revision=sys.argv[2], local_dir=sys.argv[3], max_
 PYEOF
 echo "POPULATE_SECONDS=$((SECONDS - t0))"
 du -sh "$DIR"
+# Prime the appliance image onto the filesystem in the same session: the
+# runner's prepare honors an existing unpacked tree, so every replica skips
+# the registry fetch (~3 minutes per boot).
+export DEBIAN_FRONTEND=noninteractive
+command -v skopeo >/dev/null 2>&1 || apt-get update -qq && apt-get install -y -qq skopeo rsync jq >/dev/null
+curl -fsSL --connect-timeout 10 --max-time 60 --retry 10 --retry-delay 2 --retry-all-errors \
+  https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_container_rootfs.sh \
+  -o /root/rootfs.sh
+IMG="ghcr.io/malaiwah/glm52-exl3-vast:latest"
+DIGEST=$(skopeo inspect --override-os linux --override-arch amd64 "docker://$IMG" --format '{{.Digest}}')
+TURNKEY_IMAGE="$IMG@$DIGEST" TURNKEY_ROOT=/home/jl_fs/.image/qual \
+  TURNKEY_WORKSPACE=/home/turnkey/workspace TURNKEY_GRAFT=0 bash /root/rootfs.sh prepare
+du -sh /home/jl_fs/.image/qual
 REMOTE
   jl destroy "$mid" --yes >/dev/null
   state_set populator ""
@@ -162,6 +175,9 @@ cmd_serve() { # cmd_serve <name>
     export MODEL_DIR='$FS_MOUNT/$WEIGHTS_SUBDIR'
     export GLM_STATE_DIR=/home/turnkey/workspace/.glm-config
     export TURNKEY_WORKSPACE=/home/turnkey/workspace
+    # Reuse the unpacked appliance image from the shared filesystem: the
+    # first boot pays the registry fetch, later instances skip it.
+    export TURNKEY_ROOT='$FS_MOUNT/.image/qual'
     # One shared quantization cache: its content is a pure function of the
     # weights revision, the quantization algorithm and the GPU architecture,
     # so every replica reads the same bytes. Cold boots are serialized (the

@@ -22,6 +22,11 @@ export MODEL_DIR=/home/jl_fs/GLM-5.3-EXL3-TR3-3.42bpw
 export GLM_STATE_DIR=/home/turnkey/workspace/.glm-config
 export TURNKEY_WORKSPACE=/home/turnkey/workspace
 export VLLM_API_KEY="$FLEET_KEY"
+# The unpacked appliance image lives on the shared filesystem too: the
+# first boot to see it pays the registry fetch + unpack, every later
+# instance reuses the tree (fetch_and_unpack honors the .unpacked digest
+# marker). The host driver re-injection is idempotent within a region.
+export TURNKEY_ROOT=/home/jl_fs/.image/qual
 # The online-quantization cache is one shared directory on that same
 # filesystem: identical weights, algorithm and GPU architecture make its
 # content replica-independent, and the manager serializes cold boots

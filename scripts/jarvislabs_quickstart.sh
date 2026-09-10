@@ -19,7 +19,7 @@
 # `curl | bash` transfer cannot execute a destructive prefix.
 set -Eeuo pipefail
 
-DEFAULT_IMAGE="docker.io/malaiwah/glm52-exl3-vast:latest"
+DEFAULT_IMAGE="ghcr.io/malaiwah/glm52-exl3-vast:latest"
 RUNNER_URL_DEFAULT="https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_container_rootfs.sh"
 
 log()   { printf '>>> %s\n' "$*"; }
