@@ -198,14 +198,21 @@ mint_landing_token() {
 
 print_summary() {
   local port="${PORT:-8000}"
-  local keyfile key token models
-  keyfile="$(for f in "${GLM_STATE_DIR:-}/.vllm-api-key" \
-                          "${MODEL_DIR%/*}/.vllm-api-key" \
-                          /workspace/.glm-config/.vllm-api-key \
-                          /workspace/.vllm-api-key; do
-              [[ -n "$f" && -r "$f" ]] && { printf '%s' "$f"; break; }; done || true)"
-  key=""
-  [[ -n "$keyfile" ]] && key="$(cat "$keyfile")"
+  local key="${VLLM_API_KEY:-}" keyfile="" token models
+  if [[ -z "$key" ]]; then
+    # The fleet's autonomous boot supplies the key via env and never writes a
+    # keyfile; fall back to the file candidates only on the manual path. The
+    # composed candidates are emitted only when their variable is set — an
+    # unset GLM_STATE_DIR/MODEL_DIR would otherwise both probe /.vllm-api-key.
+    local candidates=()
+    [[ -n "${GLM_STATE_DIR:-}" ]] && candidates+=("${GLM_STATE_DIR}/.vllm-api-key")
+    [[ -n "${MODEL_DIR:-}" ]] && candidates+=("${MODEL_DIR%/*}/.vllm-api-key")
+    candidates+=(/workspace/.glm-config/.vllm-api-key
+                 /workspace/.vllm-api-key)
+    for f in "${candidates[@]}"; do
+      if [[ -r "$f" ]]; then keyfile="$f"; key="$(cat "$f")"; break; fi
+    done
+  fi
   local ws="${TURNKEY_WORKSPACE:-/home/turnkey/workspace}"
   token=""
   [[ -r "$ws/.model-turnkey-landing-token" ]] && token="$(cat "$ws/.model-turnkey-landing-token")"
@@ -256,7 +263,7 @@ except Exception:
 ==================================================================
  Endpoint (from your machine)    : $api_line
  Endpoint (inside the instance)  : http://127.0.0.1:${port}/v1
- API key                         : ${key:-(see ${GLM_STATE_DIR:-$ws/.glm-config}/.vllm-api-key)}
+ API key                         : ${key:-(see ${keyfile:-${GLM_STATE_DIR:-$ws/.glm-config}/.vllm-api-key})}
                                     send it as "Authorization: Bearer <key>"
  Model name                      : ${models:-GLM-5.3 (see /v1/models)}
  Dashboard (from your machine)   : $dash_line

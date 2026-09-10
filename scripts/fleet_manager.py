@@ -25,7 +25,7 @@ import urllib.request
 
 CONFIG_PATH = os.environ.get("FLEET_MANAGER_CONFIG",
                              os.path.expanduser("~/fleet-manager/fleet.json"))
-SLOT_RE = re.compile(r"^glm53-serve-")
+NUMERIC_SLOT_RE = re.compile(r"^glm53-serve-\d+$")
 METRIC_RE = {
     "waiting": re.compile(rb'^vllm:num_requests_waiting(?:\{[^}]*\})?\s+([0-9.eE+-]+)', re.M),
     "running": re.compile(rb'^vllm:num_requests_running(?:\{[^}]*\})?\s+([0-9.eE+-]+)', re.M),
@@ -72,8 +72,6 @@ class Replica:
         self.waiting = None
         self.running = None
         self.cache = None
-        self.idle_since = None
-
     def probe(self):
         """Find the replica's vLLM proxy URL. /metrics is the discriminator:
         it answers 200 without authentication on the appliance's engine port.
@@ -81,8 +79,11 @@ class Replica:
         everything and must never be used as an API base."""
         detail = jl_json("get", str(self.mid))
         for base in detail.get("endpoints") or []:
-            code, _ = http_code(f"{base}/metrics")
-            if code == 200:
+            code, body = http_code(f"{base}/metrics")
+            # 200 alone is not proof: the Jupyter lab proxy answers 200 to
+            # everything, and port 1111 (landing page) is exposed through
+            # the same proxy family. Only vLLM's own /metrics will do.
+            if code == 200 and b"vllm:" in body:
                 self.api_url = base
                 self.healthy = True
                 return
@@ -105,28 +106,44 @@ class Fleet:
     def __init__(self, cfg):
         self.cfg = cfg
         self.fleet_key = cfg["fleet_key"]
-        self.last_change = 0
         self.last_scale = 0
         self.wired = set()
         self.unhealthy_since = {}
         self.idle_since = None
+        self.retiring = {}
         self.first_seen = {}
     def slots(self):
+        """Only numeric slots are manager-owned. Manually created replicas
+        (glm53-serve-a etc.) keep their own appliance-generated API key,
+        which the fleet key cannot authenticate against — adopting them
+        would wire a deployment that 401s every request."""
         rows = jl_json("list")
         rows = rows if isinstance(rows, list) else rows.get("instances", rows.get("data", []))
-        return [r for r in rows if SLOT_RE.match(r.get("name", ""))]
+        return [r for r in rows if NUMERIC_SLOT_RE.match(r.get("name", ""))]
 
     def ensure_min(self, replicas):
         alive = [r for r in replicas if r.status in ("Running", "Pending", "Provisioning")]
         missing = self.cfg["min_replicas"] - len(alive)
         if missing > 0:
-            # One creation per cycle: cold boots are serialized so two
-            # replicas never write the shared quantization cache at once.
             self.create_slot()
 
-
     def create_slot(self):
-        used = {r["name"] for r in self.slots()}
+        current = self.slots()
+        # max_replicas bounds the whole fleet, not just autoscale.
+        if len(current) >= self.cfg["max_replicas"]:
+            log(f"create skipped: at max_replicas={self.cfg['max_replicas']}")
+            return
+        # Serialize COLD BOOTS, not just creations: two slots booting at
+        # once would write the one shared quantization cache concurrently.
+        # Any alive slot younger than boot_timeout is treated as booting;
+        # since a just-created slot is Pending and young, this also
+        # collapses the ensure_min/reap double-create within one cycle.
+        for row in current:
+            if row.get("status") in ("Running", "Pending", "Provisioning"):
+                if self.age_of(Replica(row)) < self.cfg.get("boot_timeout_seconds", 2400):
+                    log(f"create deferred: {row.get('name')} still booting")
+                    return
+        used = {r["name"] for r in current}
         n = 0
         while f"glm53-serve-{n}" in used:
             n += 1
@@ -158,8 +175,8 @@ class Fleet:
                 self.unhealthy_since.pop(key, None)
                 continue
             age = self.age_of(r)
-            if r.status == "Running" and age < boot_timeout:
-                continue  # still booting; leave it alone
+            if r.status in ("Running", "Pending", "Provisioning") and age < boot_timeout:
+                continue  # alive and young: still booting, leave it alone
             first = self.unhealthy_since.setdefault(key, time.time())
             if r.status not in ("Running",) or time.time() - first > grace:
                 log(f"slot {r.name} is {r.status or 'unreachable'} "
@@ -175,8 +192,9 @@ class Fleet:
         ("2 hours 13 minutes"), falling back to first-seen tracking."""
         runtime = (replica.info.get("runtime") or "").strip()
         total = 0
-        for value, unit in re.findall(r"(\d+)\s*(hour|minute)", runtime):
-            total += int(value) * (3600 if unit == "hour" else 60)
+        for value, unit in re.findall(r"(\d+)\s*(day|hour|minute|second)", runtime):
+            total += int(value) * {"day": 86400, "hour": 3600,
+                                   "minute": 60, "second": 1}[unit]
         if total:
             return total
         first = self.first_seen.setdefault(replica.mid, time.time())
@@ -184,6 +202,7 @@ class Fleet:
 
     def autoscale(self, replicas):
         healthy = [r for r in replicas if r.healthy]
+        self.finish_retirements(replicas)
         if not healthy:
             return
         cooldown = self.cfg.get("cooldown_seconds", 300)
@@ -209,21 +228,47 @@ class Fleet:
         if concurrency < threshold:
             self.idle_since = self.idle_since or now
             if now - self.idle_since >= idle_for and len(replicas) > self.cfg["min_replicas"]:
-                # Retire the least-loaded replica; in-flight requests on it
-                # finish while litellm stops routing new ones to it.
-                victim = min(healthy, key=lambda r: (r.running or 0) + (r.waiting or 0))
+                # Retire the least-loaded replica. Rewire FIRST so litellm
+                # stops routing new requests (and new sessions) to it, let
+                # the drain window pass, and only then destroy it —
+                # destroying first would kill every in-flight request and
+                # every session pinned to it by deployment_affinity.
+                candidates = [r for r in healthy if r.name not in self.retiring]
+                if not candidates:
+                    return
+                victim = min(candidates, key=lambda r: (r.running or 0) + (r.waiting or 0))
                 log(f"scale down: concurrency {concurrency} < {threshold} for "
-                    f"{int(now - self.idle_since)}s; retiring {victim.name}")
-                self.destroy(victim)
-                self.last_scale = time.time()
+                    f"{int(now - self.idle_since)}s; draining {victim.name}")
+                self.retiring[victim.name] = now
+                self.wire_litellm([r for r in replicas if r.name != victim.name])
                 self.idle_since = None
         else:
             self.idle_since = None
 
+    def finish_retirements(self, replicas):
+        """After the drain window, destroy drained replicas."""
+        drain = self.cfg.get("scale_down_drain_seconds", 120)
+        for name, started in list(self.retiring.items()):
+            if time.time() - started < drain:
+                continue
+            replica = next((r for r in replicas if r.name == name), None)
+            if replica:
+                log(f"retirement drain elapsed; destroying {name}")
+                self.destroy(replica)
+            self.retiring.pop(name)
+            self.last_scale = time.time()
+
     def wire_litellm(self, replicas):
         """Reconfigure litellm when the set of healthy replicas changes."""
-        healthy = sorted((r for r in replicas if r.healthy), key=lambda r: r.name)
+        healthy = sorted((r for r in replicas
+                          if r.healthy and r.name not in self.retiring),
+                         key=lambda r: r.name)
         ids = {r.name for r in healthy}
+        # Never rewrite the config to an empty model_list: if every replica
+        # is briefly unhealthy, the last good config keeps serving while
+        # reap rebuilds the fleet.
+        if not ids:
+            return
         if ids == self.wired and os.path.exists(os.path.expanduser("~/router/config.yaml")):
             return
         cfg = ["model_list:"]
@@ -249,12 +294,21 @@ class Fleet:
             "  drop_params: true",
         ]
         path = os.path.expanduser("~/router/config.yaml")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = path + ".new"
         with open(tmp, "w") as f:
             f.write("\n".join(cfg) + "\n")
         os.replace(tmp, path)
-        subprocess.run(["sudo", "systemctl", "restart", "litellm-router"],
-                       capture_output=True)
+        rc = subprocess.run(["sudo", "systemctl", "restart", "litellm-router"],
+                            capture_output=True, text=True)
+        if rc.returncode != 0:
+            # The unit is transient (--collect): once litellm exits,
+            # restart reports the unit as gone and cannot bring it back.
+            # Leave self.wired unchanged so the next cycle retries, and say
+            # loudly that the router needs a human.
+            log(f"litellm restart FAILED rc={rc.returncode}: "
+                f"{(rc.stderr or '').strip()[:200]}")
+            return
         self.wired = ids
         log(f"litellm rewired: {sorted(ids)}")
 

@@ -6,9 +6,11 @@
 # pinned configuration and NO outside SSH involvement:
 #
 #   - weights come from the shared filesystem (--fs-id at create time)
-#   - the online-quantization cache is pinned to a per-slot directory on
-#     that same filesystem, keyed by the instance name, so a slot relaunch
-#     skips re-quantization
+#   - the online-quantization cache is ONE shared directory on that same
+#     filesystem (/home/jl_fs/.runtimes/exl3-online), not per-slot: its
+#     content is identical for every replica, and safety comes from the
+#     manager serializing COLD BOOTS — it never creates a second slot
+#     while one is still booting
 #   - config state and the API key stay on the instance's own disk
 #   - the API key is the fleet-wide key (the manager, which is the only
 #     thing that needs to know it, bakes it in at registration time)
@@ -42,11 +44,21 @@ export PREFILL_FAIRNESS_ENGINE=compute_share
 export PREFILL_COMPUTE_SHARE=0.6
 export MAX_NUM_SEQS=12
 export MAX_NUM_BATCHED_TOKENS=3072
-exec bash <(
-  # Bounded, fast retries: the startup script fires the moment the instance
-  # boots, when DNS may not be up yet; curl's default backoff would then sit
-  # in minutes-long sleeps between retries.
-  curl -fsSL --connect-timeout 10 --max-time 60 --retry 10 --retry-delay 2 \
-    --retry-all-errors \
-    "https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/cdfbbe41c2913b161f20e3e42ce897b705d66667/scripts/jarvislabs_quickstart.sh"
-)
+export VLLM_EXL3_PREFILL_CAPACITY=2048
+export GPU_MEMORY_UTILIZATION=0.95
+# 12 seqs x (1 + 3 MTP) = 48 decode tokens per step: the capture and
+# trellis windows must be raised together or decode silently leaves the
+# captured fast path under concurrency (glm_config rule concurrency-window).
+export CUDAGRAPH_CAPTURE_SIZES=4,8,12,16,20,24,28,32,36,40,44,48
+export MAX_CUDAGRAPH_CAPTURE_SIZE=48
+export VLLM_EXL3_TRELLIS_MAX_M=48
+# Download to a file and exec only on success: process substitution
+# discards curl's exit status, so a truncated download would exec a
+# truncated script. Bounded, fast retries: the startup script fires the
+# moment the instance boots, when DNS may not be up yet; curl's default
+# backoff would then sit in minutes-long sleeps between retries.
+curl -fsSL --connect-timeout 10 --max-time 60 --retry 10 --retry-delay 2 \
+  --retry-all-errors \
+  "https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/cdfbbe41c2913b161f20e3e42ce897b705d66667/scripts/jarvislabs_quickstart.sh" \
+  -o /tmp/quickstart.sh || exit 1
+exec bash /tmp/quickstart.sh

@@ -53,7 +53,7 @@ as `defaults < family < variant < startup env < state file`; see
 | `VERIFY_LONG_CONTEXT` | `1` | `0` keeps deterministic short prompts, strict structured output, and the bounded temperature-1 512-token sampling gate, but skips long-context retrieval |
 | `VERIFY_NEEDLE_TOKENS` | `32768` | size of the long-context retrieval probe |
 | `VERIFY_HEALTH_TIMEOUT_S` | `3600` | health wait after vLLM launch; accommodates first local NFS/cachefilesd page-in. Model download occurs before this timer. |
-| `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures and logs live |
+| `GLM_STATE_DIR` | `<volume>/.glm-config` | where the config state file, known-good config, failures, logs and the generated `.vllm-api-key` live |
 | `MODEL_FAMILY` / `MODEL_VARIANT` | selected by `MODEL_PROFILE` | primary `glm52` / `exl3-tr3-glm53-3.42bpw-500k`; the family names architecture, not checkpoint version. The Flash `glm53` family is withdrawn from this image |
 | `SSHD` | `auto` | `auto` starts the bundled key-only sshd when a provider injects a public key and nothing is already listening; `0` never starts it and `1` always tries |
 | `CONFIG_SMOKE` | `0` | `1` resolves the config, prints the argv and exits without downloading or touching a GPU |
