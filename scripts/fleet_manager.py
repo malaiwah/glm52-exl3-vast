@@ -123,7 +123,10 @@ class Fleet:
             # One creation per cycle: cold boots are serialized so two
             # replicas never write the shared quantization cache at once.
             self.create_slot()
-        used = {r.name for r in self.slots()}
+
+
+    def create_slot(self):
+        used = {r["name"] for r in self.slots()}
         n = 0
         while f"glm53-serve-{n}" in used:
             n += 1
@@ -134,7 +137,6 @@ class Fleet:
            "--script-id", str(self.cfg["script_id"]), "--http-ports", "8000,1111",
            "--name", name, "--yes")
         self.last_scale = time.time()
-
     def destroy(self, replica):
         log(f"destroying {replica.name} ({replica.mid})")
         jl("destroy", str(replica.mid), "--yes")
