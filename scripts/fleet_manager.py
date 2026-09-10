@@ -74,15 +74,14 @@ class Replica:
         self.cache = None
         self.idle_since = None
 
-    def probe(self, key):
-        """Discover the verified proxy URL from jl's endpoint list."""
+    def probe(self):
+        """Find the replica's vLLM proxy URL. /metrics is the discriminator:
+        it answers 200 without authentication on the appliance's engine port.
+        The 'url' field in jl get is the Jupyter lab URL, which answers 200 to
+        everything and must never be used as an API base."""
         detail = jl_json("get", str(self.mid))
-        candidates = list(detail.get("endpoints") or [])
-        url = detail.get("url") or ""
-        if url and url not in candidates:
-            candidates.append(url)
-        for base in candidates:
-            code, _ = http_code(f"{base}/v1/models", key)
+        for base in detail.get("endpoints") or []:
+            code, _ = http_code(f"{base}/metrics")
             if code == 200:
                 self.api_url = base
                 self.healthy = True
@@ -206,7 +205,7 @@ class Fleet:
         replicas = [Replica(r) for r in self.slots()]
         for r in replicas:
             if r.status == "Running":
-                r.probe(self.fleet_key)
+                r.probe()
                 r.scrape()
         self.ensure_min(replicas)
         self.reap(replicas)
@@ -215,7 +214,7 @@ class Fleet:
         replicas = [Replica(r) for r in self.slots()]
         for r in replicas:
             if r.status == "Running":
-                r.probe(self.fleet_key)
+                r.probe()
         self.wire_litellm(replicas)
         states = ", ".join(f"{r.name}:{r.status}:{'ok' if r.healthy else '-'}"
                            f"(run={r.running} wait={r.waiting})" for r in replicas)
