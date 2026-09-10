@@ -235,6 +235,52 @@ for k, v in sorted(json.load(sys.stdin).items()):
   printf 'general_settings:\n  master_key: os.environ/LITELLM_MASTER_KEY\n'
 }
 
+router_tls() { # router_tls <ip>: with DESEC_TOKEN + DESEC_DOMAIN exported,
+               # register glm53-router.<zone> -> <ip> and issue a Let's
+               # Encrypt certificate via lego DNS-01 (the appliance's
+               # deSEC path, reused on the router VM). No-op otherwise.
+  [[ -n "${DESEC_TOKEN:-}" && -n "${DESEC_DOMAIN:-}" ]] || return 0
+  local ip="$1" sub="glm53-router"
+  log "TLS: registering ${sub}.${DESEC_DOMAIN} -> $ip and issuing a certificate"
+  local remote_cmd
+  remote_cmd=$(printf 'IP=%q ZONE=%q TOKEN=%q EMAIL=%q bash -s' \
+    "$ip" "$DESEC_DOMAIN" "$DESEC_TOKEN" "${ACME_EMAIL:-michel.belleau@malaiwah.com}")
+  scp -q "$(dirname "${BASH_SOURCE[0]}")/desec_acme_guard.py" \
+    "$ROUTER_USER@$ip:router/desec_acme_guard.py" 2>/dev/null || \
+    log "TLS: could not ship desec_acme_guard.py; lego runs without the guard"
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$ROUTER_USER@$ip" "$remote_cmd" <<'REMOTE' ||
+set -e
+mkdir -p "$HOME/router/bin"
+if [ ! -x "$HOME/router/bin/lego" ]; then
+  curl -fsSL "https://github.com/go-acme/lego/releases/download/v5.4.1/lego_5.4.1_linux_amd64.tar.gz" \
+    | tar -xz -C "$HOME/router/bin" lego
+  curl -fsSL "https://github.com/go-acme/lego/releases/download/v5.4.1/lego_5.4.1_checksums.txt" \
+    | grep linux_amd64.tar.gz | sha256sum -c --status - || { echo BAD-LEGO-CHECKSUM; exit 1; }
+fi
+# A record for the router name (ttl 3600 is deSEC's account minimum). The
+# token travels in a 0600 header file, never argv.
+hdr=$(umask 077 && mktemp)
+printf 'Authorization: Token %s\n' "$TOKEN" > "$hdr"
+curl -sf -X PUT "https://desec.io/api/v1/domains/$ZONE/rrsets/" \
+  -H @"$hdr" -H "Content-Type: application/json" \
+  -d "[{\"subname\":\"glm53-router\",\"type\":\"A\",\"ttl\":3600,\"records\":[\"$IP\"]}]" >/dev/null
+rm -f "$hdr"
+# The deSEC guard (same one the appliance runs beside lego) repairs the
+# transient authoritative split observed in live DNS-01 issuances.
+pip3 install -q --break-system-packages dnspython 2>/dev/null || pip3 install -q dnspython
+python3 "$HOME/router/desec_acme_guard.py" --zone "$ZONE" \
+  --domain "glm53-router.$ZONE" --timeout 300 &
+guard=$!
+DESEC_TOKEN="$TOKEN" "$HOME/router/bin/lego" --path "$HOME/router/lego" \
+  --server https://acme-v02.api.letsencrypt.org/directory \
+  --email "$EMAIL" --dns desec --domains "glm53-router.$ZONE" \
+  --accept-tos --dns.propagation-wait 45s run
+kill $guard 2>/dev/null || true
+ls "$HOME/router/lego/certificates/"
+REMOTE
+  log "TLS: issuance failed; continuing with plain HTTP on :$ROUTER_PORT"
+}
+
 cmd_router() {
   require_jl
   local t0=$SECONDS
@@ -259,23 +305,29 @@ cmd_router() {
       python3 -c "import secrets; print(\"sk-router-\" + secrets.token_hex(24))" > "$HOME/router/master-key"
     fi
   '
+  router_tls "$ip"
   # Re-generate the config from live fleet state and ship it, then start.
   regenerate_router_config "$ip"
   router_restart "$ip"
   local rkey
   rkey=$(ssh -o BatchMode=yes "$ROUTER_USER@$ip" 'cat $HOME/router/master-key')
-  # CPU VMs have no JarvisLabs HTTPS proxy; probe the public IP directly and
-  # fall back to documenting an SSH tunnel.
-  local probe
-  probe=$(curl --max-time 8 -s -o /dev/null -w '%{http_code}' \
-    "http://$ip:$ROUTER_PORT/health/liveliness" 2>/dev/null || true)
+  # CPU VMs have no JarvisLabs HTTPS proxy; probe the public IP directly.
+  # With a certificate issued, litellm serves TLS on 443 under the
+  # glm53-router.<zone> name; otherwise plain HTTP on ROUTER_PORT.
+  local probe url
+  if ssh -o BatchMode=yes "$ROUTER_USER@$ip" 'test -d $HOME/router/lego/certificates' 2>/dev/null; then
+    url="https://glm53-router.${DESEC_DOMAIN:-}:${ROUTER_TLS_PORT:-443}/v1"
+  else
+    url="http://$ip:$ROUTER_PORT/v1"
+  fi
+  probe=$(curl --max-time 15 -s -o /dev/null -w '%{http_code}' "${url%/v1}/health/liveliness" 2>/dev/null || true)
   if [[ "$probe" == "200" ]]; then
-    log "router ready in $((SECONDS - t0))s at http://$ip:$ROUTER_PORT/v1 (publicly reachable)"
+    log "router ready in $((SECONDS - t0))s at $url (publicly reachable)"
     log "router master key (send as 'Authorization: Bearer <key>'): $rkey"
   else
-    log "router ready in $((SECONDS - t0))s; port $ROUTER_PORT is not reachable on the public IP."
+    log "router ready in $((SECONDS - t0))s but the probe failed (${probe:-no answer}): $url"
     log "master key: $rkey"
-    log "use an SSH tunnel: ssh -L $ROUTER_PORT:localhost:$ROUTER_PORT $ROUTER_USER@$ip"
+    log "if the port is unreachable, use an SSH tunnel: ssh -L $ROUTER_PORT:localhost:$ROUTER_PORT $ROUTER_USER@$ip"
   fi
 }
 
@@ -291,15 +343,33 @@ router_restart() { # router_restart <ip>: (re)start litellm under systemd so it
                    # survives ssh sessions; the VM has no user lingering.
   ssh -o BatchMode=yes "$ROUTER_USER@$1" '
     mkdir -p $HOME/router
+    if [ ! -s "$HOME/router/master-key" ]; then
+      python3 -c "import secrets; print(\"sk-router-\" + secrets.token_hex(24))" > "$HOME/router/master-key"
+    fi
     sudo systemctl stop litellm-router.service 2>/dev/null || true
+    tls_args=""
+    port='"$ROUTER_PORT"'
+    crt=$HOME/router/lego/certificates/glm53-router.*.crt
+    key=$HOME/router/lego/certificates/glm53-router.*.key
+    cap_props=""
+    if ls $crt >/dev/null 2>&1 && ls $key >/dev/null 2>&1; then
+      # Serve the issued certificate on the TLS port. Binding 443 as a
+      # non-root unit needs the ambient bind capability.
+      tls_args="--ssl_certfile_path $(ls $crt | head -1) --ssl_keyfile_path $(ls $key | head -1)"
+      port='"${ROUTER_TLS_PORT:-443}"'
+      cap_props="--property=AmbientCapabilities=CAP_NET_BIND_SERVICE --property=CapabilityBoundingSet=CAP_NET_BIND_SERVICE"
+    fi
     sudo systemd-run --uid='"$ROUTER_USER"' --unit=litellm-router --collect \
       --working-directory=$HOME/router --setenv=HOME=$HOME \
       --setenv=LITELLM_MASTER_KEY=$(cat $HOME/router/master-key) \
+      $cap_props \
       $HOME/.local/bin/litellm --config $HOME/router/config.yaml \
-      --port '"$ROUTER_PORT"' --host 0.0.0.0
+      --port $port --host 0.0.0.0 $tls_args
     sleep 15
     systemctl is-active litellm-router
-    curl -s --max-time 10 http://127.0.0.1:'"$ROUTER_PORT"'/health/liveliness && echo ROUTER_LIVE
+    curl -sk --max-time 10 https://127.0.0.1:$port/health/liveliness \
+      || curl -s --max-time 10 http://127.0.0.1:$port/health/liveliness
+    echo " ROUTER_LIVE"
   '
 }
 

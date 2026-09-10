@@ -99,6 +99,12 @@ attached. The quickstart grafts the appliance with:
   logs confirm `Online EXL3 K6 cache hit` for all 1644 entries and skip
   re-quantization entirely.
 
+Replicas also run AIBeast's selected runtime envs, so the rental fleet
+behaves like the qualified appliance: prefill fairness at a 60% compute
+share, `MAX_NUM_SEQS=12`, batched tokens 3072, prefill capacity 2048,
+0.95 GPU memory utilization, and the 48-token capture/Trellis window that
+12 sequences x 4 MTP tokens require.
+
 vLLM's AOT compilation cache lands beside the model dir on the FS and is
 shared by all replicas; that is what made the second replica boot 6 minutes
 faster than the first.
@@ -118,23 +124,36 @@ router_settings:
   deployment_affinity_ttl_seconds: 3600
 ```
 
-Requests from the same client key (or carrying a session id) keep landing on
-the replica whose LMCache prefix tier already holds their conversation; the
-shuffle only spreads NEW sessions. Verified live: repeated calls with one
-client key all hit the same `x-litellm-model-id`, a different key pinned to
-the other replica.
+**How sessions are identified.** LiteLLM pins in this order: a session id
+— any of the `session-id` / `session_id` / `thread-id` /
+`conversation_id` headers, a W3C `Baggage: session.id=...` header, or a
+`session_id` body field — and, failing that, a hash of the incoming API
+key. Pins expire after one idle hour and refresh on every request. Since
+the router enforces a master key, all anonymous clients share one hash: to
+get per-conversation spread across replicas, send a `session-id` header
+per conversation (agent frameworks like Codex emit these natively) or
+issue distinct virtual keys via `/key/generate`.
+
+**TLS (optional).** Export `DESEC_TOKEN` + `DESEC_DOMAIN` (your deSEC
+zone) before running `router`, and the router gets a real Let's Encrypt
+certificate: the script registers `glm53-router.<zone>` → the VM's public
+IP and issues via lego DNS-01 — the same deSEC path the appliance uses,
+guard included. litellm then serves TLS on 443 (the non-root systemd unit
+gets the ambient bind capability). Endpoint: `https://glm53-router.<zone>/v1`.
+Verified live: `glm53-router.malaiwah.dedyn.io` issued in 65 s. Note LE's
+5-duplicate-certificates/week limit: the certificate lives on the VM, so
+recreating the router more than ~5× a week re-issues and can hit it.
 
 ## Networking facts (measured, not documented by the provider)
 
 - JarvisLabs containers expose `--http-ports` ONLY through their HTTPS proxy
   (`https://<6-hostname-chars><machine-id><index>.notebooksc.jarvislabs.net`);
   raw TCP on the public IP is unreachable by design.
-- The router CPU VM's port 4000 IS directly reachable on its public IP
-  (plain HTTP; put TLS in front if this matters to you), and it does not
-  support `--http-ports` at all.
-- There is no network route between CPU VMs (10.0.0.x) and containers
-  (10.200.74.x), so the VM router reaches replicas via the public proxy
-  (~0.2–0.3 s overhead per request).
+- The router CPU VM's port 4000 is directly reachable on its public IP
+  (plain HTTP unless DESEC TLS is configured), and it does not support
+  `--http-ports` at all.
+- CPU VMs cannot attach filesystems (`--fs-id is not supported with CPU
+  VMs`), which is why the populator is a 1-GPU spot instance.
 - Containers CAN reach each other privately: replica A hit replica B at
   `10.200.74.31:8000` directly (200, authenticated). A colocated router
   (LiteLLM on one of the serve containers, private URLs) is the
