@@ -263,7 +263,7 @@ except Exception:
 ==================================================================
  Endpoint (from your machine)    : $api_line
  Endpoint (inside the instance)  : http://127.0.0.1:${port}/v1
- API key                         : ${key:-(see ${GLM_STATE_DIR:-$ws/.glm-config}/.vllm-api-key)}
+ API key                         : ${key:-(see ${keyfile:-${GLM_STATE_DIR:-$ws/.glm-config}/.vllm-api-key})}
                                     send it as "Authorization: Bearer <key>"
  Model name                      : ${models:-GLM-5.3 (see /v1/models)}
  Dashboard (from your machine)   : $dash_line
