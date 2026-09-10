@@ -183,20 +183,17 @@ recreating the router more than ~5× a week re-issues and can hit it.
   GPU VMs (not containers) accept `--vpc-id`, so an all-VM fleet can do
   fully private networking.
 
-## Planned: user-space weight cache in vLLM (TODO)
+## Considered and rejected (measured)
 
-`cachefilesd` cannot apply here: the JarvisLabs filesystem is a FUSE
-client, not NFS, so FS-Cache cannot attach (verified live: fscache exists
-in the kernel, but `remount,fsc` on the mount is impossible). The banked
-alternative is a small vLLM patch controlled by an environment variable:
-on weight read, check a local file first; on miss, read from the source
-while asynchronously writing the local copy in the background (the same
-spirit as vLLM's existing prefetch option). Minimum viable — no LRU, no
-eviction; the local disk is dedicated. Measured context: the FS reads at
-753 MB/s cold (1.9 GB/s re-read) versus 634 MB/s for the local rbd, so
-today the win is not raw read speed — it is immunity to shared-FS
-contention when several replicas load simultaneously, and warm resumes for
-paused instances, whose local disk persists.
+- **User-space weight cache in vLLM** (local copy populated on first read,
+  cachefilesd-style): the FS reads at 753 MB/s cold (1.9 GB/s re-read)
+  versus 634 MB/s for the local rbd, so a local copy makes the ~7-minute
+  331 GB load slower, not faster. `cachefilesd` itself is impossible anyway
+  (the FS is a FUSE client, not NFS; FS-Cache cannot attach). Dropped.
+- **Pause instead of destroy for scale-down**: a paused instance keeps the
+  graft and skips allocation, but the FS already removed those phases, so
+  resume saves only ~2 of the ~11 minutes to serving — and spot restore odds
+  are the same as a fresh create. Dropped.
 
 ## Costs at a glance (spot, IN1)
 
