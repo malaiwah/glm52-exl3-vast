@@ -410,6 +410,19 @@ class TunnelTests(unittest.TestCase):
             base = f.ensure_tunnel(r)
         self.assertEqual(base, "https://proxy.example")
 
+    def test_tunnel_reestablished_when_dead(self):
+        """A dead tunnel on an unchanged fleet self-heals within a cycle."""
+        f = fm.Fleet(make_cfg(tunnels=True))
+        r = replica("glm53-serve-0", mid=5)
+        r.healthy, r.api_url, r.public_ip = True, "https://proxy.example", "1.2.3.4"
+        with mock.patch.object(fm, "jl_json", return_value=[]), \
+             mock.patch.object(fm, "http_code", return_value=(0, b"")), \
+             mock.patch.object(fm, "subprocess") as sub:
+            sub.run.return_value = SimpleNamespace(returncode=0, stderr="")
+            f.cycle()
+        ssh_calls = [c for c in sub.run.call_args_list if c[0][0][0] == "ssh"]
+        self.assertTrue(ssh_calls, "cycle must re-establish a dead tunnel")
+
     def test_destroy_kills_tunnel(self):
         f = fm.Fleet(make_cfg(tunnels=True))
         r = replica("glm53-serve-3")

@@ -351,6 +351,7 @@ class Fleet:
             ["ssh", "-f", "-N", "-L", f"{port}:localhost:8000",
              "-i", os.path.expanduser("~/.ssh/fleet_tunnel"),
              "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+             "-o", "UserKnownHostsFile=/dev/null",
              "-o", "ExitOnForwardFailure=yes",
              "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
              f"root@{replica.public_ip}"],
@@ -487,6 +488,13 @@ class Fleet:
         for r in replicas:
             if r.status == "Running":
                 r.probe()
+        if self.cfg.get("tunnels"):
+            # Self-heal every cycle: a tunnel whose ssh process died (blip,
+            # replica reboot) must be re-established even when the healthy
+            # set is unchanged, or litellm keeps routing into a dead port.
+            for r in replicas:
+                if r.healthy:
+                    self.ensure_tunnel(r)
         self.wire_litellm(replicas)
         states = ", ".join(f"{r.name}:{r.status}:{'ok' if r.healthy else '-'}"
                            f"(run={r.running} wait={r.waiting})" for r in replicas)
