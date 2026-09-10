@@ -464,11 +464,12 @@ class RouterApiWiringTests(unittest.TestCase):
             return {}
         with mock.patch.object(self.f, "router_api", side_effect=fake_api):
             self.f.wire_litellm([r])
+        self.assertEqual(self.f.wired, {("glm53-serve-0", "https://a.example")})
         added = [c for c in calls if c[1] == "/model/new"]
         self.assertEqual(len(added), 1)
         self.assertEqual(added[0][2]["litellm_params"]["api_base"],
                          "https://a.example/v1")
-        self.assertEqual(self.f.wired, {"glm53-serve-0"})
+        self.assertEqual(self.f.wired, {("glm53-serve-0", "https://a.example")})
 
     def test_removes_stale_deployment(self):
         r = self.replica("glm53-serve-0", "https://a.example")
@@ -486,9 +487,10 @@ class RouterApiWiringTests(unittest.TestCase):
         self.assertEqual(deleted, [{"id": "dep-99"}])
 
     def test_no_calls_when_unchanged(self):
-        self.f.wired = {"glm53-serve-0"}
+        self.f.wired = {("glm53-serve-0", "https://a.example")}
         r = self.replica("glm53-serve-0", "https://a.example")
-        with mock.patch.object(self.f, "router_api") as api:
+        with mock.patch.object(self.f, "router_api") as api, \
+                mock.patch.object(self.f, "ensure_tunnel", return_value="https://a.example"):
             self.f.wire_litellm([r])
         api.assert_not_called()
 
@@ -506,7 +508,8 @@ class RouterApiWiringTests(unittest.TestCase):
             return {}
         with mock.patch.object(self.f, "router_api", side_effect=fake_api):
             self.f.wire_litellm([r, victim])
-        self.assertEqual(self.f.wired, {"glm53-serve-0"})
+        self.assertIn(("glm53-serve-0", "https://a.example"),
+                      {p for p in self.f.wired})
         self.assertIn("/model/delete", ops)
 
 
