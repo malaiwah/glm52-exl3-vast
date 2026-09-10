@@ -174,9 +174,14 @@ cmd_serve() { # cmd_serve <name>
     export PREFILL_FAIRNESS_ENGINE=compute_share
     export PREFILL_COMPUTE_SHARE=0.6
     export MAX_NUM_SEQS=12
-    export MAX_NUM_BATCHED_TOKENS=3072
     export VLLM_EXL3_PREFILL_CAPACITY=2048
     export GPU_MEMORY_UTILIZATION=0.95
+    # 12 seqs x (1 + 3 MTP) = 48 decode tokens per step: the capture and
+    # trellis windows must be raised together or decode silently leaves the
+    # captured fast path under concurrency (glm_config rule concurrency-window).
+    export CUDAGRAPH_CAPTURE_SIZES=4,8,12,16,20,24,28,32,36,40,44,48
+    export MAX_CUDAGRAPH_CAPTURE_SIZE=48
+    export VLLM_EXL3_TRELLIS_MAX_M=48
     bash /root/quickstart.sh
   " 2>&1 | tee /tmp/fleet-"$name".log | tail -40
   log "$name serving; total time-to-serve $((SECONDS - t0))s (see /tmp/fleet-$name.log for the endpoint block)"
