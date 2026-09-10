@@ -112,7 +112,16 @@ class ReapPolicyTests(unittest.TestCase):
         r.healthy = False
         with mock.patch.object(fm, "jl") as jl:
             f.reap([r])
-        jl.assert_called_once_with("resume", "1", "--yes")
+        jl.assert_called_once_with("resume", "1", "--yes")  # on-demand stays on-demand
+
+    def test_paused_spot_slot_resumes_as_spot(self):
+        """Bare jl resume flips a paused spot to on-demand at 2x price."""
+        f = fm.Fleet(make_cfg())
+        r = replica("glm53-serve-0", status="Paused", is_spot=True)
+        r.healthy = False
+        with mock.patch.object(fm, "jl") as jl:
+            f.reap([r])
+        jl.assert_called_once_with("resume", "1", "--spot", "--yes")
 
     def test_paused_resume_failure_does_not_destroy(self):
         f = fm.Fleet(make_cfg())
@@ -268,6 +277,17 @@ class CreateSlotGuardTests(unittest.TestCase):
         args = jl.call_args[0]
         self.assertNotIn("--spot", args)
 
+    def test_backbone_as_vm_when_configured(self):
+        f = fm.Fleet(make_cfg(on_demand_min=1, on_demand_kind="vm"))
+        f.slots = lambda: []
+        with mock.patch.object(fm, "jl") as jl:
+            f.create_slot()
+        args = jl.call_args[0]
+        self.assertIn("--vm", args)
+        self.assertNotIn("--spot", args)
+        self.assertNotIn("--http-ports", args)
+        self.assertNotIn("--script-id", args)  # VMs are ssh-booted
+
     def test_spot_created_when_backbone_satisfied(self):
         f = fm.Fleet(make_cfg(on_demand_min=1))
         f.slots = lambda: [{"name": "glm53-serve-0", "status": "Running",
@@ -355,6 +375,70 @@ class WiringTests(unittest.TestCase):
                 with mock.patch.object(fm, "subprocess") as sub:
                     f.wire_litellm([r])
                 sub.run.assert_not_called()
+
+
+class TunnelTests(unittest.TestCase):
+    def test_port_allocation(self):
+        f = fm.Fleet(make_cfg(tunnels=True))
+        self.assertEqual(f.tunnel_port("glm53-serve-0"), 18000)
+        self.assertEqual(f.tunnel_port("glm53-serve-7"), 18007)
+
+    def test_existing_tunnel_short_circuits(self):
+        f = fm.Fleet(make_cfg(tunnels=True))
+        r = replica("glm53-serve-0")
+        r.healthy, r.api_url = True, "https://proxy.example"
+        body = b"vllm:num_requests_running 1\n"
+        with mock.patch.object(fm, "http_code", return_value=(200, body)), \
+                mock.patch.object(fm, "subprocess") as sub:
+            base = f.ensure_tunnel(r)
+        self.assertEqual(base, "http://localhost:18000")
+        sub.run.assert_not_called()
+
+    def test_no_tunnels_config_uses_proxy_url(self):
+        f = fm.Fleet(make_cfg())
+        r = replica("glm53-serve-0")
+        r.api_url = "https://proxy.example"
+        self.assertEqual(f.ensure_tunnel(r), "https://proxy.example")
+
+    def test_tunnel_failure_falls_back_to_proxy(self):
+        f = fm.Fleet(make_cfg(tunnels=True))
+        r = replica("glm53-serve-0")
+        r.api_url, r.public_ip = "https://proxy.example", "1.2.3.4"
+        with mock.patch.object(fm, "http_code", return_value=(0, b"")), \
+                mock.patch.object(fm, "subprocess") as sub:
+            sub.run.return_value = SimpleNamespace(returncode=255, stderr="no route")
+            base = f.ensure_tunnel(r)
+        self.assertEqual(base, "https://proxy.example")
+
+    def test_tunnel_reestablished_when_dead(self):
+        """A dead tunnel on an unchanged fleet self-heals within a cycle."""
+        f = fm.Fleet(make_cfg(tunnels=True, min_replicas=0, max_replicas=0))
+        row = {"name": "glm53-serve-0", "machine_id": 5, "status": "Running",
+               "runtime": "2 hours", "is_spot": True}
+        f.slots = lambda: [row]
+        detail = {"endpoints": ["https://proxy.example"], "public_ip": "1.2.3.4"}
+        body = b"vllm:num_requests_running 1\n"
+        def fake_http(url, key=None, timeout=15):
+            if "localhost" in url:
+                return (0, b"")  # tunnel port dead
+            return (200, body)   # proxy metrics fine: replica healthy
+        with mock.patch.object(fm, "http_code", side_effect=fake_http), \
+             mock.patch.object(fm, "jl_json", return_value=detail), \
+             mock.patch.object(fm, "subprocess") as sub:
+            sub.run.return_value = SimpleNamespace(returncode=0, stderr="")
+            f.cycle()
+        ssh_calls = [c for c in sub.run.call_args_list if c[0][0][0] == "ssh"]
+        self.assertTrue(ssh_calls, "cycle must re-establish a dead tunnel")
+
+    def test_destroy_kills_tunnel(self):
+        f = fm.Fleet(make_cfg(tunnels=True))
+        r = replica("glm53-serve-3")
+        with mock.patch.object(fm, "jl"), \
+                mock.patch.object(fm, "subprocess") as sub:
+            f.destroy(r)
+        pkill = [c for c in sub.run.call_args_list
+                 if c[0][0][0] == "pkill"]
+        self.assertTrue(pkill)
 
 
 class RouterApiWiringTests(unittest.TestCase):
@@ -453,6 +537,18 @@ class HealthProbeTests(unittest.TestCase):
             r2 = replica("glm53-serve-0", mid=42)
             r2.probe()
             self.assertFalse(r2.healthy)  # nothing reachable -> not healthy
+
+    def test_vm_replica_probed_via_public_ip(self):
+        """VMs have no proxy endpoints: fall back to public_ip:8000."""
+        r = replica("glm53-serve-0", mid=7)
+        body = b"vllm:num_requests_running 1\n"
+        with mock.patch.object(fm, "jl_json",
+                               return_value={"endpoints": [], "public_ip": "10.1.2.3"}), \
+             mock.patch.object(fm, "http_code",
+                               side_effect=lambda u, **k: (200, body) if ":8000/metrics" in u else (0, b"")):
+            r.probe()
+        self.assertTrue(r.healthy)
+        self.assertEqual(r.api_url, "http://10.1.2.3:8000")
 
     def test_scrape_parses_metrics(self):
         r = replica("glm53-serve-0")

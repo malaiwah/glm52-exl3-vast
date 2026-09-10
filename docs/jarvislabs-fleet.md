@@ -256,6 +256,30 @@ config-rewrite if the key is absent). Removal of a deployment still moves
 the sessions pinned to it — inherent to retiring a replica — but the
 drain-then-destroy order keeps that to the retiring replica only.
 
+## VM backbone (on_demand_kind=vm)
+
+At the same $7.56/hr as an on-demand 4-GPU container, a 4-GPU VM is the
+better backbone: it takes the kernel/driver tuning containers cannot
+(measured: container replicas run WITHOUT native P2P atomics — vLLM logs
+`SymmMemCommunicator: native P2P atomics are not supported`; the
+rtx6kpro module settings `NVreg_DynamicPowerManagement=0x00`,
+`nvidia_uvm uvm_disable_hmm=1`, `iommu=off` need host root). Set
+`ON_DEMAND_KIND=vm` when deploying the manager and the backbone create
+uses `jl create --vm` — spot overflow replicas stay containers.
+
+VM differences the manager already handles: no HTTPS proxy and no
+`endpoints` in `jl get` (the probe falls back to `http://<public_ip>:8000`
+with the same vLLM-body check), no `--http-ports`, no startup scripts
+(VMs are SSH-only), `--fs-id` works on GPU VMs.
+
+**Not yet wired — the VM bring-up.** The appliance graft fail-closes on
+VMs by design (`require_container_graft` demands a container marker), and
+JarvisLabs does not run startup scripts on VMs, so a VM replica needs an
+SSH-driven boot (most likely: docker inside the VM, then the container
+graft inside that). This requires a live 4-GPU VM to develop against —
+IN1 VM capacity was unavailable at the time of writing. Until that path
+exists, keep `ON_DEMAND_KIND` unset (container backbone).
+
 ## Considered and rejected (measured)
 
 - **User-space weight cache in vLLM** (local copy populated on first read,

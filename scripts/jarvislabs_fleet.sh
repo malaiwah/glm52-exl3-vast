@@ -521,6 +521,7 @@ cfg = {
     "min_replicas": ${MIN_REPLICAS:-1},
     "max_replicas": ${MAX_REPLICAS:-3},
     "on_demand_min": ${ON_DEMAND_MIN:-0},
+    "on_demand_kind": "${ON_DEMAND_KIND:-container}",
     "gpu": "$SERVE_GPU",
     "num_gpus": $SERVE_GPUS,
     "region": "$FS_REGION",
@@ -530,9 +531,11 @@ cfg = {
     "scale_down_idle_seconds": 900,
     "scale_down_concurrency": 4,
     "unhealthy_grace_seconds": 300,
+    "boot_timeout_seconds": ${BOOT_TIMEOUT_SECONDS:-2400},
     "capacity_per_replica": 12,
     "router_api": ${ROUTER_API:-False},
     "router_url": "${ROUTER_URL:-https://glm53-router.${DESEC_DOMAIN:-malaiwah.dedyn.io}}",
+    "tunnels": ${TUNNELS:-False},
 }
 # Hot-reload mode needs the master key for the admin API; it lives on the
 # router VM only, so read it there. Absent key disables API mode safely.

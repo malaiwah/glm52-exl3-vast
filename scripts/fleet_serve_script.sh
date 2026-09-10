@@ -29,6 +29,11 @@ export VLLM_API_KEY="$FLEET_KEY"
 # instance reuses the tree (fetch_and_unpack honors the .unpacked digest
 # marker). The host driver re-injection is idempotent within a region.
 export TURNKEY_ROOT=/home/jl_fs/.image/qual
+# Pin the image to the digest the shared tree was primed with: a floating
+# :latest breaks the digest lock on every CI publish (the tree's .unpacked
+# marker fails closed against a moved tag). Bump this pin AND purge the
+# tree together — one replica then re-primes it at the new digest.
+export TURNKEY_IMAGE="ghcr.io/malaiwah/glm52-exl3-vast@sha256:f761426c108d2c09e6113752ba0ab8c41582ad5b470e42bb1d1f8523bc23c2fa"
 # The online-quantization cache is one shared directory on that same
 # filesystem: identical weights, algorithm and GPU architecture make its
 # content replica-independent, and the manager serializes cold boots

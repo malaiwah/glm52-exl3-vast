@@ -68,6 +68,8 @@ class Replica:
         self.mid = info.get("machine_id")
         self.status = info.get("status", "")
         self.is_spot = info.get("is_spot")
+        self.api_url = ""
+        self.public_ip = None
         self.healthy = False
         self.waiting = None
         self.running = None
@@ -78,6 +80,7 @@ class Replica:
         The 'url' field in jl get is the Jupyter lab URL, which answers 200 to
         everything and must never be used as an API base."""
         detail = jl_json("get", str(self.mid))
+        self.public_ip = detail.get("public_ip")
         for base in detail.get("endpoints") or []:
             code, body = http_code(f"{base}/metrics")
             # 200 alone is not proof: the Jupyter lab proxy answers 200 to
@@ -85,6 +88,18 @@ class Replica:
             # the same proxy family. Only vLLM's own /metrics will do.
             if code == 200 and b"vllm:" in body:
                 self.api_url = base
+                self.healthy = True
+                return
+        # VM replicas have no HTTPS proxy and no endpoints list: the engine
+        # port is exposed directly on the public IP. Plain HTTP is
+        # acceptable only on the provider's private network; a public
+        # plaintext probe is still fine here (/metrics leaks nothing), but
+        # routing production traffic to it is a docs-level decision.
+        ip = self.public_ip
+        if ip:
+            code, body = http_code(f"http://{ip}:8000/metrics")
+            if code == 200 and b"vllm:" in body:
+                self.api_url = f"http://{ip}:8000"
                 self.healthy = True
                 return
         self.healthy = False
@@ -150,24 +165,39 @@ class Fleet:
         name = f"glm53-serve-{n}"
         # Maintain an on-demand backbone: on_demand_min replicas are kept
         # non-spot so capacity pressure can never pause/destroy the whole
-        # fleet; everything beyond that stays spot for price.
-        args = ["--gpu", self.cfg["gpu"], "--num-gpus", str(self.cfg["num_gpus"]),
-                "--region", self.cfg["region"], "--fs-id", str(self.cfg["fs_id"]),
-                "--script-id", str(self.cfg["script_id"]), "--http-ports", "8000,1111",
-                "--name", name, "--yes"]
+        # fleet; everything beyond that stays spot for price. The backbone
+        # can be a GPU VM (on_demand_kind=vm) at the same hourly price as
+        # an on-demand container — a VM takes the driver/module tuning
+        # containers cannot (P2P atomics measured off on containers).
         alive = [r for r in current if r.get("status") in ("Running", "Pending", "Provisioning")]
         on_demand_alive = sum(1 for r in alive if not r.get("is_spot"))
+        args = ["--gpu", self.cfg["gpu"], "--num-gpus", str(self.cfg["num_gpus"]),
+                "--region", self.cfg["region"], "--fs-id", str(self.cfg["fs_id"]),
+                "--name", name, "--yes"]
         kind = "spot"
         if on_demand_alive < self.cfg.get("on_demand_min", 0):
-            kind = "on-demand"
+            if self.cfg.get("on_demand_kind") == "vm":
+                kind = "on-demand-vm"
+                # VMs are SSH-only: no startup scripts, no HTTPS proxy, no
+                # --http-ports. Ports are exposed directly on the public
+                # IP; the boot is driven over ssh (see docs/jarvislabs-fleet.md).
+                args += ["--vm"]
+            else:
+                kind = "on-demand"
+                args += ["--script-id", str(self.cfg["script_id"]),
+                         "--http-ports", "8000,1111"]
         else:
             args.insert(0, "--spot")
-        log(f"creating {kind} replica slot {name} (script {self.cfg['script_id']})")
+            args += ["--script-id", str(self.cfg["script_id"]),
+                     "--http-ports", "8000,1111"]
+        log(f"creating {kind} replica slot {name}"
+            + (f" (script {self.cfg['script_id']})" if "--script-id" in args else ""))
         jl("create", *args)
         self.last_scale = time.time()
     def destroy(self, replica):
         log(f"destroying {replica.name} ({replica.mid})")
         jl("destroy", str(replica.mid), "--yes")
+        self.kill_tunnel(replica.name)
 
     def reap(self, replicas):
         """Replace slots whose instance died (spot reclamation, crash).
@@ -194,9 +224,17 @@ class Fleet:
                 # (still no capacity) the paused slot costs nothing and
                 # ensure_min creates a replacement meanwhile.
                 log(f"slot {r.name} is paused; attempting resume")
+                # Resume preserves the slot's billing type: jl defaults a
+                # bare resume to on-demand (measured: a paused spot came
+                # back on-demand at 2x price with a NEW machine id). The
+                # mix logic reads is_spot fresh from jl list each cycle, so
+                # the id change is harmless, but the price flip is not.
+                args = ["resume", str(r.mid)]
+                if r.is_spot:
+                    args.append("--spot")
+                args.append("--yes")
                 try:
-                    jl("resume", str(r.mid), "--yes")
-                    log(f"slot {r.name} resumed")
+                    jl(*args)
                 except RuntimeError as exc:
                     log(f"resume failed for {r.name}: {str(exc)[:120]}")
                 return  # one action per cycle; the next pass re-checks
@@ -287,6 +325,49 @@ class Fleet:
             self.retiring.pop(name)
             self.last_scale = time.time()
 
+    def tunnel_port(self, name):
+        m = re.search(r"(\d+)$", name)
+        return 18000 + int(m.group(1)) if m else 18000
+
+    def ensure_tunnel(self, replica):
+        """Route to the replica through an ssh -L tunnel instead of the
+        provider's public HTTPS proxy. Measured: the proxy intermittently
+        black-holes chat requests (the engine sits idle behind it while
+        litellm waits); ssh to the same hosts has been lossless. Tunnels
+        ride the router's dedicated fleet_tunnel key (registered as an
+        account ssh-key so every new replica accepts it)."""
+        if not self.cfg.get("tunnels"):
+            return replica.api_url
+        port = self.tunnel_port(replica.name)
+        code, body = http_code(f"http://localhost:{port}/metrics", timeout=5)
+        if code == 200 and b"vllm:" in body:
+            return f"http://localhost:{port}"
+        subprocess.run(["pkill", "-f", f"{port}:localhost:8000"],
+                       capture_output=True)
+        if not replica.public_ip:
+            log(f"no public_ip for {replica.name}; using the proxy URL")
+            return replica.api_url
+        rc = subprocess.run(
+            ["ssh", "-f", "-N", "-L", f"{port}:localhost:8000",
+             "-i", os.path.expanduser("~/.ssh/fleet_tunnel"),
+             "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+             "-o", "UserKnownHostsFile=/dev/null",
+             "-o", "ExitOnForwardFailure=yes",
+             "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
+             f"root@{replica.public_ip}"],
+            capture_output=True, text=True)
+        if rc.returncode != 0:
+            log(f"tunnel to {replica.name} failed: {(rc.stderr or '')[:120]}")
+            return replica.api_url
+        log(f"tunnel up for {replica.name} on localhost:{port}")
+        return f"http://localhost:{port}"
+
+    def kill_tunnel(self, name):
+        if not self.cfg.get("tunnels"):
+            return
+        subprocess.run(["pkill", "-f", f"{self.tunnel_port(name)}:localhost:8000"],
+                       capture_output=True)
+
     def wire_litellm(self, replicas):
         """Reconfigure litellm when the set of healthy replicas changes."""
         healthy = sorted((r for r in replicas
@@ -314,7 +395,7 @@ class Fleet:
                 "  - model_name: GLM-5.3",
                 "    litellm_params:",
                 "      model: openai/GLM-5.3",
-                f"      api_base: {r.api_url}/v1",
+                f"      api_base: {self.ensure_tunnel(r)}/v1",
                 f"      api_key: {self.fleet_key}",
             ]
         cfg += [
@@ -369,7 +450,7 @@ class Fleet:
         for d in info.get("data", []):
             params = d.get("litellm_params", {})
             current[params.get("api_base")] = d.get("model_info", {}).get("id")
-        desired = {f"{r.api_url}/v1": r for r in healthy}
+        desired = {f"{self.ensure_tunnel(r)}/v1": r for r in healthy}
         for base, dep_id in current.items():
             if base not in desired and dep_id:
                 self.router_api("POST", "/model/delete", {"id": dep_id})
@@ -382,6 +463,12 @@ class Fleet:
                         "model": "openai/GLM-5.3",
                         "api_base": base,
                         "api_key": self.fleet_key,
+                        # The JarvisLabs public HTTPS proxy intermittently
+                        # 500s and then hangs the connection (measured: a
+                        # request stalled 14 minutes with the engine idle
+                        # behind it). A bounded request timeout turns that
+                        # into a fast failure the client can retry instead.
+                        "request_timeout": 120,
                     }})
                 log(f"router: added deployment {r.name} at {base}")
         self.wired = ids
@@ -401,6 +488,13 @@ class Fleet:
         for r in replicas:
             if r.status == "Running":
                 r.probe()
+        if self.cfg.get("tunnels"):
+            # Self-heal every cycle: a tunnel whose ssh process died (blip,
+            # replica reboot) must be re-established even when the healthy
+            # set is unchanged, or litellm keeps routing into a dead port.
+            for r in replicas:
+                if r.healthy:
+                    self.ensure_tunnel(r)
         self.wire_litellm(replicas)
         states = ", ".join(f"{r.name}:{r.status}:{'ok' if r.healthy else '-'}"
                            f"(run={r.running} wait={r.waiting})" for r in replicas)
