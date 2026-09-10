@@ -46,7 +46,14 @@ export MAX_NUM_SEQS=12
 export MAX_NUM_BATCHED_TOKENS=3072
 export VLLM_EXL3_PREFILL_CAPACITY=2048
 export GPU_MEMORY_UTILIZATION=0.95
-# 12 seqs x (1 + 3 MTP) = 48 decode tokens per step: the capture and
+# LMCache prefix tier (AIBeast parity): 125 GiB aggregate host DRAM L1
+# plus a bounded NVMe L2 on the instance's own disk (MODEL_ROOT resolves
+# to the instance-local workspace, never the shared filesystem). The L2
+# has a hard capacity limit with LRU eviction (watermark 0.90, evict 10%),
+# so disk usage stays bounded without operator intervention.
+export PREFIX_CACHE_BACKEND=lmcache
+export LMCACHE_L1_MAX_GB=125
+export PREFIX_CACHE_DISK_GB=384
 # trellis windows must be raised together or decode silently leaves the
 # captured fast path under concurrency (glm_config rule concurrency-window).
 export CUDAGRAPH_CAPTURE_SIZES=4,8,12,16,20,24,28,32,36,40,44,48
