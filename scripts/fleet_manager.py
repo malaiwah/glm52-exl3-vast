@@ -67,7 +67,7 @@ class Replica:
         self.name = info.get("name", "")
         self.mid = info.get("machine_id")
         self.status = info.get("status", "")
-        self.api_url = ""
+        self.is_spot = info.get("is_spot")
         self.healthy = False
         self.waiting = None
         self.running = None
@@ -148,11 +148,22 @@ class Fleet:
         while f"glm53-serve-{n}" in used:
             n += 1
         name = f"glm53-serve-{n}"
-        log(f"creating replica slot {name} (script {self.cfg['script_id']})")
-        jl("create", "--gpu", self.cfg["gpu"], "--num-gpus", str(self.cfg["num_gpus"]),
-           "--spot", "--region", self.cfg["region"], "--fs-id", str(self.cfg["fs_id"]),
-           "--script-id", str(self.cfg["script_id"]), "--http-ports", "8000,1111",
-           "--name", name, "--yes")
+        # Maintain an on-demand backbone: on_demand_min replicas are kept
+        # non-spot so capacity pressure can never pause/destroy the whole
+        # fleet; everything beyond that stays spot for price.
+        args = ["--gpu", self.cfg["gpu"], "--num-gpus", str(self.cfg["num_gpus"]),
+                "--region", self.cfg["region"], "--fs-id", str(self.cfg["fs_id"]),
+                "--script-id", str(self.cfg["script_id"]), "--http-ports", "8000,1111",
+                "--name", name, "--yes"]
+        alive = [r for r in current if r.get("status") in ("Running", "Pending", "Provisioning")]
+        on_demand_alive = sum(1 for r in alive if not r.get("is_spot"))
+        kind = "spot"
+        if on_demand_alive < self.cfg.get("on_demand_min", 0):
+            kind = "on-demand"
+        else:
+            args.insert(0, "--spot")
+        log(f"creating {kind} replica slot {name} (script {self.cfg['script_id']})")
+        jl("create", *args)
         self.last_scale = time.time()
     def destroy(self, replica):
         log(f"destroying {replica.name} ({replica.mid})")
@@ -175,6 +186,20 @@ class Fleet:
                 self.unhealthy_since.pop(key, None)
                 continue
             age = self.age_of(r)
+            if r.status == "Paused":
+                # The provider pauses spot instances under capacity
+                # pressure instead of destroying them: billing stops and
+                # the instance state is kept. Resuming continues the warm
+                # boot — far cheaper than a recreate. If resume fails
+                # (still no capacity) the paused slot costs nothing and
+                # ensure_min creates a replacement meanwhile.
+                log(f"slot {r.name} is paused; attempting resume")
+                try:
+                    jl("resume", str(r.mid), "--yes")
+                    log(f"slot {r.name} resumed")
+                except RuntimeError as exc:
+                    log(f"resume failed for {r.name}: {str(exc)[:120]}")
+                return  # one action per cycle; the next pass re-checks
             if r.status in ("Running", "Pending", "Provisioning") and age < boot_timeout:
                 continue  # alive and young: still booting, leave it alone
             first = self.unhealthy_since.setdefault(key, time.time())
@@ -236,7 +261,11 @@ class Fleet:
                 candidates = [r for r in healthy if r.name not in self.retiring]
                 if not candidates:
                     return
-                victim = min(candidates, key=lambda r: (r.running or 0) + (r.waiting or 0))
+                # Retire the least-loaded replica, preferring spot over the
+                # on-demand backbone (which is kept for stability, not load).
+                victim = min(candidates,
+                             key=lambda r: ((0 if r.is_spot else 1),
+                                            (r.running or 0) + (r.waiting or 0)))
                 log(f"scale down: concurrency {concurrency} < {threshold} for "
                     f"{int(now - self.idle_since)}s; draining {victim.name}")
                 self.retiring[victim.name] = now

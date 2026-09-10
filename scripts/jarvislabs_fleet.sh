@@ -472,8 +472,8 @@ import json, sys
 doc = json.load(sys.stdin)
 rows = doc if isinstance(doc, list) else doc.get('scripts', [])
 for row in rows:
-    if row.get('name') == 'glm53-fleet-serve':
-        print(row.get('id') or row.get('script_id') or '')
+    if row.get('script_name') == 'glm53-fleet-serve':
+        print(row.get('script_id') or row.get('id') or '')
         break
 ")
   if [[ -n "$script_id" ]]; then
@@ -481,9 +481,20 @@ for row in rows:
       fatal "could not update startup script $script_id"
     log "startup script updated in place (id $script_id)"
   else
-    script_id=$(jl scripts add "$rendered" --name glm53-fleet-serve --json \
-      2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['script_id'])") \
-      || fatal "could not register the startup script"
+    jl scripts add "$rendered" --name glm53-fleet-serve >/dev/null ||
+      fatal "could not register the startup script"
+    # The add response's JSON shape is not stable across CLI versions;
+    # resolve the id by name from the authoritative list instead.
+    script_id=$(jl scripts list --json 2>/dev/null | python3 -c "
+import json, sys
+doc = json.load(sys.stdin)
+rows = doc if isinstance(doc, list) else doc.get('scripts', [])
+for row in rows:
+    if row.get('script_name') == 'glm53-fleet-serve':
+        print(row.get('script_id') or row.get('id') or '')
+        break
+")
+    [[ -n "$script_id" ]] || fatal "registered but could not resolve the new script id"
     log "startup script registered (id $script_id)"
   fi
 
@@ -509,9 +520,9 @@ cfg = {
     "script_id": "$script_id",
     "min_replicas": ${MIN_REPLICAS:-1},
     "max_replicas": ${MAX_REPLICAS:-3},
+    "on_demand_min": ${ON_DEMAND_MIN:-0},
     "gpu": "$SERVE_GPU",
     "num_gpus": $SERVE_GPUS,
-    "region": "$FS_REGION",
     "poll_seconds": 30,
     "cooldown_seconds": 300,
     "scale_up_waiting": 2,

@@ -105,6 +105,26 @@ class ReapPolicyTests(unittest.TestCase):
             destroy.assert_not_called()
             create.assert_not_called()
 
+    def test_paused_slot_is_resumed_not_replaced(self):
+        """Provider pauses spot under pressure; resume continues the warm boot."""
+        f = fm.Fleet(make_cfg())
+        r = replica("glm53-serve-0", status="Paused")
+        r.healthy = False
+        with mock.patch.object(fm, "jl") as jl:
+            f.reap([r])
+        jl.assert_called_once_with("resume", "1", "--yes")
+
+    def test_paused_resume_failure_does_not_destroy(self):
+        f = fm.Fleet(make_cfg())
+        r = replica("glm53-serve-0", status="Paused")
+        r.healthy = False
+        def boom(*a):
+            raise RuntimeError("jl resume failed: no capacity")
+        with mock.patch.object(fm, "jl", side_effect=boom), \
+                mock.patch.object(f, "destroy") as destroy:
+            f.reap([r])
+        destroy.assert_not_called()
+
     def test_healthy_clears_the_grace_tracker(self):
         f = fm.Fleet(make_cfg())
         r = replica("glm53-serve-0")
@@ -186,6 +206,17 @@ class AutoscaleTests(unittest.TestCase):
         self.assertIn("glm53-serve-1", self.f.retiring)
         remaining = [r.name for r in wire.call_args[0][0]]
         self.assertNotIn("glm53-serve-1", remaining)
+        # spot replicas retire before the on-demand backbone
+        backbone = replica("glm53-serve-2", mid=9)
+        backbone.healthy, backbone.running, backbone.waiting = True, 0, 0
+        backbone.is_spot = False
+        fleet2 = fleet + [backbone]
+        self.f.retiring = {}
+        self.f.idle_since = __import__("time").time() - 1000
+        with mock.patch.object(self.f, "wire_litellm"):
+            self.f.autoscale(fleet2)
+        # the spot replica is drained, not the equally-idle on-demand backbone
+        self.assertEqual(list(self.f.retiring), ["glm53-serve-1"])
         # after the drain window the victim is destroyed
         self.f.retiring["glm53-serve-1"] = 0
         with mock.patch.object(self.f, "destroy") as destroy:
@@ -228,6 +259,23 @@ class CreateSlotGuardTests(unittest.TestCase):
         with mock.patch.object(fm, "jl") as jl:
             f.create_slot()
         jl.assert_not_called()
+
+    def test_on_demand_backbone_created_when_deficit(self):
+        f = fm.Fleet(make_cfg(on_demand_min=1))
+        f.slots = lambda: []  # empty fleet: backbone deficit
+        with mock.patch.object(fm, "jl") as jl:
+            f.create_slot()
+        args = jl.call_args[0]
+        self.assertNotIn("--spot", args)
+
+    def test_spot_created_when_backbone_satisfied(self):
+        f = fm.Fleet(make_cfg(on_demand_min=1))
+        f.slots = lambda: [{"name": "glm53-serve-0", "status": "Running",
+                            "runtime": "2 hours", "is_spot": False}]
+        with mock.patch.object(fm, "jl") as jl:
+            f.create_slot()
+        args = jl.call_args[0]
+        self.assertIn("--spot", args)
 
     def test_capped_at_max_replicas(self):
         f = fm.Fleet(make_cfg(max_replicas=2))
