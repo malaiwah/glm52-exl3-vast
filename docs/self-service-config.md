@@ -62,7 +62,7 @@ Flash runtime settings. Compatibility aliases do not bypass validation.
 
 | path | contents | lifetime |
 |---|---|---|
-| `$GLM_STATE_DIR` (`/workspace/.glm-config`) | `config.json`, `known-good.json`, `apply-state.json`, `verify-last.json`, `checkpoint-baseline.json`, `failures/`, `logs/` | the volume — survives container replacement |
+| `$GLM_STATE_DIR` (`/workspace/.glm-config`) | `config.json`, `known-good.json`, `apply-state.json`, `verify-last.json`, `checkpoint-baseline.json`, `.vllm-api-key`, `failures/`, `logs/` | the volume — survives container replacement |
 | `$GLM_RUNTIME_DIR` (`/tmp/glm-runtime`) | `startup-env.json`, `config.env`, `verify.json`, `restart-request` | the container |
 | `$GLM_STATE_DIR/soul` | optional SOUL config, status, JSONL journal, incidents, evidence, snapshots, Nanobot workspace/sessions and logs | the volume — fully selected by secure erase |
 
@@ -145,6 +145,7 @@ knobs to the model. Summary of the trade each one makes:
 | `MAX_NUM_SEQS`, `MAX_NUM_BATCHED_TOKENS`, `GPU_MEMORY_UTILIZATION` | Concurrency and scheduler prefill chunk against the capture window and against VRAM headroom. |
 | `VLLM_EXL3_PREFILL_CAPACITY` | Reusable EXL3 prefill-arena rows inside a scheduler chunk. The retained-host sweeps measured the memory/PP trade directly; the 3.25-bpw profile uses 1,024 rows because 1,536 recovered half as much memory without improving the corrected r14 executor's PP. It must not exceed `MAX_NUM_BATCHED_TOKENS`. |
 | `MAX_CUDAGRAPH_CAPTURE_SIZE`, `CUDAGRAPH_CAPTURE_SIZES`, `VLLM_EXL3_TRELLIS_MAX_M` | The three ceilings that must move together to serve more streams. |
+| `VLLM_EXL3_ONLINE_CACHE_DIR`, `VLLM_EXL3_ONLINE_CACHE_MODE` | Where the ~12 GiB exl3-b6 online-quantization cache lives and whether this instance may write it. Point the dir at persistent storage so relaunches skip re-quantization; `readonly` suits a shared cache another single-writer process owns. |
 
 ---
 

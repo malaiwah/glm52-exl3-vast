@@ -11,9 +11,11 @@ instance is destroyed. The fleet pattern splits the roles:
 │ 500 GB, IN1       │     └──────────────────────────────┘
 │ /home/jl_fs       │     ┌──────────────────────────────┐
 │  weights          │◀───│ 4-GPU spot replicas (any num) │
-│  per-slot runtime │     │ boot from the warm FS        │
-│  caches           │     └──────────────────────────────┘
-└──────────────────┘              ▲
+│  shared caches    │     │ boot from the warm FS:       │
+│  + image tree     │     │ weights, quant cache,        │
+└──────────────────┘     │ image tree, AOT cache        │
+                          └──────────────────────────────┘
+                                  ▲
                                   │ HTTPS proxy (public)
                     ┌──────────────────────────────┐
                     │ CPU VM router ($0.05/hr)      │
@@ -28,9 +30,9 @@ Three gains, all measured on live spot instances (Sept 9, 2026):
    ($3.96/hr × 12 min ≈ $0.79 per launch). The populate pays for itself on
    the first relaunch.
 2. **Reusability.** The filesystem outlives every instance. A relaunch
-   finds the weights, the vLLM AOT compile cache, and — with
-   `VLLM_EXL3_ONLINE_CACHE_DIR` pinned per slot — the ~12 GiB online-quant
-   cache, all already present.
+   finds the weights, the vLLM AOT compile cache, the unpacked appliance
+   image tree, and — with `VLLM_EXL3_ONLINE_CACHE_DIR` pinned to the
+   filesystem — the ~12 GiB online-quant cache, all already present.
 3. **Scalability.** JarvisLabs filesystems attach to any number of your
    instances at once; each replica boots from the same weights read-only and
    keeps its own config state on its own disk.
@@ -42,7 +44,7 @@ Three gains, all measured on live spot instances (Sept 9, 2026):
 | Cold: everything on the serve instance (quickstart alone) | ~36 min | ~$2.38 |
 | Warm weights (FS attached, quant cache on instance disk) | 25.6 min | ~$1.69 |
 | Warm weights + shared AOT cache (second replica) | 19.1 min | ~$1.26 |
-| **Fully warm (slot-pinned quant cache on the FS)** | **~14 min** | **~$0.92** |
+| **Fully warm (shared quant + image trees on the FS)** | **~11–14 min** | **~$0.73–0.92** |
 
 Fully warm relaunches save ~$1.45 and ~22 minutes per launch versus cold,
 indefinitely, for a one-time ~$0.17 populate. First-token latency after
@@ -66,11 +68,16 @@ curl -fsSL .../scripts/jarvislabs_fleet.sh -o jarvislabs_fleet.sh
 ./jarvislabs_fleet.sh manager    # autonomous fleet manager on the router VM
 ./jarvislabs_fleet.sh scale      # second replica + router pick-up
 ./jarvislabs_fleet.sh status     # instances + filesystem
-./jarvislabs_fleet.sh teardown   # destroy instances, KEEP the filesystem
+./jarvislabs_fleet.sh teardown   # destroy replica slots + helpers, KEEP FS and router
+./jarvislabs_fleet.sh teardown --all  # also destroy the router VM
+```
 
 The script keeps its instance map in `~/.jarvis-fleet.json`; `serve` is
-repeatable and each replica is independent. `teardown` never touches the
-filesystem — keep it so the next fleet is warm on the first launch.
+repeatable and each replica is independent. `teardown` destroys every live
+`glm53-serve-*` slot (manager-created ones included — they are not in the
+instance map) and never touches the filesystem or, by default, the router
+VM (the LE certificate, master key and manager config exist only there);
+pass `--all` to take the router down too.
 
 ## How each part works
 
@@ -78,21 +85,39 @@ filesystem — keep it so the next fleet is warm on the first launch.
 **Fleet manager (autonomous).** `manager` turns the router VM into a
 closed-loop fleet manager (`scripts/fleet_manager.py`, systemd-supervised):
 
-- **Replicas are autonomous.** The serve recipe is registered once as a
-  JarvisLabs startup script (`jl scripts add`, fleet API key baked in at
-  registration); every replica created with `--script-id` grafts itself,
-  pins `MODEL_DIR` and its slot's quant cache to the filesystem, and waits
-  for its own health — no outside SSH involved.
-- **Reap recovery.** Every cycle (`jl list`), a slot that died — spot
-  reclamation, crash, hang — is recreated. Slot names are stable, so the
-  replacement reboots from its own warm caches on the filesystem.
+- **Replicas are autonomous.** The serve recipe is registered as a
+  JarvisLabs startup script (fleet API key baked in at registration);
+  registration is idempotent — the script is updated in place by name, so
+  re-running `manager` never accumulates copies. Every replica created
+  with `--script-id` grafts itself, pins `MODEL_DIR` and the shared caches
+  to the filesystem, and waits for its own health — no outside SSH involved.
+- **Manager-owned slots are numeric.** Only `glm53-serve-<N>` slots are
+  adopted. Manually created replicas (`glm53-serve-a` from `serve`/`scale`)
+  keep their own appliance-generated API key, which the fleet key cannot
+  authenticate against — do not mix the two under one router.
+- **Reap recovery, with boot-time awareness.** A slot that died — spot
+  reclamation, crash — is recreated. A young slot that is not serving yet
+  is *booting*, not broken (`boot_timeout_seconds`, default 2400): the
+  manager never reaps an alive slot younger than that, so a slow cold boot
+  cannot trigger a destroy-and-recreate thrash loop.
+- **Cold boots are serialized.** `create_slot` refuses to create while any
+  alive slot is younger than the boot timeout: two cold boots at once would
+  write the one shared quantization cache concurrently, and this also makes
+  every creation path respect `MAX_REPLICAS`.
 - **Load-based scaling.** Each healthy replica is scraped at `/metrics`
   (unauthenticated through the proxy): queueing (`vllm:num_requests_waiting`
   above the threshold) or a full batch window scales up toward
-  `MAX_REPLICAS`; every replica fully idle for 15 minutes scales down to
-  `MIN_REPLICAS`. A 5-minute cooldown bounds churn.
-- **litellm rewiring.** When the healthy set changes, the manager
-  regenerates `config.yaml` from verified endpoints and restarts litellm.
+  `MAX_REPLICAS`. Scale-down fires on LIGHT load — fewer than 4 requests in
+  flight across the fleet for 15 minutes — retires the least-loaded
+  replica: litellm is rewired without it first, a drain window passes, and
+  only then is it destroyed, so in-flight requests and pinned sessions are
+  not killed. A 5-minute cooldown bounds churn.
+- **litellm rewiring, verified.** When the healthy set changes, the manager
+  regenerates `config.yaml` from verified endpoints (an endpoint counts
+  only if its `/metrics` body is vLLM's — the Jupyter lab URL answers 200
+  to everything and must never be routed to) and restarts litellm. A failed
+  restart is retried next cycle; the config is never rewritten to an empty
+  model list while replicas are briefly down.
 
 Watch it: `ssh ubuntu@<router> journalctl -u fleet-manager -f`.
 
@@ -115,11 +140,20 @@ attached. The quickstart grafts the appliance with:
   per replica. The API key deliberately does NOT live next to the weights:
   a weights-adjacent key file on a shared filesystem would be written by
   every replica and shared by all of them.
-- `VLLM_EXL3_ONLINE_CACHE_DIR=/home/jl_fs/.runtimes/<slot>/exl3-online` —
-  the ~12 GiB online-quantization cache, keyed by slot name so a slot
-  relaunch reuses it while two slots never race on the same files. Boot
-  logs confirm `Online EXL3 K6 cache hit` for all 1644 entries and skip
-  re-quantization entirely.
+- `VLLM_EXL3_ONLINE_CACHE_DIR=/home/jl_fs/.runtimes/exl3-online` — the
+  ~12 GiB online-quantization cache, one directory shared by all slots.
+  The cache content is a pure function of (weights revision, quant
+  algorithm, GPU arch), so per-slot copies would waste 12 GiB per replica;
+  concurrency safety comes from the manager serializing cold boots (one
+  non-adult slot at a time). Boot logs confirm `Online EXL3 K6 cache hit`
+  for all 1644 entries and skip re-quantization entirely.
+- `TURNKEY_ROOT=/home/jl_fs/.image/qual` — the unpacked appliance image
+  tree on the FS. The image must be digest-pinned
+  (`repo@sha256:...`), and the tree carries a marker naming the digest it
+  was unpacked from; a replica whose image digest does not match the tree
+  fails closed rather than grafting a mismatch. The slow GHCR fetch+unpack
+  (up to ~14 min from IN1) therefore happens once per image version, not
+  once per replica.
 
 Replicas also run AIBeast's selected runtime envs, so the rental fleet
 behaves like the qualified appliance: prefill fairness at a 60% compute
@@ -157,7 +191,8 @@ per conversation (agent frameworks like Codex emit these natively) or
 issue distinct virtual keys via `/key/generate`.
 
 **TLS (optional).** Export `DESEC_TOKEN` + `DESEC_DOMAIN` (your deSEC
-zone) before running `router`, and the router gets a real Let's Encrypt
+zone) + `ACME_EMAIL` (the Let's Encrypt registration address) before
+running `router`, and the router gets a real Let's Encrypt
 certificate: the script registers `glm53-router.<zone>` → the VM's public
 IP and issues via lego DNS-01 — the same deSEC path the appliance uses,
 guard included. litellm then serves TLS on 443 (the non-root systemd unit
