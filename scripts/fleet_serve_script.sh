@@ -68,4 +68,9 @@ curl -fsSL --connect-timeout 10 --max-time 60 --retry 10 --retry-delay 2 \
   --retry-all-errors \
   "https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/cdfbbe41c2913b161f20e3e42ce897b705d66667/scripts/jarvislabs_quickstart.sh" \
   -o /tmp/quickstart.sh || exit 1
-exec bash /tmp/quickstart.sh
+# The provider's startup-script supervisor kills long-running scripts (the
+# cold boot's image fetch alone can take ~15 minutes). Detach the boot into
+# its own session so it survives, and return immediately; the boot log is
+# on the instance at /home/turnkey/boot.log.
+mkdir -p /home/turnkey
+setsid nohup bash /tmp/quickstart.sh >/home/turnkey/boot.log 2>&1 </dev/null &
