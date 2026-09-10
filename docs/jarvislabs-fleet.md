@@ -63,16 +63,38 @@ curl -fsSL .../scripts/jarvislabs_fleet.sh -o jarvislabs_fleet.sh
 ./jarvislabs_fleet.sh populate   # 1-GPU spot fills the FS, then destroys itself
 ./jarvislabs_fleet.sh serve      # 4-GPU spot replica, boots warm, prints endpoint
 ./jarvislabs_fleet.sh router     # CPU VM LiteLLM router with session affinity
+./jarvislabs_fleet.sh manager    # autonomous fleet manager on the router VM
 ./jarvislabs_fleet.sh scale      # second replica + router pick-up
 ./jarvislabs_fleet.sh status     # instances + filesystem
 ./jarvislabs_fleet.sh teardown   # destroy instances, KEEP the filesystem
-```
 
 The script keeps its instance map in `~/.jarvis-fleet.json`; `serve` is
 repeatable and each replica is independent. `teardown` never touches the
 filesystem — keep it so the next fleet is warm on the first launch.
 
 ## How each part works
+
+
+**Fleet manager (autonomous).** `manager` turns the router VM into a
+closed-loop fleet manager (`scripts/fleet_manager.py`, systemd-supervised):
+
+- **Replicas are autonomous.** The serve recipe is registered once as a
+  JarvisLabs startup script (`jl scripts add`, fleet API key baked in at
+  registration); every replica created with `--script-id` grafts itself,
+  pins `MODEL_DIR` and its slot's quant cache to the filesystem, and waits
+  for its own health — no outside SSH involved.
+- **Reap recovery.** Every cycle (`jl list`), a slot that died — spot
+  reclamation, crash, hang — is recreated. Slot names are stable, so the
+  replacement reboots from its own warm caches on the filesystem.
+- **Load-based scaling.** Each healthy replica is scraped at `/metrics`
+  (unauthenticated through the proxy): queueing (`vllm:num_requests_waiting`
+  above the threshold) or a full batch window scales up toward
+  `MAX_REPLICAS`; every replica fully idle for 15 minutes scales down to
+  `MIN_REPLICAS`. A 5-minute cooldown bounds churn.
+- **litellm rewiring.** When the healthy set changes, the manager
+  regenerates `config.yaml` from verified endpoints and restarts litellm.
+
+Watch it: `ssh ubuntu@<router> journalctl -u fleet-manager -f`.
 
 **Populate.** A 1×RTX PRO 6000 spot container attaches the filesystem
 (`--fs-id`), runs one resumable `snapshot_download` of
@@ -160,6 +182,21 @@ recreating the router more than ~5× a week re-issues and can hit it.
   low-latency variant; it trades the stable public entrypoint for speed.
   GPU VMs (not containers) accept `--vpc-id`, so an all-VM fleet can do
   fully private networking.
+
+## Planned: user-space weight cache in vLLM (TODO)
+
+`cachefilesd` cannot apply here: the JarvisLabs filesystem is a FUSE
+client, not NFS, so FS-Cache cannot attach (verified live: fscache exists
+in the kernel, but `remount,fsc` on the mount is impossible). The banked
+alternative is a small vLLM patch controlled by an environment variable:
+on weight read, check a local file first; on miss, read from the source
+while asynchronously writing the local copy in the background (the same
+spirit as vLLM's existing prefetch option). Minimum viable — no LRU, no
+eviction; the local disk is dedicated. Measured context: the FS reads at
+753 MB/s cold (1.9 GB/s re-read) versus 634 MB/s for the local rbd, so
+today the win is not raw read speed — it is immunity to shared-FS
+contention when several replicas load simultaneously, and warm resumes for
+paused instances, whose local disk persists.
 
 ## Costs at a glance (spot, IN1)
 

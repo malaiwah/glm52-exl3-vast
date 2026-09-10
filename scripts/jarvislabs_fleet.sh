@@ -136,6 +136,19 @@ snapshot_download(sys.argv[1], revision=sys.argv[2], local_dir=sys.argv[3], max_
 PYEOF
 echo "POPULATE_SECONDS=$((SECONDS - t0))"
 du -sh "$DIR"
+# Prime the appliance image onto the filesystem in the same session: the
+# runner's prepare honors an existing unpacked tree, so every replica skips
+# the registry fetch (~3 minutes per boot).
+export DEBIAN_FRONTEND=noninteractive
+command -v skopeo >/dev/null 2>&1 || apt-get update -qq && apt-get install -y -qq skopeo rsync jq >/dev/null
+curl -fsSL --connect-timeout 10 --max-time 60 --retry 10 --retry-delay 2 --retry-all-errors \
+  https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_container_rootfs.sh \
+  -o /root/rootfs.sh
+IMG="ghcr.io/malaiwah/glm52-exl3-vast:latest"
+DIGEST=$(skopeo inspect --override-os linux --override-arch amd64 "docker://$IMG" --format '{{.Digest}}')
+TURNKEY_IMAGE="$IMG@$DIGEST" TURNKEY_ROOT=/home/jl_fs/.image/qual \
+  TURNKEY_WORKSPACE=/home/turnkey/workspace TURNKEY_GRAFT=0 bash /root/rootfs.sh prepare
+du -sh /home/jl_fs/.image/qual
 REMOTE
   jl destroy "$mid" --yes >/dev/null
   state_set populator ""
@@ -162,11 +175,16 @@ cmd_serve() { # cmd_serve <name>
     export MODEL_DIR='$FS_MOUNT/$WEIGHTS_SUBDIR'
     export GLM_STATE_DIR=/home/turnkey/workspace/.glm-config
     export TURNKEY_WORKSPACE=/home/turnkey/workspace
-    # The online-quantization cache is 12+ GiB regenerated on every fresh
-    # instance disk; pinning it to a per-slot directory on the shared
-    # filesystem makes a slot relaunch skip re-quantization entirely.
-    mkdir -p '$FS_MOUNT/.runtimes/$name'
-    export VLLM_EXL3_ONLINE_CACHE_DIR='$FS_MOUNT/.runtimes/$name/exl3-online'
+    # Reuse the unpacked appliance image from the shared filesystem: the
+    # first boot pays the registry fetch, later instances skip it.
+    export TURNKEY_ROOT='$FS_MOUNT/.image/qual'
+    # One shared quantization cache: its content is a pure function of the
+    # weights revision, the quantization algorithm and the GPU architecture,
+    # so every replica reads the same bytes. Cold boots are serialized (the
+    # manager creates one slot per cycle), so no two replicas write it at
+    # once; a slot relaunch after any boot finds it complete.
+    mkdir -p '$FS_MOUNT/.runtimes'
+    export VLLM_EXL3_ONLINE_CACHE_DIR='$FS_MOUNT/.runtimes/exl3-online'
     export VLLM_EXL3_ONLINE_CACHE_MODE=readwrite
     # AIBeast's selected runtime (maintenance glm53-optimization-20260908):
     # prefill fairness at a 60% compute share, with the tuned batching shape
@@ -386,6 +404,85 @@ cmd_scale() {
   fi
 }
 
+cmd_manager() { # install the autonomous fleet manager on the router VM
+  require_jl
+  local rip
+  rip=$(instance_ip "$(state_get router)")
+  [[ -n "$rip" ]] || fatal "no router VM in $FLEET_STATE; run '$0 router' first."
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  # The fleet-wide replica key: minted once, persisted in the local state.
+  local fleet_key
+  fleet_key=$(state_get fleet_key)
+  if [[ -z "$fleet_key" ]]; then
+    fleet_key="sk-fleet-$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
+    state_set fleet_key "$fleet_key"
+  fi
+
+  # Register the autonomous serve script (secret baked in at registration).
+  local rendered script_id
+  rendered=$(mktemp)
+  chmod 600 "$rendered"
+  sed "s|\${GLM_FLEET_KEY:?GLM_FLEET_KEY must be set by the registration step}|$fleet_key|g" \
+    "$script_dir/fleet_serve_script.sh" > "$rendered"
+  script_id=$(jl scripts add "$rendered" --name glm53-fleet-serve --json \
+    2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['script_id'])") \
+    || fatal "could not register the startup script"
+  rm -f "$rendered"
+  log "startup script registered (id $script_id)"
+
+  # Ship the manager + config; the VM needs its own jl CLI and credentials.
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$ROUTER_USER@$rip" '
+    set -e
+    mkdir -p "$HOME/fleet-manager" "$HOME/.config/jl"
+    if ! command -v jl >/dev/null 2>&1; then
+      pip3 install -q --user jarvislabs 2>/dev/null || pip3 install -q jarvislabs
+    fi
+  '
+  scp -q ~/.config/jl/config.toml "$ROUTER_USER@$rip:.config/jl/config.toml"
+  scp -q "$script_dir/fleet_manager.py" "$ROUTER_USER@$rip:fleet-manager/"
+  local id
+  id=$(fs_id)
+  # shellcheck disable=SC2087  # local expansion is the point: the fleet
+  # key, filesystem id and script id are workstation-side values.
+  ssh -o BatchMode=yes "$ROUTER_USER@$rip" "python3 - bash -s" <<EOF
+import json, os
+cfg = {
+    "fleet_key": "$fleet_key",
+    "fs_id": $id,
+    "script_id": $script_id,
+    "min_replicas": ${MIN_REPLICAS:-1},
+    "max_replicas": ${MAX_REPLICAS:-3},
+    "gpu": "$SERVE_GPU",
+    "num_gpus": $SERVE_GPUS,
+    "region": "$FS_REGION",
+    "poll_seconds": 30,
+    "cooldown_seconds": 300,
+    "scale_up_waiting": 2,
+    "scale_down_idle_seconds": 900,
+    "scale_down_concurrency": 4,
+    "unhealthy_grace_seconds": 300,
+    "capacity_per_replica": 12,
+}
+path = os.path.expanduser("~/fleet-manager/fleet.json")
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+os.chmod(path, 0o600)
+print("config written")
+EOF
+  ssh -o BatchMode=yes "$ROUTER_USER@$rip" '
+    sudo systemctl stop fleet-manager.service 2>/dev/null || true
+    sudo systemd-run --uid='"$ROUTER_USER"' --unit=fleet-manager --collect \
+      --setenv=HOME=$HOME --working-directory=$HOME/fleet-manager \
+      /usr/bin/python3 $HOME/fleet-manager/fleet_manager.py
+    sleep 3
+    systemctl is-active fleet-manager
+  '
+  log "fleet manager running (min=${MIN_REPLICAS:-1} max=${MAX_REPLICAS:-3});"
+  log "watch it with: ssh $ROUTER_USER@$rip journalctl -u fleet-manager -f"
+}
+
 cmd_status() {
   require_jl
   jl list
@@ -416,6 +513,7 @@ main() {
     serve)    shift; cmd_serve "${1:-}" ;;
     router)   shift; cmd_router "$@" ;;
     scale)    shift; cmd_scale "$@" ;;
+    manager)  shift; cmd_manager "$@" ;;
     status)   shift; cmd_status "$@" ;;
     teardown) shift; cmd_teardown "$@" ;;
     *) cat >&2 <<USAGE
