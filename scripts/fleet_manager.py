@@ -416,6 +416,12 @@ class Fleet:
                         "model": "openai/GLM-5.3",
                         "api_base": base,
                         "api_key": self.fleet_key,
+                        # The JarvisLabs public HTTPS proxy intermittently
+                        # 500s and then hangs the connection (measured: a
+                        # request stalled 14 minutes with the engine idle
+                        # behind it). A bounded request timeout turns that
+                        # into a fast failure the client can retry instead.
+                        "request_timeout": 120,
                     }})
                 log(f"router: added deployment {r.name} at {base}")
         self.wired = ids
