@@ -833,7 +833,8 @@ def build_fake_instance(root, with_manifest=True):
             w(os.path.join(md, ".cache", "huggingface", "download", name + ".metadata"),
               "hash")
     secrets = [
-        w(os.path.join(root, "workspace", ".vllm-api-key"), "sk-secret"),
+        w(os.path.join(root, "state", ".vllm-api-key"), "sk-secret"),
+        w(os.path.join(root, "workspace", ".vllm-api-key"), "sk-legacy"),
         w(os.path.join(root, "workspace", ".lego", "certificates", "x.key"), "PRIVATE"),
         w(os.path.join(home, ".ssh", "authorized_keys"), "ssh-ed25519 AAA"),
         w(os.path.join(home, ".bash_history"), "curl -H 'Authorization: Bearer sk-'"),
@@ -944,13 +945,16 @@ def test_erase_execution(tmp):
     env = erase_env(root)
     os.environ.update(env)
     doc = secure_erase.plan(secure_erase.Paths(env))
-    keyfile = os.path.join(root, "workspace", ".vllm-api-key")
+    keyfile = os.path.join(root, "state", ".vllm-api-key")
+    legacy_keyfile = os.path.join(root, "workspace", ".vllm-api-key")
 
     dry = secure_erase.erase(doc, dry_run=True)
-    check("dry run erases nothing", os.path.isfile(keyfile) and dry["dry_run"])
+    check("dry run erases nothing",
+          os.path.isfile(keyfile) and os.path.isfile(legacy_keyfile) and dry["dry_run"])
 
     res = secure_erase.erase(doc)
-    check("files are gone", not os.path.isfile(keyfile))
+    check("files are gone",
+          not os.path.isfile(keyfile) and not os.path.isfile(legacy_keyfile))
     check("public weights survive",
           os.path.isfile(os.path.join(md, "model-layer-000.safetensors")))
     check("counted what it did", res["erased"] >= len(secrets), json.dumps(res)[:200])

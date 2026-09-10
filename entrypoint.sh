@@ -2007,7 +2007,11 @@ unset _assignment _n _v
 # configured without a key); it is NEVER appropriate on a rented public host,
 # so it is opt-in and loudly announced. Default stays "always authenticated".
 AUTH="${AUTH:-key}"
-KEYFILE="${MODEL_DIR%/*}/.vllm-api-key"
+# The keyfile lives in the config state dir, NOT next to the weights: when
+# MODEL_DIR is pinned at a shared network filesystem (see the JarvisLabs fleet
+# pattern), a weights-adjacent key would be written to the shared volume and
+# silently shared by every replica attaching it.
+KEYFILE="${GLM_STATE_DIR:-${MODEL_DIR%/*}/.glm-config}/.vllm-api-key"
 if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   AUTH=none            # a smoke run must not mint or persist a key
 fi
