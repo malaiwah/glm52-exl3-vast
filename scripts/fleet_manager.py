@@ -298,6 +298,14 @@ class Fleet:
         # reap rebuilds the fleet.
         if not ids:
             return
+        if self.cfg.get("router_api"):
+            # DB-backed router: deployments are managed through the admin
+            # API. Adding/removing them is HOT — no restart, no dropped
+            # connections, and existing session pins survive scale-up.
+            if ids == self.wired:
+                return
+            self.wire_via_api(healthy, ids)
+            return
         if ids == self.wired and os.path.exists(os.path.expanduser("~/router/config.yaml")):
             return
         cfg = ["model_list:"]
@@ -340,6 +348,44 @@ class Fleet:
             return
         self.wired = ids
         log(f"litellm rewired: {sorted(ids)}")
+
+    def router_api(self, method, path, payload=None):
+        req = urllib.request.Request(
+            f"{self.cfg['router_url']}{path}",
+            data=json.dumps(payload).encode() if payload else None,
+            headers={"Authorization": f"Bearer {self.cfg['master_key']}",
+                     "Content-Type": "application/json"},
+            method=method)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = resp.read()
+        return json.loads(body) if body else {}
+
+    def wire_via_api(self, healthy, ids):
+        """Hot-manage deployments on a DB-backed router (Postgres+Redis):
+        /model/new and /model/delete apply live via litellm's config-sync;
+        no process restart, no dropped connections, pins survive."""
+        info = self.router_api("GET", "/v1/model/info")
+        current = {}  # api_base -> deployment id
+        for d in info.get("data", []):
+            params = d.get("litellm_params", {})
+            current[params.get("api_base")] = d.get("model_info", {}).get("id")
+        desired = {f"{r.api_url}/v1": r for r in healthy}
+        for base, dep_id in current.items():
+            if base not in desired and dep_id:
+                self.router_api("POST", "/model/delete", {"id": dep_id})
+                log(f"router: removed stale deployment {base}")
+        for base, r in desired.items():
+            if base not in current:
+                self.router_api("POST", "/model/new", {
+                    "model_name": "GLM-5.3",
+                    "litellm_params": {
+                        "model": "openai/GLM-5.3",
+                        "api_base": base,
+                        "api_key": self.fleet_key,
+                    }})
+                log(f"router: added deployment {r.name} at {base}")
+        self.wired = ids
+        log(f"litellm hot-wired: {sorted(ids)}")
 
     def cycle(self):
         replicas = [Replica(r) for r in self.slots()]

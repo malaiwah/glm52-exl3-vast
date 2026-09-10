@@ -357,6 +357,75 @@ class WiringTests(unittest.TestCase):
                 sub.run.assert_not_called()
 
 
+class RouterApiWiringTests(unittest.TestCase):
+    """DB-backed router: hot add/remove via the admin API, no restart."""
+
+    def setUp(self):
+        self.f = fm.Fleet(make_cfg(router_api=True,
+                                   router_url="https://router.example",
+                                   master_key="sk-master"))
+
+    def replica(self, name, url):
+        r = replica(name)
+        r.healthy, r.api_url = True, url
+        return r
+
+    def test_adds_missing_deployment_without_restart(self):
+        r = self.replica("glm53-serve-0", "https://a.example")
+        calls = []
+        def fake_api(method, path, payload=None):
+            calls.append((method, path, payload))
+            if path == "/v1/model/info":
+                return {"data": []}
+            return {}
+        with mock.patch.object(self.f, "router_api", side_effect=fake_api):
+            self.f.wire_litellm([r])
+        added = [c for c in calls if c[1] == "/model/new"]
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added[0][2]["litellm_params"]["api_base"],
+                         "https://a.example/v1")
+        self.assertEqual(self.f.wired, {"glm53-serve-0"})
+
+    def test_removes_stale_deployment(self):
+        r = self.replica("glm53-serve-0", "https://a.example")
+        info = {"data": [{"model_info": {"id": "dep-99"},
+                          "litellm_params": {"api_base": "https://old.example/v1"}}]}
+        deleted = []
+        def fake_api(method, path, payload=None):
+            if path == "/v1/model/info":
+                return info
+            if path == "/model/delete":
+                deleted.append(payload)
+            return {}
+        with mock.patch.object(self.f, "router_api", side_effect=fake_api):
+            self.f.wire_litellm([r])
+        self.assertEqual(deleted, [{"id": "dep-99"}])
+
+    def test_no_calls_when_unchanged(self):
+        self.f.wired = {"glm53-serve-0"}
+        r = self.replica("glm53-serve-0", "https://a.example")
+        with mock.patch.object(self.f, "router_api") as api:
+            self.f.wire_litellm([r])
+        api.assert_not_called()
+
+    def test_retiring_replica_is_not_wired(self):
+        r = self.replica("glm53-serve-0", "https://a.example")
+        victim = self.replica("glm53-serve-1", "https://b.example")
+        self.f.retiring["glm53-serve-1"] = 0
+        info = {"data": [{"model_info": {"id": "dep-b"},
+                          "litellm_params": {"api_base": "https://b.example/v1"}}]}
+        ops = []
+        def fake_api(method, path, payload=None):
+            if path == "/v1/model/info":
+                return info
+            ops.append(path)
+            return {}
+        with mock.patch.object(self.f, "router_api", side_effect=fake_api):
+            self.f.wire_litellm([r, victim])
+        self.assertEqual(self.f.wired, {"glm53-serve-0"})
+        self.assertIn("/model/delete", ops)
+
+
 class HealthProbeTests(unittest.TestCase):
     def test_metrics_discriminates_and_lab_url_is_ignored(self):
         r = replica("glm53-serve-0", mid=42)

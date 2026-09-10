@@ -531,7 +531,18 @@ cfg = {
     "scale_down_concurrency": 4,
     "unhealthy_grace_seconds": 300,
     "capacity_per_replica": 12,
+    "router_api": ${ROUTER_API:-False},
+    "router_url": "${ROUTER_URL:-https://glm53-router.${DESEC_DOMAIN:-malaiwah.dedyn.io}}",
 }
+# Hot-reload mode needs the master key for the admin API; it lives on the
+# router VM only, so read it there. Absent key disables API mode safely.
+_mk = os.path.expanduser("~/router/master-key")
+if cfg["router_api"] and os.path.exists(_mk):
+    cfg["master_key"] = open(_mk).read().strip()
+elif cfg["router_api"]:
+    cfg["router_api"] = False
+    print("WARNING: ROUTER_API requested but ~/router/master-key is absent;"
+          " falling back to config-rewrite mode")
 path = os.path.expanduser("~/fleet-manager/fleet.json")
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
