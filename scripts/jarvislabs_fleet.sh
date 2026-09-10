@@ -386,6 +386,84 @@ cmd_scale() {
   fi
 }
 
+cmd_manager() { # install the autonomous fleet manager on the router VM
+  require_jl
+  local rip
+  rip=$(instance_ip "$(state_get router)")
+  [[ -n "$rip" ]] || fatal "no router VM in $FLEET_STATE; run '$0 router' first."
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+  # The fleet-wide replica key: minted once, persisted in the local state.
+  local fleet_key
+  fleet_key=$(state_get fleet_key)
+  if [[ -z "$fleet_key" ]]; then
+    fleet_key="sk-fleet-$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
+    state_set fleet_key "$fleet_key"
+  fi
+
+  # Register the autonomous serve script (secret baked in at registration).
+  local rendered script_id
+  rendered=$(mktemp)
+  chmod 600 "$rendered"
+  sed "s|\${GLM_FLEET_KEY:?GLM_FLEET_KEY must be set by the registration step}|$fleet_key|g" \
+    "$script_dir/fleet_serve_script.sh" > "$rendered"
+  script_id=$(jl scripts add "$rendered" --name glm53-fleet-serve --json \
+    2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['script_id'])") \
+    || fatal "could not register the startup script"
+  rm -f "$rendered"
+  log "startup script registered (id $script_id)"
+
+  # Ship the manager + config; the VM needs its own jl CLI and credentials.
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$ROUTER_USER@$rip" '
+    set -e
+    mkdir -p "$HOME/fleet-manager" "$HOME/.config/jl"
+    if ! command -v jl >/dev/null 2>&1; then
+      pip3 install -q --user jarvislabs 2>/dev/null || pip3 install -q jarvislabs
+    fi
+  '
+  scp -q ~/.config/jl/config.toml "$ROUTER_USER@$rip:.config/jl/config.toml"
+  scp -q "$script_dir/fleet_manager.py" "$ROUTER_USER@$rip:fleet-manager/"
+  local id
+  id=$(fs_id)
+  # shellcheck disable=SC2087  # local expansion is the point: the fleet
+  # key, filesystem id and script id are workstation-side values.
+  ssh -o BatchMode=yes "$ROUTER_USER@$rip" "python3 - bash -s" <<EOF
+import json, os
+cfg = {
+    "fleet_key": "$fleet_key",
+    "fs_id": $id,
+    "script_id": $script_id,
+    "min_replicas": ${MIN_REPLICAS:-1},
+    "max_replicas": ${MAX_REPLICAS:-3},
+    "gpu": "$SERVE_GPU",
+    "num_gpus": $SERVE_GPUS,
+    "region": "$FS_REGION",
+    "poll_seconds": 30,
+    "cooldown_seconds": 300,
+    "scale_up_waiting": 2,
+    "scale_down_idle_seconds": 900,
+    "unhealthy_grace_seconds": 300,
+    "capacity_per_replica": 12,
+}
+path = os.path.expanduser("~/fleet-manager/fleet.json")
+with open(path, "w") as f:
+    json.dump(cfg, f, indent=2)
+os.chmod(path, 0o600)
+print("config written")
+EOF
+  ssh -o BatchMode=yes "$ROUTER_USER@$rip" '
+    sudo systemctl stop fleet-manager.service 2>/dev/null || true
+    sudo systemd-run --uid='"$ROUTER_USER"' --unit=fleet-manager --collect \
+      --setenv=HOME=$HOME --working-directory=$HOME/fleet-manager \
+      /usr/bin/python3 $HOME/fleet-manager/fleet_manager.py
+    sleep 3
+    systemctl is-active fleet-manager
+  '
+  log "fleet manager running (min=${MIN_REPLICAS:-1} max=${MAX_REPLICAS:-3});"
+  log "watch it with: ssh $ROUTER_USER@$rip journalctl -u fleet-manager -f"
+}
+
 cmd_status() {
   require_jl
   jl list
@@ -416,6 +494,7 @@ main() {
     serve)    shift; cmd_serve "${1:-}" ;;
     router)   shift; cmd_router "$@" ;;
     scale)    shift; cmd_scale "$@" ;;
+    manager)  shift; cmd_manager "$@" ;;
     status)   shift; cmd_status "$@" ;;
     teardown) shift; cmd_teardown "$@" ;;
     *) cat >&2 <<USAGE
