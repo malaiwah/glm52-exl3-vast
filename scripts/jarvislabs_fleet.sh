@@ -209,6 +209,9 @@ cmd_serve() { # cmd_serve <name>
     export MAX_NUM_BATCHED_TOKENS=3072
     export VLLM_EXL3_PREFILL_CAPACITY=2048
     export GPU_MEMORY_UTILIZATION=0.95
+    export PREFIX_CACHE_BACKEND=lmcache
+    export LMCACHE_L1_MAX_GB=125
+    export PREFIX_CACHE_DISK_GB=384
     # 12 seqs x (1 + 3 MTP) = 48 decode tokens per step: the capture and
     # trellis windows must be raised together or decode silently leaves the
     # captured fast path under concurrency (glm_config rule concurrency-window).
