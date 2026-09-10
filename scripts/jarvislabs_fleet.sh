@@ -443,6 +443,7 @@ cfg = {
     "cooldown_seconds": 300,
     "scale_up_waiting": 2,
     "scale_down_idle_seconds": 900,
+    "scale_down_concurrency": 4,
     "unhealthy_grace_seconds": 300,
     "capacity_per_replica": 12,
 }

@@ -110,6 +110,7 @@ class Fleet:
         self.last_scale = 0
         self.wired = set()
         self.unhealthy_since = {}
+        self.idle_since = None
 
     def slots(self):
         rows = jl_json("list")
@@ -170,22 +171,28 @@ class Fleet:
                 log(f"scale up: queued={queued} busy={busy}/{cap}")
                 self.create_slot()
             return
-        # scale down: every replica fully idle (no running, no waiting) and
-        # the fleet above minimum, for idle_seconds.
+        # Scale down on LIGHT load, not just total silence: while the fleet
+        # is under the concurrency threshold (default: fewer than 4 requests
+        # in flight across all replicas) for the idle window, it shrinks
+        # toward the minimum — keeping one warm replica through light
+        # traffic instead of oscillating on and off zero.
+        concurrency = sum((r.running or 0) + (r.waiting or 0) for r in healthy)
+        threshold = self.cfg.get("scale_down_concurrency", 4)
         idle_for = self.cfg.get("scale_down_idle_seconds", 900)
         now = time.time()
-        victim = None
-        for r in healthy:
-            if (r.running or 0) > 0 or (r.waiting or 0) > 0:
-                r.idle_since = None
-            else:
-                r.idle_since = r.idle_since or now
-                if now - r.idle_since >= idle_for:
-                    victim = victim or r
-        if victim and len(replicas) > self.cfg["min_replicas"]:
-            log(f"scale down: {victim.name} idle for {int(now - victim.idle_since)}s")
-            self.destroy(victim)
-            self.last_scale = time.time()
+        if concurrency < threshold:
+            self.idle_since = self.idle_since or now
+            if now - self.idle_since >= idle_for and len(replicas) > self.cfg["min_replicas"]:
+                # Retire the least-loaded replica; in-flight requests on it
+                # finish while litellm stops routing new ones to it.
+                victim = min(healthy, key=lambda r: (r.running or 0) + (r.waiting or 0))
+                log(f"scale down: concurrency {concurrency} < {threshold} for "
+                    f"{int(now - self.idle_since)}s; retiring {victim.name}")
+                self.destroy(victim)
+                self.last_scale = time.time()
+                self.idle_since = None
+        else:
+            self.idle_since = None
 
     def wire_litellm(self, replicas):
         """Reconfigure litellm when the set of healthy replicas changes."""
@@ -193,37 +200,6 @@ class Fleet:
         ids = {r.name for r in healthy}
         if ids == self.wired and os.path.exists(os.path.expanduser("~/router/config.yaml")):
             return
-        cfg = ["model_list:"]
-        for r in healthy:
-            cfg += [
-                "  - model_name: GLM-5.3",
-                "    litellm_params:",
-                "      model: openai/GLM-5.3",
-                f"      api_base: {r.api_url}/v1",
-                f"      api_key: {self.fleet_key}",
-            ]
-        cfg += [
-            "router_settings:",
-            "  routing_strategy: simple-shuffle",
-            "  model_group_affinity_config:",
-            "    GLM-5.3:",
-            "      - deployment_affinity",
-            "      - session_affinity",
-            "  deployment_affinity_ttl_seconds: 3600",
-            "general_settings:",
-            "  master_key: os.environ/LITELLM_MASTER_KEY",
-            "litellm_settings:",
-            "  drop_params: true",
-        ]
-        path = os.path.expanduser("~/router/config.yaml")
-        tmp = path + ".new"
-        with open(tmp, "w") as f:
-            f.write("\n".join(cfg) + "\n")
-        os.replace(tmp, path)
-        subprocess.run(["sudo", "systemctl", "restart", "litellm-router"],
-                       capture_output=True)
-        self.wired = ids
-        log(f"litellm rewired: {sorted(ids)}")
 
     def cycle(self):
         replicas = [Replica(r) for r in self.slots()]
