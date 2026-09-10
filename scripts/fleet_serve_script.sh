@@ -37,13 +37,11 @@ export PREFILL_FAIRNESS_ENGINE=compute_share
 export PREFILL_COMPUTE_SHARE=0.6
 export MAX_NUM_SEQS=12
 export MAX_NUM_BATCHED_TOKENS=3072
-export VLLM_EXL3_PREFILL_CAPACITY=2048
-export GPU_MEMORY_UTILIZATION=0.95
-export CUDAGRAPH_CAPTURE_SIZES=4,8,12,16,20,24,28,32,36,40,44,48
-export MAX_CUDAGRAPH_CAPTURE_SIZE=48
-export VLLM_EXL3_TRELLIS_MAX_M=48
-
 exec bash <(
-  curl -fsSL --retry 5 --retry-all-errors \
+  # Bounded, fast retries: the startup script fires the moment the instance
+  # boots, when DNS may not be up yet; curl's default backoff would then sit
+  # in minutes-long sleeps between retries.
+  curl -fsSL --connect-timeout 10 --max-time 60 --retry 10 --retry-delay 2 \
+    --retry-all-errors \
     "https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_quickstart.sh"
 )
