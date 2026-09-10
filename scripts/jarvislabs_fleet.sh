@@ -535,6 +535,7 @@ cfg = {
     "capacity_per_replica": 12,
     "router_api": ${ROUTER_API:-False},
     "router_url": "${ROUTER_URL:-https://glm53-router.${DESEC_DOMAIN:-malaiwah.dedyn.io}}",
+    "tunnels": ${TUNNELS:-False},
 }
 # Hot-reload mode needs the master key for the admin API; it lives on the
 # router VM only, so read it there. Absent key disables API mode safely.
