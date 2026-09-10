@@ -280,6 +280,40 @@ graft inside that). This requires a live 4-GPU VM to develop against —
 IN1 VM capacity was unavailable at the time of writing. Until that path
 exists, keep `ON_DEMAND_KIND` unset (container backbone).
 
+## Banked design: cross-replica LMCache sharing (L2 = everyone's L3)
+
+Today each replica's LMCache L2 is per-instance storage with no
+cross-replica reuse. The measured storage hierarchy (FS 753 MB/s cold /
+1.9 GB/s re-read vs local rbd 634 MB/s — both network-backed) makes the
+shared filesystem the right home for L2, at no speed cost:
+
+- **L2 (read-write)**: each replica owns one directory on the FS,
+  `/home/jl_fs/.lmcache/<slot>/l2`, written only by its owner — the
+  single-writer rule that the multi-writer sharing anti-pattern breaks
+  (capacity/eviction are per-process; concurrent independent writers
+  over-commit and orphan each other's files).
+- **L3 (read-only)**: an LMCache plugin adapter implementing
+  `L2AdapterInterface` with `lookup`/`load` delegating to ALL sibling
+  directories and `store`/`delete` as no-ops. Reads cascade L1 → own L2 →
+  peers' L2s; writes stay single-owner. The plugin must no-op stores in
+  a way the store controller does not read as fatal (per LMCache MP
+  docs, stores fan out to every configured adapter — hence the plugin,
+  not a plain extra adapter).
+- **Key compatibility** across processes: blake3 hashing (MP default)
+  plus identical model/tokenizer/chunk size — already true for identical
+  fleet replicas. No PYTHONHASHSEED coupling.
+- **Scales past 2 replicas for free**: the smart L3 unions every
+  `<slot>/l2` directory present on the FS.
+- **Budget**: L2 caps must fit the FS alongside weights + quant + image
+  trees (~365 GB used of 500 GB): e.g. 2 x ~60 GB, not the per-instance
+  384 GB local-disk cap.
+
+Value: today's GPU prefix cache already hits ~90% with session affinity
+pinning conversations to the replica that holds their KV, so the win is
+bounded to fresh-replica warmup, post-failover affinity hops, and shared
+agent system prompts across sessions. Prototype after the fleet
+measurement work settles.
+
 ## Considered and rejected (measured)
 
 - **User-space weight cache in vLLM** (local copy populated on first read,
