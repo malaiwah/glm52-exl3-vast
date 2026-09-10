@@ -377,6 +377,50 @@ class WiringTests(unittest.TestCase):
                 sub.run.assert_not_called()
 
 
+class TunnelTests(unittest.TestCase):
+    def test_port_allocation(self):
+        f = fm.Fleet(make_cfg(tunnels=True))
+        self.assertEqual(f.tunnel_port("glm53-serve-0"), 18000)
+        self.assertEqual(f.tunnel_port("glm53-serve-7"), 18007)
+
+    def test_existing_tunnel_short_circuits(self):
+        f = fm.Fleet(make_cfg(tunnels=True))
+        r = replica("glm53-serve-0")
+        r.healthy, r.api_url = True, "https://proxy.example"
+        body = b"vllm:num_requests_running 1\n"
+        with mock.patch.object(fm, "http_code", return_value=(200, body)), \
+                mock.patch.object(fm, "subprocess") as sub:
+            base = f.ensure_tunnel(r)
+        self.assertEqual(base, "http://localhost:18000")
+        sub.run.assert_not_called()
+
+    def test_no_tunnels_config_uses_proxy_url(self):
+        f = fm.Fleet(make_cfg())
+        r = replica("glm53-serve-0")
+        r.api_url = "https://proxy.example"
+        self.assertEqual(f.ensure_tunnel(r), "https://proxy.example")
+
+    def test_tunnel_failure_falls_back_to_proxy(self):
+        f = fm.Fleet(make_cfg(tunnels=True))
+        r = replica("glm53-serve-0")
+        r.api_url, r.public_ip = "https://proxy.example", "1.2.3.4"
+        with mock.patch.object(fm, "http_code", return_value=(0, b"")), \
+                mock.patch.object(fm, "subprocess") as sub:
+            sub.run.return_value = SimpleNamespace(returncode=255, stderr="no route")
+            base = f.ensure_tunnel(r)
+        self.assertEqual(base, "https://proxy.example")
+
+    def test_destroy_kills_tunnel(self):
+        f = fm.Fleet(make_cfg(tunnels=True))
+        r = replica("glm53-serve-3")
+        with mock.patch.object(fm, "jl"), \
+                mock.patch.object(fm, "subprocess") as sub:
+            f.destroy(r)
+        pkill = [c for c in sub.run.call_args_list
+                 if c[0][0][0] == "pkill"]
+        self.assertTrue(pkill)
+
+
 class RouterApiWiringTests(unittest.TestCase):
     """DB-backed router: hot add/remove via the admin API, no restart."""
 

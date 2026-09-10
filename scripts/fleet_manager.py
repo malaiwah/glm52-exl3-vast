@@ -68,6 +68,8 @@ class Replica:
         self.mid = info.get("machine_id")
         self.status = info.get("status", "")
         self.is_spot = info.get("is_spot")
+        self.api_url = ""
+        self.public_ip = None
         self.healthy = False
         self.waiting = None
         self.running = None
@@ -93,6 +95,7 @@ class Replica:
         # plaintext probe is still fine here (/metrics leaks nothing), but
         # routing production traffic to it is a docs-level decision.
         ip = detail.get("public_ip")
+        self.public_ip = ip
         if ip:
             code, body = http_code(f"http://{ip}:8000/metrics")
             if code == 200 and b"vllm:" in body:
@@ -194,6 +197,7 @@ class Fleet:
     def destroy(self, replica):
         log(f"destroying {replica.name} ({replica.mid})")
         jl("destroy", str(replica.mid), "--yes")
+        self.kill_tunnel(replica.name)
 
     def reap(self, replicas):
         """Replace slots whose instance died (spot reclamation, crash).
@@ -321,6 +325,48 @@ class Fleet:
             self.retiring.pop(name)
             self.last_scale = time.time()
 
+    def tunnel_port(self, name):
+        m = re.search(r"(\d+)$", name)
+        return 18000 + int(m.group(1)) if m else 18000
+
+    def ensure_tunnel(self, replica):
+        """Route to the replica through an ssh -L tunnel instead of the
+        provider's public HTTPS proxy. Measured: the proxy intermittently
+        black-holes chat requests (the engine sits idle behind it while
+        litellm waits); ssh to the same hosts has been lossless. Tunnels
+        ride the router's dedicated fleet_tunnel key (registered as an
+        account ssh-key so every new replica accepts it)."""
+        if not self.cfg.get("tunnels"):
+            return replica.api_url
+        port = self.tunnel_port(replica.name)
+        code, body = http_code(f"http://localhost:{port}/metrics", timeout=5)
+        if code == 200 and b"vllm:" in body:
+            return f"http://localhost:{port}"
+        subprocess.run(["pkill", "-f", f"{port}:localhost:8000"],
+                       capture_output=True)
+        if not replica.public_ip:
+            log(f"no public_ip for {replica.name}; using the proxy URL")
+            return replica.api_url
+        rc = subprocess.run(
+            ["ssh", "-f", "-N", "-L", f"{port}:localhost:8000",
+             "-i", os.path.expanduser("~/.ssh/fleet_tunnel"),
+             "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no",
+             "-o", "ExitOnForwardFailure=yes",
+             "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4",
+             f"root@{replica.public_ip}"],
+            capture_output=True, text=True)
+        if rc.returncode != 0:
+            log(f"tunnel to {replica.name} failed: {(rc.stderr or '')[:120]}")
+            return replica.api_url
+        log(f"tunnel up for {replica.name} on localhost:{port}")
+        return f"http://localhost:{port}"
+
+    def kill_tunnel(self, name):
+        if not self.cfg.get("tunnels"):
+            return
+        subprocess.run(["pkill", "-f", f"{self.tunnel_port(name)}:localhost:8000"],
+                       capture_output=True)
+
     def wire_litellm(self, replicas):
         """Reconfigure litellm when the set of healthy replicas changes."""
         healthy = sorted((r for r in replicas
@@ -348,7 +394,7 @@ class Fleet:
                 "  - model_name: GLM-5.3",
                 "    litellm_params:",
                 "      model: openai/GLM-5.3",
-                f"      api_base: {r.api_url}/v1",
+                f"      api_base: {self.ensure_tunnel(r)}/v1",
                 f"      api_key: {self.fleet_key}",
             ]
         cfg += [
@@ -403,7 +449,7 @@ class Fleet:
         for d in info.get("data", []):
             params = d.get("litellm_params", {})
             current[params.get("api_base")] = d.get("model_info", {}).get("id")
-        desired = {f"{r.api_url}/v1": r for r in healthy}
+        desired = {f"{self.ensure_tunnel(r)}/v1": r for r in healthy}
         for base, dep_id in current.items():
             if base not in desired and dep_id:
                 self.router_api("POST", "/model/delete", {"id": dep_id})
