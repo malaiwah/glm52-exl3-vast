@@ -523,6 +523,7 @@ cfg = {
     "on_demand_min": ${ON_DEMAND_MIN:-0},
     "gpu": "$SERVE_GPU",
     "num_gpus": $SERVE_GPUS,
+    "region": "$FS_REGION",
     "poll_seconds": 30,
     "cooldown_seconds": 300,
     "scale_up_waiting": 2,
