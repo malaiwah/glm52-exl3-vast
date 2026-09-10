@@ -48,5 +48,5 @@ exec bash <(
   # in minutes-long sleeps between retries.
   curl -fsSL --connect-timeout 10 --max-time 60 --retry 10 --retry-delay 2 \
     --retry-all-errors \
-    "https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/11577d83866288dc46fdd27c050962d0994d76b9/scripts/jarvislabs_quickstart.sh"
+    "https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/cdfbbe41c2913b161f20e3e42ce897b705d66667/scripts/jarvislabs_quickstart.sh"
 )
