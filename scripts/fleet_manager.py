@@ -226,6 +226,37 @@ class Fleet:
         ids = {r.name for r in healthy}
         if ids == self.wired and os.path.exists(os.path.expanduser("~/router/config.yaml")):
             return
+        cfg = ["model_list:"]
+        for r in healthy:
+            cfg += [
+                "  - model_name: GLM-5.3",
+                "    litellm_params:",
+                "      model: openai/GLM-5.3",
+                f"      api_base: {r.api_url}/v1",
+                f"      api_key: {self.fleet_key}",
+            ]
+        cfg += [
+            "router_settings:",
+            "  routing_strategy: simple-shuffle",
+            "  model_group_affinity_config:",
+            "    GLM-5.3:",
+            "      - deployment_affinity",
+            "      - session_affinity",
+            "  deployment_affinity_ttl_seconds: 3600",
+            "general_settings:",
+            "  master_key: os.environ/LITELLM_MASTER_KEY",
+            "litellm_settings:",
+            "  drop_params: true",
+        ]
+        path = os.path.expanduser("~/router/config.yaml")
+        tmp = path + ".new"
+        with open(tmp, "w") as f:
+            f.write("\n".join(cfg) + "\n")
+        os.replace(tmp, path)
+        subprocess.run(["sudo", "systemctl", "restart", "litellm-router"],
+                       capture_output=True)
+        self.wired = ids
+        log(f"litellm rewired: {sorted(ids)}")
 
     def cycle(self):
         replicas = [Replica(r) for r in self.slots()]
