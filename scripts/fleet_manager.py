@@ -80,6 +80,7 @@ class Replica:
         The 'url' field in jl get is the Jupyter lab URL, which answers 200 to
         everything and must never be used as an API base."""
         detail = jl_json("get", str(self.mid))
+        self.public_ip = detail.get("public_ip")
         for base in detail.get("endpoints") or []:
             code, body = http_code(f"{base}/metrics")
             # 200 alone is not proof: the Jupyter lab proxy answers 200 to
@@ -94,8 +95,7 @@ class Replica:
         # acceptable only on the provider's private network; a public
         # plaintext probe is still fine here (/metrics leaks nothing), but
         # routing production traffic to it is a docs-level decision.
-        ip = detail.get("public_ip")
-        self.public_ip = ip
+        ip = self.public_ip
         if ip:
             code, body = http_code(f"http://{ip}:8000/metrics")
             if code == 200 and b"vllm:" in body:
