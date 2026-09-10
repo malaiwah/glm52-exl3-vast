@@ -467,36 +467,36 @@ cmd_manager() { # install the autonomous fleet manager on the router VM
   sed "s|\${GLM_FLEET_KEY:?GLM_FLEET_KEY must be set by the registration step}|$fleet_key|g" \
     "$script_dir/fleet_serve_script.sh" > "$rendered"
   grep -q "$fleet_key" "$rendered" || fatal "fleet key substitution did not match"
+  # jl scripts update reports success but instance creation keeps running
+  # the ORIGINAL content (measured: every replica booted the pre-update
+  # script after a "✓ updated"). The only reliable refresh is remove +
+  # re-add; the new id goes straight into the manager config.
+  for old_id in $(jl scripts list --json 2>/dev/null | python3 -c "
+import json, sys
+doc = json.load(sys.stdin)
+rows = doc if isinstance(doc, list) else doc.get('scripts', [])
+for row in rows:
+    if row.get('script_name', '').startswith('glm53-fleet-serve'):
+        print(row.get('script_id') or row.get('id') or '')
+"); do
+    jl scripts remove "$old_id" --yes >/dev/null 2>&1 || true
+    log "removed stale startup script (id $old_id)"
+  done
+  jl scripts add "$rendered" --name "glm53-fleet-serve-$(date +%H%M)" >/dev/null ||
+    fatal "could not register the startup script"
+  # The add response's JSON shape is not stable across CLI versions;
+  # resolve the id by name from the authoritative list instead.
   script_id=$(jl scripts list --json 2>/dev/null | python3 -c "
 import json, sys
 doc = json.load(sys.stdin)
 rows = doc if isinstance(doc, list) else doc.get('scripts', [])
 for row in rows:
-    if row.get('script_name') == 'glm53-fleet-serve':
+    if row.get('script_name', '').startswith('glm53-fleet-serve'):
         print(row.get('script_id') or row.get('id') or '')
         break
 ")
-  if [[ -n "$script_id" ]]; then
-    jl scripts update "$script_id" "$rendered" >/dev/null ||
-      fatal "could not update startup script $script_id"
-    log "startup script updated in place (id $script_id)"
-  else
-    jl scripts add "$rendered" --name glm53-fleet-serve >/dev/null ||
-      fatal "could not register the startup script"
-    # The add response's JSON shape is not stable across CLI versions;
-    # resolve the id by name from the authoritative list instead.
-    script_id=$(jl scripts list --json 2>/dev/null | python3 -c "
-import json, sys
-doc = json.load(sys.stdin)
-rows = doc if isinstance(doc, list) else doc.get('scripts', [])
-for row in rows:
-    if row.get('script_name') == 'glm53-fleet-serve':
-        print(row.get('script_id') or row.get('id') or '')
-        break
-")
-    [[ -n "$script_id" ]] || fatal "registered but could not resolve the new script id"
-    log "startup script registered (id $script_id)"
-  fi
+  [[ -n "$script_id" ]] || fatal "registered but could not resolve the new script id"
+  log "startup script registered (id $script_id)"
 
   # Ship the manager + config; the VM needs its own jl CLI and credentials.
   ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$ROUTER_USER@$rip" '

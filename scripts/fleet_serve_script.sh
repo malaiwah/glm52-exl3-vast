@@ -20,6 +20,17 @@ set -Eeuo pipefail
 
 FLEET_KEY="${GLM_FLEET_KEY:?GLM_FLEET_KEY must be set by the registration step}"
 
+# Self-bootstrap the router's tunnel key: the provider injects NO ssh keys
+# into new instances (jl ssh-key add is not honored at creation), so this
+# script — which runs as root at boot — authorizes the router itself. The
+# manager on the router then establishes its ssh -L tunnel without any
+# workstation involvement. A public key baked here is not a secret.
+mkdir -p /root/.ssh
+grep -q "fleet-router-tunnel" /root/.ssh/authorized_keys 2>/dev/null || \
+  echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK/F/gex+tM11lzRNN5a0Mjn4C6n6tYG2cIPiUvTyCnB fleet-router-tunnel" \
+  >> /root/.ssh/authorized_keys
+chmod 700 /root/.ssh
+chmod 600 /root/.ssh/authorized_keys
 export MODEL_DIR=/home/jl_fs/GLM-5.3-EXL3-TR3-3.42bpw
 export GLM_STATE_DIR=/home/turnkey/workspace/.glm-config
 export TURNKEY_WORKSPACE=/home/turnkey/workspace
