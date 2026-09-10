@@ -34,7 +34,8 @@ WEIGHTS_SUBDIR="GLM-5.3-EXL3-TR3-3.42bpw"
 MODEL_REPO="davidsyoung/GLM-5.3-EXL3-TR3-3.42bpw"
 MODEL_REVISION="99c6f951333d2b38f1efefa533c7afadf0d376e3"
 FS_MOUNT="/home/jl_fs"
-QUICKSTART_URL="https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_quickstart.sh"
+QUICKSTART_REF="cdfbbe41c2913b161f20e3e42ce897b705d66667"
+QUICKSTART_URL="https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/$QUICKSTART_REF/scripts/jarvislabs_quickstart.sh"
 
 log()   { printf '>>> %s\n' "$*" >&2; }
 fatal() { printf 'FATAL: %s\n' "$*" >&2; exit 2; }
@@ -100,12 +101,25 @@ print(doc.get('public_ip', ''), file=sys.stderr)
 "
 }
 
-instance_ip() { jl get "$1" --json 2>/dev/null | python3 -c "
+
+instance_ip() { # instance_ip <machine_id>: jl get can answer before the
+                # public IP is assigned; poll until it appears (~120s max)
+                # so wait_ssh never starts from an empty address.
+  local ip deadline=$((SECONDS + 120))
+  while :; do
+    ip=$(jl get "$1" --json 2>/dev/null | python3 -c "
 import json, sys
 doc = json.load(sys.stdin)
 print(doc.get('public_ip') or '')
-"; }
-
+" 2>/dev/null) || ip=""
+    if [[ -n "$ip" ]]; then
+      printf '%s\n' "$ip"
+      return 0
+    fi
+    (( SECONDS < deadline )) || { log "no public IP for $1 after 120s"; return 1; }
+    sleep 5
+  done
+}
 # --- populate -----------------------------------------------------------------
 cmd_populate() {
   require_jl
@@ -122,8 +136,8 @@ cmd_populate() {
   wait_ssh "$ip"
   log "populator $mid up ($ip); downloading $MODEL_REPO@$MODEL_REVISION (resumable)"
   local remote_cmd
-  remote_cmd=$(printf 'REPO=%q REV=%q DIR=%q bash -s' \
-    "$MODEL_REPO" "$MODEL_REVISION" "$FS_MOUNT/$WEIGHTS_SUBDIR")
+  remote_cmd=$(printf 'REPO=%q REV=%q DIR=%q REF=%q bash -s' \
+    "$MODEL_REPO" "$MODEL_REVISION" "$FS_MOUNT/$WEIGHTS_SUBDIR" "$QUICKSTART_REF")
   ssh -o BatchMode=yes -o StrictHostKeyChecking=no "root@$ip" "$remote_cmd" <<'REMOTE'
 set -e
 pip install -q hf_transfer 2>/dev/null || pip install -q hf_transfer
@@ -142,7 +156,7 @@ du -sh "$DIR"
 export DEBIAN_FRONTEND=noninteractive
 command -v skopeo >/dev/null 2>&1 || apt-get update -qq && apt-get install -y -qq skopeo rsync jq >/dev/null
 curl -fsSL --connect-timeout 10 --max-time 60 --retry 10 --retry-delay 2 --retry-all-errors \
-  https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/main/scripts/jarvislabs_container_rootfs.sh \
+  https://raw.githubusercontent.com/malaiwah/glm52-exl3-vast/$REF/scripts/jarvislabs_container_rootfs.sh \
   -o /root/rootfs.sh
 IMG="ghcr.io/malaiwah/glm52-exl3-vast:latest"
 DIGEST=$(skopeo inspect --override-os linux --override-arch amd64 "docker://$IMG" --format '{{.Digest}}')
@@ -192,6 +206,7 @@ cmd_serve() { # cmd_serve <name>
     export PREFILL_FAIRNESS_ENGINE=compute_share
     export PREFILL_COMPUTE_SHARE=0.6
     export MAX_NUM_SEQS=12
+    export MAX_NUM_BATCHED_TOKENS=3072
     export VLLM_EXL3_PREFILL_CAPACITY=2048
     export GPU_MEMORY_UTILIZATION=0.95
     # 12 seqs x (1 + 3 MTP) = 48 decode tokens per step: the capture and
@@ -262,7 +277,7 @@ router_tls() { # router_tls <ip>: with DESEC_TOKEN + DESEC_DOMAIN exported,
   log "TLS: registering ${sub}.${DESEC_DOMAIN} -> $ip and issuing a certificate"
   local remote_cmd
   remote_cmd=$(printf 'IP=%q ZONE=%q TOKEN=%q EMAIL=%q bash -s' \
-    "$ip" "$DESEC_DOMAIN" "$DESEC_TOKEN" "${ACME_EMAIL:-michel.belleau@malaiwah.com}")
+    "$ip" "$DESEC_DOMAIN" "$DESEC_TOKEN" "${ACME_EMAIL:?ACME_EMAIL must be set for certificate issuance}")
   scp -q "$(dirname "${BASH_SOURCE[0]}")/desec_acme_guard.py" \
     "$ROUTER_USER@$ip:router/desec_acme_guard.py" 2>/dev/null || \
     log "TLS: could not ship desec_acme_guard.py; lego runs without the guard"
@@ -316,8 +331,8 @@ cmd_router() {
     if ! command -v pip3 >/dev/null; then
       sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip >/dev/null
     fi
-    pip3 install -q "litellm[proxy]" --break-system-packages 2>/dev/null \
-      || sudo pip3 install -q "litellm[proxy]"
+    pip3 install -q "litellm[proxy]==1.100.0" --break-system-packages 2>/dev/null \
+      || sudo pip3 install -q "litellm[proxy]==1.100.0"
     mkdir -p "$HOME/router"
     if [ ! -s "$HOME/router/master-key" ]; then
       python3 -c "import secrets; print(\"sk-router-\" + secrets.token_hex(24))" > "$HOME/router/master-key"
@@ -333,7 +348,7 @@ cmd_router() {
   # With a certificate issued, litellm serves TLS on 443 under the
   # glm53-router.<zone> name; otherwise plain HTTP on ROUTER_PORT.
   local probe url
-  if ssh -o BatchMode=yes "$ROUTER_USER@$ip" 'test -d $HOME/router/lego/certificates' 2>/dev/null; then
+  if ssh -o BatchMode=yes "$ROUTER_USER@$ip" 'ls $HOME/router/lego/certificates/glm53-router.*.crt >/dev/null 2>&1'; then
     url="https://glm53-router.${DESEC_DOMAIN:-}:${ROUTER_TLS_PORT:-443}/v1"
   else
     url="http://$ip:$ROUTER_PORT/v1"
@@ -349,17 +364,21 @@ cmd_router() {
   fi
 }
 
-regenerate_router_config() { # regenerate_router_config <router-ip>
+regenerate_router_config() { # regenerate_router_config <router-ip>: write
+                            # atomically so litellm never reads a half-written
+                            # config, and never echo the api_key values.
   local ip="$1" cfg
   cfg=$(router_config) || fatal "could not build router config"
-  printf '%s\n' "$cfg" | ssh -o BatchMode=yes "$ROUTER_USER@$ip" 'cat > $HOME/router/config.yaml'
+  printf '%s\n' "$cfg" | ssh -o BatchMode=yes "$ROUTER_USER@$ip" \
+    'cat > $HOME/router/config.yaml.new && mv $HOME/router/config.yaml.new $HOME/router/config.yaml'
   log "router config updated:"
-  printf '%s\n' "$cfg" >&2
+  printf '%s\n' "$cfg" | sed 's/^\( *api_key:\).*/\1 <redacted>/' >&2
 }
 
 router_restart() { # router_restart <ip>: (re)start litellm under systemd so it
                    # survives ssh sessions; the VM has no user lingering.
   ssh -o BatchMode=yes "$ROUTER_USER@$1" '
+    set -e
     mkdir -p $HOME/router
     if [ ! -s "$HOME/router/master-key" ]; then
       python3 -c "import secrets; print(\"sk-router-\" + secrets.token_hex(24))" > "$HOME/router/master-key"
@@ -381,19 +400,33 @@ router_restart() { # router_restart <ip>: (re)start litellm under systemd so it
       --working-directory=$HOME/router --setenv=HOME=$HOME \
       --setenv=LITELLM_MASTER_KEY=$(cat $HOME/router/master-key) \
       $cap_props \
-      $HOME/.local/bin/litellm --config $HOME/router/config.yaml \
+      $(command -v litellm) --config $HOME/router/config.yaml \
       --port $port --host 0.0.0.0 $tls_args
     sleep 15
-    systemctl is-active litellm-router
     curl -sk --max-time 10 https://127.0.0.1:$port/health/liveliness \
       || curl -s --max-time 10 http://127.0.0.1:$port/health/liveliness
-    echo " ROUTER_LIVE"
+    echo "ROUTER_LIVE"
+    # Final gate: a unit that crashed after start fails the whole restart.
+    systemctl is-active --quiet litellm-router
   '
 }
 
 # --- scale / status / teardown -------------------------------------------------
 cmd_scale() {
-  cmd_serve glm53-serve-b
+  # First unused glm53-serve-<letter> slot in the local state (a..z) instead
+  # of a hardcoded name: repeated scale calls each get their own slot, and
+  # the letters never collide with the manager's glm53-serve-<N> slots.
+  local letter
+  letter=$(state_load | python3 -c "
+import json, sys
+taken = {k for k, v in json.load(sys.stdin).items() if v}
+for c in 'abcdefghijklmnopqrstuvwxyz':
+    if 'glm53-serve-' + c not in taken:
+        print(c)
+        break
+")
+  [[ -n "$letter" ]] || fatal "no free glm53-serve-<letter> slot in a..z"
+  cmd_serve "glm53-serve-$letter"
   local rip
   rip=$(instance_ip "$(state_get router)")
   if [[ -n "$rip" ]]; then
@@ -421,23 +454,42 @@ cmd_manager() { # install the autonomous fleet manager on the router VM
   fi
 
   # Register the autonomous serve script (secret baked in at registration).
+  # Idempotent: update the existing glm53-fleet-serve registration in place
+  # when there is one (jarvislabs ids go stale otherwise), add it otherwise.
+  # The rendered file holds the fleet key, so trap it away on every path.
   local rendered script_id
   rendered=$(mktemp)
   chmod 600 "$rendered"
+  trap "rm -f '$rendered'" EXIT
   sed "s|\${GLM_FLEET_KEY:?GLM_FLEET_KEY must be set by the registration step}|$fleet_key|g" \
     "$script_dir/fleet_serve_script.sh" > "$rendered"
-  script_id=$(jl scripts add "$rendered" --name glm53-fleet-serve --json \
-    2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['script_id'])") \
-    || fatal "could not register the startup script"
-  rm -f "$rendered"
-  log "startup script registered (id $script_id)"
+  grep -q "$fleet_key" "$rendered" || fatal "fleet key substitution did not match"
+  script_id=$(jl scripts list --json 2>/dev/null | python3 -c "
+import json, sys
+doc = json.load(sys.stdin)
+rows = doc if isinstance(doc, list) else doc.get('scripts', [])
+for row in rows:
+    if row.get('name') == 'glm53-fleet-serve':
+        print(row.get('id') or row.get('script_id') or '')
+        break
+")
+  if [[ -n "$script_id" ]]; then
+    jl scripts update "$script_id" "$rendered" >/dev/null ||
+      fatal "could not update startup script $script_id"
+    log "startup script updated in place (id $script_id)"
+  else
+    script_id=$(jl scripts add "$rendered" --name glm53-fleet-serve --json \
+      2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin)['script_id'])") \
+      || fatal "could not register the startup script"
+    log "startup script registered (id $script_id)"
+  fi
 
   # Ship the manager + config; the VM needs its own jl CLI and credentials.
   ssh -o BatchMode=yes -o StrictHostKeyChecking=no "$ROUTER_USER@$rip" '
     set -e
     mkdir -p "$HOME/fleet-manager" "$HOME/.config/jl"
     if ! command -v jl >/dev/null 2>&1; then
-      pip3 install -q --user jarvislabs 2>/dev/null || pip3 install -q jarvislabs
+      pip3 install -q --user --break-system-packages jarvislabs 2>/dev/null || pip3 install -q jarvislabs
     fi
   '
   scp -q ~/.config/jl/config.toml "$ROUTER_USER@$rip:.config/jl/config.toml"
@@ -446,12 +498,12 @@ cmd_manager() { # install the autonomous fleet manager on the router VM
   id=$(fs_id)
   # shellcheck disable=SC2087  # local expansion is the point: the fleet
   # key, filesystem id and script id are workstation-side values.
-  ssh -o BatchMode=yes "$ROUTER_USER@$rip" "python3 - bash -s" <<EOF
+  ssh -o BatchMode=yes "$ROUTER_USER@$rip" "python3 -" <<EOF
 import json, os
 cfg = {
     "fleet_key": "$fleet_key",
-    "fs_id": $id,
-    "script_id": $script_id,
+    "fs_id": "$id",
+    "script_id": "$script_id",
     "min_replicas": ${MIN_REPLICAS:-1},
     "max_replicas": ${MAX_REPLICAS:-3},
     "gpu": "$SERVE_GPU",
@@ -475,6 +527,7 @@ EOF
     sudo systemctl stop fleet-manager.service 2>/dev/null || true
     sudo systemd-run --uid='"$ROUTER_USER"' --unit=fleet-manager --collect \
       --setenv=HOME=$HOME --working-directory=$HOME/fleet-manager \
+      --setenv=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin \
       /usr/bin/python3 $HOME/fleet-manager/fleet_manager.py
     sleep 3
     systemctl is-active fleet-manager
@@ -490,9 +543,28 @@ cmd_status() {
   jl filesystem list
 }
 
-cmd_teardown() {
+cmd_teardown() { # cmd_teardown [--all]: destroy replica slots + state-file
+                 # instances. The router VM is destroyed only with --all: its
+                 # LE certificate, master key and fleet.json exist nowhere
+                 # else, and Let's Encrypt allows 5 duplicate certs/week.
   require_jl
-  local state name mid
+  # Destroy every LIVE glm53-serve-* slot first, enumerated from the API —
+  # the local state file does not know about slots another workstation (or
+  # the manager) created.
+  local mid
+  while read -r mid; do
+    [[ -n "$mid" ]] || continue
+    log "destroying serve slot $mid"
+    jl destroy "$mid" --yes >/dev/null 2>&1 || log "could not destroy $mid"
+  done < <(jl list --json 2>/dev/null | python3 -c "
+import json, sys
+for row in json.load(sys.stdin):
+    if str(row.get('name') or '').startswith('glm53-serve-'):
+        print(row.get('machine_id') or row.get('mid') or '')
+")
+  # Then the state file's instances. Skip 'fleet_key' (a secret, not a
+  # machine id) and 'router' (kept unless --all).
+  local state name
   state=$(state_load)
   while read -r name mid; do
     [[ -n "$mid" ]] || continue
@@ -500,9 +572,18 @@ cmd_teardown() {
     jl destroy "$mid" --yes >/dev/null 2>&1 || log "could not destroy $mid"
   done < <(printf '%s' "$state" | python3 -c "
 import json, sys
-for k, v in json.load(sys.stdin).items():
-    if v: print(k, v)
+for k, v in sorted(json.load(sys.stdin).items()):
+    if k not in ('fleet_key', 'router') and v:
+        print(k, v)
 ")
+  local rmid
+  rmid=$(state_get router)
+  if [[ "${1:-}" == "--all" && -n "$rmid" ]]; then
+    log "destroying router ($rmid)"
+    jl destroy "$rmid" --yes >/dev/null 2>&1 || log "could not destroy $rmid"
+  else
+    log "router kept (the LE certificate, master key and fleet.json live only on it; use 'teardown --all' to destroy it too)"
+  fi
   echo '{}' > "$FLEET_STATE"
   log "fleet instances destroyed; filesystem kept (jl filesystem remove to delete it)"
 }
@@ -526,7 +607,10 @@ Usage: jarvislabs_fleet.sh <command>
   router     launch the CPU-VM LiteLLM router with prefix-cache affinity
   scale      second serve instance + router pick-up
   status     list fleet instances and the filesystem
-  teardown   destroy all fleet instances (filesystem is kept)
+  teardown   destroy live serve slots + state-file instances; the router VM is
+             kept (its LE certificate, master key and fleet.json exist only
+             there). 'teardown --all' also destroys the router. The
+             filesystem is always kept
 
 Environment: FS_NAME, FS_SIZE_GB, POPULATOR_GPU, SERVE_GPU, SERVE_GPUS, ROUTER_PORT
 USAGE
