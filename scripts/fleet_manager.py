@@ -383,9 +383,13 @@ class Fleet:
             # DB-backed router: deployments are managed through the admin
             # API. Adding/removing them is HOT — no restart, no dropped
             # connections, and existing session pins survive scale-up.
-            if ids == self.wired:
+            # The wired set tracks (name, base) pairs: a replica whose
+            # tunnel comes up AFTER it was wired via the proxy fallback
+            # must be reconciled to the tunnel base, not skipped.
+            desired = {(r.name, self.ensure_tunnel(r)) for r in healthy}
+            if desired == self.wired:
                 return
-            self.wire_via_api(healthy, ids)
+            self.wire_via_api(healthy, ids, desired)
             return
         if ids == self.wired and os.path.exists(os.path.expanduser("~/router/config.yaml")):
             return
@@ -441,7 +445,7 @@ class Fleet:
             body = resp.read()
         return json.loads(body) if body else {}
 
-    def wire_via_api(self, healthy, ids):
+    def wire_via_api(self, healthy, ids, pairs):
         """Hot-manage deployments on a DB-backed router (Postgres+Redis):
         /model/new and /model/delete apply live via litellm's config-sync;
         no process restart, no dropped connections, pins survive."""
@@ -450,7 +454,8 @@ class Fleet:
         for d in info.get("data", []):
             params = d.get("litellm_params", {})
             current[params.get("api_base")] = d.get("model_info", {}).get("id")
-        desired = {f"{self.ensure_tunnel(r)}/v1": r for r in healthy}
+        by_name = {r.name: r for r in healthy}
+        desired = {f"{base}/v1": by_name[name] for (name, base) in pairs}
         for base, dep_id in current.items():
             if base not in desired and dep_id:
                 self.router_api("POST", "/model/delete", {"id": dep_id})
@@ -471,7 +476,7 @@ class Fleet:
                         "request_timeout": 120,
                     }})
                 log(f"router: added deployment {r.name} at {base}")
-        self.wired = ids
+        self.wired = pairs
         log(f"litellm hot-wired: {sorted(ids)}")
 
     def cycle(self):
