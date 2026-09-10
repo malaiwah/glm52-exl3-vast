@@ -119,10 +119,11 @@ class Fleet:
 
     def ensure_min(self, replicas):
         alive = [r for r in replicas if r.status in ("Running", "Pending", "Provisioning")]
-        for _ in range(self.cfg["min_replicas"] - len(alive)):
+        missing = self.cfg["min_replicas"] - len(alive)
+        if missing > 0:
+            # One creation per cycle: cold boots are serialized so two
+            # replicas never write the shared quantization cache at once.
             self.create_slot()
-
-    def create_slot(self):
         used = {r.name for r in self.slots()}
         n = 0
         while f"glm53-serve-{n}" in used:

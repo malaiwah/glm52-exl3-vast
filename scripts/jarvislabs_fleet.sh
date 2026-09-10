@@ -162,11 +162,13 @@ cmd_serve() { # cmd_serve <name>
     export MODEL_DIR='$FS_MOUNT/$WEIGHTS_SUBDIR'
     export GLM_STATE_DIR=/home/turnkey/workspace/.glm-config
     export TURNKEY_WORKSPACE=/home/turnkey/workspace
-    # The online-quantization cache is 12+ GiB regenerated on every fresh
-    # instance disk; pinning it to a per-slot directory on the shared
-    # filesystem makes a slot relaunch skip re-quantization entirely.
-    mkdir -p '$FS_MOUNT/.runtimes/$name'
-    export VLLM_EXL3_ONLINE_CACHE_DIR='$FS_MOUNT/.runtimes/$name/exl3-online'
+    # One shared quantization cache: its content is a pure function of the
+    # weights revision, the quantization algorithm and the GPU architecture,
+    # so every replica reads the same bytes. Cold boots are serialized (the
+    # manager creates one slot per cycle), so no two replicas write it at
+    # once; a slot relaunch after any boot finds it complete.
+    mkdir -p '$FS_MOUNT/.runtimes'
+    export VLLM_EXL3_ONLINE_CACHE_DIR='$FS_MOUNT/.runtimes/exl3-online'
     export VLLM_EXL3_ONLINE_CACHE_MODE=readwrite
     # AIBeast's selected runtime (maintenance glm53-optimization-20260908):
     # prefill fairness at a 60% compute share, with the tuned batching shape

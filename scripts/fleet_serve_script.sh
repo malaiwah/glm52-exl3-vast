@@ -17,15 +17,17 @@
 set -Eeuo pipefail
 
 FLEET_KEY="${GLM_FLEET_KEY:?GLM_FLEET_KEY must be set by the registration step}"
-SLOT="${MACHINE_NAME:-glm53-serve-unnamed}"
 
 export MODEL_DIR=/home/jl_fs/GLM-5.3-EXL3-TR3-3.42bpw
 export GLM_STATE_DIR=/home/turnkey/workspace/.glm-config
 export TURNKEY_WORKSPACE=/home/turnkey/workspace
 export VLLM_API_KEY="$FLEET_KEY"
-
-mkdir -p "/home/jl_fs/.runtimes/$SLOT"
-export VLLM_EXL3_ONLINE_CACHE_DIR="/home/jl_fs/.runtimes/$SLOT/exl3-online"
+# The online-quantization cache is one shared directory on that same
+# filesystem: identical weights, algorithm and GPU architecture make its
+# content replica-independent, and the manager serializes cold boots
+# so no two replicas ever write it at once.
+mkdir -p /home/jl_fs/.runtimes
+export VLLM_EXL3_ONLINE_CACHE_DIR=/home/jl_fs/.runtimes/exl3-online
 export VLLM_EXL3_ONLINE_CACHE_MODE=readwrite
 
 # The appliance's selected runtime (AIBeast parity): prefill fairness at a
