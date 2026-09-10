@@ -218,6 +218,44 @@ recreating the router more than ~5× a week re-issues and can hit it.
   GPU VMs (not containers) accept `--vpc-id`, so an all-VM fleet can do
   fully private networking.
 
+## Hot-reload router (Postgres + Redis on the router VM)
+
+By default the manager rewires litellm by rewriting `config.yaml` and
+restarting the proxy. That works, but a restart drops connections in flight
+through the proxy and wipes every session-affinity pin (pins are in-process
+state), so conversations re-shuffle across replicas after each scaling
+event.
+
+LiteLLM's zero-drop path is its management API backed by Postgres and Redis:
+`/model/new` and `/model/delete` store deployments in the DB, publish to the
+config-sync pubsub, and hot-apply them — no restart, no dropped connections,
+and existing session pins survive scale-up. `/key/generate` (virtual keys)
+also comes alive with the DB.
+
+One-time setup on the router VM:
+
+```bash
+sudo apt-get install -y postgresql redis-server
+sudo -u postgres psql -c "CREATE USER litellm WITH PASSWORD '<local-only>';"
+sudo -u postgres createdb -O litellm litellm
+pip3 install --user prisma
+cd ~/.local/lib/python3.*/site-packages/litellm/proxy && prisma generate
+```
+
+Then run litellm with `DATABASE_URL=postgresql://litellm:...@localhost:5432/litellm`
+and `REDIS_URL=redis://localhost:6379/0` in the unit environment, and point
+the manager at API mode:
+
+```bash
+ROUTER_API=True ./jarvislabs_fleet.sh manager
+```
+
+The manager config gains `router_api: true`, the router URL, and the master
+key (read from `~/router/master-key` on the VM; API mode falls back to
+config-rewrite if the key is absent). Removal of a deployment still moves
+the sessions pinned to it — inherent to retiring a replica — but the
+drain-then-destroy order keeps that to the retiring replica only.
+
 ## Considered and rejected (measured)
 
 - **User-space weight cache in vLLM** (local copy populated on first read,
