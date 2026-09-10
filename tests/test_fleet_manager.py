@@ -412,11 +412,18 @@ class TunnelTests(unittest.TestCase):
 
     def test_tunnel_reestablished_when_dead(self):
         """A dead tunnel on an unchanged fleet self-heals within a cycle."""
-        f = fm.Fleet(make_cfg(tunnels=True))
-        r = replica("glm53-serve-0", mid=5)
-        r.healthy, r.api_url, r.public_ip = True, "https://proxy.example", "1.2.3.4"
-        with mock.patch.object(fm, "jl_json", return_value=[]), \
-             mock.patch.object(fm, "http_code", return_value=(0, b"")), \
+        f = fm.Fleet(make_cfg(tunnels=True, min_replicas=0, max_replicas=0))
+        row = {"name": "glm53-serve-0", "machine_id": 5, "status": "Running",
+               "runtime": "2 hours", "is_spot": True}
+        f.slots = lambda: [row]
+        detail = {"endpoints": ["https://proxy.example"], "public_ip": "1.2.3.4"}
+        body = b"vllm:num_requests_running 1\n"
+        def fake_http(url, key=None, timeout=15):
+            if "localhost" in url:
+                return (0, b"")  # tunnel port dead
+            return (200, body)   # proxy metrics fine: replica healthy
+        with mock.patch.object(fm, "http_code", side_effect=fake_http), \
+             mock.patch.object(fm, "jl_json", return_value=detail), \
              mock.patch.object(fm, "subprocess") as sub:
             sub.run.return_value = SimpleNamespace(returncode=0, stderr="")
             f.cycle()
