@@ -112,7 +112,16 @@ class ReapPolicyTests(unittest.TestCase):
         r.healthy = False
         with mock.patch.object(fm, "jl") as jl:
             f.reap([r])
-        jl.assert_called_once_with("resume", "1", "--yes")
+        jl.assert_called_once_with("resume", "1", "--yes")  # on-demand stays on-demand
+
+    def test_paused_spot_slot_resumes_as_spot(self):
+        """Bare jl resume flips a paused spot to on-demand at 2x price."""
+        f = fm.Fleet(make_cfg())
+        r = replica("glm53-serve-0", status="Paused", is_spot=True)
+        r.healthy = False
+        with mock.patch.object(fm, "jl") as jl:
+            f.reap([r])
+        jl.assert_called_once_with("resume", "1", "--spot", "--yes")
 
     def test_paused_resume_failure_does_not_destroy(self):
         f = fm.Fleet(make_cfg())

@@ -194,9 +194,17 @@ class Fleet:
                 # (still no capacity) the paused slot costs nothing and
                 # ensure_min creates a replacement meanwhile.
                 log(f"slot {r.name} is paused; attempting resume")
+                # Resume preserves the slot's billing type: jl defaults a
+                # bare resume to on-demand (measured: a paused spot came
+                # back on-demand at 2x price with a NEW machine id). The
+                # mix logic reads is_spot fresh from jl list each cycle, so
+                # the id change is harmless, but the price flip is not.
+                args = ["resume", str(r.mid)]
+                if r.is_spot:
+                    args.append("--spot")
+                args.append("--yes")
                 try:
-                    jl("resume", str(r.mid), "--yes")
-                    log(f"slot {r.name} resumed")
+                    jl(*args)
                 except RuntimeError as exc:
                     log(f"resume failed for {r.name}: {str(exc)[:120]}")
                 return  # one action per cycle; the next pass re-checks
