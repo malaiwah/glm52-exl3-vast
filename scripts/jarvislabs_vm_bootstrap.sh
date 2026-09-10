@@ -224,7 +224,7 @@ wait_and_summarize() {
       echo ">>> still booting... ${waited}s elapsed (last health: ${health:-none})"
   done
   [[ "$health" == "200" ]] || { echo "FATAL: not healthy after 60 minutes; inspect: sudo docker logs $CONTAINER_NAME" >&2; exit 1; }
-  key="$(sudo docker exec "$CONTAINER_NAME" sh -c 'cat /workspace/.glm-config/.vllm-api-key 2>/dev/null || cat /workspace/../.vllm-api-key 2>/dev/null || true')"
+  key="$(sudo docker exec "$CONTAINER_NAME" sh -c 'cat /workspace/.glm-config/.vllm-api-key 2>/dev/null || cat /workspace/.vllm-api-key 2>/dev/null || true')"
   [[ -z "$key" && -r "$WORKSPACE/.glm-config/.vllm-api-key" ]] && key="$(cat "$WORKSPACE/.glm-config/.vllm-api-key")"
   [[ -z "$key" && -r "$WORKSPACE/.vllm-api-key" ]] && key="$(cat "$WORKSPACE/.vllm-api-key")"
   [[ -z "$key" && -r "$WORKSPACE/../.vllm-api-key" ]] && key="$(cat "$WORKSPACE/../.vllm-api-key")"

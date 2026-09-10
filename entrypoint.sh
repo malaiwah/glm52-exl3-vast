@@ -2012,6 +2012,9 @@ AUTH="${AUTH:-key}"
 # pattern), a weights-adjacent key would be written to the shared volume and
 # silently shared by every replica attaching it.
 KEYFILE="${GLM_STATE_DIR:-${MODEL_DIR%/*}/.glm-config}/.vllm-api-key"
+# Pre-fleet layouts kept the key weights-adjacent; a volume created before the
+# move may still carry it there.
+LEGACY_KEYFILE="${MODEL_DIR%/*}/.vllm-api-key"
 if [ "${CONFIG_SMOKE:-0}" = "1" ]; then
   AUTH=none            # a smoke run must not mint or persist a key
 fi
@@ -2026,6 +2029,21 @@ fi
 if [ "$AUTH" != "none" ] && [ -z "${VLLM_API_KEY:-}" ] && [ -s "$KEYFILE" ]; then
   VLLM_API_KEY="$(cat "$KEYFILE")"
   echo ">>> API key: reusing the persisted key from $KEYFILE"
+fi
+# Legacy-layout migration: when the new home is absent/empty but the old
+# weights-adjacent keyfile still exists, reuse THAT key instead of minting a
+# fresh one (a new key would silently invalidate every client config already
+# pasted against the volume), re-persist it at the new home, and remove the
+# legacy file so no live secret lingers next to the weights. The legacy file
+# is only removed after the copy at the new home succeeded.
+if [ "$AUTH" != "none" ] && [ -z "${VLLM_API_KEY:-}" ] && [ -s "$LEGACY_KEYFILE" ]; then
+  VLLM_API_KEY="$(cat "$LEGACY_KEYFILE")"
+  if ( umask 077; printf '%s' "$VLLM_API_KEY" > "$KEYFILE" ) 2>/dev/null; then
+    shred -u "$LEGACY_KEYFILE" 2>/dev/null || rm -f "$LEGACY_KEYFILE"
+    echo ">>> API key: migrated the legacy key from $LEGACY_KEYFILE to $KEYFILE"
+  else
+    echo ">>> API key: reusing the legacy key from $LEGACY_KEYFILE (could not persist to $KEYFILE)"
+  fi
 fi
 if [ "$AUTH" != "none" ] && [ -z "${VLLM_API_KEY:-}" ]; then
   VLLM_API_KEY="sk-$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"

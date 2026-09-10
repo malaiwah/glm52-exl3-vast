@@ -968,6 +968,38 @@ def test_erase_execution(tmp):
     shutil.rmtree(root, ignore_errors=True)
 
 
+def test_erase_paths_from_injected_env_only(tmp):
+    section("erase planned from the injected env alone (SSH-started erase)")
+    # Regression: Paths used to resolve the keyfile via gc.state_dir(), which
+    # reads os.environ only. An erase started from an SSH session — where
+    # GLM_STATE_DIR is set just in the injected env — planned the WRONG
+    # keyfile and left the live key alive on the volume. This test therefore
+    # deliberately does NOT os.environ.update(env): the env dict alone must
+    # be enough to plan and erase both keyfiles.
+    root = os.path.join(tmp, "inst-env-only")
+    md, home, public, secrets, user, derived = build_fake_instance(root)
+    env = erase_env(root)
+    paths = secure_erase.Paths(env)
+    keyfile = os.path.join(root, "state", ".vllm-api-key")
+    legacy_keyfile = os.path.join(root, "workspace", ".vllm-api-key")
+    check("keyfile resolves under the env's GLM_STATE_DIR",
+          paths.keyfile == keyfile, paths.keyfile)
+    check("legacy keyfile resolves from the env's MODEL_DIR",
+          paths.legacy_keyfile == legacy_keyfile, paths.legacy_keyfile)
+    doc = secure_erase.plan(paths)
+    chosen = {t["path"] for t in doc["targets"]}
+    check("both keyfiles are planned",
+          keyfile in chosen and legacy_keyfile in chosen,
+          json.dumps([t["path"] for t in doc["targets"]
+                      if "api-key" in t["path"]])[:200])
+    secure_erase.erase(doc)
+    check("both keyfiles are erased without touching os.environ",
+          not os.path.isfile(keyfile) and not os.path.isfile(legacy_keyfile))
+    check("public weights survive",
+          os.path.isfile(os.path.join(md, "model-layer-000.safetensors")))
+    shutil.rmtree(root, ignore_errors=True)
+
+
 def test_no_secret_written_world_readable(tmp):
     section("nothing this code writes leaks a credential by mode")
     os.environ["GLM_STATE_DIR"] = os.path.join(tmp, "modes", "state")
@@ -1227,6 +1259,7 @@ def main():
         _run(test_erase_plan, tmp)
         _run(test_erase_without_manifest, tmp)
         _run(test_erase_execution, tmp)
+        _run(test_erase_paths_from_injected_env_only, tmp)
         _run(test_worker_lock_during_erase_is_honoured, tmp)
         _run(test_erase_keeps_progress_file, tmp)
         _run(test_no_secret_written_world_readable, tmp)

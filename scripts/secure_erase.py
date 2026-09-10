@@ -75,13 +75,20 @@ class Paths:
         self.home = env.get("ERASE_HOME", "/root")
         self.tmp = env.get("ERASE_TMP", "/tmp")
         self.var_log = env.get("ERASE_VARLOG", "/var/log")
-        self.state_dir = gc.state_dir()
-        self.runtime_dir = gc.runtime_dir()
+        # state_dir/runtime_dir/keyfile resolve from the EFFECTIVE env, not
+        # gc.state_dir()/gc.runtime_dir(): those read os.environ only, so an
+        # erase started from an SSH session — where GLM_STATE_DIR is set just
+        # in the injected env — would plan the wrong keyfile and leave the
+        # live key alive on the volume.
+        self.state_dir = env.get("GLM_STATE_DIR") or os.path.join(
+            os.path.dirname(self.model_dir.rstrip("/")) or "/workspace",
+            ".glm-config")
+        self.runtime_dir = env.get("GLM_RUNTIME_DIR", "/tmp/glm-runtime")
         self.status_file = env.get("STATUS_FILE", "/tmp/glm-boot-status.json")
         # The API key lives in the config state dir (see entrypoint.sh); the
         # weights-adjacent location is the legacy layout, erased too when a
         # recycled disk still carries it.
-        self.keyfile = os.path.join(gc.state_dir(), ".vllm-api-key")
+        self.keyfile = os.path.join(self.state_dir, ".vllm-api-key")
         self.legacy_keyfile = os.path.join(
             os.path.dirname(self.model_dir.rstrip("/")) or "/workspace",
             ".vllm-api-key")
