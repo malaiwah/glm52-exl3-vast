@@ -87,6 +87,18 @@ class Replica:
                 self.api_url = base
                 self.healthy = True
                 return
+        # VM replicas have no HTTPS proxy and no endpoints list: the engine
+        # port is exposed directly on the public IP. Plain HTTP is
+        # acceptable only on the provider's private network; a public
+        # plaintext probe is still fine here (/metrics leaks nothing), but
+        # routing production traffic to it is a docs-level decision.
+        ip = detail.get("public_ip")
+        if ip:
+            code, body = http_code(f"http://{ip}:8000/metrics")
+            if code == 200 and b"vllm:" in body:
+                self.api_url = f"http://{ip}:8000"
+                self.healthy = True
+                return
         self.healthy = False
 
     def scrape(self):
@@ -150,19 +162,33 @@ class Fleet:
         name = f"glm53-serve-{n}"
         # Maintain an on-demand backbone: on_demand_min replicas are kept
         # non-spot so capacity pressure can never pause/destroy the whole
-        # fleet; everything beyond that stays spot for price.
-        args = ["--gpu", self.cfg["gpu"], "--num-gpus", str(self.cfg["num_gpus"]),
-                "--region", self.cfg["region"], "--fs-id", str(self.cfg["fs_id"]),
-                "--script-id", str(self.cfg["script_id"]), "--http-ports", "8000,1111",
-                "--name", name, "--yes"]
+        # fleet; everything beyond that stays spot for price. The backbone
+        # can be a GPU VM (on_demand_kind=vm) at the same hourly price as
+        # an on-demand container — a VM takes the driver/module tuning
+        # containers cannot (P2P atomics measured off on containers).
         alive = [r for r in current if r.get("status") in ("Running", "Pending", "Provisioning")]
         on_demand_alive = sum(1 for r in alive if not r.get("is_spot"))
+        args = ["--gpu", self.cfg["gpu"], "--num-gpus", str(self.cfg["num_gpus"]),
+                "--region", self.cfg["region"], "--fs-id", str(self.cfg["fs_id"]),
+                "--name", name, "--yes"]
         kind = "spot"
         if on_demand_alive < self.cfg.get("on_demand_min", 0):
-            kind = "on-demand"
+            if self.cfg.get("on_demand_kind") == "vm":
+                kind = "on-demand-vm"
+                # VMs are SSH-only: no startup scripts, no HTTPS proxy, no
+                # --http-ports. Ports are exposed directly on the public
+                # IP; the boot is driven over ssh (see docs/jarvislabs-fleet.md).
+                args += ["--vm"]
+            else:
+                kind = "on-demand"
+                args += ["--script-id", str(self.cfg["script_id"]),
+                         "--http-ports", "8000,1111"]
         else:
             args.insert(0, "--spot")
-        log(f"creating {kind} replica slot {name} (script {self.cfg['script_id']})")
+            args += ["--script-id", str(self.cfg["script_id"]),
+                     "--http-ports", "8000,1111"]
+        log(f"creating {kind} replica slot {name}"
+            + (f" (script {self.cfg['script_id']})" if "--script-id" in args else ""))
         jl("create", *args)
         self.last_scale = time.time()
     def destroy(self, replica):

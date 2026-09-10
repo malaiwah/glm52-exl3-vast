@@ -277,6 +277,17 @@ class CreateSlotGuardTests(unittest.TestCase):
         args = jl.call_args[0]
         self.assertNotIn("--spot", args)
 
+    def test_backbone_as_vm_when_configured(self):
+        f = fm.Fleet(make_cfg(on_demand_min=1, on_demand_kind="vm"))
+        f.slots = lambda: []
+        with mock.patch.object(fm, "jl") as jl:
+            f.create_slot()
+        args = jl.call_args[0]
+        self.assertIn("--vm", args)
+        self.assertNotIn("--spot", args)
+        self.assertNotIn("--http-ports", args)
+        self.assertNotIn("--script-id", args)  # VMs are ssh-booted
+
     def test_spot_created_when_backbone_satisfied(self):
         f = fm.Fleet(make_cfg(on_demand_min=1))
         f.slots = lambda: [{"name": "glm53-serve-0", "status": "Running",
@@ -462,6 +473,18 @@ class HealthProbeTests(unittest.TestCase):
             r2 = replica("glm53-serve-0", mid=42)
             r2.probe()
             self.assertFalse(r2.healthy)  # nothing reachable -> not healthy
+
+    def test_vm_replica_probed_via_public_ip(self):
+        """VMs have no proxy endpoints: fall back to public_ip:8000."""
+        r = replica("glm53-serve-0", mid=7)
+        body = b"vllm:num_requests_running 1\n"
+        with mock.patch.object(fm, "jl_json",
+                               return_value={"endpoints": [], "public_ip": "10.1.2.3"}), \
+             mock.patch.object(fm, "http_code",
+                               side_effect=lambda u, **k: (200, body) if ":8000/metrics" in u else (0, b"")):
+            r.probe()
+        self.assertTrue(r.healthy)
+        self.assertEqual(r.api_url, "http://10.1.2.3:8000")
 
     def test_scrape_parses_metrics(self):
         r = replica("glm53-serve-0")

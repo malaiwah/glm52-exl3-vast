@@ -521,6 +521,7 @@ cfg = {
     "min_replicas": ${MIN_REPLICAS:-1},
     "max_replicas": ${MAX_REPLICAS:-3},
     "on_demand_min": ${ON_DEMAND_MIN:-0},
+    "on_demand_kind": "${ON_DEMAND_KIND:-container}",
     "gpu": "$SERVE_GPU",
     "num_gpus": $SERVE_GPUS,
     "region": "$FS_REGION",
