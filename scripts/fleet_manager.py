@@ -110,7 +110,7 @@ class Fleet:
         self.wired = set()
         self.unhealthy_since = {}
         self.idle_since = None
-
+        self.first_seen = {}
     def slots(self):
         rows = jl_json("list")
         rows = rows if isinstance(rows, list) else rows.get("instances", rows.get("data", []))
@@ -142,21 +142,45 @@ class Fleet:
         jl("destroy", str(replica.mid), "--yes")
 
     def reap(self, replicas):
-        """Replace slots whose instance died (spot reclamation, crash)."""
+        """Replace slots whose instance died (spot reclamation, crash).
+
+        A fresh instance is NOT unhealthy just because it is not serving
+        yet: a cold boot takes 15-25 minutes. Reaping is only allowed once
+        the instance is older than boot_timeout, or its status is gone
+        (destroyed/reaped spot) — otherwise the manager destroys every
+        booting replica after the grace window and thrashes forever.
+        """
         grace = self.cfg.get("unhealthy_grace_seconds", 300)
+        boot_timeout = self.cfg.get("boot_timeout_seconds", 2400)
         for r in replicas:
             key = r.name
             if r.healthy:
                 self.unhealthy_since.pop(key, None)
                 continue
+            age = self.age_of(r)
+            if r.status == "Running" and age < boot_timeout:
+                continue  # still booting; leave it alone
             first = self.unhealthy_since.setdefault(key, time.time())
             if r.status not in ("Running",) or time.time() - first > grace:
-                log(f"slot {r.name} is {r.status or 'unreachable'}; recreating")
+                log(f"slot {r.name} is {r.status or 'unreachable'} "
+                    f"(age {int(age)}s); recreating")
                 if r.status == "Running":
-                    self.destroy(r)  # hung: kill before replacing
+                    self.destroy(r)  # hung past boot timeout: kill + replace
                 self.create_slot()
                 self.unhealthy_since.pop(key, None)
                 return  # one action per cycle; the next pass re-checks
+
+    def age_of(self, replica):
+        """Seconds since the instance was created, from jl's runtime field
+        ("2 hours 13 minutes"), falling back to first-seen tracking."""
+        runtime = (replica.info.get("runtime") or "").strip()
+        total = 0
+        for value, unit in re.findall(r"(\d+)\s*(hour|minute)", runtime):
+            total += int(value) * (3600 if unit == "hour" else 60)
+        if total:
+            return total
+        first = self.first_seen.setdefault(replica.mid, time.time())
+        return time.time() - first
 
     def autoscale(self, replicas):
         healthy = [r for r in replicas if r.healthy]
